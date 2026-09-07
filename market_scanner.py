@@ -522,7 +522,7 @@ try:
             flow = analysis["flow"]["1h"]
 
             message += (
-                f"{(symbol + "/SDA") if symbol else token_label(address, metadata)}\n"
+                f'{(symbol + "/SDA") if symbol else token_label(address, metadata)}\n'
                 f"Price: {analysis['price_in_sda']:.10f} SDA\n"
                 f"15m: {momentum['15m_pct']:.2f}%\n"
                 f"30m: {momentum['30m_pct']:.2f}%\n"
