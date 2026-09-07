@@ -20,7 +20,7 @@ DISCOVERY_FILE = "sidra_swap_discovery.json"
 LIQUIDITY_FILE = "liquidity_data.json"
 
 session = requests.Session()
-session.headers.update({"User-Agent": "sda-scanner/11.0"})
+session.headers.update({"User-Agent": "sda-scanner/12.0"})
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -153,19 +153,46 @@ def eth_get_balance(address):
     try:return int(out.get("result","0x0"),16),None
     except Exception:return None,{"message":"invalid eth_getBalance result"}
 
-def choose_funded_from(samples,min_value_wei):
-    candidates=[]; seen=set()
+def choose_funded_from(samples, txs, min_value_wei):
+    # V12: sampled buyers can all be empty today. Expand candidates to the
+    # senders of recent pool transactions as well. This remains read-only.
+    candidates = []
+    seen = set()
+
+    def add(a):
+        a = (a or "").lower()
+        if a and a not in seen and len(a) == 42 and a.startswith("0x"):
+            seen.add(a)
+            candidates.append(a)
+
     for x in samples:
-        a=(x.get("buyer") or "").lower()
-        if a and a not in seen: seen.add(a); candidates.append(a)
-    balances=[]
-    for a in candidates[:20]:
+        add(x.get("buyer"))
+    for tx in txs:
+        add(addr(tx.get("from")))
+        add(addr(tx.get("to")))
+
+    # Need some headroom for the RPC's gas*price balance check.
+    required = int(min_value_wei + 1 * 10**18)
+    balances = []
+
+    def check(a):
         try:
-            bal,err=eth_get_balance(a)
-            balances.append({"address":a,"balance_wei":bal,"error":err})
-            if bal is not None and bal>=min_value_wei:return a,balances
-        except Exception as e: balances.append({"address":a,"balance_wei":None,"error":str(e)})
-    return None,balances
+            bal, err = eth_get_balance(a)
+            return {"address": a, "balance_wei": bal, "error": err}
+        except Exception as e:
+            return {"address": a, "balance_wei": None, "error": str(e)}
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = [ex.submit(check, a) for a in candidates[:100]]
+        for fut in as_completed(futures):
+            item = fut.result()
+            balances.append(item)
+
+    balances.sort(key=lambda x: x.get("balance_wei") or 0, reverse=True)
+    for item in balances:
+        if item.get("balance_wei") is not None and item["balance_wei"] >= required:
+            return item["address"], balances
+    return None, balances
 
 def decode_uint256_result(result):
     if not isinstance(result, str) or not result.startswith("0x"):
@@ -248,7 +275,7 @@ def analyze(tx):
     }
 
 def main():
-    print("💧 LIQUIDITY V11 — FUNDED ETH_CALL + QUOTE PROBE")
+    print("💧 LIQUIDITY V12 — FUND SOURCE EXPANSION + ETH_CALL")
     print(f"Pool: {POOL}")
     print(f"Target trade: {TRADE_SIZE_SDA:.0f} SDA")
     print("Safety: READ-ONLY / explorer GET only / no broadcast")
@@ -372,7 +399,7 @@ def main():
 
     discovery = {
         "updated_at": now(),
-        "version": "V11",
+        "version": "V12",
         "pool": POOL,
         "wsda": WSDA,
         "trade_size_sda": TRADE_SIZE_SDA,
@@ -394,7 +421,7 @@ def main():
 
     liquidity = {
         "updated_at": now(),
-        "version": "V11",
+        "version": "V12",
         "pool_address": POOL,
         "wsda_address": WSDA,
         "trade_size_sda": TRADE_SIZE_SDA,
@@ -427,7 +454,7 @@ def main():
         probe_sample=usable[0]
         quote_probe["token"]=probe_sample["token"]; quote_probe["fee_tier"]=probe_sample["arg1"]
         try:
-            funded,balances=choose_funded_from(samples,value_wei)
+            funded,balances=choose_funded_from(samples, txs, value_wei)
             quote_probe["candidate_balances"]=balances; quote_probe["from_address"]=funded
             if funded:
                 quote_probe["from_balance_wei"]=next((x.get("balance_wei") for x in balances if x.get("address")==funded),None)
@@ -442,7 +469,7 @@ def main():
                     quote_probe["results"].append(item); quote_probe["attempted"]=True
                     if result.get("ok"): quote_probe["ok"]=True
             else:
-                quote_probe["error"]={"message":"No sampled buyer currently has enough native SDA for a 50 SDA eth_call.","required_wei":value_wei}
+                quote_probe["error"]={"message":"No recent candidate address currently has enough native SDA for a 50 SDA eth_call.","required_wei":value_wei}
         except Exception as e: quote_probe["error"]=str(e)
     quote_probe["decoded_token_amount"]=next((x["decoded_token_amount"] for x in quote_probe["results"] if x.get("decoded_token_amount") is not None),None)
     quote_probe["quote_ready"]=quote_probe["decoded_token_amount"] is not None
@@ -469,6 +496,9 @@ def main():
     print(f"eth_call attempted: {quote_probe['attempted']}")
     print(f"eth_call from: {quote_probe.get('from_address')}")
     print(f"funded candidates checked: {len(quote_probe.get('candidate_balances', []))}")
+    top_balances = quote_probe.get("candidate_balances", [])[:5]
+    for b in top_balances:
+        print(f"  balance {b.get('address')}: {b.get('balance_wei')}")
     print(f"eth_call successful result: {quote_probe.get('ok')}")
     for r in quote_probe.get("results", []):
         print(f"  test={r.get('label')} arg2={r.get('arg2')} ok={r.get('ok')} decoded={r.get('decoded_token_amount')}")
@@ -479,7 +509,7 @@ def main():
     print(f"Saved {DISCOVERY_FILE}")
     print(f"Saved {LIQUIDITY_FILE}")
     print("Overall liquidity status: UNKNOWN")
-    print("Next: use the measured WSDA input + token output to pin down arg2 semantics before eth_call.")
+    print("Next: V12 expands the read-only from-address search beyond sampled buyers.")
 
 if __name__ == "__main__":
     main()
