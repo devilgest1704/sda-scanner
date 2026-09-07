@@ -189,7 +189,7 @@ try:
     top=ranking[:5]
     lines=['🔎 TOP BUY CANDIDATES','']
     for i,(conf,address,a,sc,trades) in enumerate(top,1):
-        status='🟢 BUY' if conf>=BUY_THRESHOLD and trades>=MIN_TRADES_1H else ('🟡 WATCH' if conf>=55 else '⚪ WEAK')
+        status='🟢 BUY' if conf>=BUY_THRESHOLD and trades>=MIN_TRADES_1H else ('🟠 NEAR BUY' if conf>=75 else ('🟡 WATCH' if conf>=55 else '⚪ WEAK'))
         lines.append(f"{i}. {status} {label(address,meta)} — {conf}/100")
         lines.append(f"   1h {sc['m1h']:+.2f}% | flow {sc['net_1h']:+.0f} SDA | trades {int(trades)} | whale 1h {sc['whale_net']:+.0f}")
     send('\n'.join(lines))
