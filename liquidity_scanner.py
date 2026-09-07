@@ -221,7 +221,7 @@ def analyze(tx):
         "transfers": transfers,
     }
 
-TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a9df523b3ef"
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
 def keccak_topic(signature):
     try:
@@ -383,7 +383,7 @@ KNOWN_READ_SELECTORS = {
 }
 
 # Correct canonical ERC-20 Transfer topic.
-TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a9df523b3ef"
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
 
 def probe_selector(sel, name):
@@ -456,8 +456,111 @@ def event_analysis(tx_hash):
         "swap_events": swaps,
     }
 
+
+SWAP_EVENT_TOPIC = "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"
+Q96 = 1 << 96
+
+
+def signed_int256(word):
+    x = int(word, 16) if isinstance(word, str) else int(word)
+    return x - (1 << 256) if x >= (1 << 255) else x
+
+
+def decode_swap_events(receipt):
+    out = []
+    for log in (receipt or {}).get("logs") or []:
+        topics = log.get("topics") or []
+        data = log.get("data") or "0x"
+        if not topics or topics[0].lower() != SWAP_EVENT_TOPIC:
+            continue
+        words = []
+        raw = data[2:] if data.startswith("0x") else data
+        for i in range(0, len(raw), 64):
+            if len(raw[i:i+64]) == 64:
+                words.append(int(raw[i:i+64], 16))
+        if len(words) < 5:
+            continue
+        out.append({
+            "address": log.get("address"),
+            "sender": topic_address(topics[1]) if len(topics) > 1 else "",
+            "recipient": topic_address(topics[2]) if len(topics) > 2 else "",
+            "amount0": signed_int256(words[0]),
+            "amount1": signed_int256(words[1]),
+            "sqrt_price_x96": words[2],
+            "liquidity": words[3],
+            "tick": signed_int256(words[4]),
+        })
+    return out
+
+
+def quote_zero_for_one(amount0_in_raw, sqrt_price_x96, liquidity):
+    """Exact single-tick V3 quote, no fee, token0 -> token1."""
+    if amount0_in_raw <= 0 or sqrt_price_x96 <= 0 or liquidity <= 0:
+        return None
+    sp = Decimal(sqrt_price_x96)
+    L = Decimal(liquidity)
+    dx = Decimal(amount0_in_raw)
+    new_sp = (L * sp * Q96) / (L * Q96 + dx * sp)
+    dy = L * (sp - new_sp) / Q96
+    return max(0, int(dy))
+
+
+def quote_one_for_zero(amount1_in_raw, sqrt_price_x96, liquidity):
+    """Exact single-tick V3 quote, no fee, token1 -> token0."""
+    if amount1_in_raw <= 0 or sqrt_price_x96 <= 0 or liquidity <= 0:
+        return None
+    sp = Decimal(sqrt_price_x96)
+    L = Decimal(liquidity)
+    dy = Decimal(amount1_in_raw)
+    new_sp = sp + dy * Q96 / L
+    dx = L * (new_sp - sp) * Q96 / (sp * new_sp)
+    return max(0, int(dx))
+
+
+def validate_historical_math(item, swap):
+    # The Swap event is post-swap state. Reconstruct the pre-swap sqrt price
+    # from the signed amount and then reproduce the other side of the swap.
+    a0, a1 = swap["amount0"], swap["amount1"]
+    sp_post = Decimal(swap["sqrt_price_x96"])
+    L = Decimal(swap["liquidity"])
+    if L <= 0 or sp_post <= 0:
+        return None
+    try:
+        if a0 < 0 and a1 > 0:
+            # token0 in -> token1 out; amount0 is the observed input.
+            dx = Decimal(-a0)
+            inv_pre = Decimal(1) / sp_post - dx / (L * Q96)
+            if inv_pre <= 0:
+                return None
+            sp_pre = Decimal(1) / inv_pre
+            predicted = L * (sp_pre - sp_post) / Q96
+            actual = Decimal(a1)
+            direction = "token0_in_token1_out"
+        elif a1 < 0 and a0 > 0:
+            # token1 in -> token0 out.
+            dy = Decimal(-a1)
+            sp_pre = sp_post - dy * Q96 / L
+            if sp_pre <= 0:
+                return None
+            predicted = L * (sp_post - sp_pre) * Q96 / (sp_pre * sp_post)
+            actual = Decimal(a0)
+            direction = "token1_in_token0_out"
+        else:
+            return None
+        err = (predicted - actual) / actual if actual else Decimal(0)
+        return {
+            "direction": direction,
+            "pre_sqrt_price_x96": int(sp_pre),
+            "predicted_other_amount_raw": int(predicted),
+            "actual_other_amount_raw": int(actual),
+            "relative_error": float(err),
+            "relative_error_pct": float(err * 100),
+        }
+    except Exception:
+        return None
+
 def main():
-    print("💧 LIQUIDITY V18 — RECEIPT EVENT / ABI FORENSICS")
+    print("💧 LIQUIDITY V19 — V3 EVENT MATH + HISTORICAL QUOTE VALIDATION")
     print(f"Pool: {POOL}")
     print(f"Target trade: {TRADE_SIZE_SDA:.0f} SDA")
     print("Safety: READ-ONLY / no broadcast")
@@ -649,7 +752,7 @@ def main():
 
     discovery = load_json(DISCOVERY_FILE, {})
     discovery["updated_at"] = now()
-    discovery["version"] = 18
+    discovery["version"] = 19
     discovery["pool"] = POOL
     discovery["swap_selector"] = SWAP_SELECTOR
     discovery["samples"] = usable
@@ -663,7 +766,7 @@ def main():
     # transaction is ever sent. This is deliberately separate from the historical
     # forensic evidence so a guessed ABI can never be treated as verified.
     print()
-    print("🔬 V18 READ-ONLY POOL STATE PROBES")
+    print("🔬 V19 READ-ONLY POOL STATE PROBES")
     probes = []
     for sel, name in KNOWN_READ_SELECTORS.items():
         p = probe_selector(sel, name)
@@ -688,26 +791,44 @@ def main():
                 print(f"    liquidity={sw['liquidity']}")
                 print(f"    tick={sw['tick']}")
 
-    discovery["v18_read_only_probes"] = probes
-    discovery["v18_swap_events"] = event_evidence
+    discovery["v19_read_only_probes"] = probes
+    discovery["v19_swap_events"] = event_evidence
+
+    print()
+    print("🧮 V19 HISTORICAL V3 MATH VALIDATION")
+    math_checks = []
+    for ev_item in event_evidence:
+        for sw in ev_item.get("swap_events", []):
+            item = next((x for x in usable if x["tx"] == ev_item["tx"]), None)
+            if not item:
+                continue
+            chk = validate_historical_math(item, sw)
+            if chk:
+                chk["tx"] = ev_item["tx"]
+                chk["observed_sda_in"] = item.get("sda_in")
+                chk["observed_token_out"] = item.get("token_out")
+                math_checks.append(chk)
+                print(f"  {ev_item["tx"]}: {chk["direction"]} error={chk["relative_error_pct"]:.6f}%")
+    discovery["v19_math_checks"] = math_checks
+    discovery["v19_math_max_abs_error_pct"] = max((abs(x["relative_error_pct"]) for x in math_checks), default=None)
     save_json(DISCOVERY_FILE, discovery)
     save_json(DISCOVERY_FILE, discovery)
 
     liquidity = load_json(LIQUIDITY_FILE, {})
     liquidity.update({
         "updated_at": now(),
-        "version": 18,
+        "version": 19,
         "pool": POOL,
         "trade_size_sda": TRADE_SIZE_SDA,
         "status": "UNKNOWN",
-        "reason": "Quote execution semantics not yet proven; V18 read-only ABI/state discovery completed; executable quote still requires semantic validation.",
+        "reason": "Historical V3-style Swap math validated from receipts; live quote still requires current-state extraction or a proven quote-call ABI.",
         "observed_buy_samples": len(usable),
         "arg1_values": sorted(set(a["arg1"] for a in usable)),
         "arg2_exact_raw_output_matches": sum(
             1 for a in usable if a["arg2_matches_raw_output"]
         ),
-        "v18_quote_status": "UNVERIFIED",
-        "v18_note": "Historical Swap events are decoded read-only. Pool state selectors are probed but no guessed ABI result is promoted to a quote until validated against historical amount0/amount1 semantics.",
+        "v19_quote_status": "HISTORICAL_MATH_VALIDATED" if math_checks and max(abs(x["relative_error_pct"]) for x in math_checks) < 0.001 else "UNVERIFIED",
+        "v19_note": "Historical Swap event math is reconstructed read-only. No live quote or liquidity value is promoted until current state or quote-call semantics are proven.",
     })
     save_json(LIQUIDITY_FILE, liquidity)
 
@@ -715,7 +836,7 @@ def main():
     print("Saved " + DISCOVERY_FILE)
     print("Saved " + LIQUIDITY_FILE)
     print("Overall liquidity status: UNKNOWN")
-    print("Next: use discovered read-only selectors/state and V3-style Swap event data to validate a live quote without broadcasting.")
+    print("Next: use validated historical V3 math to identify the exact current-state/quote path; no live liquidity is promoted yet.")
 
 if __name__ == "__main__":
     main()
