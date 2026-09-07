@@ -1,17 +1,17 @@
 import os
 import requests
+import traceback
 
 TOKEN = os.environ["TELEGRAM_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
-URL = "https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/rpc/get_token_stats_24h"
-
-headers = {
-    "apikey": "sb_publishable_fl6m94CTRdZESg1licW9Qw_BuLlkm1Z",
-    "Content-Type": "application/json"
-}
-
 try:
+
+    URL = "https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/rpc/get_token_stats_24h"
+
+    headers = {
+        "apikey": "sb_publishable_fl6m94CTRdZESg1licW9Qw_BuLlkm1Z"
+    }
 
     response = requests.post(
         URL,
@@ -20,31 +20,21 @@ try:
         timeout=30
     )
 
-    data = response.json()
+    message = (
+        f"HTTP: {response.status_code}\n\n"
+        f"{response.text[:2000]}"
+    )
 
-    message = f"""
-✅ SDA Scanner
+except Exception:
 
-HTTP: {response.status_code}
-
-Records:
-{len(data)}
-
-First:
-{data[0]}
-"""
-
-except Exception as e:
-
-    message = f"❌ Error\n\n{e}"
+    message = traceback.format_exc()
 
 requests.post(
     f"https://api.telegram.org/bot{TOKEN}/sendMessage",
     json={
         "chat_id": CHAT_ID,
         "text": message[:4000]
-    },
-    timeout=30
+    }
 )
 
 print("Done")
