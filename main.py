@@ -103,7 +103,7 @@ try:
         old_signal = previous_state.get(address)
 
         if old_signal is None:
-            continue
+            old_signal = "NEW"
 
         if True:
 
