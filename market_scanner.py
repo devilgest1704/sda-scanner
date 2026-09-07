@@ -20,11 +20,10 @@ SUPABASE_URL = (
 SUPABASE_KEY = "sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z"
 
 MARKET_DATA_FILE = "market_data.json"
-METADATA_FILE = "token_metadata.json"
 
 FETCH_LIMIT = 1000
 MAX_HISTORY_POINTS = 1000
-MIN_RECENT_VOLUME_SDA = 1000
+MIN_RECENT_VOLUME_SDA = 250
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -63,27 +62,6 @@ def save_market_data(data):
         json.dump(data, f, indent=2, ensure_ascii=False)
 
     os.replace(tmp_file, MARKET_DATA_FILE)
-
-
-
-def load_token_metadata():
-    if not Path(METADATA_FILE).exists():
-        return {}
-    try:
-        with open(METADATA_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def token_label(address, metadata):
-    item = metadata.get(str(address).lower(), {})
-    if isinstance(item, dict):
-        symbol = item.get("symbol")
-        if symbol:
-            return f"{symbol}/SDA"
-    return f"{address[:12]}..."
 
 
 # ============================================================
@@ -415,7 +393,6 @@ try:
 
     market_data = load_market_data()
     tokens = market_data.setdefault("tokens", {})
-    token_metadata = load_token_metadata()
 
     new_transactions = 0
 
@@ -503,7 +480,7 @@ try:
             flow = analysis["flow"]["1h"]
 
             message += (
-                f"{token_label(address, token_metadata)}\n"
+                f"{address[:12]}...\n"
                 f"Price: {analysis['price_in_sda']:.10f} SDA\n"
                 f"15m: {momentum['15m_pct']:.2f}%\n"
                 f"30m: {momentum['30m_pct']:.2f}%\n"
