@@ -3,9 +3,9 @@ from datetime import datetime,timezone
 from pathlib import Path
 import requests
 
-MARKET='market_data.json'; WHALE='whale_data.json'; META='token_metadata.json'; POS='positions.json'
+MARKET='market_data.json'; WHALE='whale_data.json'; META='token_metadata.json'; LIQ='liquidity_data.json'; POS='positions.json'
 INVESTMENT_SDA=10000.0; BUY_THRESHOLD=78; MIN_1H_VOLUME_SDA=0.0; MIN_TRADES_1H=2
-TP1_PCT=.05; TP2_PCT=.10; SL_PCT=.04; FEE_RATE=.0025; SLIPPAGE_RATE=.001; MAX_OPEN_POSITIONS=5
+TP1_PCT=.05; TP2_PCT=.10; SL_PCT=.04; FEE_RATE=.02; SLIPPAGE_RATE=.001; MAX_OPEN_POSITIONS=5
 TG=os.environ.get('TELEGRAM_TOKEN'); CHAT=os.environ.get('CHAT_ID')
 
 def load(path,default):
@@ -110,6 +110,9 @@ def score_for(address,a,whales):
             'whale_15m_net':w15n,'whale_30m_net':w30n,'whale_4h_net':w4n,
             'm15':m15,'m1h':m1,'m4h':m4,'volume_accel':None if va is None else n(va),'trades_1h':trades}
 
+def liquidity_for(address, liquidity):
+    return liquidity.get(address) or liquidity.get(address.lower()) or {}
+
 def fmt(x):
     x=n(x)
     if abs(x)>=1:return f'{x:.6f}'
@@ -137,7 +140,7 @@ def close_msg(c):
     return f"{icon} {c['close_reason']} {c['label']}\n\nEntry: {fmt(c['entry_price'])} SDA\nCurrent: {fmt(c['close_price'])} SDA\nValue: {c['closed_value_sda']:.0f} SDA\nProfit: {c['closed_profit_sda']:+.0f} SDA\nROI: {c['closed_roi_pct']:+.2f}%\n\nMode: PAPER TRADING"
 
 try:
-    md=load(MARKET,{'tokens':{}}); tokens=md.get('tokens',{}) or {}; whales=load(WHALE,{}); meta=load(META,{})
+    md=load(MARKET,{'tokens':{}}); tokens=md.get('tokens',{}) or {}; whales=load(WHALE,{}); meta=load(META,{}); ld=load(LIQ,{}); liquidity=ld.get('tokens',{}) or {}
     pd=load(POS,{'positions':{},'closed_trades':[]}); pd.setdefault('positions',{}); pd.setdefault('closed_trades',[])
     events=[]
     # Manage existing positions first.
@@ -192,10 +195,12 @@ try:
         status='🟢 BUY' if conf>=BUY_THRESHOLD and trades>=MIN_TRADES_1H else ('🟠 NEAR BUY' if conf>=75 else ('🟡 WATCH' if conf>=55 else '⚪ WEAK'))
         lines.append(f"{i}. {status} {label(address,meta)} — {conf}/100")
         lines.append(f"   1h {sc['m1h']:+.2f}% | flow {sc['net_1h']:+.0f} SDA | trades {int(trades)} | whale 1h {sc['whale_net']:+.0f}")
+        liq=liquidity_for(address,liquidity); liq_sda=n(liq.get('liquidity_sda_equivalent')); buy10k=liq.get('buy_10k_sda') or {}; impact=buy10k.get('estimated_price_impact_pct'); impact_txt=f"{n(impact):.2f}%" if impact is not None else 'n/a'
+        if liq: lines.append(f"   liquidity {liq_sda:,.0f} SDA | est. 10k impact {impact_txt}")
     send('\n'.join(lines))
     slots=max(0,MAX_OPEN_POSITIONS-len(pd['positions']))
     for _,address,a,sc in candidates[:slots]:
-        p=newpos(address,a,sc,meta); pd['positions'][address]=p
+        liq=liquidity_for(address,liquidity); p=newpos(address,a,sc,meta); p['liquidity_snapshot']=liq; pd['positions'][address]=p
         events.append(f"🟢 BUY {p['label']}\n\nEntry: {fmt(p['entry_price'])} SDA\nTP1: {fmt(p['tp1'])} SDA (+5.0%)\nTP2: {fmt(p['tp2'])} SDA (+10.0%)\nSL: {fmt(p['sl'])} SDA (-4.0%)\n\nInvested: {INVESTMENT_SDA:.0f} SDA\nConfidence: {p['entry_confidence']}/100\nMode: PAPER TRADING")
     save(POS,pd)
     send(f"🤖 SDA PAPER TRADING\n\nOpen positions: {len(pd['positions'])}\nClosed trades: {len(pd['closed_trades'])}\nBUY candidates: {len(candidates)}\nEvents: {len(events)}")
