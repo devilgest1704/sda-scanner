@@ -1,153 +1,237 @@
-import json, time
-from decimal import Decimal, getcontext
-from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import requests
-from Crypto.Hash import keccak
+import json
+import time
+from datetime import datetime, timezone
 
-getcontext().prec = 60
+import requests
 
 RPC = "https://node.sidrachain.com"
+EXPLORER_API = "https://ledger.sidrachain.com/api/v2"
 POOL = "0xCB94460F967f49E3a955278f252Ca9D6056ecE75"
 WSDA = "0xE4095a910209D7BE03B55D02F40d4554B1666182"
-MARKET = Path("market_data.json")
-OUT = Path("liquidity_data.json")
-TRADE = Decimal("50")
-FEE = Decimal("0.01")
-TIMEOUT = 6
+MARKET_FILE = "market_data.json"
+OUT_FILE = "liquidity_data.json"
+DISCOVERY_FILE = "sidra_swap_discovery.json"
+
+TRADE_SIZE_SDA = 50.0
+TIMEOUT = 8
+MAX_TXS = 100
 
 session = requests.Session()
-
-# We only probe READ calls. Never execute sidraBuyWithFee itself.
-READ_SIGNATURES = [
-    "quoteBuy(address,uint256)",
-    "quoteBuy(address,uint256,uint256)",
-    "getBuyQuote(address,uint256)",
-    "getBuyQuote(address,uint256,uint256)",
-    "getAmountOut(address,uint256)",
-    "getAmountOut(uint256,address)",
-    "getAmountOut(uint256,address,uint256)",
-    "sidraQuoteBuy(address,uint256)",
-    "sidraQuoteBuy(address,uint256,uint256)",
-    "quote(address,uint256)",
-    "quote(address,uint256,uint256)",
-]
+session.headers.update({"User-Agent": "sda-scanner/1.0"})
 
 
-def selector(sig):
-    k = keccak.new(digest_bits=256); k.update(sig.encode())
-    return k.hexdigest()[:8]
-
-
-def word_addr(a): return a.lower().replace("0x", "").rjust(64, "0")
-def word_uint(x): return int(x).to_bytes(32, "big").hex()
+def now():
+    return datetime.now(timezone.utc).isoformat()
 
 
 def rpc(method, params):
-    r = session.post(RPC, json={"jsonrpc":"2.0","id":1,"method":method,"params":params}, timeout=TIMEOUT)
-    r.raise_for_status(); j = r.json()
-    if "error" in j: raise RuntimeError(str(j["error"]))
-    return j.get("result")
+    r = session.post(
+        RPC,
+        json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+        timeout=TIMEOUT,
+    )
+    r.raise_for_status()
+    data = r.json()
+    if "error" in data:
+        raise RuntimeError(data["error"])
+    return data.get("result")
 
 
-def call(data): return rpc("eth_call", [{"to":POOL,"data":data}, "latest"])
+def hex_int(v):
+    if v is None:
+        return 0
+    if isinstance(v, int):
+        return v
+    if isinstance(v, str):
+        return int(v, 16) if v.startswith("0x") else int(v)
+    return 0
 
 
-def load_market():
-    if not MARKET.exists(): return []
-    raw = json.loads(MARKET.read_text(encoding="utf-8")); data = raw.get("tokens", raw)
-    return [(a.lower(),v) for a,v in data.items() if isinstance(a,str) and len(a)==42 and a.startswith("0x") and isinstance(v,dict) and a.lower()!=WSDA.lower()]
-
-
-def label(a,d): return d.get("symbol") or d.get("name") or (d.get("analysis") or {}).get("symbol") or f"{a[:6]}...{a[-4:]}"
-
-
-def decimals(d):
-    try: return int(d.get("decimals",18))
-    except: return 18
-
-
-def encode(sig, token, amount):
-    types = sig.split("(",1)[1].split(")",1)[0].split(",")
-    if types == ["address","uint256"]: return word_addr(token)+word_uint(amount)
-    if types == ["uint256","address"]: return word_uint(amount)+word_addr(token)
-    if types == ["address","uint256","uint256"]: return word_addr(token)+word_uint(amount)+word_uint(1)
-    if types == ["uint256","address","uint256"]: return word_uint(amount)+word_addr(token)+word_uint(1)
-    return None
-
-
-def probe(token, sig):
-    enc=encode(sig,token,int(TRADE*Decimal(10**18)))
-    if not enc: return None
+def load_json(path, default):
     try:
-        raw=call("0x"+selector(sig)+enc)
-        if raw and raw != "0x":
-            # Accept only a clean single uint256 return (32 bytes).
-            if len(raw)==66:
-                v=int(raw,16)
-                if v>0: return {"signature":sig,"selector":"0x"+selector(sig),"raw_output":v}
-    except Exception: pass
-    return None
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def explorer_transactions():
+    """Try the documented Blockscout REST API in a few compatible forms."""
+    urls = [
+        f"{EXPLORER_API}/transactions?filter=to&to={POOL}&items_count=100",
+        f"{EXPLORER_API}/transactions?filter=to&to={POOL.lower()}&items_count=100",
+        f"{EXPLORER_API}/transactions?to={POOL}&items_count=100",
+    ]
+    last_error = None
+
+    for url in urls:
+        try:
+            r = session.get(url, timeout=TIMEOUT)
+            if not r.ok:
+                last_error = f"{r.status_code}: {r.text[:200]}"
+                continue
+            data = r.json()
+            items = data.get("items", [])
+            if isinstance(items, list):
+                return items, None
+        except Exception as e:
+            last_error = str(e)
+
+    return [], last_error
+
+
+def tx_detail(tx_hash):
+    r = session.get(f"{EXPLORER_API}/transactions/{tx_hash}", timeout=TIMEOUT)
+    r.raise_for_status()
+    return r.json()
+
+
+def discover():
+    items, error = explorer_transactions()
+
+    result = {
+        "updated_at": now(),
+        "pool": POOL,
+        "wsda": WSDA,
+        "trade_size_sda": TRADE_SIZE_SDA,
+        "api_error": error,
+        "transactions_seen": len(items),
+        "candidates": [],
+    }
+
+    for tx in items[:MAX_TXS]:
+        method = str(tx.get("method") or "")
+        to = str(tx.get("to", {}).get("hash", tx.get("to", ""))) if isinstance(tx.get("to"), dict) else str(tx.get("to", ""))
+        tx_hash = tx.get("hash") or tx.get("tx_hash")
+
+        if to and to.lower() != POOL.lower():
+            continue
+
+        interesting = (
+            "sidraBuyWithFee" in method
+            or "sidraSellWithFee" in method
+            or method.startswith("0x")
+        )
+        if not interesting or not tx_hash:
+            continue
+
+        try:
+            detail = tx_detail(tx_hash)
+        except Exception as e:
+            detail = {"detail_error": str(e)}
+
+        raw_input = (
+            detail.get("raw_input")
+            or detail.get("rawInput")
+            or tx.get("raw_input")
+            or tx.get("rawInput")
+            or tx.get("input")
+            or ""
+        )
+
+        value = detail.get("value", tx.get("value", "0"))
+        status = detail.get("status", tx.get("status"))
+
+        candidate = {
+            "hash": tx_hash,
+            "method": method,
+            "status": status,
+            "from": (detail.get("from") or tx.get("from") or {}).get("hash")
+                    if isinstance(detail.get("from") or tx.get("from"), dict)
+                    else detail.get("from") or tx.get("from"),
+            "to": POOL,
+            "value": value,
+            "raw_input": raw_input,
+            "selector": raw_input[:10] if isinstance(raw_input, str) and len(raw_input) >= 10 else None,
+            "decoded_input": detail.get("decoded_input") or detail.get("decodedInput") or tx.get("decoded_input"),
+            "timestamp": detail.get("timestamp") or tx.get("timestamp"),
+            "logs_count": len(detail.get("logs", []) or []),
+        }
+
+        # Keep successful contract calls first.
+        result["candidates"].append(candidate)
+
+        if len(result["candidates"]) >= 8:
+            break
+
+    result["candidates"].sort(
+        key=lambda x: (
+            0 if str(x.get("status", "")).lower() in ("ok", "success") else 1,
+            0 if "sidraBuyWithFee" in str(x.get("method", "")) else 1,
+        )
+    )
+
+    return result
+
+
+def build_unknown_liquidity(market):
+    tokens = market if isinstance(market, dict) else {}
+    return {
+        "updated_at": now(),
+        "pool_address": POOL,
+        "wsda_address": WSDA,
+        "trade_size_sda": TRADE_SIZE_SDA,
+        "status": "DISCOVERY_ONLY",
+        "tokens": {
+            addr.lower(): {
+                "status": "UNKNOWN",
+                "liquidity_sda": None,
+                "impact_50_sda_pct": None,
+            }
+            for addr in tokens.keys()
+        },
+        "errors": [],
+    }
 
 
 def main():
-    started=time.time(); tokens=load_market()
-    result={"updated_at":int(time.time()),"rpc":RPC,"swap_v3_pool":POOL,"wsda_address":WSDA,
-            "trade_size_sda":50.0,"platform_fee_rate":0.01,"status":"UNKNOWN",
-            "method":"sidra_dex_liquidity_v3","quote_method":None,"tokens":{},"errors":[],
-            "warning":"Liquidity is UNKNOWN until a real read-only quote is found. Zero is never used to mean unknown."}
-    try:
-        code=rpc("eth_getCode",[POOL,"latest"]); result["contract_code_bytes"]=max(0,(len(code or "")-2)//2)
-    except Exception as e: result["errors"].append({"stage":"code","error":str(e)})
+    print("💧 LIQUIDITY V4 — ON-CHAIN SWAP DISCOVERY")
+    print(f"Pool: {POOL}")
+    print(f"Trade size: {TRADE_SIZE_SDA:.0f} SDA")
+    print("Safety: READ-ONLY / no transaction is broadcast")
 
-    # Probe a few active tokens only. This keeps Actions fast.
-    def rank(item):
-        d=item[1]; f=((d.get("analysis") or {}).get("flow") or {}).get("1h") or {}
-        return float(f.get("buy_count",0))+float(f.get("sell_count",0))
-    probe_tokens=sorted(tokens,key=rank,reverse=True)[:3]
-    print(f"LIQUIDITY V3 | tokens={len(tokens)} probe_tokens={len(probe_tokens)}")
-    print(f"Pool={POOL} code_bytes={result.get('contract_code_bytes','?')}")
+    market = load_json(MARKET_FILE, {})
+    discovery = discover()
 
-    found=None
-    def discover(a):
-        for sig in READ_SIGNATURES:
-            hit = probe(a, sig)
-            if hit:
-                return sig, hit
-        return None
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        fs={ex.submit(discover,a):(a,d) for a,d in probe_tokens}
-        for f in as_completed(fs):
-            a,d=fs[f]
-            try: hit=f.result()
-            except Exception as e: hit=None; result["errors"].append({"stage":"probe","token":a,"error":str(e)})
-            print(f"Probe {label(a,d)}: {hit[0] if hit else 'NO READ QUOTE'}")
-            if hit and not found: found=hit[0]
+    with open(DISCOVERY_FILE, "w", encoding="utf-8") as f:
+        json.dump(discovery, f, indent=2, ensure_ascii=False)
 
-    result["quote_method"]=found
-    if found:
-        result["status"]="QUOTE_FOUND"
-        print("QUOTE METHOD FOUND:",found)
-        def one(item):
-            a,d=item; hit=probe(a,found); e={"symbol":label(a,d),"token_address":a,"source":None,"buy_50_sda":None,"estimated_price_impact_pct":None,"status":"UNKNOWN"}
-            if hit:
-                out=Decimal(hit["raw_output"])/Decimal(10**decimals(d)); e.update({"source":"official_pool_eth_call","buy_50_sda":float(out),"quote_probe":hit,"status":"OK"})
-                try:
-                    spot=Decimal(str((d.get("analysis") or {}).get("price_in_sda"))); ideal=TRADE*(1-FEE)/spot
-                    if spot>0: e["estimated_price_impact_pct"]=float(max(Decimal(0),(1-out/ideal)*100))
-                except: pass
-            return a,e
-        with ThreadPoolExecutor(max_workers=8) as ex:
-            for f in as_completed([ex.submit(one,x) for x in tokens]):
-                a,e=f.result(); result["tokens"][a]=e
+    print(f"Explorer transactions seen: {discovery['transactions_seen']}")
+    if discovery["api_error"]:
+        print(f"Explorer API warning: {discovery['api_error']}")
+
+    if discovery["candidates"]:
+        print(f"Swap candidates found: {len(discovery['candidates'])}")
+        for c in discovery["candidates"][:5]:
+            print(
+                f"  {c.get('method')} | selector={c.get('selector')} | "
+                f"value={c.get('value')} | tx={c.get('hash')}"
+            )
+            if c.get("decoded_input"):
+                print(f"    decoded: {c['decoded_input']}")
+            if c.get("raw_input"):
+                print(f"    calldata: {c['raw_input'][:138]}")
     else:
-        for a,d in tokens:
-            result["tokens"][a]={"symbol":label(a,d),"token_address":a,"source":None,"buy_50_sda":None,"estimated_price_impact_pct":None,"status":"UNKNOWN"}
-        print("NO READ-ONLY QUOTE FOUND; liquidity remains UNKNOWN")
+        print("No sidraBuyWithFee/sidraSellWithFee transaction found yet.")
 
-    result["elapsed_seconds"]=round(time.time()-started,2)
-    OUT.write_text(json.dumps(result,indent=2,ensure_ascii=False),encoding="utf-8")
-    ok=sum(1 for x in result["tokens"].values() if x.get("status")=="OK")
-    print(f"Finished in {result['elapsed_seconds']}s | quote={found or 'none'} | valid={ok}/{len(tokens)}")
+    # Do NOT invent liquidity when the exact swap ABI is unknown.
+    liquidity = build_unknown_liquidity(market)
+    if discovery["candidates"]:
+        liquidity["discovery"] = {
+            "method": discovery["candidates"][0].get("method"),
+            "selector": discovery["candidates"][0].get("selector"),
+            "tx_hash": discovery["candidates"][0].get("hash"),
+        }
+    else:
+        liquidity["discovery"] = {"method": None, "selector": None, "tx_hash": None}
 
-if __name__=="__main__": main()
+    with open(OUT_FILE, "w", encoding="utf-8") as f:
+        json.dump(liquidity, f, indent=2, ensure_ascii=False)
+
+    print(f"Saved {DISCOVERY_FILE}")
+    print(f"Saved {OUT_FILE}")
+    print("Next step: use the real selector/calldata to perform an eth_call quote.")
+
+
+if __name__ == "__main__":
+    main()
