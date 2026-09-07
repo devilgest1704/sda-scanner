@@ -39,10 +39,10 @@ def get_signal(score):
     elif score >= 2.0:
         return "🟢 BUY"
 
-    elif score >= 1.0:
+    elif score >= 1.2:
         return "🟡 HOLD"
 
-    elif score >= 0.6:
+    elif score >= 0.8:
         return "🟠 WEAK SELL"
 
     else:
@@ -80,8 +80,8 @@ try:
         buy_count = int(token.get("buy_count", 0))
         sell_count = int(token.get("sell_count", 0))
 
-        # ignoruj nelikvidní tokeny
-        if total < 1000:
+        # ignoruj malé tokeny
+        if total < 5000:
             continue
 
         strength = buy / max(sell, 1)
@@ -111,14 +111,14 @@ try:
 
         old_signal = previous_state.get(address)
 
-        # první spuštění
+        # první běh jen naplní state
         if old_signal is None:
             continue
 
         old_signal = old_signal.strip()
         signal = signal.strip()
 
-        # žádná změna = žádný alert
+        # bez změny = bez alertu
         if old_signal == signal:
             continue
 
@@ -180,6 +180,9 @@ try:
             },
             timeout=30
         )
+
+    else:
+        print("No signal changes")
 
 except Exception:
 
