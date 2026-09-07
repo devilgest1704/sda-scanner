@@ -17,6 +17,7 @@ HEADERS = {
 }
 
 STATE_FILE = "state.json"
+WHALE_DATA_FILE = "whale_data.json"
 
 
 def load_state():
@@ -31,41 +32,19 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-def get_signal(score, strength, trade_ratio, volume):
+def load_whale_data():
+    if Path(WHALE_DATA_FILE).exists():
+        with open(WHALE_DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
 
-    if (
-        score >= 3.0
-        and strength >= 1.40
-        and trade_ratio >= 1.20
-        and volume >= 15000
-    ):
-        return "🚀 ACCUMULATE AGGRESSIVE"
-
-    elif (
-        score >= 2.0
-        and strength >= 1.15
-        and trade_ratio >= 1.00
-        and volume >= 10000
-    ):
-        return "🟢 ACCUMULATE"
-
-    elif score >= 1.2:
-        return "🟡 HOLD"
-
-    elif (
-        score >= 0.8
-        and strength < 1.0
-    ):
-        return "💰 TAKE PROFIT"
-
-    else:
-        return "🔴 DISTRIBUTION"
+    return {}
 
 
 try:
 
     previous_state = load_state()
     current_state = {}
+    whale_data = load_whale_data()
 
     response = requests.post(
         URL,
@@ -77,8 +56,6 @@ try:
     response.raise_for_status()
 
     data = response.json()
-
-    print(f"Loaded tokens: {len(data)}")
 
     alerts = []
     valid_tokens = 0
@@ -109,24 +86,74 @@ try:
 
         if total >= 20000:
             volume_bonus = 1.5
-        elif total >= 10000:
-            volume_bonus = 1.3
         else:
-            volume_bonus = 1.0
+            volume_bonus = 1.3
 
         score = (
             (strength * 0.7) +
             (trade_ratio * 0.3)
         ) * volume_bonus
 
-        signal = get_signal(
-            score,
-            strength,
-            trade_ratio,
-            total
+        address = token["token_address"]
+
+        whale = whale_data.get(address, {})
+
+        whale_buy_volume = float(
+            whale.get("whale_buy_volume", 0)
         )
 
-        address = token["token_address"]
+        whale_sell_volume = float(
+            whale.get("whale_sell_volume", 0)
+        )
+
+        whale_buy_count = int(
+            whale.get("whale_buy_count", 0)
+        )
+
+        whale_sell_count = int(
+            whale.get("whale_sell_count", 0)
+        )
+
+        if (
+            score >= 3.0
+            and strength >= 1.40
+            and trade_ratio >= 1.20
+            and total >= 15000
+            and whale_buy_volume >= 10000
+            and whale_buy_count >= 2
+            and whale_buy_volume > whale_sell_volume
+        ):
+
+            signal = "🚀 ACCUMULATE AGGRESSIVE"
+
+        elif (
+            score >= 2.0
+            and strength >= 1.15
+            and trade_ratio >= 1.00
+            and total >= 10000
+            and whale_buy_volume > whale_sell_volume
+        ):
+
+            signal = "🟢 ACCUMULATE"
+
+        elif (
+            score >= 0.8
+            and strength < 1.0
+            and whale_sell_volume > whale_buy_volume
+        ):
+
+            signal = "💰 TAKE PROFIT"
+
+        elif (
+            whale_sell_volume >
+            whale_buy_volume * 2
+        ):
+
+            signal = "🔴 DISTRIBUTION"
+
+        else:
+
+            signal = "🟡 HOLD"
 
         current_state[address] = signal
 
@@ -134,8 +161,6 @@ try:
 
         if old_signal is None:
             continue
-
-        old_signal = old_signal.strip()
 
         if old_signal == signal:
             continue
@@ -149,40 +174,33 @@ try:
             "new": signal,
             "score": score,
             "strength": strength,
-            "trade_ratio": trade_ratio,
-            "volume_bonus": volume_bonus,
             "volume": total,
-            "buy": buy,
-            "sell": sell,
-            "buy_count": buy_count,
-            "sell_count": sell_count
+            "whale_buy_volume": whale_buy_volume,
+            "whale_sell_volume": whale_sell_volume,
+            "whale_buy_count": whale_buy_count,
+            "whale_sell_count": whale_sell_count
         })
 
-    print(f"Valid tokens: {valid_tokens}")
-    print(f"Signal changes: {len(alerts)}")
+    save_state(current_state)
+
+    debug_message = (
+        "📊 SDA DEBUG\n\n"
+        f"Loaded tokens: {len(data)}\n"
+        f"Valid tokens: {valid_tokens}\n"
+        f"Whale tokens: {len(whale_data)}\n"
+        f"Signal changes: {len(alerts)}"
+    )
 
     requests.post(
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
         json={
             "chat_id": CHAT_ID,
-            "text": (
-                "📊 SDA DEBUG\n\n"
-                f"Loaded tokens: {len(data)}\n"
-                f"Valid tokens: {valid_tokens}\n"
-                f"Signal changes: {len(alerts)}"
-            )
+            "text": debug_message
         },
         timeout=30
     )
 
-    save_state(current_state)
-
     if alerts:
-
-        alerts.sort(
-            key=lambda x: x["score"],
-            reverse=True
-        )
 
         message = "🔄 SDA SIGNAL CHANGES\n\n"
 
@@ -190,20 +208,19 @@ try:
 
             message += (
                 f"{alert['address'][:12]}...\n"
-                f"Signal:\n"
                 f"{alert['old']} → {alert['new']}\n\n"
                 f"Score: {alert['score']:.2f}\n"
                 f"Strength: {alert['strength']:.2f}\n"
-                f"Trade Ratio: {alert['trade_ratio']:.2f}\n"
-                f"Volume Bonus: {alert['volume_bonus']:.2f}\n\n"
-                f"Výpočet:\n"
-                f"(({alert['strength']:.2f} × 0.7) + "
-                f"({alert['trade_ratio']:.2f} × 0.3)) × "
-                f"{alert['volume_bonus']:.2f}\n\n"
-                f"Trades: {alert['buy_count']}/{alert['sell_count']}\n"
-                f"Buy: {alert['buy']:.0f} SDA\n"
-                f"Sell: {alert['sell']:.0f} SDA\n"
                 f"Volume: {alert['volume']:.0f} SDA\n\n"
+                f"Whale Buy Volume: "
+                f"{alert['whale_buy_volume']:.0f} SDA\n"
+
+                f"Whale Sell Volume: "
+                f"{alert['whale_sell_volume']:.0f} SDA\n"
+
+                f"Whale Trades: "
+                f"{alert['whale_buy_count']}/"
+                f"{alert['whale_sell_count']}\n\n"
             )
 
         requests.post(
