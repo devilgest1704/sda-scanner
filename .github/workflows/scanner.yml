@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/15 * * * *"
 
 permissions:
   contents: write
@@ -39,7 +39,7 @@ jobs:
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
 
-          git add state.json whale_state.json
+          git add state.json whale_state.json whale_data.json
 
           git diff --staged --quiet || git commit -m "Update scanner state"
 
