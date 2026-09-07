@@ -13,7 +13,6 @@ HEADERS = {
 }
 
 try:
-
     response = requests.post(
         URL,
         headers=HEADERS,
@@ -23,8 +22,7 @@ try:
 
     data = response.json()
 
-    buy_candidates = []
-    sell_candidates = []
+    candidates = []
 
     for token in data:
 
@@ -32,89 +30,71 @@ try:
         sell = float(token.get("sell_vol_sda", 0))
         total = float(token.get("total_vol_sda", 0))
 
-        if total < 5000:
+        buy_count = int(token.get("buy_count", 0))
+        sell_count = int(token.get("sell_count", 0))
+
+        # ignoruj malé objemy
+        if total < 1000:
             continue
 
         strength = buy / max(sell, 1)
 
-        address = token["token_address"]
+        trade_ratio = (
+            buy_count /
+            max(sell_count, 1)
+        )
 
-        if strength >= 1.25:
+        if total >= 10000:
+            volume_bonus = 1.5
+        elif total >= 5000:
+            volume_bonus = 1.3
+        elif total >= 1000:
+            volume_bonus = 1.0
+        else:
+            volume_bonus = 0.7
 
-            buy_candidates.append({
-                "address": address,
-                "buy": buy,
-                "sell": sell,
-                "strength": strength,
-                "volume": total
-            })
+        score = (
+            (strength * 0.7) +
+            (trade_ratio * 0.3)
+        ) * volume_bonus
 
-        elif strength <= 0.80:
+        if score >= 3.5:
+            signal = "🚀 STRONG BUY"
+        elif score >= 2.0:
+            signal = "🟢 BUY"
+        elif score >= 1.0:
+            signal = "🟡 HOLD"
+        elif score >= 0.6:
+            signal = "🟠 WEAK SELL"
+        else:
+            signal = "🔴 STRONG SELL"
 
-            sell_candidates.append({
-                "address": address,
-                "buy": buy,
-                "sell": sell,
-                "strength": strength,
-                "volume": total
-            })
+        candidates.append({
+            "address": token["token_address"],
+            "buy": buy,
+            "sell": sell,
+            "total": total,
+            "buy_count": buy_count,
+            "sell_count": sell_count,
+            "strength": strength,
+            "trade_ratio": trade_ratio,
+            "score": score,
+            "signal": signal
+        })
 
-    buy_candidates.sort(
-        key=lambda x: x["strength"] * x["volume"],
+    candidates.sort(
+        key=lambda x: x["score"],
         reverse=True
     )
 
-    sell_candidates.sort(
-        key=lambda x: (1 / x["strength"]) * x["volume"],
-        reverse=True
-    )
+    top = candidates[:10]
 
     message = "🚀 SDA SCANNER\n\n"
 
-    if buy_candidates:
+    for idx, token in enumerate(top, start=1):
 
-        message += "🟢 BUY SIGNALS\n\n"
-
-        for token in buy_candidates[:3]:
-
-            message += (
-                f"{token['address'][:12]}...\n"
-                f"Buy: {token['buy']:.0f}\n"
-                f"Sell: {token['sell']:.0f}\n"
-                f"Strength: {token['strength']:.2f}\n\n"
-            )
-
-    if sell_candidates:
-
-        message += "\n🔴 SELL SIGNALS\n\n"
-
-        for token in sell_candidates[:3]:
-
-            message += (
-                f"{token['address'][:12]}...\n"
-                f"Buy: {token['buy']:.0f}\n"
-                f"Sell: {token['sell']:.0f}\n"
-                f"Strength: {token['strength']:.2f}\n\n"
-            )
-
-    if not buy_candidates and not sell_candidates:
-
-        message = (
-            "📊 SDA SCANNER\n\n"
-            "Žádný zajímavý BUY ani SELL signál."
-        )
-
-except Exception as e:
-
-    message = f"❌ ERROR\n\n{str(e)}"
-
-requests.post(
-    f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-    json={
-        "chat_id": CHAT_ID,
-        "text": message[:4000]
-    },
-    timeout=30
-)
-
-print("Done")
+        message += (
+            f"{idx}. {token['signal']}\n"
+            f"{token['address'][:12]}...\n"
+            f"Score: {token['score']:.2f}\n"
+          
