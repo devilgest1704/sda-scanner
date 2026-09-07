@@ -54,6 +54,8 @@ try:
     previous_state = load_state()
     current_state = {}
 
+    print(f"Loaded state entries: {len(previous_state)}")
+
     response = requests.post(
         URL,
         headers=HEADERS,
@@ -64,6 +66,8 @@ try:
     response.raise_for_status()
 
     data = response.json()
+
+    print(f"Loaded tokens: {len(data)}")
 
     alerts = []
 
@@ -76,11 +80,16 @@ try:
         buy_count = int(token.get("buy_count", 0))
         sell_count = int(token.get("sell_count", 0))
 
+        # ignoruj nelikvidní tokeny
         if total < 1000:
             continue
 
         strength = buy / max(sell, 1)
-        trade_ratio = buy_count / max(sell_count, 1)
+
+        trade_ratio = (
+            buy_count /
+            max(sell_count, 1)
+        )
 
         if total >= 10000:
             volume_bonus = 1.5
@@ -90,8 +99,8 @@ try:
             volume_bonus = 1.0
 
         score = (
-            (strength * 0.7)
-            + (trade_ratio * 0.3)
+            (strength * 0.7) +
+            (trade_ratio * 0.3)
         ) * volume_bonus
 
         signal = get_signal(score)
@@ -102,21 +111,33 @@ try:
 
         old_signal = previous_state.get(address)
 
+        # první spuštění
         if old_signal is None:
-            old_signal = "NEW"
+            continue
 
-        if old_signal != signal:
+        old_signal = old_signal.strip()
+        signal = signal.strip()
 
-            alerts.append({
-                "address": address,
-                "old": old_signal,
-                "new": signal,
-                "score": score,
-                "strength": strength,
-                "volume": total,
-                "buy": buy,
-                "sell": sell
-            })
+        # žádná změna = žádný alert
+        if old_signal == signal:
+            continue
+
+        alerts.append({
+            "address": address,
+            "old": old_signal,
+            "new": signal,
+            "score": score,
+            "strength": strength,
+            "trade_ratio": trade_ratio,
+            "volume_bonus": volume_bonus,
+            "volume": total,
+            "buy": buy,
+            "sell": sell,
+            "buy_count": buy_count,
+            "sell_count": sell_count
+        })
+
+    print(f"Signal changes: {len(alerts)}")
 
     save_state(current_state)
 
@@ -133,12 +154,22 @@ try:
 
             message += (
                 f"{alert['address'][:12]}...\n"
-                f"{alert['old']} → {alert['new']}\n"
+                f"{alert['old']} → {alert['new']}\n\n"
+
                 f"Score: {alert['score']:.2f}\n"
                 f"Strength: {alert['strength']:.2f}\n"
-                f"Volume: {alert['volume']:.0f} SDA\n"
-                f"Buy: {alert['buy']:.0f}\n"
-                f"Sell: {alert['sell']:.0f}\n\n"
+                f"Trade Ratio: {alert['trade_ratio']:.2f}\n"
+                f"Volume Bonus: {alert['volume_bonus']:.2f}\n\n"
+
+                f"Výpočet:\n"
+                f"(({alert['strength']:.2f} × 0.7) + "
+                f"({alert['trade_ratio']:.2f} × 0.3)) × "
+                f"{alert['volume_bonus']:.2f}\n\n"
+
+                f"Trades: {alert['buy_count']}/{alert['sell_count']}\n"
+                f"Buy: {alert['buy']:.0f} SDA\n"
+                f"Sell: {alert['sell']:.0f} SDA\n"
+                f"Volume: {alert['volume']:.0f} SDA\n\n"
             )
 
         requests.post(
@@ -149,8 +180,6 @@ try:
             },
             timeout=30
         )
-
-    print(f"Signal changes: {len(alerts)}")
 
 except Exception:
 
