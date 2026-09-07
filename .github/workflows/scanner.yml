@@ -24,12 +24,14 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - run: python main.py
+      # Update whale data BEFORE the main scanner reads it
+      - run: python whale_scanner.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
 
-      - run: python whale_scanner.py
+      # Main scanner uses the freshly updated whale_data.json
+      - run: python main.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
