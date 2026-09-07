@@ -18,6 +18,7 @@ HEADERS = {
 
 STATE_FILE = "state.json"
 WHALE_DATA_FILE = "whale_data.json"
+METADATA_FILE = "token_metadata.json"
 
 
 def load_state():
@@ -33,6 +34,27 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
+
+def load_token_metadata():
+    if Path(METADATA_FILE).exists():
+        try:
+            with open(METADATA_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            pass
+    return {}
+
+
+def token_label(address, metadata):
+    item = metadata.get(str(address).lower(), {})
+    if isinstance(item, dict):
+        symbol = item.get("symbol")
+        if symbol:
+            return f"{symbol}/SDA"
+    return f"{address[:12]}..."
+
+
 def load_whale_data():
     if Path(WHALE_DATA_FILE).exists():
         with open(WHALE_DATA_FILE, "r", encoding="utf-8") as f:
@@ -46,6 +68,7 @@ try:
     previous_state = load_state()
     current_state = {}
     whale_data = load_whale_data()
+    token_metadata = load_token_metadata()
 
     response = requests.post(
         URL,
@@ -190,8 +213,9 @@ try:
 
     save_state(current_state)
 
-    # DEBUG is ALWAYS sent to Telegram.
-    debug_message = (
+    # Debug goes only to the GitHub Actions log. Telegram is used only for
+    # actual signal changes, so there is no message every 15 minutes.
+    print(
         "📊 SDA DEBUG\n\n"
         f"Loaded tokens: {len(data)}\n"
         f"Valid tokens: {valid_tokens}\n"
@@ -199,16 +223,6 @@ try:
         f"Signal changes: {len(alerts)}"
     )
 
-    requests.post(
-        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-        json={
-            "chat_id": CHAT_ID,
-            "text": debug_message
-        },
-        timeout=30
-    )
-
-    # SIGNAL is sent ONLY when a signal changes to an important signal.
     if alerts:
 
         alerts.sort(
@@ -221,7 +235,7 @@ try:
         for alert in alerts[:10]:
 
             message += (
-                f"{alert['address'][:12]}...\n"
+                f"{token_label(alert['address'], token_metadata)}\n"
                 f"Signal:\n"
                 f"{alert['old']} → {alert['new']}\n\n"
 
