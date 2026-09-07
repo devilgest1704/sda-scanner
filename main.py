@@ -1,20 +1,45 @@
 import os
 import requests
-from bs4 import BeautifulSoup
+from datetime import datetime
 
 TOKEN = os.environ["TELEGRAM_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
-url = "https://pinetswap.app/"
+try:
+    response = requests.get(
+        "https://pinetswap.app/",
+        timeout=30
+    )
 
-html = requests.get(url, timeout=30).text
+    status = response.status_code
+    size = len(response.text)
 
-message = f"""🚀 SDA Scanner
+    message = f"""
+🚀 SDA Scanner
 
-PinetSwap je dostupný.
-Délka stránky: {len(html)} znaků
+Čas:
+{datetime.now()}
 
-Scanner běží.
+PinetSwap:
+✅ ONLINE
+
+HTTP:
+{status}
+
+Velikost stránky:
+{size} znaků
+
+Scanner běží správně.
+"""
+
+except Exception as e:
+
+    message = f"""
+🚀 SDA Scanner
+
+❌ Chyba
+
+{str(e)}
 """
 
 requests.post(
@@ -22,8 +47,8 @@ requests.post(
     json={
         "chat_id": CHAT_ID,
         "text": message
-    }
+    },
+    timeout=30
 )
 
-print("done")
-``
+print("Done")
