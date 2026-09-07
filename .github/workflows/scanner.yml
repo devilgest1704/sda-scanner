@@ -1,63 +1,42 @@
 name: SDA Scanner
-
 on:
   workflow_dispatch:
-
   schedule:
-    # Every 15 minutes, offset from the usual quarter-hour load
     - cron: "7,22,37,52 * * * *"
-
 permissions:
   contents: write
-
 jobs:
   run:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: true
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - run: pip install -r requirements.txt
-
-      # 1. Update whale data first
       - name: Run whale scanner
         run: python whale_scanner.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-
-      # 2. Collect price / market history
       - name: Run market scanner
         run: python market_scanner.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-
-      # 3. Resolve token names/symbols from Sidra metadata
       - name: Update token metadata
         run: python token_metadata.py
-
-      # 4. Run main signal scanner
-      - name: Run main scanner
+      - name: Run paper trading engine
         run: python main.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-
-      # 5. Save all scanner state
       - name: Commit state files
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
-
-          git add             state.json             whale_state.json             whale_data.json             market_data.json             token_metadata.json             pending_signals.json
-
-          git diff --staged --quiet || git commit -m "Update scanner state"
-
+          git add state.json whale_state.json whale_data.json market_data.json token_metadata.json pending_signals.json positions.json
+          git diff --staged --quiet || git commit -m "Update scanner and paper trading state"
           git push origin main
