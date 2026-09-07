@@ -84,6 +84,12 @@ try:
             tx.get("volume_in_sda", 0)
         )
 
+        # IMPORTANT: The API returns the latest transactions on every run.
+        # Only process a transaction once, otherwise the same whale trade
+        # would be added again every 15 minutes.
+        if tx_hash in seen_hashes:
+            continue
+
         if token_address not in whale_data:
 
             whale_data[token_address] = {
@@ -112,9 +118,6 @@ try:
             whale_data[token_address][
                 "whale_sell_count"
             ] += 1
-
-        if tx_hash in seen_hashes:
-            continue
 
         new_transactions += 1
         new_hashes.add(tx_hash)
