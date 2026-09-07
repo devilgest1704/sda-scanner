@@ -469,7 +469,7 @@ def main():
     print(f"eth_call attempted: {quote_probe['attempted']}")
     print(f"eth_call from: {quote_probe.get('from_address')}")
     print(f"funded candidates checked: {len(quote_probe.get('candidate_balances', []))}")
-    print(f"eth_call successful result: {quote_probe.get("ok")}")
+    print(f"eth_call successful result: {quote_probe.get('ok')}")
     for r in quote_probe.get("results", []):
         print(f"  test={r.get('label')} arg2={r.get('arg2')} ok={r.get('ok')} decoded={r.get('decoded_token_amount')}")
         if r.get("error"): print(f"    error: {r.get('error')}")
