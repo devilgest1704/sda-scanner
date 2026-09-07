@@ -1,33 +1,44 @@
 name: SDA Scanner
+
 on:
   workflow_dispatch:
   schedule:
     - cron: "7,22,37,52 * * * *"
+
 permissions:
   contents: write
+
 jobs:
   run:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: true
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
       - name: Run whale scanner
         run: python whale_scanner.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+
       - name: Run market scanner
         run: python market_scanner.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+
       - name: Update token metadata
         run: python token_metadata.py
+
       - name: Run liquidity scanner
         run: python liquidity_scanner.py
 
@@ -36,10 +47,34 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+
+      - name: Ensure state files exist
+        run: |
+          touch state.json
+          touch whale_state.json
+          touch whale_data.json
+          touch whale_history.json
+          touch market_data.json
+          touch token_metadata.json
+          touch liquidity_data.json
+          touch pending_signals.json
+          touch positions.json
+
       - name: Commit state files
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
-          git add state.json whale_state.json whale_data.json whale_history.json market_data.json token_metadata.json liquidity_data.json pending_signals.json positions.json
+
+          git add \
+            state.json \
+            whale_state.json \
+            whale_data.json \
+            whale_history.json \
+            market_data.json \
+            token_metadata.json \
+            liquidity_data.json \
+            pending_signals.json \
+            positions.json
+
           git diff --staged --quiet || git commit -m "Update scanner and paper trading state"
           git push origin main
