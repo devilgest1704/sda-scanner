@@ -196,12 +196,17 @@ try:
         lines.append(f"{i}. {status} {label(address,meta)} — {conf}/100")
         lines.append(f"   1h {sc['m1h']:+.2f}% | flow {sc['net_1h']:+.0f} SDA | trades {int(trades)} | whale 1h {sc['whale_net']:+.0f}")
         liq=liquidity_for(address,liquidity); liq_sda=n(liq.get('liquidity_sda_equivalent')); buy10k=liq.get('buy_10k_sda') or {}; impact=buy10k.get('estimated_price_impact_pct'); impact_txt=f"{n(impact):.2f}%" if impact is not None else 'n/a'
-        if liq: lines.append(f"   liquidity {liq_sda:,.0f} SDA | est. 10k impact {impact_txt}")
+        if liq:
+            lines.append(f"   💧 Liquidity: {liq_sda:,.0f} SDA | est. 50 SDA impact: {impact_txt}")
+        else:
+            lines.append("   💧 Liquidity: n/a | est. 50 SDA impact: n/a")
     send('\n'.join(lines))
     slots=max(0,MAX_OPEN_POSITIONS-len(pd['positions']))
     for _,address,a,sc in candidates[:slots]:
         liq=liquidity_for(address,liquidity); p=newpos(address,a,sc,meta); p['liquidity_snapshot']=liq; pd['positions'][address]=p
-        events.append(f"🟢 BUY {p['label']}\n\nEntry: {fmt(p['entry_price'])} SDA\nTP1: {fmt(p['tp1'])} SDA (+5.0%)\nTP2: {fmt(p['tp2'])} SDA (+10.0%)\nSL: {fmt(p['sl'])} SDA (-4.0%)\n\nInvested: {INVESTMENT_SDA:.0f} SDA\nConfidence: {p['entry_confidence']}/100\nMode: PAPER TRADING")
+        liq_sda=n(liq.get('liquidity_sda_equivalent')); buy10k=liq.get('buy_10k_sda') or {}; impact=buy10k.get('estimated_price_impact_pct'); impact_txt=f"{n(impact):.2f}%" if impact is not None else 'n/a'
+        liquidity_txt=f"💧 Liquidity: {liq_sda:,.0f} SDA\n📉 Est. 50 SDA impact: {impact_txt}" if liq else "💧 Liquidity: n/a\n📉 Est. 50 SDA impact: n/a"
+        events.append(f"🟢 BUY {p['label']}\n\nEntry: {fmt(p['entry_price'])} SDA\nTP1: {fmt(p['tp1'])} SDA (+5.0%)\nTP2: {fmt(p['tp2'])} SDA (+10.0%)\nSL: {fmt(p['sl'])} SDA (-4.0%)\n\nInvested: {INVESTMENT_SDA:.0f} SDA\nConfidence: {p['entry_confidence']}/100\n{liquidity_txt}\n\nMode: PAPER TRADING")
     save(POS,pd)
     send(f"🤖 SDA PAPER TRADING\n\nOpen positions: {len(pd['positions'])}\nClosed trades: {len(pd['closed_trades'])}\nBUY candidates: {len(candidates)}\nEvents: {len(events)}")
     for e in events:send(e)
