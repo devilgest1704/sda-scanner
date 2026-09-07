@@ -190,21 +190,14 @@ try:
 
     save_state(current_state)
 
-    debug_message = (
+    # Debug goes only to the GitHub Actions log. Telegram is used only for
+    # actual signal changes, so there is no message every 15 minutes.
+    print(
         "📊 SDA DEBUG\n\n"
         f"Loaded tokens: {len(data)}\n"
         f"Valid tokens: {valid_tokens}\n"
         f"Whale tokens: {len(whale_data)}\n"
         f"Signal changes: {len(alerts)}"
-    )
-
-    requests.post(
-        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-        json={
-            "chat_id": CHAT_ID,
-            "text": debug_message
-        },
-        timeout=30
     )
 
     if alerts:
