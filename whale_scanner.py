@@ -41,9 +41,9 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-state = load_state()
-
 try:
+
+    state = load_state()
 
     seen_hashes = set(
         state.get("seen_hashes", [])
@@ -61,7 +61,6 @@ try:
 
     whale_data = {}
 
-    alerts = []
     new_hashes = set(seen_hashes)
     new_transactions = 0
 
@@ -118,35 +117,7 @@ try:
             continue
 
         new_transactions += 1
-
         new_hashes.add(tx_hash)
-
-        price = float(
-            tx.get("price_in_sda", 0)
-        )
-
-        timestamp = tx.get(
-            "tx_timestamp",
-            ""
-        )
-
-        if volume >= 20000:
-            whale_level = "🐋 MEGA WHALE"
-
-        elif volume >= 10000:
-            whale_level = "🐳 WHALE"
-
-        else:
-            whale_level = "🐟 LARGE TRADE"
-
-        alerts.append({
-            "level": whale_level,
-            "address": token_address,
-            "volume": volume,
-            "price": price,
-            "type": tx_type,
-            "timestamp": timestamp
-        })
 
     with open(
         WHALE_DATA_FILE,
@@ -164,12 +135,36 @@ try:
         "seen_hashes": list(new_hashes)[-1000:]
     })
 
+    flow_alerts = []
+
+    for token_address, whale in whale_data.items():
+
+        buy_volume = whale["whale_buy_volume"]
+        sell_volume = whale["whale_sell_volume"]
+
+        net_flow = (
+            buy_volume -
+            sell_volume
+        )
+
+        if abs(net_flow) < 10000:
+            continue
+
+        flow_alerts.append({
+            "address": token_address,
+            "buy_volume": buy_volume,
+            "sell_volume": sell_volume,
+            "net_flow": net_flow,
+            "buy_count": whale["whale_buy_count"],
+            "sell_count": whale["whale_sell_count"]
+        })
+
     debug_message = (
         "🐋 WHALE DEBUG\n\n"
         f"Loaded transactions: {len(transactions)}\n"
         f"New transactions: {new_transactions}\n"
-        f"Whale alerts: {len(alerts)}\n"
-        f"Tracked tokens: {len(whale_data)}"
+        f"Tracked tokens: {len(whale_data)}\n"
+        f"Flow alerts: {len(flow_alerts)}"
     )
 
     requests.post(
@@ -181,33 +176,31 @@ try:
         timeout=30
     )
 
-    if alerts:
+    if flow_alerts:
 
-        alerts.sort(
-            key=lambda x: x["volume"],
+        flow_alerts.sort(
+            key=lambda x: abs(x["net_flow"]),
             reverse=True
         )
 
-        message = "🐋 SDA WHALE ALERTS\n\n"
+        message = "🐋 WHALE FLOW\n\n"
 
-        for alert in alerts[:10]:
+        for item in flow_alerts[:10]:
 
-            if alert["type"] == "buy":
-                direction = "🟢 WHALE BUY"
-
-            elif alert["type"] == "sell":
-                direction = "🔴 WHALE SELL"
-
+            if item["net_flow"] > 0:
+                signal = "🟢 WHALE ACCUMULATION"
             else:
-                direction = alert["type"]
+                signal = "🔴 WHALE DISTRIBUTION"
 
             message += (
-                f"{alert['level']}\n"
-                f"{alert['address'][:12]}...\n"
-                f"{direction}\n"
-                f"Volume: {alert['volume']:.0f} SDA\n"
-                f"Price: {alert['price']:.4f}\n"
-                f"Time: {alert['timestamp']}\n\n"
+                f"{signal}\n"
+                f"{item['address'][:12]}...\n"
+                f"Buy: {item['buy_volume']:.0f} SDA\n"
+                f"Sell: {item['sell_volume']:.0f} SDA\n"
+                f"Net Flow: {item['net_flow']:.0f} SDA\n"
+                f"Whales: "
+                f"{item['buy_count']}/"
+                f"{item['sell_count']}\n\n"
             )
 
         requests.post(
