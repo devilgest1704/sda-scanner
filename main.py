@@ -24,6 +24,7 @@ def load_state():
     if Path(STATE_FILE).exists():
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
+
     return {}
 
 
@@ -114,14 +115,20 @@ try:
             whale.get("whale_sell_count", 0)
         )
 
+        net_whale_flow = (
+            whale_buy_volume -
+            whale_sell_volume
+        )
+
+        # CONFIRMED SIGNALS
+
         if (
             score >= 3.0
             and strength >= 1.40
             and trade_ratio >= 1.20
             and total >= 15000
-            and whale_buy_volume >= 10000
+            and net_whale_flow >= 20000
             and whale_buy_count >= 2
-            and whale_buy_volume > whale_sell_volume
         ):
 
             signal = "🚀 ACCUMULATE AGGRESSIVE"
@@ -131,22 +138,20 @@ try:
             and strength >= 1.15
             and trade_ratio >= 1.00
             and total >= 10000
-            and whale_buy_volume > whale_sell_volume
+            and net_whale_flow >= 10000
         ):
 
             signal = "🟢 ACCUMULATE"
 
         elif (
-            score >= 0.8
-            and strength < 1.0
-            and whale_sell_volume > whale_buy_volume
+            strength < 1.0
+            and net_whale_flow <= -10000
         ):
 
             signal = "💰 TAKE PROFIT"
 
         elif (
-            whale_sell_volume >
-            whale_buy_volume * 2
+            net_whale_flow <= -30000
         ):
 
             signal = "🔴 DISTRIBUTION"
@@ -174,7 +179,9 @@ try:
             "new": signal,
             "score": score,
             "strength": strength,
+            "trade_ratio": trade_ratio,
             "volume": total,
+            "net_whale_flow": net_whale_flow,
             "whale_buy_volume": whale_buy_volume,
             "whale_sell_volume": whale_sell_volume,
             "whale_buy_count": whale_buy_count,
@@ -202,16 +209,28 @@ try:
 
     if alerts:
 
+        alerts.sort(
+            key=lambda x: x["score"],
+            reverse=True
+        )
+
         message = "🔄 SDA SIGNAL CHANGES\n\n"
 
         for alert in alerts[:10]:
 
             message += (
                 f"{alert['address'][:12]}...\n"
+                f"Signal:\n"
                 f"{alert['old']} → {alert['new']}\n\n"
+
                 f"Score: {alert['score']:.2f}\n"
                 f"Strength: {alert['strength']:.2f}\n"
+                f"Trade Ratio: {alert['trade_ratio']:.2f}\n"
                 f"Volume: {alert['volume']:.0f} SDA\n\n"
+
+                f"Net Whale Flow: "
+                f"{alert['net_whale_flow']:.0f} SDA\n"
+
                 f"Whale Buy Volume: "
                 f"{alert['whale_buy_volume']:.0f} SDA\n"
 
