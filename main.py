@@ -13,6 +13,7 @@ HEADERS = {
 }
 
 try:
+
     response = requests.post(
         URL,
         headers=HEADERS,
@@ -22,7 +23,8 @@ try:
 
     data = response.json()
 
-    candidates = []
+    buy_candidates = []
+    sell_candidates = []
 
     for token in data:
 
@@ -30,63 +32,87 @@ try:
         sell = float(token.get("sell_vol_sda", 0))
         total = float(token.get("total_vol_sda", 0))
 
-        if total < 300:
+        if total < 5000:
             continue
 
         strength = buy / max(sell, 1)
 
-        score = (
-            strength * 50
-            + min(total, 2000) / 2000 * 50
-        )
+        address = token["token_address"]
 
-        candidates.append({
-            "address": token["token_address"],
-            "buy": buy,
-            "sell": sell,
-            "total": total,
-            "strength": strength,
-            "score": score
-        })
+        if strength >= 1.25:
 
-    candidates.sort(
-        key=lambda x: x["score"],
+            buy_candidates.append({
+                "address": address,
+                "buy": buy,
+                "sell": sell,
+                "strength": strength,
+                "volume": total
+            })
+
+        elif strength <= 0.80:
+
+            sell_candidates.append({
+                "address": address,
+                "buy": buy,
+                "sell": sell,
+                "strength": strength,
+                "volume": total
+            })
+
+    buy_candidates.sort(
+        key=lambda x: x["strength"] * x["volume"],
         reverse=True
     )
 
-    top = candidates[:10]
+    sell_candidates.sort(
+        key=lambda x: (1 / x["strength"]) * x["volume"],
+        reverse=True
+    )
 
     message = "🚀 SDA SCANNER\n\n"
 
-    for idx, token in enumerate(top, start=1):
+    if buy_candidates:
 
-        if token["score"] >= 80:
-            signal = "🟢 STRONG BUY"
-        elif token["score"] >= 60:
-            signal = "✅ BUY WATCH"
-        elif token["score"] >= 40:
-            signal = "🟡 HOLD"
-        else:
-            signal = "🔴 AVOID"
+        message += "🟢 BUY SIGNALS\n\n"
 
-        message += (
-            f"{idx}. {signal}\n"
-            f"{token['address'][:12]}...\n"
-            f"Score: {token['score']:.1f}\n"
-            f"Buy: {token['buy']:.0f}\n"
-            f"Sell: {token['sell']:.0f}\n"
-            f"Volume: {token['total']:.0f}\n\n"
+        for token in buy_candidates[:3]:
+
+            message += (
+                f"{token['address'][:12]}...\n"
+                f"Buy: {token['buy']:.0f}\n"
+                f"Sell: {token['sell']:.0f}\n"
+                f"Strength: {token['strength']:.2f}\n\n"
+            )
+
+    if sell_candidates:
+
+        message += "\n🔴 SELL SIGNALS\n\n"
+
+        for token in sell_candidates[:3]:
+
+            message += (
+                f"{token['address'][:12]}...\n"
+                f"Buy: {token['buy']:.0f}\n"
+                f"Sell: {token['sell']:.0f}\n"
+                f"Strength: {token['strength']:.2f}\n\n"
+            )
+
+    if not buy_candidates and not sell_candidates:
+
+        message = (
+            "📊 SDA SCANNER\n\n"
+            "Žádný zajímavý BUY ani SELL signál."
         )
 
 except Exception as e:
 
-    message = f"❌ ERROR\n\n{e}"
+    message = f"❌ ERROR\n\n{str(e)}"
 
 requests.post(
     f"https://api.telegram.org/bot{TOKEN}/sendMessage",
     json={
         "chat_id": CHAT_ID,
-        "text": message
+        "text": message[:4000]
     },
     timeout=30
 )
