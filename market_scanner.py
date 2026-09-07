@@ -462,6 +462,12 @@ try:
             analyzed_tokens[token_address] = analysis
 
     # Trim stored history after analysis.
+    for token_address, analysis in analyzed_tokens.items():
+        # Persist the latest analysis alongside the transaction history so
+        # downstream scanners (main.py) can consume it directly.
+        if token_address in tokens:
+            tokens[token_address]["analysis"] = analysis
+
     for token_data in tokens.values():
         history = token_data.get("transactions", [])
         history.sort(key=lambda x: x.get("timestamp", ""))
