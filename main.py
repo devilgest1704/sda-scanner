@@ -105,7 +105,7 @@ try:
         if old_signal is None:
             old_signal = "NEW"
 
-        if True:
+        if old_signal != signal:
 
             alerts.append({
                 "address": address,
