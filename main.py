@@ -34,60 +34,81 @@ def label(a,meta):
 
 def flow(a,w):return (a.get('flow',{}).get(w,{}) or {})
 
+def whale_flow(address, whales, window="1h"):
+    w = whales.get(address) or whales.get(address.lower()) or {}
+    windows = w.get("windows") or {}
+    f = windows.get(window) or {}
+    # Backward compatibility with old cumulative whale_data.json.
+    if not f and window == "1h":
+        wb = n(w.get("whale_buy_volume"))
+        ws = n(w.get("whale_sell_volume"))
+        return {
+            "buy_volume": wb, "sell_volume": ws,
+            "buy_count": n(w.get("whale_buy_count")),
+            "sell_count": n(w.get("whale_sell_count")),
+            "net_flow": wb - ws,
+        }
+    return f
+
+
 def score_for(address,a,whales):
     m=a.get('momentum',{}) or {}; f=flow(a,'1h'); f15=flow(a,'15m')
     m15=n(m.get('15m_pct')); m1=n(m.get('1h_pct')); m4=n(m.get('4h_pct'))
     buy=n(f.get('buy_volume')); sell=n(f.get('sell_volume')); bc=n(f.get('buy_count')); sc=n(f.get('sell_count'))
-    total=buy+sell; strength=buy/max(sell,1); ratio=bc/max(sc,1)
-    trades=bc+sc
-    whale=whales.get(address,{}) or whales.get(address.lower(),{})
-    wb=n(whale.get('whale_buy_volume')); ws=n(whale.get('whale_sell_volume')); wn=wb-ws; wbc=n(whale.get('whale_buy_count'))
+    total=buy+sell; strength=buy/max(sell,1); ratio=bc/max(sc,1); trades=bc+sc
+
+    w15=whale_flow(address,whales,'15m'); w30=whale_flow(address,whales,'30m'); w1=whale_flow(address,whales,'1h'); w4=whale_flow(address,whales,'4h')
+    wn=n(w1.get('net_flow')); wb=n(w1.get('buy_volume')); ws=n(w1.get('sell_volume')); wbc=n(w1.get('buy_count')); wsc=n(w1.get('sell_count'))
+    w15n=n(w15.get('net_flow')); w30n=n(w30.get('net_flow')); w4n=n(w4.get('net_flow'))
 
     s=0.0
-    # Momentum: reward strong 1h moves, but penalize exhausted/negative 4h trend.
+    # Price momentum, but do not over-reward a move that is already extended.
     s += max(0,min(1,(m1+1)/9))*18
     s += max(0,min(1,(m4+3)/10))*8
 
-    # Buy/sell imbalance.
+    # Spot order-flow imbalance.
     s += max(0,min(1,(strength-.8)/1.7))*18
     s += max(0,min(1,(ratio-.8)/1.7))*7
 
-    # Whale confirmation. Missing whale data gives no bonus rather than a false positive.
+    # Rolling whale confirmation: 1h is primary, 15m confirms timing.
     if wn > 0:
-        s += max(0,min(1,wn/50000))*25
-    if wbc >= 2:
-        s += 5
+        s += max(0,min(1,wn/10000))*20
+    elif wn < 0:
+        s += max(-10,min(0,wn/10000))
+    if wbc >= 2: s += 3
+    if wsc >= 3 and wn < 0: s -= 3
+    if w15n > 0: s += 4
+    elif w15n < 0: s -= 3
 
-    # Timing/setup: positive short-term continuation is best; flat after a big run is only watch.
-    if m1 >= 2 and m15 > 0.2:
-        s += 10
-    elif m1 >= 1 and m15 >= 0:
-        s += 6
-    elif m1 >= 4 and m15 < -0.5:
-        s -= 5
-
-    if n(f15.get('net_flow')) > 0:
-        s += 3
-    elif n(f15.get('net_flow')) < 0:
-        s -= 2
+    # Timing/setup.
+    if m1 >= 2 and m15 > 0.2: s += 10
+    elif m1 >= 1 and m15 >= 0: s += 6
+    elif m1 >= 4 and m15 < -0.5: s -= 5
+    if n(f15.get('net_flow')) > 0: s += 3
+    elif n(f15.get('net_flow')) < 0: s -= 2
 
     va=a.get('volume_acceleration_15m_pct')
     if va is not None:
-        if n(va) > 15:s += 4
-        elif n(va) < -20:s -= 2
+        if n(va) > 15: s += 4
+        elif n(va) < -20: s -= 2
 
-    # Liquidity/activity is a soft factor, never a hard gate.
+    # Liquidity/activity is soft, never a hard gate.
     s += max(0,min(1,total/15000))*7
-    if trades >= 8:s += 5
-    elif trades >= 4:s += 3
-    elif trades >= 2:s += 1
+    if trades >= 8: s += 5
+    elif trades >= 4: s += 3
+    elif trades >= 2: s += 1
 
-    # Data-quality cap: with no whale confirmation, don't allow an artificial 80+ score.
+    # One trade is never enough to trigger a BUY.
+    if trades < MIN_TRADES_1H: s -= 8
+
     confidence=int(round(max(0,min(100,s))))
-    if wn <= 0:
-        confidence=min(confidence,75)
+    if wb == 0 and ws == 0:
+        confidence=min(confidence,72)
 
-    return {'confidence':confidence,'strength':strength,'trade_ratio':ratio,'total_1h':total,'net_1h':n(f.get('net_flow')),'net_15m':n(f15.get('net_flow')),'whale_buy':wb,'whale_sell':ws,'whale_net':wn,'whale_buy_count':wbc,'m15':m15,'m1h':m1,'m4h':m4,'volume_accel':None if va is None else n(va),'trades_1h':trades}
+    return {'confidence':confidence,'strength':strength,'trade_ratio':ratio,'total_1h':total,'net_1h':n(f.get('net_flow')),'net_15m':n(f15.get('net_flow')),
+            'whale_buy':wb,'whale_sell':ws,'whale_net':wn,'whale_buy_count':wbc,'whale_sell_count':wsc,
+            'whale_15m_net':w15n,'whale_30m_net':w30n,'whale_4h_net':w4n,
+            'm15':m15,'m1h':m1,'m4h':m4,'volume_accel':None if va is None else n(va),'trades_1h':trades}
 
 def fmt(x):
     x=n(x)
@@ -170,7 +191,7 @@ try:
     for i,(conf,address,a,sc,trades) in enumerate(top,1):
         status='🟢 BUY' if conf>=BUY_THRESHOLD and trades>=MIN_TRADES_1H else ('🟡 WATCH' if conf>=55 else '⚪ WEAK')
         lines.append(f"{i}. {status} {label(address,meta)} — {conf}/100")
-        lines.append(f"   1h {sc['m1h']:+.2f}% | flow {sc['net_1h']:+.0f} SDA | trades {int(trades)} | whale {sc['whale_net']:+.0f}")
+        lines.append(f"   1h {sc['m1h']:+.2f}% | flow {sc['net_1h']:+.0f} SDA | trades {int(trades)} | whale 1h {sc['whale_net']:+.0f}")
     send('\n'.join(lines))
     slots=max(0,MAX_OPEN_POSITIONS-len(pd['positions']))
     for _,address,a,sc in candidates[:slots]:
