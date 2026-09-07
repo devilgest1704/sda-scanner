@@ -31,30 +31,41 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-def get_signal(score):
+def get_signal(score, strength, trade_ratio, volume):
 
-    if score >= 3.5:
-        return "🚀 STRONG BUY"
+    if (
+        score >= 3.0
+        and strength >= 1.40
+        and trade_ratio >= 1.20
+        and volume >= 15000
+    ):
+        return "🚀 ACCUMULATE AGGRESSIVE"
 
-    elif score >= 2.0:
-        return "🟢 BUY"
+    elif (
+        score >= 2.0
+        and strength >= 1.15
+        and trade_ratio >= 1.00
+        and volume >= 10000
+    ):
+        return "🟢 ACCUMULATE"
 
     elif score >= 1.2:
         return "🟡 HOLD"
 
-    elif score >= 0.8:
-        return "🟠 WEAK SELL"
+    elif (
+        score >= 0.8
+        and strength < 1.0
+    ):
+        return "💰 TAKE PROFIT"
 
     else:
-        return "🔴 STRONG SELL"
+        return "🔴 DISTRIBUTION"
 
 
 try:
 
     previous_state = load_state()
     current_state = {}
-
-    print(f"Loaded state entries: {len(previous_state)}")
 
     response = requests.post(
         URL,
@@ -67,9 +78,14 @@ try:
 
     data = response.json()
 
-    print(f"Loaded tokens: {len(data)}")
-
     alerts = []
+
+    IMPORTANT_SIGNALS = [
+        "🚀 ACCUMULATE AGGRESSIVE",
+        "🟢 ACCUMULATE",
+        "💰 TAKE PROFIT",
+        "🔴 DISTRIBUTION"
+    ]
 
     for token in data:
 
@@ -80,20 +96,15 @@ try:
         buy_count = int(token.get("buy_count", 0))
         sell_count = int(token.get("sell_count", 0))
 
-        # ignoruj malé tokeny
-        if total < 5000:
+        if total < 10000:
             continue
 
         strength = buy / max(sell, 1)
+        trade_ratio = buy_count / max(sell_count, 1)
 
-        trade_ratio = (
-            buy_count /
-            max(sell_count, 1)
-        )
-
-        if total >= 10000:
+        if total >= 20000:
             volume_bonus = 1.5
-        elif total >= 5000:
+        elif total >= 10000:
             volume_bonus = 1.3
         else:
             volume_bonus = 1.0
@@ -103,7 +114,12 @@ try:
             (trade_ratio * 0.3)
         ) * volume_bonus
 
-        signal = get_signal(score)
+        signal = get_signal(
+            score,
+            strength,
+            trade_ratio,
+            total
+        )
 
         address = token["token_address"]
 
@@ -111,15 +127,15 @@ try:
 
         old_signal = previous_state.get(address)
 
-        # první běh jen naplní state
         if old_signal is None:
             continue
 
         old_signal = old_signal.strip()
-        signal = signal.strip()
 
-        # bez změny = bez alertu
         if old_signal == signal:
+            continue
+
+        if signal not in IMPORTANT_SIGNALS:
             continue
 
         alerts.append({
@@ -137,8 +153,6 @@ try:
             "sell_count": sell_count
         })
 
-    print(f"Signal changes: {len(alerts)}")
-
     save_state(current_state)
 
     if alerts:
@@ -154,6 +168,7 @@ try:
 
             message += (
                 f"{alert['address'][:12]}...\n"
+                f"Signal:\n"
                 f"{alert['old']} → {alert['new']}\n\n"
 
                 f"Score: {alert['score']:.2f}\n"
@@ -181,9 +196,6 @@ try:
             timeout=30
         )
 
-    else:
-        print("No signal changes")
-
 except Exception:
 
     error_text = traceback.format_exc()
@@ -192,10 +204,7 @@ except Exception:
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
         json={
             "chat_id": CHAT_ID,
-            "text": (
-                "❌ SCANNER ERROR\n\n"
-                f"{error_text[:3500]}"
-            )
+            "text": f"❌ SCANNER ERROR\n\n{error_text[:3500]}"
         },
         timeout=30
     )
