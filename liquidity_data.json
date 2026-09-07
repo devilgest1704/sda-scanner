@@ -1,22 +1,13 @@
 {
-  "updated_at": 1788810847,
+  "updated_at": 1788811249,
   "rpc": "https://node.sidrachain.com",
-  "factory_address": "0xCFE41fb5dA87916D84E7F22889087b4Ff7163cDE",
+  "swap_v3_pool": "0xCB94460F967f49E3a955278f252Ca9D6056ecE75",
   "wsda_address": "0xE4095a910209D7BE03B55D02F40d4554B1666182",
   "trade_size_sda": 50.0,
   "platform_fee_rate": 0.01,
-  "pool_fee_tiers": [
-    500,
-    3000,
-    10000
-  ],
-  "method": "uniswap_v3_factory_pool_slot0_liquidity_estimate",
-  "warning": "Pool discovery uses the Sidra V3 factory and active V3 liquidity. The 50 SDA price-impact figure is an estimate over the current active tick range; exact executable quotes may differ if the swap crosses ticks.",
+  "method": "direct_swap_v3_pool_balance_diagnostic",
+  "status": "diagnostic",
+  "warning": "The current Sidra DEX exposes one Swap V3 Pool contract and routes buys through sidraBuyWithFee. The exact executable quote ABI is not publicly exposed here. This scanner deliberately does NOT pretend that a token balance at the router is the V3 reserve. It reports only on-chain balances and an indicative 50 SDA impact when a defensible pair-balance estimate is possible. Do not use this field as a BUY gate yet.",
   "tokens": {},
-  "errors": [
-    {
-      "stage": "factory_batch",
-      "error": "Unexpected RPC batch response: {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32600, 'message': 'empty batch'}}"
-    }
-  ]
+  "errors": []
 }
