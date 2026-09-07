@@ -20,7 +20,7 @@ DISCOVERY_FILE = "sidra_swap_discovery.json"
 LIQUIDITY_FILE = "liquidity_data.json"
 
 session = requests.Session()
-session.headers.update({"User-Agent": "sda-scanner/12.0"})
+session.headers.update({"User-Agent": "sda-scanner/13.0"})
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -123,19 +123,20 @@ def build_observed_calldata(token, fee_tier, arg2):
         + pad_word(arg2)
     )
 
-def eth_call(data, from_address=None, value_wei=0):
+def eth_call(data, to_address=POOL, from_address=None, value_wei=0, block_tag="latest"):
+    """Read-only eth_call. Supports historical block simulation."""
     payload = {
         "jsonrpc": "2.0",
         "id": 1,
         "method": "eth_call",
         "params": [
             {
-                "to": POOL,
+                "to": to_address,
                 "from": from_address or ETH_CALL_FROM_FALLBACK,
                 "data": data,
                 "value": hex(int(value_wei)),
             },
-            "latest",
+            block_tag if isinstance(block_tag, str) else hex(int(block_tag)),
         ],
     }
     r = requests.post(RPC, json=payload, timeout=RPC_TIMEOUT)
@@ -145,13 +146,25 @@ def eth_call(data, from_address=None, value_wei=0):
         return {"ok": False, "result": None, "error": out["error"]}
     return {"ok": True, "result": out.get("result"), "error": None}
 
-def eth_get_balance(address):
-    payload={"jsonrpc":"2.0","id":2,"method":"eth_getBalance","params":[address,"latest"]}
+def erc20_call(contract, data, block_tag="latest", from_address=None):
+    return eth_call(data, to_address=contract, from_address=from_address, value_wei=0, block_tag=block_tag)
+
+def build_balance_of(address):
+    return "0x70a08231" + pad_word(int(address.lower(), 16))
+
+def build_allowance(owner, spender):
+    return "0xdd62ed3e" + pad_word(int(owner.lower(), 16)) + pad_word(int(spender.lower(), 16))
+
+def eth_get_balance(address, block_tag="latest"):
+    payload={"jsonrpc":"2.0","id":2,"method":"eth_getBalance","params":[address, block_tag if isinstance(block_tag, str) else hex(int(block_tag))]}
     r=requests.post(RPC,json=payload,timeout=RPC_TIMEOUT); r.raise_for_status()
     out=r.json()
     if "error" in out:return None,out["error"]
     try:return int(out.get("result","0x0"),16),None
     except Exception:return None,{"message":"invalid eth_getBalance result"}
+
+def decode_call_uint(result):
+    return decode_uint256_result(result)
 
 def choose_funded_from(samples, txs, min_value_wei):
     # V12: sampled buyers can all be empty today. Expand candidates to the
@@ -275,7 +288,7 @@ def analyze(tx):
     }
 
 def main():
-    print("💧 LIQUIDITY V12 — FUND SOURCE EXPANSION + ETH_CALL")
+    print("💧 LIQUIDITY V13 — HISTORICAL BLOCK ETH_CALL + WSDA STATE")
     print(f"Pool: {POOL}")
     print(f"Target trade: {TRADE_SIZE_SDA:.0f} SDA")
     print("Safety: READ-ONLY / explorer GET only / no broadcast")
@@ -357,6 +370,8 @@ def main():
         if a["sda_in"] > 0 and a["token_out"] > 0:
             usable.append({
                 "tx": a["tx"],
+                "block": a.get("block"),
+                "buyer": a.get("buyer"),
                 "token": a["token"],
                 "arg1": a["arg1"],
                 "arg2": a["arg2"],
@@ -399,7 +414,7 @@ def main():
 
     discovery = {
         "updated_at": now(),
-        "version": "V12",
+        "version": "V13",
         "pool": POOL,
         "wsda": WSDA,
         "trade_size_sda": TRADE_SIZE_SDA,
@@ -421,7 +436,7 @@ def main():
 
     liquidity = {
         "updated_at": now(),
-        "version": "V12",
+        "version": "V13",
         "pool_address": POOL,
         "wsda_address": WSDA,
         "trade_size_sda": TRADE_SIZE_SDA,
@@ -444,33 +459,124 @@ def main():
         e["observed_sda_in"] += x["sda_in"]
         e["observed_token_out"] += x["token_out"]
 
-    # V11: use a currently funded sampled buyer so eth_call can supply 50 SDA.
-    value_wei=int(TRADE_SIZE_SDA*10**18)
-    quote_probe={"attempted":False,"ok":False,"token":None,"fee_tier":None,
-        "trade_size_sda":TRADE_SIZE_SDA,"value_wei":value_wei,"arg2_tests":[],
-        "from_address":None,"from_balance_wei":None,"candidate_balances":[],
-        "results":[],"error":None}
-    if usable:
-        probe_sample=usable[0]
-        quote_probe["token"]=probe_sample["token"]; quote_probe["fee_tier"]=probe_sample["arg1"]
+    # V13: reproduce a real historical BUY against the pre-transaction state.
+    # Historical successful calls showed native SDA value=0 while WSDA moved
+    # from buyer -> pool. Therefore we no longer force 50 native SDA into the call.
+    # The strongest test is eth_call at block-1 with the real historical buyer.
+    probe_sample = max(
+        usable,
+        key=lambda x: int(x.get("block") or 0)
+    ) if usable else None
+
+    quote_probe = {
+        "attempted": False,
+        "ok": False,
+        "token": None,
+        "fee_tier": None,
+        "trade_size_sda": TRADE_SIZE_SDA,
+        "value_wei": 0,
+        "arg2_tests": [],
+        "from_address": None,
+        "historical_block": None,
+        "pre_transaction_block": None,
+        "historical_wsda_balance_wei": None,
+        "historical_wsda_allowance_to_pool_wei": None,
+        "historical_native_balance_wei": None,
+        "results": [],
+        "error": None,
+    }
+
+    if probe_sample:
+        quote_probe["token"] = probe_sample["token"]
+        quote_probe["fee_tier"] = probe_sample["arg1"]
+        quote_probe["from_address"] = probe_sample.get("buyer")
         try:
-            funded,balances=choose_funded_from(samples, txs, value_wei)
-            quote_probe["candidate_balances"]=balances; quote_probe["from_address"]=funded
-            if funded:
-                quote_probe["from_balance_wei"]=next((x.get("balance_wei") for x in balances if x.get("address")==funded),None)
-                for label,arg2 in [("zero",0),("historical_exact_output",int(probe_sample["arg2"]))]:
-                    data=build_observed_calldata(probe_sample["token"],probe_sample["arg1"],arg2)
-                    result=eth_call(data,from_address=funded,value_wei=value_wei)
-                    decoded=decode_uint256_result(result.get("result"))
-                    item={"label":label,"arg2":arg2,"calldata":data,"ok":result.get("ok"),
-                          "raw_result":result.get("result"),"decoded_uint256":decoded,
-                          "decoded_token_amount":(float(Decimal(decoded)/(Decimal(10)**(probe_sample.get("token_decimals") or 18))) if decoded is not None else None),
-                          "error":result.get("error")}
-                    quote_probe["results"].append(item); quote_probe["attempted"]=True
-                    if result.get("ok"): quote_probe["ok"]=True
-            else:
-                quote_probe["error"]={"message":"No recent candidate address currently has enough native SDA for a 50 SDA eth_call.","required_wei":value_wei}
-        except Exception as e: quote_probe["error"]=str(e)
+            block_number = int(probe_sample.get("block") or 0)
+            if block_number <= 0:
+                raise RuntimeError("Selected historical sample has no usable block number.")
+            pre_block = block_number - 1
+            quote_probe["historical_block"] = block_number
+            quote_probe["pre_transaction_block"] = pre_block
+
+            buyer = probe_sample.get("buyer")
+            if not buyer:
+                raise RuntimeError("Selected historical sample has no WSDA-derived buyer.")
+
+            # Inspect the exact state required by a token-in / token-out simulation.
+            bal_res = erc20_call(
+                WSDA,
+                build_balance_of(buyer),
+                block_tag=pre_block,
+            )
+            allowance_res = erc20_call(
+                WSDA,
+                build_allowance(buyer, POOL),
+                block_tag=pre_block,
+            )
+            native_bal, native_err = eth_get_balance(buyer, block_tag=pre_block)
+
+            quote_probe["historical_wsda_balance_wei"] = decode_call_uint(bal_res.get("result"))
+            quote_probe["historical_wsda_allowance_to_pool_wei"] = decode_call_uint(allowance_res.get("result"))
+            quote_probe["historical_native_balance_wei"] = native_bal
+            quote_probe["state_checks"] = {
+                "wsda_balance_error": bal_res.get("error"),
+                "wsda_allowance_error": allowance_res.get("error"),
+                "native_balance_error": native_err,
+            }
+
+            historical_arg2 = int(probe_sample["arg2"])
+            # Exact historical calldata, then a slightly lower minimum. The latter
+            # helps distinguish exact-output from amountOutMinimum behavior if the
+            # function executes successfully at the historical state.
+            tests = [
+                ("historical_exact_arg2", historical_arg2),
+                ("historical_99pct_arg2", max(0, int(historical_arg2 * 0.99))),
+                ("historical_zero_arg2", 0),
+            ]
+            quote_probe["arg2_tests"] = [
+                {"label": label, "arg2": arg2} for label, arg2 in tests
+            ]
+
+            for label, arg2 in tests:
+                data = build_observed_calldata(
+                    probe_sample["token"],
+                    probe_sample["arg1"],
+                    arg2,
+                )
+                result = eth_call(
+                    data,
+                    from_address=buyer,
+                    value_wei=0,
+                    block_tag=pre_block,
+                )
+                decoded = decode_uint256_result(result.get("result"))
+                item = {
+                    "label": label,
+                    "arg2": arg2,
+                    "calldata": data,
+                    "block_tag": hex(pre_block),
+                    "from_address": buyer,
+                    "value_wei": 0,
+                    "ok": result.get("ok"),
+                    "raw_result": result.get("result"),
+                    "decoded_uint256": decoded,
+                    "decoded_token_amount": (
+                        float(
+                            Decimal(decoded)
+                            / (Decimal(10) ** (probe_sample.get("token_decimals") or 18))
+                        )
+                        if decoded is not None else None
+                    ),
+                    "error": result.get("error"),
+                }
+                quote_probe["results"].append(item)
+                quote_probe["attempted"] = True
+                if result.get("ok"):
+                    quote_probe["ok"] = True
+
+        except Exception as e:
+            quote_probe["error"] = str(e)
+
     quote_probe["decoded_token_amount"]=next((x["decoded_token_amount"] for x in quote_probe["results"] if x.get("decoded_token_amount") is not None),None)
     quote_probe["quote_ready"]=quote_probe["decoded_token_amount"] is not None
 
@@ -504,12 +610,18 @@ def main():
         print(f"  test={r.get('label')} arg2={r.get('arg2')} ok={r.get('ok')} decoded={r.get('decoded_token_amount')}")
         if r.get("error"): print(f"    error: {r.get('error')}")
     if quote_probe.get("error"): print(f"eth_call error: {quote_probe['error']}")
+    print(f"historical block: {quote_probe.get('historical_block')}")
+    print(f"pre-transaction block: {quote_probe.get('pre_transaction_block')}")
+    print(f"historical WSDA balance: {quote_probe.get('historical_wsda_balance_wei')}")
+    print(f"historical WSDA allowance→pool: {quote_probe.get('historical_wsda_allowance_to_pool_wei')}")
+    print(f"historical native SDA balance: {quote_probe.get('historical_native_balance_wei')}")
     if quote_probe.get("quote_ready"): print("Quote probe produced a uint256 return value.")
-    else: print("No current executable uint256 quote obtained.")
+    elif quote_probe.get("ok"): print("Historical eth_call executed, but returned no uint256 quote.")
+    else: print("No successful historical eth_call yet.")
     print(f"Saved {DISCOVERY_FILE}")
     print(f"Saved {LIQUIDITY_FILE}")
     print("Overall liquidity status: UNKNOWN")
-    print("Next: V12 expands the read-only from-address search beyond sampled buyers.")
+    print("Next: inspect the historical eth_call result and revert data to determine the pool function semantics.")
 
 if __name__ == "__main__":
     main()
