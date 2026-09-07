@@ -20,44 +20,10 @@ try:
         timeout=30
     )
 
-    data = response.json()
-
-    candidates = []
-
-    for token in data:
-        buy = float(token.get("buy_vol_sda", 0))
-        sell = float(token.get("sell_vol_sda", 0))
-        total = float(token.get("total_vol_sda", 0))
-
-        if total < 2000:
-            continue
-
-        strength = buy / max(sell, 1)
-
-        candidates.append({
-            "address": token["token_address"],
-            "buy": buy,
-            "sell": sell,
-            "total": total,
-            "strength": strength
-        })
-
-    candidates.sort(
-        key=lambda x: x["strength"] * x["total"],
-        reverse=True
+    message = (
+        f"Status: {response.status_code}\n\n"
+        f"{response.text[:3000]}"
     )
-
-    top = candidates[:5]
-
-    message = "🚀 SDA SCANNER\n\n"
-
-    for idx, token in enumerate(top, start=1):
-        message += (
-            f"{idx}. {token['address'][:12]}...\n"
-            f"Buy: {token['buy']:.0f} SDA\n"
-            f"Sell: {token['sell']:.0f} SDA\n"
-            f"Strength: {token['strength']:.2f}\n\n"
-        )
 
 except Exception as e:
     message = f"❌ ERROR\n\n{str(e)}"
