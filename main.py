@@ -78,7 +78,10 @@ try:
 
     data = response.json()
 
+    print(f"Loaded tokens: {len(data)}")
+
     alerts = []
+    valid_tokens = 0
 
     IMPORTANT_SIGNALS = [
         "🚀 ACCUMULATE AGGRESSIVE",
@@ -98,6 +101,8 @@ try:
 
         if total < 10000:
             continue
+
+        valid_tokens += 1
 
         strength = buy / max(sell, 1)
         trade_ratio = buy_count / max(sell_count, 1)
@@ -153,6 +158,23 @@ try:
             "sell_count": sell_count
         })
 
+    print(f"Valid tokens: {valid_tokens}")
+    print(f"Signal changes: {len(alerts)}")
+
+    requests.post(
+        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        json={
+            "chat_id": CHAT_ID,
+            "text": (
+                "📊 SDA DEBUG\n\n"
+                f"Loaded tokens: {len(data)}\n"
+                f"Valid tokens: {valid_tokens}\n"
+                f"Signal changes: {len(alerts)}"
+            )
+        },
+        timeout=30
+    )
+
     save_state(current_state)
 
     if alerts:
@@ -170,17 +192,14 @@ try:
                 f"{alert['address'][:12]}...\n"
                 f"Signal:\n"
                 f"{alert['old']} → {alert['new']}\n\n"
-
                 f"Score: {alert['score']:.2f}\n"
                 f"Strength: {alert['strength']:.2f}\n"
                 f"Trade Ratio: {alert['trade_ratio']:.2f}\n"
                 f"Volume Bonus: {alert['volume_bonus']:.2f}\n\n"
-
                 f"Výpočet:\n"
                 f"(({alert['strength']:.2f} × 0.7) + "
                 f"({alert['trade_ratio']:.2f} × 0.3)) × "
                 f"{alert['volume_bonus']:.2f}\n\n"
-
                 f"Trades: {alert['buy_count']}/{alert['sell_count']}\n"
                 f"Buy: {alert['buy']:.0f} SDA\n"
                 f"Sell: {alert['sell']:.0f} SDA\n"
@@ -204,7 +223,10 @@ except Exception:
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
         json={
             "chat_id": CHAT_ID,
-            "text": f"❌ SCANNER ERROR\n\n{error_text[:3500]}"
+            "text": (
+                "❌ SCANNER ERROR\n\n"
+                f"{error_text[:3500]}"
+            )
         },
         timeout=30
     )
