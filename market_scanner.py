@@ -20,6 +20,7 @@ SUPABASE_URL = (
 SUPABASE_KEY = "sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z"
 
 MARKET_DATA_FILE = "market_data.json"
+METADATA_FILE = "token_metadata.json"
 
 FETCH_LIMIT = 1000
 MAX_HISTORY_POINTS = 1000
@@ -34,6 +35,45 @@ HEADERS = {
 # ============================================================
 # FILE HELPERS
 # ============================================================
+
+def load_metadata():
+    if not Path(METADATA_FILE).exists():
+        return {}
+    try:
+        with open(METADATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def token_label(address, metadata):
+    item = metadata.get(str(address).lower(), {}) or metadata.get(str(address), {})
+    symbol = item.get("symbol") if isinstance(item, dict) else None
+    return f"{symbol}/SDA" if symbol else f"{str(address)[:12]}.../SDA"
+
+def resolve_symbol(address, metadata):
+    key = str(address).lower()
+    current = metadata.get(key, {})
+    if isinstance(current, dict) and current.get("symbol"):
+        return current.get("symbol")
+    try:
+        url = f"https://ledger.sidrachain.com/api/v2/tokens/{address}"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            symbol = data.get("symbol") if isinstance(data, dict) else None
+            if symbol:
+                metadata[key] = {
+                    "name": data.get("name"),
+                    "symbol": symbol,
+                    "decimals": data.get("decimals"),
+                    "source": "blockscout",
+                    "address": address,
+                }
+                return symbol
+    except Exception:
+        pass
+    return None
 
 def load_market_data():
     if not Path(MARKET_DATA_FILE).exists():
@@ -391,6 +431,7 @@ try:
     transactions = fetch_transactions()
     print(f"Loaded transactions: {len(transactions)}")
 
+    metadata = load_metadata()
     market_data = load_market_data()
     tokens = market_data.setdefault("tokens", {})
 
@@ -475,12 +516,13 @@ try:
 
         for item in candidates[:10]:
             address = item["address"]
+            symbol = resolve_symbol(address, metadata)
             analysis = item["analysis"]
             momentum = analysis["momentum"]
             flow = analysis["flow"]["1h"]
 
             message += (
-                f"{address[:12]}...\n"
+                f"{(symbol + "/SDA") if symbol else token_label(address, metadata)}\n"
                 f"Price: {analysis['price_in_sda']:.10f} SDA\n"
                 f"15m: {momentum['15m_pct']:.2f}%\n"
                 f"30m: {momentum['30m_pct']:.2f}%\n"
