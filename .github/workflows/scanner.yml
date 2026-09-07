@@ -1,5 +1,4 @@
 name: SDA Scanner
-
 on:
   workflow_dispatch:
   schedule:
@@ -11,7 +10,6 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,8 +37,8 @@ jobs:
       - name: Update token metadata
         run: python token_metadata.py
 
-      - name: Run liquidity scanner
-        run: python liquidity_scanner.py
+      - name: Run liquidity scanner V4
+        run: python liquidity_scanner_v4.py
 
       - name: Run paper trading engine
         run: python main.py
@@ -57,6 +55,7 @@ jobs:
           touch market_data.json
           touch token_metadata.json
           touch liquidity_data.json
+          touch sidra_swap_discovery.json
           touch pending_signals.json
           touch positions.json
 
@@ -64,17 +63,6 @@ jobs:
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
-
-          git add \
-            state.json \
-            whale_state.json \
-            whale_data.json \
-            whale_history.json \
-            market_data.json \
-            token_metadata.json \
-            liquidity_data.json \
-            pending_signals.json \
-            positions.json
-
-          git diff --staged --quiet || git commit -m "Update scanner and paper trading state"
+          git add             state.json             whale_state.json             whale_data.json             whale_history.json             market_data.json             token_metadata.json             liquidity_data.json             sidra_swap_discovery.json             pending_signals.json             positions.json
+          git diff --staged --quiet || git commit -m "Discover Sidra swap calldata for liquidity scanner"
           git push origin main
