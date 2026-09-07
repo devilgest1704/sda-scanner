@@ -20,7 +20,7 @@ DISCOVERY_FILE = "sidra_swap_discovery.json"
 LIQUIDITY_FILE = "liquidity_data.json"
 
 session = requests.Session()
-session.headers.update({"User-Agent": "sda-scanner/10.0"})
+session.headers.update({"User-Agent": "sda-scanner/11.0"})
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -109,25 +109,13 @@ def transfers_for_tx(tx_hash):
     items = data.get("items", []) if isinstance(data, dict) else []
     return [normalize_transfer(x) for x in items]
 
-def raw_transfer_value(t):
-    total = t.get("total")
-    if isinstance(total, dict):
-        raw = total.get("value")
-        decimals = total.get("decimals")
-    else:
-        raw = t.get("value") or t.get("amount") or t.get("raw_value")
-        decimals = t.get("decimals")
-    try:
-        return int(raw), int(decimals)
-    except Exception:
-        return None, None
 
 def pad_word(value):
     return f"{int(value):064x}"
 
-def build_swap_calldata(token, fee_tier, arg2):
-    # The observed live transactions prove this 3-word layout:
-    # selector | token(address) | arg1(fee tier) | arg2
+def build_observed_calldata(token, fee_tier, arg2):
+    # Observed live calls are exactly:
+    # selector + address word + fee-tier word + uint256 word.
     return (
         SWAP_SELECTOR
         + pad_word(int(token, 16))
@@ -154,11 +142,30 @@ def eth_call(data, from_address=None, value_wei=0):
     r.raise_for_status()
     out = r.json()
     if "error" in out:
-        return {"ok": False, "error": out["error"]}
-    result = out.get("result")
-    if isinstance(result, str):
-        return {"ok": True, "result": result}
-    return {"ok": True, "result": result}
+        return {"ok": False, "result": None, "error": out["error"]}
+    return {"ok": True, "result": out.get("result"), "error": None}
+
+def eth_get_balance(address):
+    payload={"jsonrpc":"2.0","id":2,"method":"eth_getBalance","params":[address,"latest"]}
+    r=requests.post(RPC,json=payload,timeout=RPC_TIMEOUT); r.raise_for_status()
+    out=r.json()
+    if "error" in out:return None,out["error"]
+    try:return int(out.get("result","0x0"),16),None
+    except Exception:return None,{"message":"invalid eth_getBalance result"}
+
+def choose_funded_from(samples,min_value_wei):
+    candidates=[]; seen=set()
+    for x in samples:
+        a=(x.get("buyer") or "").lower()
+        if a and a not in seen: seen.add(a); candidates.append(a)
+    balances=[]
+    for a in candidates[:20]:
+        try:
+            bal,err=eth_get_balance(a)
+            balances.append({"address":a,"balance_wei":bal,"error":err})
+            if bal is not None and bal>=min_value_wei:return a,balances
+        except Exception as e: balances.append({"address":a,"balance_wei":None,"error":str(e)})
+    return None,balances
 
 def decode_uint256_result(result):
     if not isinstance(result, str) or not result.startswith("0x"):
@@ -202,8 +209,6 @@ def analyze(tx):
     ]
     token_out = sum(t["value"] for t in token_out_transfers)
 
-    # Exact raw token output is the decisive comparison: arg2 is uint256,
-    # while Blockscout gives the token transfer raw value + decimals.
     token_out_raw = sum(
         int(t["raw_value"]) for t in token_out_transfers
         if t.get("raw_value") is not None
@@ -243,7 +248,7 @@ def analyze(tx):
     }
 
 def main():
-    print("💧 LIQUIDITY V9 — FIX TRANSFER DECODING + REAL BUY FLOW")
+    print("💧 LIQUIDITY V11 — FUNDED ETH_CALL + QUOTE PROBE")
     print(f"Pool: {POOL}")
     print(f"Target trade: {TRADE_SIZE_SDA:.0f} SDA")
     print("Safety: READ-ONLY / explorer GET only / no broadcast")
@@ -342,6 +347,13 @@ def main():
     arg1_values = sorted({x["arg1"] for x in usable})
     fee_tier_like = all(x in (100, 500, 1000, 3000, 5000, 10000) for x in arg1_values) if arg1_values else False
 
+    # Test whether arg2 looks like a minimum/output amount by comparing it
+    # to the observed output in raw token units when available.
+    ratios = []
+    for x in usable:
+        if x["token_out"] > 0:
+            ratios.append(x["arg2"] / x["token_out"])
+
     exact_arg2_matches = sum(
         1 for x in usable if x.get("arg2_matches_raw_output")
     )
@@ -349,9 +361,9 @@ def main():
         exact_arg2_matches / len(usable) if usable else 0.0
     )
 
-    # A perfect raw equality across independent real swaps is strong evidence
-    # that arg2 is the token amount encoded in the call. It does NOT by itself
-    # prove whether the contract treats it as exact output or amountOutMinimum.
+    # Equality with the actual transfer proves that arg2 encodes the exact
+    # output observed in these historical calls. It does not, by itself,
+    # distinguish exact-output from amountOutMinimum semantics.
     arg2_semantics = (
         "ARG2_EQUALS_ACTUAL_TOKEN_OUTPUT_IN_ALL_SAMPLES"
         if usable and exact_arg2_matches == len(usable)
@@ -360,7 +372,7 @@ def main():
 
     discovery = {
         "updated_at": now(),
-        "version": "V10",
+        "version": "V11",
         "pool": POOL,
         "wsda": WSDA,
         "trade_size_sda": TRADE_SIZE_SDA,
@@ -372,27 +384,24 @@ def main():
         "usable_input_output_pairs": usable,
         "arg1_values": arg1_values,
         "arg1_matches_common_v3_fee_tiers": fee_tier_like,
-        "arg2_exact_match_count": exact_arg2_matches,
-        "arg2_exact_match_rate": arg2_match_rate,
-        "arg2_semantics": arg2_semantics,
-        "eth_call_quote": {},
+        "arg2_to_token_output_ratios": ratios,
         "conclusion": {
             "swap_direction_observed": bool(usable),
             "arg1_likely_fee_tier": fee_tier_like,
-            "arg2_equals_observed_output": bool(usable and exact_arg2_matches == len(usable)),
             "quote_ready": False,
         },
     }
 
     liquidity = {
         "updated_at": now(),
-        "version": "V10",
+        "version": "V11",
         "pool_address": POOL,
         "wsda_address": WSDA,
         "trade_size_sda": TRADE_SIZE_SDA,
         "status": "UNKNOWN",
         "tokens": {},
         "errors": [],
+        "eth_call_quote": {},
     }
 
     # Keep observed prices per token for later calibration, but don't claim
@@ -408,63 +417,38 @@ def main():
         e["observed_sda_in"] += x["sda_in"]
         e["observed_token_out"] += x["token_out"]
 
-    # V10: read-only eth_call probe using the exact observed calldata layout.
-    # We test arg2=0 because, if arg2 is amountOutMinimum, zero should remove
-    # the minimum-output constraint. If the function returns a uint256, that
-    # gives us a direct executable quote. A revert/empty return is still useful
-    # evidence that the function does not expose a quote through return data.
-    quote_probe = {
-        "attempted": False,
-        "ok": False,
-        "token": None,
-        "fee_tier": None,
-        "trade_size_sda": TRADE_SIZE_SDA,
-        "value_wei": int(TRADE_SIZE_SDA * 10**18),
-        "calldata": None,
-        "raw_result": None,
-        "decoded_uint256": None,
-        "decoded_token_amount": None,
-        "error": None,
-    }
-
+    # V11: use a currently funded sampled buyer so eth_call can supply 50 SDA.
+    value_wei=int(TRADE_SIZE_SDA*10**18)
+    quote_probe={"attempted":False,"ok":False,"token":None,"fee_tier":None,
+        "trade_size_sda":TRADE_SIZE_SDA,"value_wei":value_wei,"arg2_tests":[],
+        "from_address":None,"from_balance_wei":None,"candidate_balances":[],
+        "results":[],"error":None}
     if usable:
-        # Prefer the most recent-looking sample in the selected set.
-        probe = usable[-1]
+        probe_sample=usable[0]
+        quote_probe["token"]=probe_sample["token"]; quote_probe["fee_tier"]=probe_sample["arg1"]
         try:
-            data = build_swap_calldata(
-                probe["token"],
-                probe["arg1"],
-                0,
-            )
-            quote_probe["attempted"] = True
-            quote_probe["token"] = probe["token"]
-            quote_probe["fee_tier"] = probe["arg1"]
-            quote_probe["calldata"] = data
-
-            result = eth_call(
-                data,
-                from_address=next(
-                    (x.get("buyer") for x in samples
-                     if x.get("tx") == probe["tx"] and x.get("buyer")),
-                    ETH_CALL_FROM_FALLBACK,
-                ),
-                value_wei=int(TRADE_SIZE_SDA * 10**18),
-            )
-            quote_probe["ok"] = bool(result.get("ok"))
-            quote_probe["raw_result"] = result.get("result")
-            quote_probe["error"] = result.get("error")
-            decoded = decode_uint256_result(result.get("result"))
-            quote_probe["decoded_uint256"] = decoded
-            if decoded is not None:
-                decimals = probe.get("token_decimals") or 18
-                quote_probe["decoded_token_amount"] = float(
-                    Decimal(decoded) / (Decimal(10) ** decimals)
-                )
-        except Exception as e:
-            quote_probe["error"] = str(e)
+            funded,balances=choose_funded_from(samples,value_wei)
+            quote_probe["candidate_balances"]=balances; quote_probe["from_address"]=funded
+            if funded:
+                quote_probe["from_balance_wei"]=next((x.get("balance_wei") for x in balances if x.get("address")==funded),None)
+                for label,arg2 in [("zero",0),("historical_exact_output",int(probe_sample["arg2"]))]:
+                    data=build_observed_calldata(probe_sample["token"],probe_sample["arg1"],arg2)
+                    result=eth_call(data,from_address=funded,value_wei=value_wei)
+                    decoded=decode_uint256_result(result.get("result"))
+                    item={"label":label,"arg2":arg2,"calldata":data,"ok":result.get("ok"),
+                          "raw_result":result.get("result"),"decoded_uint256":decoded,
+                          "decoded_token_amount":(float(Decimal(decoded)/(Decimal(10)**(probe_sample.get("token_decimals") or 18))) if decoded is not None else None),
+                          "error":result.get("error")}
+                    quote_probe["results"].append(item); quote_probe["attempted"]=True
+                    if result.get("ok"): quote_probe["ok"]=True
+            else:
+                quote_probe["error"]={"message":"No sampled buyer currently has enough native SDA for a 50 SDA eth_call.","required_wei":value_wei}
+        except Exception as e: quote_probe["error"]=str(e)
+    quote_probe["decoded_token_amount"]=next((x["decoded_token_amount"] for x in quote_probe["results"] if x.get("decoded_token_amount") is not None),None)
+    quote_probe["quote_ready"]=quote_probe["decoded_token_amount"] is not None
 
     discovery["eth_call_quote"] = quote_probe
-    discovery["conclusion"]["quote_ready"] = bool(
+    discovery["conclusion"]["quote_ready"] = (
         quote_probe.get("decoded_token_amount") is not None
     )
 
@@ -482,19 +466,20 @@ def main():
     print(f"arg1 looks like common V3 fee tier: {fee_tier_like}")
     print(f"arg2 exact raw-output matches: {exact_arg2_matches}/{len(usable)} ({arg2_match_rate:.1%})")
     print(f"arg2 semantic conclusion: {arg2_semantics}")
-    print(f"eth_call attempted: {quote_probe['attempted']}")
-    print(f"eth_call ok: {quote_probe['ok']}")
-    if quote_probe.get("decoded_token_amount") is not None:
-        print(f"eth_call decoded token quote: {quote_probe['decoded_token_amount']}")
-        print("Quote probe produced a uint256 return value.")
-    elif quote_probe.get("error"):
-        print(f"eth_call error: {quote_probe['error']}")
-    else:
-        print("eth_call returned no decodable uint256 quote.")
+    print(f"eth_call attempted: {quote_probe["attempted"]}")
+    print(f"eth_call from: {quote_probe.get("from_address")}")
+    print(f"funded candidates checked: {len(quote_probe.get("candidate_balances", []))}")
+    print(f"eth_call successful result: {quote_probe.get("ok")}")
+    for r in quote_probe.get("results", []):
+        print(f"  test={r.get("label")} arg2={r.get("arg2")} ok={r.get("ok")} decoded={r.get("decoded_token_amount")}")
+        if r.get("error"): print(f"    error: {r.get("error")}")
+    if quote_probe.get("error"): print(f"eth_call error: {quote_probe["error"]}")
+    if quote_probe.get("quote_ready"): print("Quote probe produced a uint256 return value.")
+    else: print("No current executable uint256 quote obtained.")
     print(f"Saved {DISCOVERY_FILE}")
     print(f"Saved {LIQUIDITY_FILE}")
     print("Overall liquidity status: UNKNOWN")
-    print("V10 remains read-only: no transaction is broadcast.")
+    print("Next: use the measured WSDA input + token output to pin down arg2 semantics before eth_call.")
 
 if __name__ == "__main__":
     main()
