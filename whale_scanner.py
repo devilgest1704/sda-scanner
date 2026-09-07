@@ -59,14 +59,17 @@ try:
 
     transactions = response.json()
 
-    # Keep previously accumulated whale data. The API only returns the latest
-    # 150 transactions, so rebuilding this dict from scratch would make all
-    # already-seen transactions disappear.
+    # Keep previously accumulated whale data.
+    # If whale_data.json is empty, rebuild it from the current API window.
+    # This also fixes the situation where whale_state.json already contains
+    # hashes but whale_data.json was empty.
     if Path(WHALE_DATA_FILE).exists():
         with open(WHALE_DATA_FILE, "r", encoding="utf-8") as f:
             whale_data = json.load(f)
     else:
         whale_data = {}
+
+    rebuild_whale_data = not bool(whale_data)
 
     new_hashes = set(seen_hashes)
     new_transactions = 0
@@ -92,9 +95,10 @@ try:
         )
 
         # IMPORTANT: The API returns the latest transactions on every run.
-        # Only process a transaction once, otherwise the same whale trade
-        # would be added again every 15 minutes.
-        if tx_hash in seen_hashes:
+        # Normally process each transaction only once.
+        # Exception: when whale_data is empty, rebuild it from the current
+        # transaction window even if whale_state.json already knows the hashes.
+        if not rebuild_whale_data and tx_hash in seen_hashes:
             continue
 
         if token_address not in whale_data:
