@@ -1,60 +1,62 @@
 import os
-import json
-from pathlib import Path
-
 import requests
 
 TOKEN = os.environ["TELEGRAM_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
-URL = "https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/rpc/get_token_stats_24h"
+SUPABASE_URL = "https://uhrsigapvhlpudafxqfg.supabase.co"
+SUPABASE_KEY = "sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z"
+
+DATA_URL = f"{SUPABASE_URL}/rest/v1/rpc/get_token_stats_24h"
 
 HEADERS = {
-    "apikey": "sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z",
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json",
     "Content-Profile": "public"
 }
 
-STATE_FILE = "state.json"
+
+def load_signal(address):
+    r = requests.get(
+        f"{SUPABASE_URL}/rest/v1/scanner_signals",
+        params={
+            "token_address": f"eq.{address}",
+            "select": "signal,score"
+        },
+        headers=HEADERS,
+        timeout=30
+    )
+
+    data = r.json()
+
+    if not data:
+        return None
+
+    return data[0]
 
 
-def load_state():
-    if Path(STATE_FILE).exists():
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+def save_signal(address, signal, score):
 
-
-def save_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
-
-
-def get_signal(score):
-
-    if score >= 3.5:
-        return "🚀 STRONG BUY"
-
-    elif score >= 2.0:
-        return "🟢 BUY"
-
-    elif score >= 1.0:
-        return "🟡 HOLD"
-
-    elif score >= 0.6:
-        return "🟠 WEAK SELL"
-
-    else:
-        return "🔴 STRONG SELL"
+    requests.post(
+        f"{SUPABASE_URL}/rest/v1/scanner_signals",
+        headers={
+            **HEADERS,
+            "Prefer": "resolution=merge-duplicates"
+        },
+        json={
+            "token_address": address,
+            "signal": signal,
+            "score": score
+        },
+        timeout=30
+    )
 
 
 try:
 
-    previous_state = load_state()
-    current_state = {}
-
     response = requests.post(
-        URL,
+        DATA_URL,
         headers=HEADERS,
         json={},
         timeout=30
@@ -65,6 +67,7 @@ try:
     data = response.json()
 
     alerts = []
+    checked = 0
 
     for token in data:
 
@@ -78,9 +81,14 @@ try:
         if total < 1000:
             continue
 
+        checked += 1
+
         strength = buy / max(sell, 1)
 
-        trade_ratio = buy_count / max(sell_count, 1)
+        trade_ratio = (
+            buy_count /
+            max(sell_count, 1)
+        )
 
         if total >= 10000:
             volume_bonus = 1.5
@@ -94,76 +102,72 @@ try:
             (trade_ratio * 0.3)
         ) * volume_bonus
 
-        signal = get_signal(score)
+        if score >= 3.5:
+            signal = "🚀 STRONG BUY"
+        elif score >= 2.0:
+            signal = "🟢 BUY"
+        elif score >= 1.0:
+            signal = "🟡 HOLD"
+        elif score >= 0.6:
+            signal = "🟠 WEAK SELL"
+        else:
+            signal = "🔴 STRONG SELL"
 
-        address = token["token_address"]
+        previous = load_signal(token["token_address"])
 
-        current_state[address] = signal
+        changed = (
+            previous is None
+            or previous["signal"] != signal
+        )
 
-        old_signal = previous_state.get(address)
-
-        # první spuštění nealertuje
-        if old_signal is None:
-            continue
-
-        if old_signal != signal:
+        if changed:
 
             alerts.append(
-                {
-                    "address": address,
-                    "old": old_signal,
-                    "new": signal,
-                    "score": score,
-                    "strength": strength,
-                    "volume": total,
-                    "buy": buy,
-                    "sell": sell
-                }
+                f"{signal}\n"
+                f"{token['token_address'][:12]}...\n"
+                f"Score: {score:.2f}\n"
+                f"Strength: {strength:.2f}\n"
+                f"Volume: {total:.0f} SDA"
             )
 
-    save_state(current_state)
+        save_signal(
+            token["token_address"],
+            signal,
+            score
+        )
 
     if alerts:
 
-        alerts.sort(
-            key=lambda x: x["score"],
-            reverse=True
+        message = (
+            "🚨 SDA SIGNAL CHANGES\n\n"
+            f"Tokens checked: {checked}\n"
+            f"Signal changes: {len(alerts)}\n\n"
+            + "\n\n".join(alerts[:10])
         )
 
-        message = "🔄 SDA SIGNAL CHANGES\n\n"
+    else:
 
-        for alert in alerts[:10]:
-
-            message += (
-                f"{alert['address'][:12]}...\n"
-                f"{alert['old']} → {alert['new']}\n"
-                f"Score: {alert['score']:.2f}\n"
-                f"Strength: {alert['strength']:.2f}\n"
-                f"Volume: {alert['volume']:.0f} SDA\n"
-                f"Buy: {alert['buy']:.0f}\n"
-                f"Sell: {alert['sell']:.0f}\n\n"
-            )
-
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            json={
-                "chat_id": CHAT_ID,
-                "text": message[:4000]
-            },
-            timeout=30
+        message = (
+            "✅ SDA SCANNER\n\n"
+            f"Tokens checked: {checked}\n"
+            f"Signal changes: 0\n\n"
+            "No new signals"
         )
-
-    print(f"Signal changes: {len(alerts)}")
 
 except Exception as e:
 
-    requests.post(
-        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-        json={
-            "chat_id": CHAT_ID,
-            "text": f"❌ SCANNER ERROR\n\n{str(e)}"
-        },
-        timeout=30
+    message = (
+        "❌ SCANNER ERROR\n\n"
+        f"{str(e)}"
     )
 
-    print(e)
+requests.post(
+    f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+    json={
+        "chat_id": CHAT_ID,
+        "text": message
+    },
+    timeout=30
+)
+
+print("Done")
