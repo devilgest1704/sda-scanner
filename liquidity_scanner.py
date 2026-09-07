@@ -18,7 +18,7 @@ DISCOVERY_FILE = "sidra_swap_discovery.json"
 LIQUIDITY_FILE = "liquidity_data.json"
 
 session = requests.Session()
-session.headers.update({"User-Agent": "sda-scanner/17.0"})
+session.headers.update({"User-Agent": "sda-scanner/18.0"})
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -368,8 +368,96 @@ def extract_push4(bytecode):
             i += 2 * (op - 0x5f)
     return out
 
+
+# Known selectors used by common V3-style pools. We probe them with eth_call only;
+# unsupported selectors simply revert and are recorded as such.
+KNOWN_READ_SELECTORS = {
+    "0x0dfe1681": "token0()",
+    "0xd21220a7": "token1()",
+    "0xddca3f43": "fee()",
+    "0x3850c7bd": "slot0()",
+    "0x1a686502": "liquidity()",
+    "0x0902f1ac": "getReserves()",
+    "0x18160ddd": "totalSupply()",
+    "0x70a08231": "balanceOf(address)",
+}
+
+# Correct canonical ERC-20 Transfer topic.
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a9df523b3ef"
+
+
+def probe_selector(sel, name):
+    r = eth_call(sel, to_address=POOL, from_address="0x0000000000000000000000000000000000000001")
+    return {
+        "selector": sel,
+        "name": name,
+        "ok": bool(r.get("ok")),
+        "result": r.get("result"),
+        "error": r.get("error"),
+    }
+
+
+def decode_static_words(result):
+    if not isinstance(result, str) or not result.startswith("0x"):
+        return []
+    raw = result[2:]
+    if len(raw) % 64:
+        return []
+    return ["0x" + raw[i:i+64] for i in range(0, len(raw), 64)]
+
+
+def signed_int256_word(word):
+    x = int(word, 16)
+    return x - (1 << 256) if x >= (1 << 255) else x
+
+
+def decode_swap_event_log(log):
+    topics = log.get("topics") or []
+    data = log.get("data") or ""
+    if not topics or topics[0].lower() != "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67":
+        return None
+    words = decode_static_words(data)
+    if len(words) != 5:
+        return None
+    return {
+        "sender": topic_address(topics[1]) if len(topics) > 1 else "",
+        "recipient": topic_address(topics[2]) if len(topics) > 2 else "",
+        "amount0": signed_int256_word(words[0]),
+        "amount1": signed_int256_word(words[1]),
+        "sqrt_price_x96": int(words[2], 16),
+        "liquidity": int(words[3], 16),
+        "tick": signed_int256_word(words[4]),
+    }
+
+
+def fetch_receipt(tx_hash):
+    try:
+        r = rpc_json("eth_getTransactionReceipt", [tx_hash])
+        return r.get("result") if isinstance(r, dict) else None
+    except Exception:
+        return None
+
+
+def event_analysis(tx_hash):
+    receipt = fetch_receipt(tx_hash)
+    if not receipt:
+        return None
+    swaps = []
+    for log in receipt.get("logs") or []:
+        item = decode_swap_event_log(log)
+        if item:
+            item["address"] = (log.get("address") or "").lower()
+            swaps.append(item)
+    return {
+        "tx": tx_hash,
+        "block": int(receipt.get("blockNumber", "0x0"), 16) if receipt.get("blockNumber") else None,
+        "status": receipt.get("status"),
+        "log_count": len(receipt.get("logs") or []),
+        "swap_events": swaps,
+    }
+
 def main():
-    print("💧 LIQUIDITY V17 — RECEIPT EVENT / ABI FORENSICS")
+    print("💧 LIQUIDITY V18 — RECEIPT EVENT / ABI FORENSICS")
     print(f"Pool: {POOL}")
     print(f"Target trade: {TRADE_SIZE_SDA:.0f} SDA")
     print("Safety: READ-ONLY / no broadcast")
@@ -561,7 +649,7 @@ def main():
 
     discovery = load_json(DISCOVERY_FILE, {})
     discovery["updated_at"] = now()
-    discovery["version"] = 17
+    discovery["version"] = 18
     discovery["pool"] = POOL
     discovery["swap_selector"] = SWAP_SELECTOR
     discovery["samples"] = usable
@@ -570,21 +658,56 @@ def main():
     discovery["arg2_exact_raw_output_matches"] = sum(
         1 for a in usable if a["arg2_matches_raw_output"]
     )
+
+    # V18: probe common read-only state selectors on the pool. No state-changing
+    # transaction is ever sent. This is deliberately separate from the historical
+    # forensic evidence so a guessed ABI can never be treated as verified.
+    print()
+    print("🔬 V18 READ-ONLY POOL STATE PROBES")
+    probes = []
+    for sel, name in KNOWN_READ_SELECTORS.items():
+        p = probe_selector(sel, name)
+        probes.append(p)
+        if p["ok"]:
+            words = decode_static_words(p["result"])
+            print(f"  {sel} {name}: OK words={len(words)} result={p['result']}")
+        else:
+            print(f"  {sel} {name}: REVERT/UNSUPPORTED")
+
+    event_evidence = []
+    for item in usable[:SAMPLE_COUNT]:
+        ev = event_analysis(item["tx"])
+        if ev:
+            event_evidence.append(ev)
+            for sw in ev["swap_events"]:
+                print()
+                print(f"  Swap event {item['tx']}")
+                print(f"    amount0={sw['amount0']}")
+                print(f"    amount1={sw['amount1']}")
+                print(f"    sqrtPriceX96={sw['sqrt_price_x96']}")
+                print(f"    liquidity={sw['liquidity']}")
+                print(f"    tick={sw['tick']}")
+
+    discovery["v18_read_only_probes"] = probes
+    discovery["v18_swap_events"] = event_evidence
+    save_json(DISCOVERY_FILE, discovery)
     save_json(DISCOVERY_FILE, discovery)
 
     liquidity = load_json(LIQUIDITY_FILE, {})
     liquidity.update({
         "updated_at": now(),
-        "version": 17,
+        "version": 18,
         "pool": POOL,
         "trade_size_sda": TRADE_SIZE_SDA,
         "status": "UNKNOWN",
-        "reason": "Quote execution semantics not yet proven; V17 forensic event analysis completed.",
+        "reason": "Quote execution semantics not yet proven; V18 read-only ABI/state discovery completed; executable quote still requires semantic validation.",
         "observed_buy_samples": len(usable),
         "arg1_values": sorted(set(a["arg1"] for a in usable)),
         "arg2_exact_raw_output_matches": sum(
             1 for a in usable if a["arg2_matches_raw_output"]
         ),
+        "v18_quote_status": "UNVERIFIED",
+        "v18_note": "Historical Swap events are decoded read-only. Pool state selectors are probed but no guessed ABI result is promoted to a quote until validated against historical amount0/amount1 semantics.",
     })
     save_json(LIQUIDITY_FILE, liquidity)
 
@@ -592,7 +715,7 @@ def main():
     print("Saved " + DISCOVERY_FILE)
     print("Saved " + LIQUIDITY_FILE)
     print("Overall liquidity status: UNKNOWN")
-    print("Next: use receipt event topics/data and trace results to reconstruct sidraBuyWithFee semantics.")
+    print("Next: use discovered read-only selectors/state and V3-style Swap event data to validate a live quote without broadcasting.")
 
 if __name__ == "__main__":
     main()
