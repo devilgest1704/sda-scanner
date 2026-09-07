@@ -61,6 +61,8 @@ try:
     print(f"Loaded transactions: {len(transactions)}")
 
     alerts = []
+    new_transactions = 0
+
     new_hashes = set(seen_hashes)
 
     for tx in transactions:
@@ -74,6 +76,7 @@ try:
             continue
 
         new_hashes.add(tx_hash)
+        new_transactions += 1
 
         volume = float(
             tx.get("volume_in_sda", 0)
@@ -116,6 +119,23 @@ try:
             "timestamp": timestamp
         })
 
+    print(f"New transactions: {new_transactions}")
+    print(f"Whale alerts: {len(alerts)}")
+
+    requests.post(
+        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        json={
+            "chat_id": CHAT_ID,
+            "text": (
+                "🐋 WHALE DEBUG\n\n"
+                f"Loaded transactions: {len(transactions)}\n"
+                f"New transactions: {new_transactions}\n"
+                f"Whale alerts: {len(alerts)}"
+            )
+        },
+        timeout=30
+    )
+
     save_state({
         "seen_hashes": list(new_hashes)[-1000:]
     })
@@ -131,14 +151,16 @@ try:
 
         for alert in alerts[:10]:
 
-            if alert["type"] == "buy":
+            tx_type = str(alert["type"]).lower()
+
+            if tx_type == "buy":
                 direction = "🟢 WHALE BUY"
 
-            elif alert["type"] == "sell":
+            elif tx_type == "sell":
                 direction = "🔴 WHALE SELL"
 
             else:
-                direction = alert["type"]
+                direction = f"ℹ️ {alert['type']}"
 
             message += (
                 f"{alert['level']}\n"
@@ -158,7 +180,7 @@ try:
             timeout=30
         )
 
-        print(f"Whale alerts: {len(alerts)}")
+        print(f"Whale alerts sent: {len(alerts)}")
 
     else:
 
