@@ -107,16 +107,14 @@ try:
         else:
             whale_level = "🐟 LARGE TRADE"
 
-        alerts.append(
-            {
-                "level": whale_level,
-                "address": token_address,
-                "volume": volume,
-                "price": price,
-                "type": tx_type,
-                "timestamp": timestamp
-            }
-        )
+        alerts.append({
+            "level": whale_level,
+            "address": token_address,
+            "volume": volume,
+            "price": price,
+            "type": tx_type,
+            "timestamp": timestamp
+        })
 
     save_state({
         "seen_hashes": list(new_hashes)[-1000:]
@@ -137,4 +135,40 @@ try:
                 f"{alert['level']}\n"
                 f"{alert['address'][:12]}...\n"
                 f"Type: {alert['type']}\n"
-                f
+                f"Volume: {alert['volume']:.0f} SDA\n"
+                f"Price: {alert['price']:.4f}\n"
+                f"Time: {alert['timestamp']}\n\n"
+            )
+
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            json={
+                "chat_id": CHAT_ID,
+                "text": message[:4000]
+            },
+            timeout=30
+        )
+
+        print(f"Whale alerts: {len(alerts)}")
+
+    else:
+
+        print("No new whale alerts")
+
+except Exception:
+
+    error_text = traceback.format_exc()
+
+    requests.post(
+        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        json={
+            "chat_id": CHAT_ID,
+            "text": (
+                "❌ WHALE SCANNER ERROR\n\n"
+                f"{error_text[:3500]}"
+            )
+        },
+        timeout=30
+    )
+
+    print(error_text)
