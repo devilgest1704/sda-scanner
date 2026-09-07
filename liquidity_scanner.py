@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 from decimal import Decimal
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 RPC = "https://node.sidrachain.com"
 EXPLORER_API = "https://ledger.sidrachain.com/api/v2"
@@ -14,12 +15,13 @@ DISCOVERY_FILE = "sidra_swap_discovery.json"
 TRADE_SIZE_SDA = 50.0
 SWAP_SELECTOR = "0x8ab5246f"
 SELL_SELECTOR = "0x75b5c5d8"
-TIMEOUT = 12
+TIMEOUT = 6
 MAX_TXS = 50
-DETAIL_LIMIT = 20
+DETAIL_LIMIT = 6
+MAX_WORKERS = 6
 
 session = requests.Session()
-session.headers.update({"User-Agent": "sda-scanner/7.0"})
+session.headers.update({"User-Agent": "sda-scanner/8.0"})
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -174,7 +176,7 @@ def analyze_tx(tx):
     }
 
 def main():
-    print("💧 LIQUIDITY V7 — REVERSE ENGINEER REAL SWAP TRANSACTIONS")
+    print("💧 LIQUIDITY V8 — FAST REVERSE ENGINEERING OF REAL SWAPS")
     print(f"Pool: {POOL}")
     print(f"Target trade: {TRADE_SIZE_SDA:.0f} SDA")
     print("Safety: READ-ONLY / explorer GET + eth_call only / no broadcast")
@@ -200,9 +202,20 @@ def main():
         print(f"  {s}: {n}")
     print(f"Real 0x8ab5246f transactions selected: {len(swap_txs)}")
 
+    selected=swap_txs[:DETAIL_LIMIT]
     analyses=[]
-    for tx in swap_txs[:DETAIL_LIMIT]:
-        a=analyze_tx(tx); analyses.append(a)
+    print(f"Analyzing {len(selected)} samples concurrently (timeout {TIMEOUT}s, workers {MAX_WORKERS})")
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+        futures={ex.submit(analyze_tx,tx):tx for tx in selected}
+        for fut in as_completed(futures):
+            tx=futures[fut]
+            try:
+                a=fut.result()
+            except Exception as e:
+                a={"hash":tx.get("hash"),"errors":["worker: "+str(e)],"flow":{"sda_in":0,"sda_out":0,"token_in":0,"token_out":0,"target_token":"","transfer_count":0},"call":None}
+            analyses.append(a)
+    analyses.sort(key=lambda x: x.get("hash") or "")
+    for a in analyses:
         c=a.get("call") or {}; f=a["flow"]
         print(f"\nTX {a.get('hash')}")
         print(f"  token={c.get('token')} arg1={c.get('arg1')} arg2={c.get('arg2')}")
@@ -210,9 +223,9 @@ def main():
         print(f"  token user→pool={f['token_in']} | pool→user={f['token_out']}")
         print(f"  transfers={f['transfer_count']} errors={a.get('errors')}")
         if a.get("transfers"):
-            for t in a["transfers"][:12]:
-                print(f"    {t.get('symbol') or t.get('token')} "
-                      f"{t.get('value')} {t.get('from','')[:10]}→{t.get('to','')[:10]}")
+            for t in a["transfers"][:8]:
+                print(f"    {t.get('symbol') or t.get('token')} {t.get('value')} "
+                      f"{t.get('from','')[:10]}→{t.get('to','')[:10]}")
 
     pairs=[]
     for a in analyses:
@@ -226,17 +239,17 @@ def main():
             })
 
     discovery={
-        "updated_at":now(),"version":"V7","pool":POOL,"wsda":WSDA,
+        "updated_at":now(),"version":"V8","pool":POOL,"wsda":WSDA,
         "trade_size_sda":TRADE_SIZE_SDA,"api_error":api_error,
         "transactions_seen":len(calls),"selector_counts":counts,
         "selector":SWAP_SELECTOR,"samples":analyses,
         "usable_input_output_pairs":pairs,
     }
     liquidity={
-        "updated_at":now(),"version":"V7","pool_address":POOL,
+        "updated_at":now(),"version":"V8","pool_address":POOL,
         "wsda_address":WSDA,"trade_size_sda":TRADE_SIZE_SDA,
         "status":"UNKNOWN","selector":SWAP_SELECTOR,"tokens":{},
-        "errors":[],"reason":"Reverse-engineering real swap input/output flows",
+        "errors":[],"reason":"Reverse-engineering real swap input/output flows; fast bounded sample",
     }
     for r in pairs:
         e=liquidity["tokens"].setdefault(r["token"],{
