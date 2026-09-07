@@ -59,7 +59,14 @@ try:
 
     transactions = response.json()
 
-    whale_data = {}
+    # Keep previously accumulated whale data. The API only returns the latest
+    # 150 transactions, so rebuilding this dict from scratch would make all
+    # already-seen transactions disappear.
+    if Path(WHALE_DATA_FILE).exists():
+        with open(WHALE_DATA_FILE, "r", encoding="utf-8") as f:
+            whale_data = json.load(f)
+    else:
+        whale_data = {}
 
     new_hashes = set(seen_hashes)
     new_transactions = 0
@@ -162,58 +169,15 @@ try:
             "sell_count": whale["whale_sell_count"]
         })
 
-    debug_message = (
+    # Debug stays in the GitHub Actions log. Telegram is reserved for actual
+    # signal changes from main.py, so the bot does not spam every 15 minutes.
+    print(
         "🐋 WHALE DEBUG\n\n"
         f"Loaded transactions: {len(transactions)}\n"
         f"New transactions: {new_transactions}\n"
         f"Tracked tokens: {len(whale_data)}\n"
         f"Flow alerts: {len(flow_alerts)}"
     )
-
-    requests.post(
-        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-        json={
-            "chat_id": CHAT_ID,
-            "text": debug_message
-        },
-        timeout=30
-    )
-
-    if flow_alerts:
-
-        flow_alerts.sort(
-            key=lambda x: abs(x["net_flow"]),
-            reverse=True
-        )
-
-        message = "🐋 WHALE FLOW\n\n"
-
-        for item in flow_alerts[:10]:
-
-            if item["net_flow"] > 0:
-                signal = "🟢 WHALE ACCUMULATION"
-            else:
-                signal = "🔴 WHALE DISTRIBUTION"
-
-            message += (
-                f"{signal}\n"
-                f"{item['address'][:12]}...\n"
-                f"Buy: {item['buy_volume']:.0f} SDA\n"
-                f"Sell: {item['sell_volume']:.0f} SDA\n"
-                f"Net Flow: {item['net_flow']:.0f} SDA\n"
-                f"Whales: "
-                f"{item['buy_count']}/"
-                f"{item['sell_count']}\n\n"
-            )
-
-        requests.post(
-            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            json={
-                "chat_id": CHAT_ID,
-                "text": message[:4000]
-            },
-            timeout=30
-        )
 
 except Exception:
 
