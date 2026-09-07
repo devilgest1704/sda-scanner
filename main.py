@@ -35,16 +35,12 @@ try:
         buy_count = int(token.get("buy_count", 0))
         sell_count = int(token.get("sell_count", 0))
 
-        # ignoruj malé a nelikvidní tokeny
         if total < 1000:
             continue
 
         strength = buy / max(sell, 1)
 
-        trade_ratio = (
-            buy_count /
-            max(sell_count, 1)
-        )
+        trade_ratio = buy_count / max(sell_count, 1)
 
         if total >= 10000:
             volume_bonus = 1.5
@@ -58,19 +54,14 @@ try:
             (trade_ratio * 0.3)
         ) * volume_bonus
 
-        # 5 úrovní signálu
         if score >= 3.5:
             signal = "🚀 STRONG BUY"
-
         elif score >= 2.0:
             signal = "🟢 BUY"
-
         elif score >= 1.0:
             signal = "🟡 HOLD"
-
         elif score >= 0.6:
             signal = "🟠 WEAK SELL"
-
         else:
             signal = "🔴 STRONG SELL"
 
@@ -96,7 +87,6 @@ try:
     message = "🚀 SDA SCANNER\n\n"
 
     for idx, token in enumerate(top, start=1):
-
         message += (
             f"{idx}. {token['signal']}\n"
             f"{token['address'][:12]}...\n"
@@ -109,11 +99,15 @@ try:
         )
 
 except Exception as e:
-
-    message = (
-        "❌ SCANNER ERROR\n\n"
-        f"{str(e)}"
-    )
+    message = f"❌ SCANNER ERROR\n\n{str(e)}"
 
 requests.post(
-    f"https://api.telegram.org/bot{TOKEN
+    f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+    json={
+        "chat_id": CHAT_ID,
+        "text": message[:4000]
+    },
+    timeout=30
+)
+
+print("Done")
