@@ -1,12 +1,22 @@
 {
-  "updated_at": 1788810520,
+  "updated_at": 1788810847,
   "rpc": "https://node.sidrachain.com",
-  "pool_address": "0xCB94460F967f49E3a955278f252Ca9D6056ecE75",
+  "factory_address": "0xCFE41fb5dA87916D84E7F22889087b4Ff7163cDE",
   "wsda_address": "0xE4095a910209D7BE03B55D02F40d4554B1666182",
-  "trade_size_sda": 10000.0,
-  "platform_fee_rate": 0.02,
-  "method": "on_chain_pool_balances_constant_product_estimate",
-  "warning": "Liquidity is read directly from the Sidra Swap V3 Pool contract. Price impact is currently an ESTIMATE until the exact Sidra quote function/curve ABI is confirmed. Do not treat estimated impact as an executable quote.",
+  "trade_size_sda": 50.0,
+  "platform_fee_rate": 0.01,
+  "pool_fee_tiers": [
+    500,
+    3000,
+    10000
+  ],
+  "method": "uniswap_v3_factory_pool_slot0_liquidity_estimate",
+  "warning": "Pool discovery uses the Sidra V3 factory and active V3 liquidity. The 50 SDA price-impact figure is an estimate over the current active tick range; exact executable quotes may differ if the swap crosses ticks.",
   "tokens": {},
-  "errors": []
+  "errors": [
+    {
+      "stage": "factory_batch",
+      "error": "Unexpected RPC batch response: {'jsonrpc': '2.0', 'id': None, 'error': {'code': -32600, 'message': 'empty batch'}}"
+    }
+  ]
 }
