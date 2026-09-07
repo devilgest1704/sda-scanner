@@ -47,7 +47,7 @@ try:
 
     top = candidates[:5]
 
-    message = "🚀 SDA Scanner\n\n"
+    message = "🚀 SDA Scanner\n\nTop nákupní momentum:\n\n"
 
     for i, t in enumerate(top, start=1):
 
@@ -55,7 +55,7 @@ try:
             f"{i}. {t['address'][:10]}...\n"
             f"Buy: {round(t['buy'])} SDA\n"
             f"Sell: {round(t['sell'])} SDA\n"
-            f"Strength: {round(t['strength'],2)}\n\n"
+            f"Strength: {round(t['strength'], 2)}\n\n"
         )
 
 except Exception as e:
