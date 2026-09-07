@@ -6,17 +6,16 @@ CHAT_ID = os.environ["CHAT_ID"]
 
 URL = "https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/rpc/get_token_stats_24h"
 
-headers = {
+HEADERS = {
     "apikey": "sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z",
     "Content-Type": "application/json",
     "Content-Profile": "public"
 }
 
 try:
-
     response = requests.post(
         URL,
-        headers=headers,
+        headers=HEADERS,
         json={},
         timeout=30
     )
@@ -26,10 +25,9 @@ try:
     candidates = []
 
     for token in data:
-
-        buy = float(token["buy_vol_sda"])
-        sell = float(token["sell_vol_sda"])
-        total = float(token["total_vol_sda"])
+        buy = float(token.get("buy_vol_sda", 0))
+        sell = float(token.get("sell_vol_sda", 0))
+        total = float(token.get("total_vol_sda", 0))
 
         if total < 2000:
             continue
@@ -45,10 +43,7 @@ try:
         })
 
     candidates.sort(
-        key=lambda x: (
-            x["strength"],
-            x["total"]
-        ),
+        key=lambda x: x["strength"] * x["total"],
         reverse=True
     )
 
@@ -56,19 +51,16 @@ try:
 
     message = "🚀 SDA SCANNER\n\n"
 
-    for i, token in enumerate(top, start=1):
-
+    for idx, token in enumerate(top, start=1):
         message += (
-            f"#{i}\n"
-            f"{token['address'][:12]}...\n"
+            f"{idx}. {token['address'][:12]}...\n"
             f"Buy: {token['buy']:.0f} SDA\n"
             f"Sell: {token['sell']:.0f} SDA\n"
             f"Strength: {token['strength']:.2f}\n\n"
         )
 
 except Exception as e:
-
-    message = f"❌ ERROR\n\n{e}"
+    message = f"❌ ERROR\n\n{str(e)}"
 
 requests.post(
     f"https://api.telegram.org/bot{TOKEN}/sendMessage",
@@ -78,4 +70,6 @@ requests.post(
     },
     timeout=30
 )
+
+print("Done")
 ``
