@@ -39,25 +39,24 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
 
-      # 3. Run existing main signal scanner
+      # 3. Resolve token names/symbols from Sidra metadata
+      - name: Update token metadata
+        run: python token_metadata.py
+
+      # 4. Run main signal scanner
       - name: Run main scanner
         run: python main.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
 
-      # 4. Save all scanner state
+      # 5. Save all scanner state
       - name: Commit state files
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
 
-          git add \
-            state.json \
-            whale_state.json \
-            whale_data.json \
-            market_data.json \
-            pending_signals.json
+          git add             state.json             whale_state.json             whale_data.json             market_data.json             token_metadata.json             pending_signals.json
 
           git diff --staged --quiet || git commit -m "Update scanner state"
 
