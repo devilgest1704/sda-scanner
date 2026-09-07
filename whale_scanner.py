@@ -1,15 +1,22 @@
 import os
+import json
+import traceback
+from pathlib import Path
+
 import requests
 
 TOKEN = os.environ["TELEGRAM_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
+STATE_FILE = "whale_state.json"
+
 URL = (
     "https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/token_transactions"
-    "?select=token_address,volume_in_sda,price_in_sda,tx_timestamp,tx_type"
+    "?select=id,tx_hash,token_address,price_in_sda,"
+    "volume_in_sda,tx_timestamp,tx_type"
     "&volume_in_sda=gte.5000"
     "&order=tx_timestamp.desc"
-    "&limit=20"
+    "&limit=50"
 )
 
 HEADERS = {
@@ -17,32 +24,117 @@ HEADERS = {
     "accept-profile": "public"
 }
 
-response = requests.get(
-    URL,
-    headers=HEADERS,
-    timeout=30
-)
 
-data = response.json()
+def load_state():
+    if Path(STATE_FILE).exists():
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
 
-message = "🐋 WHALE SCANNER\n\n"
+    return {
+        "seen_hashes": []
+    }
 
-for tx in data[:10]:
 
-    message += (
-        f"{tx['token_address'][:12]}...\n"
-        f"Volume: {float(tx['volume_in_sda']):.0f} SDA\n"
-        f"Price: {float(tx['price_in_sda']):.2f}\n"
-        f"Type: {tx['tx_type']}\n\n"
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+
+try:
+
+    state = load_state()
+
+    seen_hashes = set(
+        state.get("seen_hashes", [])
     )
 
-requests.post(
-    f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-    json={
-        "chat_id": CHAT_ID,
-        "text": message[:4000]
-    },
-    timeout=30
-)
+    response = requests.get(
+        URL,
+        headers=HEADERS,
+        timeout=30
+    )
 
-print("Done")
+    response.raise_for_status()
+
+    transactions = response.json()
+
+    print(f"Loaded transactions: {len(transactions)}")
+
+    alerts = []
+    new_hashes = set(seen_hashes)
+
+    for tx in transactions:
+
+        tx_hash = tx.get("tx_hash")
+
+        if not tx_hash:
+            continue
+
+        if tx_hash in seen_hashes:
+            continue
+
+        new_hashes.add(tx_hash)
+
+        volume = float(
+            tx.get("volume_in_sda", 0)
+        )
+
+        price = float(
+            tx.get("price_in_sda", 0)
+        )
+
+        token_address = tx.get(
+            "token_address",
+            "unknown"
+        )
+
+        tx_type = tx.get(
+            "tx_type",
+            "unknown"
+        )
+
+        timestamp = tx.get(
+            "tx_timestamp",
+            ""
+        )
+
+        if volume >= 20000:
+            whale_level = "🐋 MEGA WHALE"
+
+        elif volume >= 10000:
+            whale_level = "🐳 WHALE"
+
+        else:
+            whale_level = "🐟 LARGE TRADE"
+
+        alerts.append(
+            {
+                "level": whale_level,
+                "address": token_address,
+                "volume": volume,
+                "price": price,
+                "type": tx_type,
+                "timestamp": timestamp
+            }
+        )
+
+    save_state({
+        "seen_hashes": list(new_hashes)[-1000:]
+    })
+
+    if alerts:
+
+        alerts.sort(
+            key=lambda x: x["volume"],
+            reverse=True
+        )
+
+        message = "🐋 SDA WHALE ALERTS\n\n"
+
+        for alert in alerts[:10]:
+
+            message += (
+                f"{alert['level']}\n"
+                f"{alert['address'][:12]}...\n"
+                f"Type: {alert['type']}\n"
+                f
