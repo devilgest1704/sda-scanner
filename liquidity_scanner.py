@@ -808,10 +808,9 @@ def main():
                 chk["observed_sda_in"] = item.get("sda_in")
                 chk["observed_token_out"] = item.get("token_out")
                 math_checks.append(chk)
-                print(f"  {ev_item["tx"]}: {chk["direction"]} error={chk["relative_error_pct"]:.6f}%")
+                print(f"  {ev_item['tx']}: {chk['direction']} error={chk['relative_error_pct']:.6f}%")
     discovery["v19_math_checks"] = math_checks
     discovery["v19_math_max_abs_error_pct"] = max((abs(x["relative_error_pct"]) for x in math_checks), default=None)
-    save_json(DISCOVERY_FILE, discovery)
     save_json(DISCOVERY_FILE, discovery)
 
     liquidity = load_json(LIQUIDITY_FILE, {})
