@@ -24,40 +24,28 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # ==========================================
-      # 1. Update whale data
-      # ==========================================
-
+      # 1. Update whale data first
       - name: Run whale scanner
         run: python whale_scanner.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
 
-      # ==========================================
-      # 2. Collect market / price history
-      # ==========================================
-
+      # 2. Collect price / market history
       - name: Run market scanner
         run: python market_scanner.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
 
-      # ==========================================
-      # 3. Run main signal scanner
-      # ==========================================
-
+      # 3. Run existing main signal scanner
       - name: Run main scanner
         run: python main.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
 
-      # ==========================================
-      # 4. Save scanner state
-      # ==========================================
-
+      # 4. Save all scanner state
       - name: Commit state files
         run: |
           git config user.name "sda-scanner-bot"
