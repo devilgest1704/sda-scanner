@@ -20,6 +20,8 @@ try:
         timeout=30
     )
 
+    response.raise_for_status()
+
     data = response.json()
 
     candidates = []
@@ -33,7 +35,7 @@ try:
         buy_count = int(token.get("buy_count", 0))
         sell_count = int(token.get("sell_count", 0))
 
-        # ignoruj malé objemy
+        # ignoruj malé a nelikvidní tokeny
         if total < 1000:
             continue
 
@@ -48,38 +50,40 @@ try:
             volume_bonus = 1.5
         elif total >= 5000:
             volume_bonus = 1.3
-        elif total >= 1000:
-            volume_bonus = 1.0
         else:
-            volume_bonus = 0.7
+            volume_bonus = 1.0
 
         score = (
             (strength * 0.7) +
             (trade_ratio * 0.3)
         ) * volume_bonus
 
+        # 5 úrovní signálu
         if score >= 3.5:
             signal = "🚀 STRONG BUY"
+
         elif score >= 2.0:
             signal = "🟢 BUY"
+
         elif score >= 1.0:
             signal = "🟡 HOLD"
+
         elif score >= 0.6:
             signal = "🟠 WEAK SELL"
+
         else:
             signal = "🔴 STRONG SELL"
 
         candidates.append({
             "address": token["token_address"],
+            "signal": signal,
+            "score": score,
+            "strength": strength,
             "buy": buy,
             "sell": sell,
-            "total": total,
+            "volume": total,
             "buy_count": buy_count,
-            "sell_count": sell_count,
-            "strength": strength,
-            "trade_ratio": trade_ratio,
-            "score": score,
-            "signal": signal
+            "sell_count": sell_count
         })
 
     candidates.sort(
@@ -97,4 +101,19 @@ try:
             f"{idx}. {token['signal']}\n"
             f"{token['address'][:12]}...\n"
             f"Score: {token['score']:.2f}\n"
-          
+            f"Strength: {token['strength']:.2f}\n"
+            f"Trades: {token['buy_count']}/{token['sell_count']}\n"
+            f"Buy: {token['buy']:.0f} SDA\n"
+            f"Sell: {token['sell']:.0f} SDA\n"
+            f"Volume: {token['volume']:.0f} SDA\n\n"
+        )
+
+except Exception as e:
+
+    message = (
+        "❌ SCANNER ERROR\n\n"
+        f"{str(e)}"
+    )
+
+requests.post(
+    f"https://api.telegram.org/bot{TOKEN
