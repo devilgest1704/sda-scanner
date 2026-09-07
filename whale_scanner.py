@@ -9,6 +9,7 @@ TOKEN = os.environ["TELEGRAM_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 
 STATE_FILE = "whale_state.json"
+WHALE_DATA_FILE = "whale_data.json"
 
 URL = (
     "https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/token_transactions"
@@ -16,7 +17,7 @@ URL = (
     "volume_in_sda,tx_timestamp,tx_type"
     "&volume_in_sda=gte.5000"
     "&order=tx_timestamp.desc"
-    "&limit=50"
+    "&limit=150"
 )
 
 HEADERS = {
@@ -40,9 +41,9 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-try:
+state = load_state()
 
-    state = load_state()
+try:
 
     seen_hashes = set(
         state.get("seen_hashes", [])
@@ -58,12 +59,11 @@ try:
 
     transactions = response.json()
 
-    print(f"Loaded transactions: {len(transactions)}")
+    whale_data = {}
 
     alerts = []
-    new_transactions = 0
-
     new_hashes = set(seen_hashes)
+    new_transactions = 0
 
     for tx in transactions:
 
@@ -72,28 +72,57 @@ try:
         if not tx_hash:
             continue
 
-        if tx_hash in seen_hashes:
-            continue
+        token_address = tx.get(
+            "token_address",
+            ""
+        )
 
-        new_hashes.add(tx_hash)
-        new_transactions += 1
+        tx_type = str(
+            tx.get("tx_type", "")
+        ).lower()
 
         volume = float(
             tx.get("volume_in_sda", 0)
         )
 
+        if token_address not in whale_data:
+
+            whale_data[token_address] = {
+                "whale_buy_volume": 0.0,
+                "whale_sell_volume": 0.0,
+                "whale_buy_count": 0,
+                "whale_sell_count": 0
+            }
+
+        if tx_type == "buy":
+
+            whale_data[token_address][
+                "whale_buy_volume"
+            ] += volume
+
+            whale_data[token_address][
+                "whale_buy_count"
+            ] += 1
+
+        elif tx_type == "sell":
+
+            whale_data[token_address][
+                "whale_sell_volume"
+            ] += volume
+
+            whale_data[token_address][
+                "whale_sell_count"
+            ] += 1
+
+        if tx_hash in seen_hashes:
+            continue
+
+        new_transactions += 1
+
+        new_hashes.add(tx_hash)
+
         price = float(
             tx.get("price_in_sda", 0)
-        )
-
-        token_address = tx.get(
-            "token_address",
-            "unknown"
-        )
-
-        tx_type = tx.get(
-            "tx_type",
-            "unknown"
         )
 
         timestamp = tx.get(
@@ -119,26 +148,38 @@ try:
             "timestamp": timestamp
         })
 
-    print(f"New transactions: {new_transactions}")
-    print(f"Whale alerts: {len(alerts)}")
+    with open(
+        WHALE_DATA_FILE,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            whale_data,
+            f,
+            indent=2
+        )
+
+    save_state({
+        "seen_hashes": list(new_hashes)[-1000:]
+    })
+
+    debug_message = (
+        "🐋 WHALE DEBUG\n\n"
+        f"Loaded transactions: {len(transactions)}\n"
+        f"New transactions: {new_transactions}\n"
+        f"Whale alerts: {len(alerts)}\n"
+        f"Tracked tokens: {len(whale_data)}"
+    )
 
     requests.post(
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
         json={
             "chat_id": CHAT_ID,
-            "text": (
-                "🐋 WHALE DEBUG\n\n"
-                f"Loaded transactions: {len(transactions)}\n"
-                f"New transactions: {new_transactions}\n"
-                f"Whale alerts: {len(alerts)}"
-            )
+            "text": debug_message
         },
         timeout=30
     )
-
-    save_state({
-        "seen_hashes": list(new_hashes)[-1000:]
-    })
 
     if alerts:
 
@@ -151,16 +192,14 @@ try:
 
         for alert in alerts[:10]:
 
-            tx_type = str(alert["type"]).lower()
-
-            if tx_type == "buy":
+            if alert["type"] == "buy":
                 direction = "🟢 WHALE BUY"
 
-            elif tx_type == "sell":
+            elif alert["type"] == "sell":
                 direction = "🔴 WHALE SELL"
 
             else:
-                direction = f"ℹ️ {alert['type']}"
+                direction = alert["type"]
 
             message += (
                 f"{alert['level']}\n"
@@ -179,12 +218,6 @@ try:
             },
             timeout=30
         )
-
-        print(f"Whale alerts sent: {len(alerts)}")
-
-    else:
-
-        print("No new whale alerts")
 
 except Exception:
 
