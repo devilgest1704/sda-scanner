@@ -1,4 +1,10 @@
-message = str(data)[:3500]
+import os
+import requests
+
+TOKEN = os.environ["TELEGRAM_TOKEN"]
+CHAT_ID = os.environ["CHAT_ID"]
+
+message = "✅ Scanner funguje"
 
 requests.post(
     f"https://api.telegram.org/bot{TOKEN}/sendMessage",
@@ -8,4 +14,4 @@ requests.post(
     }
 )
 
-raise SystemExit()
+print("Done")
