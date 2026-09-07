@@ -1,186 +1,76 @@
-import json
-import time
-from decimal import Decimal, getcontext
+import json,time
+from decimal import Decimal,getcontext
 from pathlib import Path
-
 import requests
-
-getcontext().prec = 60
-
-RPC_URL = "https://node.sidrachain.com"
-SWAP_V3_POOL = "0xCB94460F967f49E3a955278f252Ca9D6056ecE75"
-WSDA_ADDRESS = "0xE4095a910209D7BE03B55D02F40d4554B1666182"
-MARKET_FILE = Path("market_data.json")
-OUTPUT_FILE = Path("liquidity_data.json")
-TRADE_SDA = Decimal("50")
-PLATFORM_FEE_RATE = Decimal("0.01")
-
-# ERC-20 selectors
-BALANCE_OF = "0x70a08231"
-DECIMALS = "0x313ce567"
-
-
-def pad_address(address):
-    return address.lower().replace("0x", "").rjust(64, "0")
-
-
-def rpc_batch(calls):
-    payload = []
-    for i, (to, data) in enumerate(calls):
-        payload.append({
-            "jsonrpc": "2.0",
-            "id": i,
-            "method": "eth_call",
-            "params": [{"to": to, "data": data}, "latest"],
-        })
-    r = requests.post(RPC_URL, json=payload, timeout=30)
-    r.raise_for_status()
-    body = r.json()
-    if not isinstance(body, list):
-        raise RuntimeError(f"Unexpected RPC response: {body}")
-    return {int(x["id"]): x for x in body}
-
-
-def decode_uint(result):
-    if not result or result == "0x":
-        return None
-    try:
-        return int(result, 16)
-    except Exception:
-        return None
-
-
-def normalize_address(address):
-    if isinstance(address, str) and address.startswith("0x") and len(address) == 42:
-        return address.lower()
-    return None
-
-
-def load_tokens():
-    if not MARKET_FILE.exists():
-        return []
-    raw = json.loads(MARKET_FILE.read_text(encoding="utf-8"))
-    out = []
-    for address, data in raw.items():
-        address = normalize_address(address)
-        if address and isinstance(data, dict):
-            out.append((address, data))
-    return out
-
-
-def label(address, data):
-    analysis = data.get("analysis") or {}
-    return data.get("symbol") or data.get("name") or analysis.get("symbol") or f"{address[:6]}...{address[-4:]}"
-
-
-def market_price(data):
-    analysis = data.get("analysis") or {}
-    try:
-        p = Decimal(str(analysis.get("price_in_sda")))
-        return p if p > 0 else None
-    except Exception:
-        return None
-
-
+from Crypto.Hash import keccak
+getcontext().prec=60
+RPC="https://node.sidrachain.com"
+POOL="0xCB94460F967f49E3a955278f252Ca9D6056ecE75"
+WSDA="0xE4095a910209D7BE03B55D02F40d4554B1666182"
+MARKET=Path("market_data.json"); OUT=Path("liquidity_data.json")
+TRADE=Decimal("50"); FEE=Decimal("0.01"); ZERO="0x0000000000000000000000000000000000000001"
+def sel(s):
+ h=keccak.new(digest_bits=256); h.update(s.encode()); return "0x"+h.hexdigest()[:8]
+def wa(a): return a.lower().replace("0x","").rjust(64,"0")
+def wu(n): return int(n).to_bytes(32,"big").hex()
+def call(data,value=None):
+ tx={"to":POOL,"data":data}
+ if value is not None: tx["value"]=hex(int(value))
+ if value is not None: tx["from"]=ZERO
+ r=requests.post(RPC,json={"jsonrpc":"2.0","id":1,"method":"eth_call","params":[tx,"latest"]},timeout=30); r.raise_for_status(); return r.json()
+def uint(x):
+ try: return int(x,16) if x and x!="0x" else None
+ except: return None
+def tokens():
+ d=json.loads(MARKET.read_text()); d=d.get("tokens",d); return [(a.lower(),v) for a,v in d.items() if isinstance(a,str) and len(a)==42 and isinstance(v,dict)]
+def label(a,d): return d.get("symbol") or d.get("name") or (d.get("analysis") or {}).get("symbol") or a[:6]+"..."+a[-4:]
+# Broad ABI probes. Successful calls are persisted; no router balances are treated as reserves.
+QUOTE=["quoteBuy(address,uint256)","quoteBuy(address,uint256,uint256)","getBuyQuote(address,uint256)","getBuyQuote(address,uint256,uint256)","getAmountOut(address,uint256)","getAmountOut(uint256,address)","sidraQuoteBuy(address,uint256)","sidraQuoteBuy(address,uint256,uint256)"]
+BUY=["sidraBuyWithFee(address,uint256)","sidraBuyWithFee(address,uint256,address)","sidraBuyWithFee(address,uint256,uint256)","sidraBuyWithFee(address,uint256,uint256,address)","sidraBuyWithFee(uint256,address)","sidraBuyWithFee(uint256,address,uint256)","sidraBuyWithFee(uint256,address,uint256,address)"]
+def probe(a):
+ amt=int(TRADE*Decimal(10)**18); aw=wu(amt); tw=wa(a)
+ for s in QUOTE:
+  nargs=s.split("(",1)[1].split(")",1)[0].split(",")
+  opts=[]
+  if nargs==["address","uint256"]: opts=[[tw,aw],[aw,tw]] if s.startswith("getAmountOut") else [[tw,aw]]
+  elif len(nargs)==3: opts=[[tw,aw,wu(1)],[wa(WSDA),tw,aw],[tw,wa(WSDA),aw]]
+  for args in opts:
+   try:
+    r=call(sel(s)+"".join(args))
+    if "error" not in r and (v:=uint(r.get("result"))) is not None and v>0: return {"kind":"quote_view","signature":s,"raw_output":v}
+   except: pass
+ for s in BUY:
+  n=len(s.split("(",1)[1].split(")",1)[0].split(",")); opts=[]
+  if n==2: opts=[[tw,aw],[aw,tw]]
+  elif n==3: opts=[[tw,aw,wa(ZERO)],[aw,tw,wu(1)]]
+  elif n==4: opts=[[tw,aw,wu(1),wa(ZERO)],[aw,tw,wu(1),wa(ZERO)]]
+  for args in opts:
+   try:
+    r=call(sel(s)+"".join(args),amt)
+    if "error" not in r: return {"kind":"buy_eth_call_success","signature":s,"raw_output":uint(r.get("result")),"raw_result":r.get("result")}
+   except: pass
+ return None
 def main():
-    tokens = load_tokens()
-    result = {
-        "updated_at": int(time.time()),
-        "rpc": RPC_URL,
-        "swap_v3_pool": SWAP_V3_POOL,
-        "wsda_address": WSDA_ADDRESS,
-        "trade_size_sda": float(TRADE_SDA),
-        "platform_fee_rate": float(PLATFORM_FEE_RATE),
-        "method": "direct_swap_v3_pool_balance_diagnostic",
-        "status": "diagnostic",
-        "warning": (
-            "The current Sidra DEX exposes one Swap V3 Pool contract and routes buys through "
-            "sidraBuyWithFee. The exact executable quote ABI is not publicly exposed here. "
-            "This scanner deliberately does NOT pretend that a token balance at the router is "
-            "the V3 reserve. It reports only on-chain balances and an indicative 50 SDA impact "
-            "when a defensible pair-balance estimate is possible. Do not use this field as a BUY gate yet."
-        ),
-        "tokens": {},
-        "errors": [],
-    }
-
-    # Query the current WSDA balance of the actual Swap V3 Pool contract.
-    calls = [(WSDA_ADDRESS, BALANCE_OF + pad_address(SWAP_V3_POOL))]
-    token_rows = []
-    for address, data in tokens:
-        token_rows.append((address, data))
-        calls.append((address, BALANCE_OF + pad_address(SWAP_V3_POOL)))
-        calls.append((address, DECIMALS))
-
+ ts=tokens(); res={"updated_at":int(time.time()),"rpc":RPC,"swap_v3_pool":POOL,"wsda_address":WSDA,"trade_size_sda":50.0,"platform_fee_rate":.01,"method":"sidra_dex_abi_probe","status":"probe","warning":"Probes the current official Swap V3 Pool. Only a successful on-chain quote is used; no router balance is treated as V3 reserve.","tokens":{},"probe_hits":[],"errors":[]}
+ try:
+  c=call("0x"); res["contract_code_bytes"]=max(0,(len(c.get("result",""))-2)//2)
+ except Exception as e: res["errors"].append({"stage":"contract_code","error":str(e)})
+ for a,d in ts:
+  e={"symbol":label(a,d),"token_address":a,"pool_contract":POOL,"buy_50_sda":None,"estimated_price_impact_pct":None,"source":None,"quote_probe":None}
+  h=probe(a)
+  if h:
+   e["quote_probe"]=h; raw=h.get("raw_output")
+   if raw:
+    dec=int(d.get("decimals") or 18); out=Decimal(raw)/Decimal(10**dec); e["buy_50_sda"]=float(out)
+    p=(d.get("analysis") or {}).get("price_in_sda")
     try:
-        responses = rpc_batch(calls)
-    except Exception as exc:
-        result["errors"].append({"stage": "rpc_batch", "error": str(exc)})
-        responses = {}
-
-    wsda_raw = decode_uint((responses.get(0) or {}).get("result"))
-    wsda_balance = None
-    if wsda_raw is not None:
-        wsda_balance = Decimal(wsda_raw) / (Decimal(10) ** 18)
-
-    for i, (address, data) in enumerate(token_rows):
-        bal_raw = decode_uint((responses.get(1 + i * 2) or {}).get("result"))
-        dec = decode_uint((responses.get(2 + i * 2) or {}).get("result"))
-        if dec is None:
-            dec = 18
-        token_balance = None
-        if bal_raw is not None:
-            token_balance = Decimal(bal_raw) / (Decimal(10) ** dec)
-
-        price = market_price(data)
-        entry = {
-            "symbol": label(address, data),
-            "token_address": address,
-            "pool_contract": SWAP_V3_POOL,
-            "pool_wsda_balance": float(wsda_balance) if wsda_balance is not None else None,
-            "pool_token_balance": float(token_balance) if token_balance is not None else None,
-            "token_decimals": dec,
-            "market_price_sda": float(price) if price is not None else None,
-            "buy_50_sda": None,
-            "estimated_price_impact_pct": None,
-            "source": "router_balance_only",
-        }
-
-        # Only calculate an indicative constant-product impact if BOTH sides are
-        # actually held by the contract and the market price agrees with reserves.
-        # This is intentionally labelled indicative; it is NOT a V3 quote.
-        if wsda_balance and wsda_balance > 0 and token_balance and token_balance > 0 and price:
-            implied_price = wsda_balance / token_balance
-            deviation = abs(implied_price / price - Decimal(1))
-            if deviation <= Decimal("0.25"):
-                net_in = TRADE_SDA * (Decimal(1) - PLATFORM_FEE_RATE)
-                k = wsda_balance * token_balance
-                new_wsda = wsda_balance + net_in
-                new_token = k / new_wsda
-                out = token_balance - new_token
-                spot_out = net_in / price
-                impact = (Decimal(1) - (out / spot_out)) * Decimal(100)
-                entry["buy_50_sda"] = float(out)
-                entry["estimated_price_impact_pct"] = float(max(Decimal(0), impact))
-                entry["source"] = "router_balance_indicative_cp"
-                entry["reserve_price_deviation_pct"] = float(deviation * 100)
-
-        result["tokens"][address] = entry
-
-    # Always write a file so the GitHub workflow never fails just because the
-    # DEX ABI is unavailable.
-    OUTPUT_FILE.write_text(json.dumps(result, indent=2), encoding="utf-8")
-
-    valid = [x for x in result["tokens"].values() if x.get("buy_50_sda") is not None]
-    print(f"Liquidity diagnostic: {len(valid)}/{len(result['tokens'])} tokens have an indicative 50 SDA estimate")
-    if wsda_balance is not None:
-        print(f"Swap V3 Pool WSDA balance: {wsda_balance:.6f} WSDA")
-    for x in sorted(valid, key=lambda z: z.get("estimated_price_impact_pct", 999))[:10]:
-        print(
-            f"{x['symbol']}: impact={x['estimated_price_impact_pct']:.4f}% "
-            f"out={x['buy_50_sda']:.8f} source={x['source']}"
-        )
-
-
-if __name__ == "__main__":
-    main()
+     p=Decimal(str(p)); ideal=TRADE*(1-FEE)/p
+     e["estimated_price_impact_pct"]=float(max(Decimal(0),(1-out/ideal)*100)) if p>0 else None
+    except: pass
+   e["source"]=h["kind"]; res["probe_hits"].append({"token":a,"symbol":e["symbol"],**h})
+  res["tokens"][a]=e
+ OUT.write_text(json.dumps(res,indent=2),encoding="utf-8")
+ print(f"Sidra ABI probe: {len(res['probe_hits'])}/{len(ts)} numeric/successful quote probes")
+ print(f"Contract code bytes: {res.get('contract_code_bytes','unknown')}")
+ for x in res["probe_hits"][:20]: print("HIT",x["symbol"],x["signature"],x["kind"],x.get("raw_output"))
+if __name__=="__main__": main()
