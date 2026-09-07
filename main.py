@@ -4,7 +4,7 @@ from pathlib import Path
 import requests
 
 MARKET='market_data.json'; WHALE='whale_data.json'; META='token_metadata.json'; POS='positions.json'
-INVESTMENT_SDA=10000.0; BUY_THRESHOLD=78; MIN_1H_VOLUME_SDA=1000.0
+INVESTMENT_SDA=10000.0; BUY_THRESHOLD=78; MIN_1H_VOLUME_SDA=0.0; MIN_TRADES_1H=2
 TP1_PCT=.05; TP2_PCT=.10; SL_PCT=.04; FEE_RATE=.0025; SLIPPAGE_RATE=.001; MAX_OPEN_POSITIONS=5
 TG=os.environ.get('TELEGRAM_TOKEN'); CHAT=os.environ.get('CHAT_ID')
 
@@ -39,20 +39,55 @@ def score_for(address,a,whales):
     m15=n(m.get('15m_pct')); m1=n(m.get('1h_pct')); m4=n(m.get('4h_pct'))
     buy=n(f.get('buy_volume')); sell=n(f.get('sell_volume')); bc=n(f.get('buy_count')); sc=n(f.get('sell_count'))
     total=buy+sell; strength=buy/max(sell,1); ratio=bc/max(sc,1)
+    trades=bc+sc
     whale=whales.get(address,{}) or whales.get(address.lower(),{})
     wb=n(whale.get('whale_buy_volume')); ws=n(whale.get('whale_sell_volume')); wn=wb-ws; wbc=n(whale.get('whale_buy_count'))
-    s=0
-    s+=max(0,min(1,(m1+2)/8))*20; s+=max(0,min(1,(m4+2)/14))*10
-    s+=max(0,min(1,(strength-.8)/1.7))*18; s+=max(0,min(1,(ratio-.8)/1.7))*7
-    s+=max(0,min(1,wn/50000))*25 if wn>0 else max(0,min(1,1+wn/50000))*5
-    if wbc>=2:s+=5
-    if m1>1 and -1<=m15<=1.5:s+=8
-    elif m1>1.5 and m15>0:s+=5
-    if n(f15.get('net_flow'))>0:s+=4
+
+    s=0.0
+    # Momentum: reward strong 1h moves, but penalize exhausted/negative 4h trend.
+    s += max(0,min(1,(m1+1)/9))*18
+    s += max(0,min(1,(m4+3)/10))*8
+
+    # Buy/sell imbalance.
+    s += max(0,min(1,(strength-.8)/1.7))*18
+    s += max(0,min(1,(ratio-.8)/1.7))*7
+
+    # Whale confirmation. Missing whale data gives no bonus rather than a false positive.
+    if wn > 0:
+        s += max(0,min(1,wn/50000))*25
+    if wbc >= 2:
+        s += 5
+
+    # Timing/setup: positive short-term continuation is best; flat after a big run is only watch.
+    if m1 >= 2 and m15 > 0.2:
+        s += 10
+    elif m1 >= 1 and m15 >= 0:
+        s += 6
+    elif m1 >= 4 and m15 < -0.5:
+        s -= 5
+
+    if n(f15.get('net_flow')) > 0:
+        s += 3
+    elif n(f15.get('net_flow')) < 0:
+        s -= 2
+
     va=a.get('volume_acceleration_15m_pct')
-    if va is not None and n(va)>15:s+=3
-    s+=max(0,min(1,total/15000))*10
-    return {'confidence':int(round(max(0,min(100,s)))), 'strength':strength,'trade_ratio':ratio,'total_1h':total,'net_1h':n(f.get('net_flow')),'net_15m':n(f15.get('net_flow')),'whale_buy':wb,'whale_sell':ws,'whale_net':wn,'whale_buy_count':wbc,'m15':m15,'m1h':m1,'m4h':m4,'volume_accel':None if va is None else n(va)}
+    if va is not None:
+        if n(va) > 15:s += 4
+        elif n(va) < -20:s -= 2
+
+    # Liquidity/activity is a soft factor, never a hard gate.
+    s += max(0,min(1,total/15000))*7
+    if trades >= 8:s += 5
+    elif trades >= 4:s += 3
+    elif trades >= 2:s += 1
+
+    # Data-quality cap: with no whale confirmation, don't allow an artificial 80+ score.
+    confidence=int(round(max(0,min(100,s))))
+    if wn <= 0:
+        confidence=min(confidence,75)
+
+    return {'confidence':confidence,'strength':strength,'trade_ratio':ratio,'total_1h':total,'net_1h':n(f.get('net_flow')),'net_15m':n(f15.get('net_flow')),'whale_buy':wb,'whale_sell':ws,'whale_net':wn,'whale_buy_count':wbc,'m15':m15,'m1h':m1,'m4h':m4,'volume_accel':None if va is None else n(va),'trades_1h':trades}
 
 def fmt(x):
     x=n(x)
@@ -107,15 +142,36 @@ try:
     # New candidates.
     candidates=[]
     for address,td in tokens.items():
+        address=str(address).lower()
         if address in pd['positions']:continue
         a=td.get('analysis') or td
-        if not a or a.get('active') is False:continue
+        if not a:continue
         price=n(a.get('price_in_sda'))
         f=flow(a,'1h'); vol=n(f.get('buy_volume'))+n(f.get('sell_volume'))
         if price<=0 or vol<MIN_1H_VOLUME_SDA:continue
         sc=score_for(address,a,whales)
-        if sc['confidence']>=BUY_THRESHOLD:candidates.append((sc['confidence'],address,a,sc))
+        # Very thin one-trade setups are shown as candidates but cannot trigger BUY.
+        sc['eligible_for_buy']=(sc['total_1h']>=MIN_1H_VOLUME_SDA and (n(f.get('buy_count'))+n(f.get('sell_count')))>=MIN_TRADES_1H)
+        if sc['confidence']>=BUY_THRESHOLD and sc['eligible_for_buy']:candidates.append((sc['confidence'],address,a,sc))
     candidates.sort(reverse=True)
+    # Always show the strongest setups, even when none reaches BUY threshold.
+    ranking=[]
+    for address,td in tokens.items():
+        address=str(address).lower()
+        if address in pd['positions']:continue
+        a=td.get('analysis') or td
+        if not a or n(a.get('price_in_sda'))<=0:continue
+        sc=score_for(address,a,whales)
+        trades=n(flow(a,'1h').get('buy_count'))+n(flow(a,'1h').get('sell_count'))
+        ranking.append((sc['confidence'],address,a,sc,trades))
+    ranking.sort(key=lambda x:(x[0],x[4]),reverse=True)
+    top=ranking[:5]
+    lines=['🔎 TOP BUY CANDIDATES','']
+    for i,(conf,address,a,sc,trades) in enumerate(top,1):
+        status='🟢 BUY' if conf>=BUY_THRESHOLD and trades>=MIN_TRADES_1H else ('🟡 WATCH' if conf>=55 else '⚪ WEAK')
+        lines.append(f"{i}. {status} {label(address,meta)} — {conf}/100")
+        lines.append(f"   1h {sc['m1h']:+.2f}% | flow {sc['net_1h']:+.0f} SDA | trades {int(trades)} | whale {sc['whale_net']:+.0f}")
+    send('\n'.join(lines))
     slots=max(0,MAX_OPEN_POSITIONS-len(pd['positions']))
     for _,address,a,sc in candidates[:slots]:
         p=newpos(address,a,sc,meta); pd['positions'][address]=p
