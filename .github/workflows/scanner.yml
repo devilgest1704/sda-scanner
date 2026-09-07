@@ -28,6 +28,9 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
       - name: Update token metadata
         run: python token_metadata.py
+      - name: Run liquidity scanner
+        run: python liquidity_scanner.py
+
       - name: Run paper trading engine
         run: python main.py
         env:
@@ -37,6 +40,6 @@ jobs:
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
-          git add state.json whale_state.json whale_data.json whale_history.json market_data.json token_metadata.json pending_signals.json positions.json
+          git add state.json whale_state.json whale_data.json whale_history.json market_data.json token_metadata.json liquidity_data.json pending_signals.json positions.json
           git diff --staged --quiet || git commit -m "Update scanner and paper trading state"
           git push origin main
