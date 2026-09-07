@@ -131,10 +131,19 @@ try:
 
         for alert in alerts[:10]:
 
+            if alert["type"] == "buy":
+                direction = "🟢 WHALE BUY"
+
+            elif alert["type"] == "sell":
+                direction = "🔴 WHALE SELL"
+
+            else:
+                direction = alert["type"]
+
             message += (
                 f"{alert['level']}\n"
                 f"{alert['address'][:12]}...\n"
-                f"Type: {alert['type']}\n"
+                f"{direction}\n"
                 f"Volume: {alert['volume']:.0f} SDA\n"
                 f"Price: {alert['price']:.4f}\n"
                 f"Time: {alert['timestamp']}\n\n"
