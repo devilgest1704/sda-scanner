@@ -1,4 +1,7 @@
 import os
+import json
+from pathlib import Path
+
 import requests
 
 TOKEN = os.environ["TELEGRAM_TOKEN"]
@@ -12,7 +15,44 @@ HEADERS = {
     "Content-Profile": "public"
 }
 
+STATE_FILE = "state.json"
+
+
+def load_state():
+    if Path(STATE_FILE).exists():
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+
+def get_signal(score):
+
+    if score >= 3.5:
+        return "🚀 STRONG BUY"
+
+    elif score >= 2.0:
+        return "🟢 BUY"
+
+    elif score >= 1.0:
+        return "🟡 HOLD"
+
+    elif score >= 0.6:
+        return "🟠 WEAK SELL"
+
+    else:
+        return "🔴 STRONG SELL"
+
+
 try:
+
+    previous_state = load_state()
+    current_state = {}
+
     response = requests.post(
         URL,
         headers=HEADERS,
@@ -24,7 +64,7 @@ try:
 
     data = response.json()
 
-    candidates = []
+    alerts = []
 
     for token in data:
 
@@ -54,60 +94,76 @@ try:
             (trade_ratio * 0.3)
         ) * volume_bonus
 
-        if score >= 3.5:
-            signal = "🚀 STRONG BUY"
-        elif score >= 2.0:
-            signal = "🟢 BUY"
-        elif score >= 1.0:
-            signal = "🟡 HOLD"
-        elif score >= 0.6:
-            signal = "🟠 WEAK SELL"
-        else:
-            signal = "🔴 STRONG SELL"
+        signal = get_signal(score)
 
-        candidates.append({
-            "address": token["token_address"],
-            "signal": signal,
-            "score": score,
-            "strength": strength,
-            "buy": buy,
-            "sell": sell,
-            "volume": total,
-            "buy_count": buy_count,
-            "sell_count": sell_count
-        })
+        address = token["token_address"]
 
-    candidates.sort(
-        key=lambda x: x["score"],
-        reverse=True
-    )
+        current_state[address] = signal
 
-    top = candidates[:10]
+        old_signal = previous_state.get(address)
 
-    message = "🚀 SDA SCANNER\n\n"
+        # první spuštění nealertuje
+        if old_signal is None:
+            continue
 
-    for idx, token in enumerate(top, start=1):
-        message += (
-            f"{idx}. {token['signal']}\n"
-            f"{token['address'][:12]}...\n"
-            f"Score: {token['score']:.2f}\n"
-            f"Strength: {token['strength']:.2f}\n"
-            f"Trades: {token['buy_count']}/{token['sell_count']}\n"
-            f"Buy: {token['buy']:.0f} SDA\n"
-            f"Sell: {token['sell']:.0f} SDA\n"
-            f"Volume: {token['volume']:.0f} SDA\n\n"
+        if old_signal != signal:
+
+            alerts.append(
+                {
+                    "address": address,
+                    "old": old_signal,
+                    "new": signal,
+                    "score": score,
+                    "strength": strength,
+                    "volume": total,
+                    "buy": buy,
+                    "sell": sell
+                }
+            )
+
+    save_state(current_state)
+
+    if alerts:
+
+        alerts.sort(
+            key=lambda x: x["score"],
+            reverse=True
         )
 
+        message = "🔄 SDA SIGNAL CHANGES\n\n"
+
+        for alert in alerts[:10]:
+
+            message += (
+                f"{alert['address'][:12]}...\n"
+                f"{alert['old']} → {alert['new']}\n"
+                f"Score: {alert['score']:.2f}\n"
+                f"Strength: {alert['strength']:.2f}\n"
+                f"Volume: {alert['volume']:.0f} SDA\n"
+                f"Buy: {alert['buy']:.0f}\n"
+                f"Sell: {alert['sell']:.0f}\n\n"
+            )
+
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            json={
+                "chat_id": CHAT_ID,
+                "text": message[:4000]
+            },
+            timeout=30
+        )
+
+    print(f"Signal changes: {len(alerts)}")
+
 except Exception as e:
-    message = f"❌ SCANNER ERROR\n\n{str(e)}"
 
-requests.post(
-    f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-    json={
-        "chat_id": CHAT_ID,
-        "text": message[:4000]
-    },
-    timeout=30
-)
+    requests.post(
+        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        json={
+            "chat_id": CHAT_ID,
+            "text": f"❌ SCANNER ERROR\n\n{str(e)}"
+        },
+        timeout=30
+    )
 
-print("Done")
+    print(e)
