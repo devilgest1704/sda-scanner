@@ -20,7 +20,7 @@ DISCOVERY_FILE = "sidra_swap_discovery.json"
 LIQUIDITY_FILE = "liquidity_data.json"
 
 session = requests.Session()
-session.headers.update({"User-Agent": "sda-scanner/15.0"})
+session.headers.update({"User-Agent": "sda-scanner/16.0"})
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -388,8 +388,90 @@ def forensic_transaction(tx_hash):
         result["errors"].append({"internal_exception": str(e)})
     return result
 
+
+def rpc_trace(tx_hash):
+    """Try supported read-only EVM trace methods to expose internal CALLs."""
+    methods = [
+        ("trace_transaction", [tx_hash]),
+        ("debug_traceTransaction", [tx_hash, {"tracer": "callTracer"}]),
+        ("trace_replayTransaction", [tx_hash, ["trace"]]),
+    ]
+    results = []
+    for method, params in methods:
+        try:
+            out = rpc_call(method, params, timeout=20)
+            results.append({"method": method, "response": out})
+            if out.get("result") is not None:
+                return {"method": method, "result": out.get("result"), "error": out.get("error"), "attempts": results}
+        except Exception as e:
+            results.append({"method": method, "exception": str(e)})
+    return {"method": None, "result": None, "error": "No supported trace method returned a result.", "attempts": results}
+
+def rpc_get_code(address, block_tag="latest"):
+    try:
+        out = rpc_call("eth_getCode", [address, block_tag if isinstance(block_tag, str) else hex(int(block_tag))])
+        return out.get("result"), out.get("error")
+    except Exception as e:
+        return None, str(e)
+
+def extract_push4(bytecode):
+    """Return unique PUSH4 constants from EVM bytecode."""
+    if not isinstance(bytecode, str) or not bytecode.startswith("0x"):
+        return []
+    raw = bytecode[2:]
+    out=[]
+    i=0
+    while i+2 <= len(raw):
+        try: op=int(raw[i:i+2],16)
+        except Exception: break
+        i += 2
+        if op == 0x63 and i+8 <= len(raw):
+            val="0x"+raw[i:i+8]
+            if val not in out: out.append(val)
+            i += 8
+        elif 0x60 <= op <= 0x7f:
+            n=op-0x5f
+            i += 2*n
+    return out
+
+def flatten_trace_calls(node, out=None, depth=0):
+    if out is None: out=[]
+    if not isinstance(node, dict): return out
+    if node.get("type") in ("CALL","DELEGATECALL","STATICCALL","CALLCODE","CREATE","CREATE2"):
+        inp=node.get("input") or node.get("data") or ""
+        out.append({
+            "depth": depth,
+            "type": node.get("type"),
+            "from": (node.get("from") or "").lower(),
+            "to": (node.get("to") or "").lower(),
+            "value": node.get("value"),
+            "gas": node.get("gas"),
+            "gasUsed": node.get("gasUsed"),
+            "input": inp,
+            "selector": selector(inp),
+            "output": node.get("output"),
+            "error": node.get("error"),
+        })
+    for child in node.get("calls") or []:
+        flatten_trace_calls(child, out, depth+1)
+    return out
+
+def trace_summary(trace):
+    if not trace: return []
+    result=trace.get("result")
+    if isinstance(result, list):
+        return [{
+            "type": x.get("type"), "from": (x.get("action",{}).get("from") or "").lower(),
+            "to": (x.get("action",{}).get("to") or "").lower(),
+            "value": x.get("action",{}).get("value"),
+            "input": x.get("action",{}).get("input") or "",
+            "selector": selector(x.get("action",{}).get("input") or ""),
+            "result": x.get("result"), "error": x.get("error"),
+        } for x in result if isinstance(x,dict)]
+    return flatten_trace_calls(result)
+
 def main():
-    print("💧 LIQUIDITY V15 — TRANSACTION FORENSICS + RECEIPT/LOG DISCOVERY")
+    print("💧 LIQUIDITY V16 — TRANSACTION FORENSICS + RECEIPT/LOG DISCOVERY")
     print(f"Pool: {POOL}")
     print(f"Target trade: {TRADE_SIZE_SDA:.0f} SDA")
     print("Safety: READ-ONLY / explorer GET only / no broadcast")
@@ -503,6 +585,7 @@ def main():
         print(f"  RPC block={rt.get('blockNumber')}")
         print(f"  receipt status={receipt.get('status')}")
         print(f"  receipt gasUsed={receipt.get('gasUsed')}")
+        print(f"  receipt logs={len(receipt.get('logs', []))}")
         print(f"  Transfer logs decoded={len(forensic.get('logs', []))}")
         for log in forensic.get("logs", []):
             print(f"    LOG token={log['token']} {log['from'][:10]}→{log['to'][:10]} amount_raw={log['amount_raw']}")
@@ -511,6 +594,32 @@ def main():
             print(f"    INTERNAL {it.get('from','')[:10]}→{it.get('to','')[:10]} method={it.get('method')} value={it.get('value')} success={it.get('success')}")
         if forensic.get("errors"):
             print(f"  forensic errors={forensic['errors']}")
+
+        # V16: RPC trace is the key missing layer. Blockscout token-transfers
+        # are derived from execution traces, while the node receipt may expose
+        # no top-level Transfer logs. Try several standard trace RPCs read-only.
+        trace = rpc_trace(forensic_sample["tx"])
+        forensic["rpc_trace"] = trace
+        calls = trace_summary(trace)
+        forensic["trace_calls"] = calls
+        print(f"  trace method={trace.get('method')}")
+        print(f"  trace calls={len(calls)}")
+        for c in calls[:30]:
+            print(f"    TRACE {c.get('type')} {c.get('from','')[:10]}→{c.get('to','')[:10]} selector={c.get('selector')} value={c.get('value')} error={c.get('error')}")
+            inp=c.get("input") or ""
+            if selector(inp) and selector(inp) != SWAP_SELECTOR:
+                print(f"      input={inp[:138]}{'...' if len(inp)>138 else ''}")
+
+        # Inspect the bytecode of tx.from and pool for PUSH4 selectors.
+        tx_from=(rt.get("from") or "").lower()
+        for label, address in (("tx_from", tx_from), ("pool", POOL.lower())):
+            if not address: continue
+            code, code_err = rpc_get_code(address, block_tag=forensic_sample.get("block") or "latest")
+            selectors = extract_push4(code)
+            forensic.setdefault("bytecode", {})[label] = {"address":address,"code_length":(len(code)-2)//2 if isinstance(code,str) and code.startswith("0x") else None,"push4":selectors[:500],"error":code_err}
+            print(f"  {label} code bytes={forensic['bytecode'][label]['code_length']} PUSH4 selectors={len(selectors)}")
+            if SWAP_SELECTOR in selectors:
+                print(f"    {label} contains {SWAP_SELECTOR}")
 
     # Determine whether arg1 behaves like a V3 fee tier from observed data.
     arg1_values = sorted({x["arg1"] for x in usable})
@@ -541,7 +650,7 @@ def main():
 
     discovery = {
         "updated_at": now(),
-        "version": "V15",
+        "version": "V16",
         "pool": POOL,
         "wsda": WSDA,
         "trade_size_sda": TRADE_SIZE_SDA,
@@ -564,7 +673,7 @@ def main():
 
     liquidity = {
         "updated_at": now(),
-        "version": "V15",
+        "version": "V16",
         "pool_address": POOL,
         "wsda_address": WSDA,
         "trade_size_sda": TRADE_SIZE_SDA,
