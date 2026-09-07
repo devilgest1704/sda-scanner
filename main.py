@@ -6,27 +6,45 @@ CHAT_ID = os.environ["CHAT_ID"]
 
 URL = "https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/rpc/get_token_stats_24h"
 
+headers = {
+    "apikey": "sb_publishable_fl6m94CTRdZESg1licW9Qw_BuLlkm1Z",
+    "Content-Type": "application/json"
+}
+
 try:
-    response = requests.post(URL, timeout=30)
+
+    response = requests.post(
+        URL,
+        headers=headers,
+        json={},
+        timeout=30
+    )
+
+    data = response.json()
 
     message = f"""
+✅ SDA Scanner
+
 HTTP: {response.status_code}
 
-TYPE:
-{type(response.text)}
+Records:
+{len(data)}
 
-FIRST 1000 CHARS:
-
-{response.text[:1000]}
+First:
+{data[0]}
 """
 
 except Exception as e:
-    message = str(e)
+
+    message = f"❌ Error\n\n{e}"
 
 requests.post(
     f"https://api.telegram.org/bot{TOKEN}/sendMessage",
     json={
         "chat_id": CHAT_ID,
         "text": message[:4000]
-    }
+    },
+    timeout=30
 )
+
+print("Done")
