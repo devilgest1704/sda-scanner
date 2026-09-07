@@ -24,24 +24,51 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # Update whale data BEFORE the main scanner reads it
-      - run: python whale_scanner.py
+      # ==========================================
+      # 1. Update whale data
+      # ==========================================
+
+      - name: Run whale scanner
+        run: python whale_scanner.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
 
-      # Main scanner uses the freshly updated whale_data.json
-      - run: python main.py
+      # ==========================================
+      # 2. Collect market / price history
+      # ==========================================
+
+      - name: Run market scanner
+        run: python market_scanner.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
 
-      - name: Commit state file
+      # ==========================================
+      # 3. Run main signal scanner
+      # ==========================================
+
+      - name: Run main scanner
+        run: python main.py
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+
+      # ==========================================
+      # 4. Save scanner state
+      # ==========================================
+
+      - name: Commit state files
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
 
-          git add state.json whale_state.json whale_data.json pending_signals.json
+          git add \
+            state.json \
+            whale_state.json \
+            whale_data.json \
+            market_data.json \
+            pending_signals.json
 
           git diff --staged --quiet || git commit -m "Update scanner state"
 
