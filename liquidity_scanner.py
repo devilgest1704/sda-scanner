@@ -20,7 +20,7 @@ DISCOVERY_FILE = "sidra_swap_discovery.json"
 LIQUIDITY_FILE = "liquidity_data.json"
 
 session = requests.Session()
-session.headers.update({"User-Agent": "sda-scanner/13.0"})
+session.headers.update({"User-Agent": "sda-scanner/14.0"})
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -149,6 +149,24 @@ def eth_call(data, to_address=POOL, from_address=None, value_wei=0, block_tag="l
 def erc20_call(contract, data, block_tag="latest", from_address=None):
     return eth_call(data, to_address=contract, from_address=from_address, value_wei=0, block_tag=block_tag)
 
+def internal_txs_for_tx(tx_hash):
+    try:
+        data = get_json(f"{EXPLORER_API}/transactions/{tx_hash}/internal-transactions")
+        return data.get("items", []) if isinstance(data, dict) else []
+    except Exception as e:
+        return [{"_error": str(e)}]
+
+def candidate_spenders_from_internal(items):
+    out = []
+    seen = set()
+    for item in items:
+        for key in ("to", "from"):
+            a = addr(item.get(key)).lower()
+            if a and len(a) == 42 and a.startswith("0x") and a not in seen:
+                seen.add(a)
+                out.append(a)
+    return out
+
 def build_balance_of(address):
     return "0x70a08231" + pad_word(int(address.lower(), 16))
 
@@ -276,6 +294,9 @@ def analyze(tx):
         "arg1": call["arg1"],
         "arg2": call["arg2"],
         "buyer": buyer,
+        "tx_from": addr(tx.get("from")).lower(),
+        "tx_to": addr(tx.get("to")).lower(),
+        "tx_value": tx.get("value"),
         "sda_in": sda_in,
         "token_out": token_out,
         "token_out_raw": token_out_raw,
@@ -288,7 +309,7 @@ def analyze(tx):
     }
 
 def main():
-    print("💧 LIQUIDITY V13 — HISTORICAL BLOCK ETH_CALL + WSDA STATE")
+    print("💧 LIQUIDITY V14 — HISTORICAL STATE + INTERNAL CALL / ALLOWANCE DISCOVERY")
     print(f"Pool: {POOL}")
     print(f"Target trade: {TRADE_SIZE_SDA:.0f} SDA")
     print("Safety: READ-ONLY / explorer GET only / no broadcast")
@@ -349,6 +370,9 @@ def main():
         print(f"  arg1={a['arg1']}")
         print(f"  arg2={a['arg2']}")
         print(f"  buyer={a['buyer']}")
+        print(f"  tx_from={a.get('tx_from')}")
+        print(f"  tx_to={a.get('tx_to')}")
+        print(f"  tx_value={a.get('tx_value')}")
         print(f"  WSDA user→pool={a['sda_in']}")
         print(f"  token pool→user={a['token_out']}")
         print(f"  token raw output={a['token_out_raw']}")
@@ -372,6 +396,9 @@ def main():
                 "tx": a["tx"],
                 "block": a.get("block"),
                 "buyer": a.get("buyer"),
+                "tx_from": a.get("tx_from"),
+                "tx_to": a.get("tx_to"),
+                "tx_value": a.get("tx_value"),
                 "token": a["token"],
                 "arg1": a["arg1"],
                 "arg2": a["arg2"],
@@ -414,7 +441,7 @@ def main():
 
     discovery = {
         "updated_at": now(),
-        "version": "V13",
+        "version": "V14",
         "pool": POOL,
         "wsda": WSDA,
         "trade_size_sda": TRADE_SIZE_SDA,
@@ -436,7 +463,7 @@ def main():
 
     liquidity = {
         "updated_at": now(),
-        "version": "V13",
+        "version": "V14",
         "pool_address": POOL,
         "wsda_address": WSDA,
         "trade_size_sda": TRADE_SIZE_SDA,
@@ -459,7 +486,7 @@ def main():
         e["observed_sda_in"] += x["sda_in"]
         e["observed_token_out"] += x["token_out"]
 
-    # V13: reproduce a real historical BUY against the pre-transaction state.
+    # V14: reproduce a real historical BUY against the pre-transaction state.
     # Historical successful calls showed native SDA value=0 while WSDA moved
     # from buyer -> pool. Therefore we no longer force 50 native SDA into the call.
     # The strongest test is eth_call at block-1 with the real historical buyer.
@@ -508,19 +535,43 @@ def main():
                 build_balance_of(buyer),
                 block_tag=pre_block,
             )
-            allowance_res = erc20_call(
-                WSDA,
-                build_allowance(buyer, POOL),
-                block_tag=pre_block,
-            )
+            internal_items = internal_txs_for_tx(probe_sample["tx"])
+            internal_spenders = candidate_spenders_from_internal(internal_items)
+            # Always include the pool and the transaction endpoints as candidates.
+            for candidate in [POOL, probe_sample.get("tx_from"), probe_sample.get("tx_to")]:
+                c = (candidate or "").lower()
+                if c and c not in internal_spenders:
+                    internal_spenders.append(c)
+
+            allowance_candidates = []
+            for spender in internal_spenders[:30]:
+                try:
+                    ar = erc20_call(
+                        WSDA,
+                        build_allowance(buyer, spender),
+                        block_tag=pre_block,
+                    )
+                    value = decode_call_uint(ar.get("result"))
+                    allowance_candidates.append({
+                        "spender": spender,
+                        "allowance_wei": value,
+                        "allowance_sda": (float(Decimal(value) / Decimal(10**18)) if value is not None else None),
+                        "error": ar.get("error"),
+                    })
+                except Exception as e:
+                    allowance_candidates.append({"spender": spender, "allowance_wei": None, "allowance_sda": None, "error": str(e)})
+
+            allowance_candidates.sort(key=lambda x: x.get("allowance_wei") or 0, reverse=True)
             native_bal, native_err = eth_get_balance(buyer, block_tag=pre_block)
 
             quote_probe["historical_wsda_balance_wei"] = decode_call_uint(bal_res.get("result"))
-            quote_probe["historical_wsda_allowance_to_pool_wei"] = decode_call_uint(allowance_res.get("result"))
+            quote_probe["historical_wsda_allowance_to_pool_wei"] = next((x.get("allowance_wei") for x in allowance_candidates if x.get("spender") == POOL.lower()), None)
             quote_probe["historical_native_balance_wei"] = native_bal
+            quote_probe["internal_transactions"] = internal_items
+            quote_probe["internal_spender_candidates"] = internal_spenders
+            quote_probe["allowance_candidates"] = allowance_candidates
             quote_probe["state_checks"] = {
                 "wsda_balance_error": bal_res.get("error"),
-                "wsda_allowance_error": allowance_res.get("error"),
                 "native_balance_error": native_err,
             }
 
@@ -613,6 +664,9 @@ def main():
     print(f"historical block: {quote_probe.get('historical_block')}")
     print(f"pre-transaction block: {quote_probe.get('pre_transaction_block')}")
     print(f"historical WSDA balance: {quote_probe.get('historical_wsda_balance_wei')}")
+    print(f"internal spender candidates: {len(quote_probe.get('internal_spender_candidates', []))}")
+    for a in quote_probe.get("allowance_candidates", [])[:10]:
+        print(f"  allowance {a.get('spender')}: {a.get('allowance_sda')} SDA")
     print(f"historical WSDA allowance→pool: {quote_probe.get('historical_wsda_allowance_to_pool_wei')}")
     print(f"historical native SDA balance: {quote_probe.get('historical_native_balance_wei')}")
     if quote_probe.get("quote_ready"): print("Quote probe produced a uint256 return value.")
@@ -621,7 +675,7 @@ def main():
     print(f"Saved {DISCOVERY_FILE}")
     print(f"Saved {LIQUIDITY_FILE}")
     print("Overall liquidity status: UNKNOWN")
-    print("Next: inspect the historical eth_call result and revert data to determine the pool function semantics.")
+    print("Next: use internal-call / allowance evidence to identify the real WSDA spender before changing calldata semantics.")
 
 if __name__ == "__main__":
     main()
