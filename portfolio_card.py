@@ -1,5 +1,6 @@
 import io
 import json
+import math
 import os
 from pathlib import Path
 
@@ -11,9 +12,6 @@ META_FILE = "token_metadata.json"
 OUT_FILE = "portfolio_card.png"
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-
-# The DEX page currently references a broken /tokens/*.png path from the old
-# frontend. token_icons.py stores working public logo sources instead.
 
 
 def load(path, default):
@@ -78,8 +76,30 @@ def fmt_amount(x):
     return f"{x:,.8f}".rstrip("0").rstrip(".")
 
 
+def valuation_is_sane(pf):
+    if not isinstance(pf, dict):
+        return False
+    value = pf.get("value_sda")
+    amount = float(pf.get("amount") or 0)
+    px = float(pf.get("price_sda") or 0)
+    if value is None or amount <= 0 or not math.isfinite(px) or px <= 0:
+        return False
+    try:
+        value = float(value)
+    except Exception:
+        return False
+    if not math.isfinite(value) or value < 0:
+        return False
+    symbol = str(pf.get("symbol") or "").upper()
+    if ("USD" in symbol or symbol in {"USDX", "USDT", "USDC", "DAI", "USD1"}) and not (0.01 <= px <= 10.0):
+        return False
+    expected = amount * px
+    if expected > 0 and not (0.80 <= value / expected <= 1.20):
+        return False
+    return True
+
+
 def fallback_badge(d, symbol, x, y):
-    # Only used when no real logo source exists. Never use '?'.
     d.ellipse((x, y, x + 78, y + 78), fill=(35, 45, 55), outline=(120, 135, 150), width=2)
     text = str(symbol or "?")[:5].upper()
     f = font(20 if len(text) <= 4 else 16, True)
@@ -98,13 +118,15 @@ def main():
         m = meta.get(str(token).lower(), {}) if isinstance(meta, dict) else {}
         symbol = pf.get("symbol") or m.get("symbol") or str(token)[:10] + "..."
         name = m.get("name") or symbol
+        row_pf = dict(pf) if isinstance(pf, dict) else {}
+        row_pf["symbol"] = symbol
         value = pf.get("value_sda")
         pnl = pf.get("unrealized_pnl_sda")
         pct = pf.get("unrealized_pnl_pct")
         crop = m.get("icon_crop")
-        # A held token with zero/invalid value is not a real 0-SDA position.
-        # Keep it UNKNOWN and never manufacture -100% P/L.
-        if pf.get("cost_basis_status") in {"PRICE_UNKNOWN", "UNKNOWN"} or value is None or float(value or 0) <= 0:
+        # Independent safety check: the card must never turn an invalid USDX
+        # valuation into a synthetic -100% loss.
+        if not valuation_is_sane(row_pf):
             value = None
             pnl = None
             pct = None
@@ -156,11 +178,7 @@ def main():
     op = p.get("open_unrealized_pnl_sda")
     rp = p.get("realized_pnl_sda")
     tp = p.get("known_total_pnl_sda")
-    summary = [
-        ("Current open P/L", op),
-        ("Historical matched P/L", rp),
-        ("Known total P/L", tp),
-    ]
+    summary = [("Current open P/L", op), ("Historical matched P/L", rp), ("Known total P/L", tp)]
     sy = y + 35
     for label, val in summary:
         v = float(val or 0)
