@@ -1,198 +1,135 @@
-import os
-import json
-import traceback
+# SDA whale scanner — rolling 15m/30m/1h/4h
+import os, json, traceback
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
-
 import requests
 
-TOKEN = os.environ["TELEGRAM_TOKEN"]
-CHAT_ID = os.environ["CHAT_ID"]
+TOKEN=os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID=os.environ.get("CHAT_ID")
+SUPABASE_URL="https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/token_transactions"
+HEADERS={"apikey":"sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z","accept-profile":"public"}
+WHALE_DATA_FILE="whale_data.json"
+WHALE_HISTORY_FILE="whale_history.json"
+WHALE_STATE_FILE="whale_state.json"
+FETCH_LIMIT=1000
+WHALE_THRESHOLD_SDA=5000.0
+HISTORY_HOURS=6
+WINDOWS={"15m":15,"30m":30,"1h":60,"4h":240}
 
-STATE_FILE = "whale_state.json"
-WHALE_DATA_FILE = "whale_data.json"
+def load_json(path, default):
+    try:
+        with open(path,encoding="utf-8") as f: return json.load(f)
+    except Exception: return default
 
-URL = (
-    "https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/token_transactions"
-    "?select=id,tx_hash,token_address,price_in_sda,"
-    "volume_in_sda,tx_timestamp,tx_type"
-    "&volume_in_sda=gte.5000"
-    "&order=tx_timestamp.desc"
-    "&limit=150"
-)
+def save_json(path,data):
+    tmp=path+".tmp"
+    with open(tmp,"w",encoding="utf-8") as f: json.dump(data,f,indent=2,ensure_ascii=False)
+    os.replace(tmp,path)
 
-HEADERS = {
-    "apikey": "sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z",
-    "accept-profile": "public"
-}
+def num(v,d=0.0):
+    try: return d if v is None else float(v)
+    except Exception: return d
 
+def ts(v):
+    try:
+        if isinstance(v,(int,float)): return datetime.fromtimestamp(float(v),tz=timezone.utc)
+        s=str(v).strip()
+        if s.endswith("Z"): s=s[:-1]+"+00:00"
+        d=datetime.fromisoformat(s)
+        return (d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d).astimezone(timezone.utc)
+    except Exception: return None
 
-def load_state():
-    if Path(STATE_FILE).exists():
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+def normalize_history(history):
+    if not isinstance(history,list): return []
+    out=[]
+    for x in history:
+        if not isinstance(x,dict): continue
+        a=str(x.get("token_address") or "").lower()
+        h=x.get("tx_hash")
+        typ=str(x.get("tx_type") or "").lower()
+        t=x.get("tx_timestamp")
+        if h and a and typ in {"buy","sell"} and ts(t):
+            out.append({"tx_hash":str(h),"token_address":a,"tx_type":typ,
+                        "volume_in_sda":num(x.get("volume_in_sda")),"tx_timestamp":t})
+    return out
 
-    return {
-        "seen_hashes": []
-    }
+def fetch():
+    p={"select":"id,tx_hash,token_address,price_in_sda,volume_in_sda,tx_timestamp,tx_type",
+       "volume_in_sda":f"gte.{WHALE_THRESHOLD_SDA}","order":"tx_timestamp.desc","limit":FETCH_LIMIT}
+    r=requests.get(SUPABASE_URL,params=p,headers=HEADERS,timeout=30)
+    r.raise_for_status()
+    x=r.json()
+    return x if isinstance(x,list) else []
 
+def merge(history,rows):
+    seen={str(x.get("tx_hash")) for x in history if isinstance(x,dict) and x.get("tx_hash")}
+    n=0
+    for x in rows:
+        h=x.get("tx_hash"); a=str(x.get("token_address") or "").lower()
+        typ=str(x.get("tx_type") or "").lower(); t=x.get("tx_timestamp")
+        if not h or str(h) in seen or not a or typ not in {"buy","sell"} or not ts(t): continue
+        history.append({"tx_hash":str(h),"token_address":a,"tx_type":typ,
+                        "volume_in_sda":num(x.get("volume_in_sda")),"tx_timestamp":t})
+        seen.add(str(h)); n+=1
+    return history,n
 
-def save_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
+def trim(history):
+    cutoff=datetime.now(timezone.utc)-timedelta(hours=HISTORY_HOURS)
+    return [x for x in history if ts(x.get("tx_timestamp")) and ts(x.get("tx_timestamp"))>=cutoff]
 
+def window(history,address,minutes):
+    cutoff=datetime.now(timezone.utc)-timedelta(minutes=minutes)
+    bv=sv=0.0; bc=sc=0
+    for x in history:
+        if x.get("token_address")!=address: continue
+        t=ts(x.get("tx_timestamp"))
+        if not t or t<cutoff: continue
+        v=num(x.get("volume_in_sda"))
+        if x.get("tx_type")=="buy": bv+=v; bc+=1
+        elif x.get("tx_type")=="sell": sv+=v; sc+=1
+    return {"buy_volume":round(bv,6),"sell_volume":round(sv,6),
+            "buy_count":bc,"sell_count":sc,"net_flow":round(bv-sv,6)}
 
-try:
+def main():
+    print("WHALE SCANNER — ROLLING 15m/30m/1h/4h")
+    rows=fetch()
+    history,n=merge(normalize_history(load_json(WHALE_HISTORY_FILE,[])),rows)
+    history=trim(history)
+    data={}
+    for a in sorted({x["token_address"] for x in history}):
+        w={k:window(history,a,m) for k,m in WINDOWS.items()}
+        data[a]={"windows":w,
+                 "whale_buy_volume":w["1h"]["buy_volume"],
+                 "whale_sell_volume":w["1h"]["sell_volume"],
+                 "whale_buy_count":w["1h"]["buy_count"],
+                 "whale_sell_count":w["1h"]["sell_count"],
+                 "current_1h_net":w["1h"]["net_flow"],
+                 "updated_at":datetime.now(timezone.utc).isoformat()}
+    save_json(WHALE_HISTORY_FILE,history); save_json(WHALE_DATA_FILE,data)
+    state=load_json(WHALE_STATE_FILE,{})
+    if not isinstance(state,dict): state={}
+    state.update({"updated_at":datetime.now(timezone.utc).isoformat(),
+                  "history_transactions":len(history),"tracked_tokens":len(data),
+                  "last_loaded_transactions":len(rows),"last_new_transactions":n})
+    save_json(WHALE_STATE_FILE,state)
+    rank=[]
+    for a,w in data.items():
+        if not isinstance(w,dict): continue
+        q=w.get("windows",{}).get("1h",{})
+        rank.append((num(q.get("net_flow")),a,num(q.get("buy_volume")),
+                     num(q.get("sell_volume")),int(num(q.get("buy_count"))),int(num(q.get("sell_count")))))
+    rank.sort(key=lambda x:abs(x[0]),reverse=True)
+    print(f"Loaded transactions: {len(rows)}")
+    print(f"New transactions: {n}")
+    print(f"History transactions: {len(history)}")
+    print(f"Tracked tokens: {len(data)}")
+    for r in rank[:10]: print(f"{r[1][:10]}... buy={r[2]:.0f} sell={r[3]:.0f} net={r[0]:+.0f} trades={r[4]}/{r[5]}")
 
-    state = load_state()
-
-    seen_hashes = set(
-        state.get("seen_hashes", [])
-    )
-
-    response = requests.get(
-        URL,
-        headers=HEADERS,
-        timeout=30
-    )
-
-    response.raise_for_status()
-
-    transactions = response.json()
-
-    # Keep previously accumulated whale data. The API only returns the latest
-    # 150 transactions, so rebuilding this dict from scratch would make all
-    # already-seen transactions disappear.
-    if Path(WHALE_DATA_FILE).exists():
-        with open(WHALE_DATA_FILE, "r", encoding="utf-8") as f:
-            whale_data = json.load(f)
-    else:
-        whale_data = {}
-
-    new_hashes = set(seen_hashes)
-    new_transactions = 0
-
-    for tx in transactions:
-
-        tx_hash = tx.get("tx_hash")
-
-        if not tx_hash:
-            continue
-
-        token_address = tx.get(
-            "token_address",
-            ""
-        )
-
-        tx_type = str(
-            tx.get("tx_type", "")
-        ).lower()
-
-        volume = float(
-            tx.get("volume_in_sda", 0)
-        )
-
-        # IMPORTANT: The API returns the latest transactions on every run.
-        # Only process a transaction once, otherwise the same whale trade
-        # would be added again every 15 minutes.
-        if tx_hash in seen_hashes:
-            continue
-
-        if token_address not in whale_data:
-
-            whale_data[token_address] = {
-                "whale_buy_volume": 0.0,
-                "whale_sell_volume": 0.0,
-                "whale_buy_count": 0,
-                "whale_sell_count": 0
-            }
-
-        if tx_type == "buy":
-
-            whale_data[token_address][
-                "whale_buy_volume"
-            ] += volume
-
-            whale_data[token_address][
-                "whale_buy_count"
-            ] += 1
-
-        elif tx_type == "sell":
-
-            whale_data[token_address][
-                "whale_sell_volume"
-            ] += volume
-
-            whale_data[token_address][
-                "whale_sell_count"
-            ] += 1
-
-        new_transactions += 1
-        new_hashes.add(tx_hash)
-
-    with open(
-        WHALE_DATA_FILE,
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        json.dump(
-            whale_data,
-            f,
-            indent=2
-        )
-
-    save_state({
-        "seen_hashes": list(new_hashes)[-1000:]
-    })
-
-    flow_alerts = []
-
-    for token_address, whale in whale_data.items():
-
-        buy_volume = whale["whale_buy_volume"]
-        sell_volume = whale["whale_sell_volume"]
-
-        net_flow = (
-            buy_volume -
-            sell_volume
-        )
-
-        if abs(net_flow) < 10000:
-            continue
-
-        flow_alerts.append({
-            "address": token_address,
-            "buy_volume": buy_volume,
-            "sell_volume": sell_volume,
-            "net_flow": net_flow,
-            "buy_count": whale["whale_buy_count"],
-            "sell_count": whale["whale_sell_count"]
-        })
-
-    # Debug stays in the GitHub Actions log. Telegram is reserved for actual
-    # signal changes from main.py, so the bot does not spam every 15 minutes.
-    print(
-        "🐋 WHALE DEBUG\n\n"
-        f"Loaded transactions: {len(transactions)}\n"
-        f"New transactions: {new_transactions}\n"
-        f"Tracked tokens: {len(whale_data)}\n"
-        f"Flow alerts: {len(flow_alerts)}"
-    )
-
-except Exception:
-
-    error_text = traceback.format_exc()
-
-    requests.post(
-        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-        json={
-            "chat_id": CHAT_ID,
-            "text": (
-                "❌ WHALE SCANNER ERROR\n\n"
-                f"{error_text[:3500]}"
-            )
-        },
-        timeout=30
-    )
-
-    print(error_text)
+if __name__=="__main__":
+    try: main()
+    except Exception:
+        e=traceback.format_exc(); print(e)
+        if TOKEN and CHAT_ID:
+            try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",json={"chat_id":CHAT_ID,"text":"WHALE SCANNER ERROR\n\n"+e[:4000]},timeout=30)
+            except Exception: pass
+        raise
