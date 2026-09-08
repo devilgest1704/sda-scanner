@@ -45,6 +45,29 @@ jobs:
       - name: Discover token icons
         run: python token_icons.py
 
+      - name: Prepare liquidity scanner compatibility fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("liquidity_scanner.py")
+          s = p.read_text(encoding="utf-8")
+          old1 = '"token_decimals": token_out["decimals"] if token_out else None,'
+          new1 = '"token_decimals": token_out.get("decimals") if token_out else None,'
+          old2 = 'bool(discovery.get("v25_50_sda_quote_probe", {}).get("ok"))'
+          new2 = 'bool((discovery.get("v25_50_sda_quote_probe") or {}).get("ok"))'
+          if old1 in s:
+              s = s.replace(old1, new1, 1)
+              print("FIXED: token_out decimals access")
+          else:
+              print("OK: token_out decimals access already safe")
+          if old2 in s:
+              s = s.replace(old2, new2, 1)
+              print("FIXED: None-safe quote probe access")
+          else:
+              print("OK: quote probe access already None-safe")
+          p.write_text(s, encoding="utf-8")
+          PY
+
       - name: Run liquidity scanner
         run: python liquidity_scanner.py
 
