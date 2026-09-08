@@ -70,9 +70,9 @@ jobs:
         run: |
           touch state.json whale_state.json whale_data.json whale_history.json portfolio_data.json
           touch market_data.json token_metadata.json liquidity_data.json paper_stats.json
-          touch sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json portfolio_data.json decision_state_v15.json
+          touch sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json
 
-      - name: Validate JSON state
+      - name: Ensure JSON state files are valid
         run: |
           python - <<'PY'
           import json
@@ -83,11 +83,14 @@ jobs:
             "sidra_swap_discovery.json","pending_signals.json","positions.json","wallet_data.json","decision_state_v15.json"
           ]
           for name in files:
-              p=Path(name)
-              if not p.exists():
-                  print("SKIP:",name); continue
-              with p.open(encoding="utf-8") as f: json.load(f)
-              print("OK:",name)
+              p = Path(name)
+              if not p.exists() or p.stat().st_size == 0:
+                  p.write_text("{}\n", encoding="utf-8")
+                  print("INITIALIZED:", name)
+                  continue
+              with p.open(encoding="utf-8") as f:
+                  json.load(f)
+              print("OK:", name)
           PY
 
       - name: Show open paper positions
