@@ -2,10 +2,12 @@ import os,json,traceback
 from datetime import datetime,timezone
 import requests
 
-MARKET='market_data.json'; WHALE='whale_data.json'; META='token_metadata.json'; LIQ='liquidity_data.json'; POS='positions.json'
+MARKET='market_data.json'; WHALE='whale_data.json'; META='token_metadata.json'; LIQ='liquidity_data.json'; DISCOVERY='sidra_swap_discovery.json'; POS='positions.json'; WALLET='wallet_data.json'
 INVESTMENT_SDA=50.0; BUY_THRESHOLD=78; MIN_1H_VOLUME_SDA=0.0; MIN_TRADES_1H=2
 TP1_PCT=.05; TP2_PCT=.10; SL_PCT=.04; FEE_RATE=.01; SLIPPAGE_RATE=.001; MAX_OPEN_POSITIONS=5
 TG=os.environ.get('TELEGRAM_TOKEN'); CHAT=os.environ.get('CHAT_ID')
+WALLET_ADDRESS=os.environ.get('WATCH_WALLET','0x0a7415b28d0f3641fd202ced0c4d3a70619e6230').lower()
+EXPLORER_API='https://ledger.sidrachain.com/api/v2'
 
 def load(path,default):
     try:
@@ -74,6 +76,44 @@ def score_for(address,a,whales):
 
 def liquidity_for(address,liquidity):return liquidity.get(address) or liquidity.get(address.lower()) or {}
 
+
+def wallet_snapshot(meta, tokens):
+    """Read-only watch-only wallet snapshot from Sidra Blockscout."""
+    try:
+        r=requests.get(f"{EXPLORER_API}/addresses/{WALLET_ADDRESS}/token-balances",timeout=20); r.raise_for_status(); rows=r.json()
+        if not isinstance(rows,list): rows=rows.get('items',[]) if isinstance(rows,dict) else []
+        addr_to_market={str(a).lower(): (td.get('analysis') or td) for a,td in tokens.items()}
+        holdings=[]
+        for row in rows:
+            tok=row.get('token') or {}; a=str(tok.get('address_hash') or tok.get('address') or '').lower()
+            if not a: continue
+            try: dec=int(tok.get('decimals') or 18); raw=int(row.get('value') or 0); balance=raw/(10**dec)
+            except Exception: continue
+            if balance<=0: continue
+            m=addr_to_market.get(a,{})
+            price=n(m.get('price_in_sda'))
+            value=balance*price if price>0 else None
+            holdings.append({'address':a,'symbol':tok.get('symbol') or meta.get(a,{}).get('symbol') or a[:10]+'...','name':tok.get('name') or meta.get(a,{}).get('name'),'decimals':dec,'balance':balance,'price_sda':price if price>0 else None,'value_sda':value})
+        # native SDA balance
+        ar=requests.get(f"{EXPLORER_API}/addresses/{WALLET_ADDRESS}",timeout=20); ar.raise_for_status(); ad=ar.json()
+        native=n(ad.get('coin_balance') or ad.get('fetched_coin_balance'))/1e18
+        return {'wallet':WALLET_ADDRESS,'native_sda':native,'holdings':sorted(holdings,key=lambda x:(x.get('value_sda') is not None,x.get('value_sda') or 0),reverse=True),'updated_at':datetime.now(timezone.utc).isoformat()}
+    except Exception as e:
+        return {'wallet':WALLET_ADDRESS,'native_sda':None,'holdings':[],'updated_at':datetime.now(timezone.utc).isoformat(),'error':str(e)}
+
+def wallet_text(ws):
+    lines=[f"👛 WALLET {WALLET_ADDRESS[:10]}...{WALLET_ADDRESS[-6:]}", '']
+    if ws.get('error'): return '\n'.join(lines+[f"❌ Wallet read error: {ws['error']}"])
+    lines.append(f"SDA: {ws.get('native_sda',0):,.2f}")
+    if not ws.get('holdings'): lines.append('No non-zero token balances found.')
+    else:
+        lines.append('')
+        for h in ws['holdings'][:15]:
+            value=h.get('value_sda'); val=f"{value:,.2f} SDA" if value is not None else 'value n/a'
+            lines.append(f"• {h['symbol']}: {h['balance']:.8f} | {val}")
+    return '\n'.join(lines)
+
+
 def fmt(x):
     x=n(x)
     if abs(x)>=.01:return f'{x:.6f}'
@@ -81,11 +121,11 @@ def fmt(x):
     return f'{x:.10f}'
 
 def liq_text(liq):
-    if not liq or liq.get('status')=='UNKNOWN' or liq.get('buy_50_sda') is None:
-        return '💧 Liquidity: UNKNOWN\n📉 Est. 50 SDA impact: UNKNOWN'
+    if not liq or liq.get('quote_status') not in ('VALIDATED_READ_ONLY','AMOUNT_OUT_VALIDATED') or liq.get('amount_out_token_18dec') is None:
+        return '💧 50 SDA quote: unavailable'
     impact=liq.get('estimated_price_impact_pct')
     impact_txt=f'{n(impact):.2f}%' if impact is not None else 'UNKNOWN'
-    return f"💧 50 SDA quote: {n(liq.get('buy_50_sda')):.8f} token\n📉 Est. 50 SDA impact: {impact_txt}"
+    return f"💧 50 SDA quote: {n(liq.get('amount_out_token_18dec')):.8f} token\n📉 Quote: READ-ONLY validated"
 
 def buy_exec(p):return p*(1+SLIPPAGE_RATE)
 def sell_exec(p):return p*(1-SLIPPAGE_RATE)
@@ -105,7 +145,8 @@ def close_msg(c):
     return f"{icon} {c['close_reason']} {c['label']}\n\nEntry: {fmt(c['entry_price'])} SDA\nCurrent: {fmt(c['close_price'])} SDA\nValue: {c['closed_value_sda']:.0f} SDA\nProfit: {c['closed_profit_sda']:+.0f} SDA\nROI: {c['closed_roi_pct']:+.2f}%\n\nMode: PAPER TRADING"
 
 try:
-    md=load(MARKET,{'tokens':{}}); tokens=md.get('tokens',{}) or {}; whales=load(WHALE,{}); meta=load(META,{}); ld=load(LIQ,{}); liquidity=ld.get('tokens',{}) or {}
+    md=load(MARKET,{'tokens':{}}); tokens=md.get('tokens',{}) or {}; whales=load(WHALE,{}); meta=load(META,{}); ld=load(LIQ,{}); liquidity=ld.get('tokens',{}) or {}; quotes=ld.get('quotes_50_sda',{}) or {}
+    for qa,qv in quotes.items(): liquidity.setdefault(qa,{}).update(qv)
     pd=load(POS,{'positions':{},'closed_trades':[]}); pd.setdefault('positions',{}); pd.setdefault('closed_trades',[]); events=[]
     for address in list(pd['positions']):
         td=tokens.get(address) or tokens.get(address.lower())
@@ -145,6 +186,15 @@ try:
     for _,address,a,sc in candidates[:slots]:
         p=newpos(address,a,sc,meta); p['liquidity_snapshot']=liquidity_for(address,liquidity); pd['positions'][address]=p
         events.append(f"🟢 BUY {p['label']}\n\nEntry: {fmt(p['entry_price'])} SDA\nTP1: {fmt(p['tp1'])} SDA (+5.0%)\nTP2: {fmt(p['tp2'])} SDA (+10.0%)\nSL: {fmt(p['sl'])} SDA (-4.0%)\n\nInvested: {INVESTMENT_SDA:.0f} SDA\nConfidence: {p['entry_confidence']}/100\n{liq_text(p['liquidity_snapshot'])}\n\nMode: PAPER TRADING")
+    ws=wallet_snapshot(meta,tokens); save(WALLET,ws)
+    open_lines=['📊 OPEN PAPER POSITIONS','']
+    if not pd['positions']: open_lines.append('No open paper positions.')
+    else:
+        for pa,pv in pd['positions'].items():
+            cur=n((tokens.get(pa) or {}).get('analysis',{}).get('price_in_sda')); entry=n(pv.get('entry_price')); roi=((cur-entry)/entry*100) if entry and cur else 0
+            open_lines.append(f"• {pv.get('label',pa)} | Entry {fmt(entry)} | Current {fmt(cur)} | ROI {roi:+.2f}% | 50 SDA")
+    send('\n'.join(open_lines))
+    send(wallet_text(ws))
     save(POS,pd); send(f"🤖 SDA PAPER TRADING\n\nOpen positions: {len(pd['positions'])}\nClosed trades: {len(pd['closed_trades'])}\nBUY candidates: {len(candidates)}\nEvents: {len(events)}")
     for e in events:send(e)
 except Exception:
