@@ -1,10 +1,10 @@
 {
-  "updated_at": "2026-09-08T11:26:48.775742+00:00",
-  "version": 26,
+  "updated_at": "2026-09-08T11:46:56.050731+00:00",
+  "version": 25,
   "pool_address": "0xCB94460F967f49E3a955278f252Ca9D6056ecE75",
   "wsda_address": "0xE4095a910209D7BE03B55D02F40d4554B1666182",
   "trade_size_sda": 50.0,
-  "status": "QUOTES_AVAILABLE",
+  "status": "UNKNOWN",
   "tokens": {
     "0xe1a8ffd7280d5a278a9e8c6daff6d391b59081b4": {
       "status": "OBSERVED",
@@ -155,7 +155,7 @@
     "quote_ready": false
   },
   "pool": "0xCB94460F967f49E3a955278f252Ca9D6056ecE75",
-  "reason": "V26 promotes successful read-only 50 SDA amountOut results into quotes_50_sda. No live transaction is broadcast.",
+  "reason": "V25 reverse-engineers the live Sidra helper/router path using historical 0x414bf389 BUY calls and read-only eth_call simulations. No live liquidity or quote is promoted until return semantics are proven.",
   "observed_buy_samples": 0,
   "arg1_values": [],
   "arg2_exact_raw_output_matches": 0,
@@ -184,12 +184,12 @@
   "v24_50_sda_probe_ok": false,
   "v24_quote_status": "UNVERIFIED",
   "v24_note": "Historical router BUY calls are simulated with eth_call only. A successful return is not promoted as a quote until it is matched against observed token output and calldata semantics.",
-  "v25_router_buy_calls": 28,
+  "v25_router_buy_calls": 30,
   "v25_historical_eth_call_successes": 3,
   "v25_50_sda_probe_ok": true,
-  "v25_historical_return_validation_successes": 3,
+  "v25_historical_return_validation_successes": 4,
   "v25_historical_return_validation_matched": 3,
-  "v25_quote_sweep_successes": 17,
+  "v25_quote_sweep_successes": 14,
   "v25_quote_status": "AMOUNT_OUT_VALIDATED",
   "v25_note": "0x414bf389 matches the 8-word exactInputSingle ABI shape. eth_call returns a uint256 amountOut for funded read-only simulations. Historical return validation compares that value with the actual pool->buyer token transfer; no transaction is broadcast.",
   "v26_router_buy_calls": 23,
