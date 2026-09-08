@@ -12,20 +12,16 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           persist-credentials: true
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Run whale scanner
         run: python whale_scanner.py
@@ -45,68 +41,61 @@ jobs:
       - name: Run liquidity scanner
         run: python liquidity_scanner.py
 
+      - name: Validate generated JSON
+        run: |
+          python - <<'PY'
+          import json
+          files = [
+              "whale_data.json", "whale_history.json", "whale_state.json",
+              "market_data.json", "token_metadata.json", "liquidity_data.json",
+              "positions.json", "wallet_data.json"
+          ]
+          for path in files:
+              with open(path, encoding="utf-8") as f:
+                  json.load(f)
+              print("OK", path)
+          PY
+
       - name: Run paper trading engine
         run: python main.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
 
-      - name: Ensure state files exist
-        run: |
-          touch state.json whale_state.json whale_data.json whale_history.json
-          touch market_data.json token_metadata.json liquidity_data.json
-          touch sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json
-
-      - name: Validate JSON state
+      - name: Validate final JSON
         run: |
           python - <<'PY'
           import json
-          from pathlib import Path
-          files = [
-            "state.json","whale_state.json","whale_data.json","whale_history.json",
-            "market_data.json","token_metadata.json","liquidity_data.json",
-            "sidra_swap_discovery.json","pending_signals.json","positions.json","wallet_data.json"
-          ]
-          for name in files:
-              p=Path(name)
-              if not p.exists():
-                  print("SKIP:",name); continue
-              with p.open(encoding="utf-8") as f: json.load(f)
-              print("OK:",name)
+          for path in [
+              "whale_data.json", "whale_history.json", "whale_state.json",
+              "market_data.json", "token_metadata.json", "liquidity_data.json",
+              "positions.json", "wallet_data.json"
+          ]:
+              with open(path, encoding="utf-8") as f:
+                  json.load(f)
+              print("OK", path)
           PY
 
       - name: Show open paper positions
         run: |
           python - <<'PY'
           import json
-          try:
-              with open("positions.json",encoding="utf-8") as f: data=json.load(f)
-          except Exception as e:
-              print("Could not read positions.json:",e); raise SystemExit(0)
-          positions=data.get("positions",{})
-          print("========== OPEN PAPER POSITIONS ==========")
-          if not positions:
-              print("No open paper positions.")
-          else:
-              for address,p in positions.items():
-                  print(p.get("label",address))
-                  print("  Entry:",p.get("entry_price"))
-                  print("  TP1:",p.get("tp1"))
-                  print("  TP2:",p.get("tp2"))
-                  print("  SL:",p.get("sl"))
-                  print("  Investment:",p.get("investment_sda"))
-                  print("  Confidence:",p.get("entry_confidence"))
-          print("===========================================")
+          with open("positions.json", encoding="utf-8") as f:
+              p = json.load(f)
+          positions = p.get("positions", {})
+          print(f"Open paper positions: {len(positions)}")
+          for address, pos in positions.items():
+              print(
+                  f"- {pos.get('label', address)} | "
+                  f"entry={pos.get('entry_price')} | "
+                  f"TP1={pos.get('tp1')} | TP2={pos.get('tp2')} | SL={pos.get('sl')}"
+              )
           PY
 
       - name: Commit state files
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
-          git add state.json whale_state.json whale_data.json whale_history.json             market_data.json token_metadata.json liquidity_data.json sidra_swap_discovery.json             pending_signals.json positions.json wallet_data.json
-          if git diff --staged --quiet; then
-            echo "No state changes to commit."
-          else
-            git commit -m "Update SDA scanner state"
-            git push origin main
-          fi
+          git add             state.json             whale_state.json             whale_data.json             whale_history.json             market_data.json             token_metadata.json             liquidity_data.json             sidra_swap_discovery.json             pending_signals.json             positions.json             wallet_data.json
+          git diff --staged --quiet || git commit -m "Update scanner and paper trading state"
+          git push origin main
