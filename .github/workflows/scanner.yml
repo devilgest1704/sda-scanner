@@ -16,6 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: true
+          ref: ${{ github.ref }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -45,8 +46,8 @@ jobs:
       - name: Run liquidity scanner
         run: python liquidity_scanner.py
 
-      - name: Run paper trading engine v9
-        run: python main_v9.py
+      - name: Run paper trading engine v12
+        run: python main_v12.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -55,7 +56,8 @@ jobs:
         run: |
           touch state.json whale_state.json whale_data.json whale_history.json portfolio_data.json
           touch market_data.json token_metadata.json liquidity_data.json
-          touch sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json portfolio_data.json
+          touch sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json
+          touch decision_state_v12.json
 
       - name: Validate JSON state
         run: |
@@ -65,7 +67,8 @@ jobs:
           files = [
             "state.json","whale_state.json","whale_data.json","whale_history.json","portfolio_data.json",
             "market_data.json","token_metadata.json","liquidity_data.json",
-            "sidra_swap_discovery.json","pending_signals.json","positions.json","wallet_data.json"
+            "sidra_swap_discovery.json","pending_signals.json","positions.json","wallet_data.json",
+            "decision_state_v12.json"
           ]
           for name in files:
               p=Path(name)
@@ -103,10 +106,12 @@ jobs:
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
-          git add state.json whale_state.json whale_data.json whale_history.json portfolio_data.json             market_data.json token_metadata.json liquidity_data.json sidra_swap_discovery.json             pending_signals.json positions.json wallet_data.json
+          git add state.json whale_state.json whale_data.json whale_history.json portfolio_data.json \
+            market_data.json token_metadata.json liquidity_data.json sidra_swap_discovery.json \
+            pending_signals.json positions.json wallet_data.json decision_state_v12.json
           if git diff --staged --quiet; then
             echo "No state changes to commit."
           else
             git commit -m "Update SDA scanner state"
-            git push origin main
+            git push origin HEAD:${GITHUB_REF_NAME}
           fi
