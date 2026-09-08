@@ -1,4 +1,5 @@
 name: SDA Scanner
+
 on:
   workflow_dispatch:
   schedule:
@@ -10,6 +11,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,14 +57,26 @@ jobs:
           touch market_data.json
           touch token_metadata.json
           touch liquidity_data.json
-          touch sidra_swap_discovery.json
           touch pending_signals.json
           touch positions.json
+          touch wallet_data.json
 
       - name: Commit state files
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
-          git add             state.json             whale_state.json             whale_data.json             whale_history.json             market_data.json             token_metadata.json             liquidity_data.json             sidra_swap_discovery.json             pending_signals.json             positions.json
-          git diff --staged --quiet || git commit -m "Discover Sidra swap calldata for liquidity scanner"
+
+          git add \
+            state.json \
+            whale_state.json \
+            whale_data.json \
+            whale_history.json \
+            market_data.json \
+            token_metadata.json \
+            liquidity_data.json \
+            pending_signals.json \
+            positions.json \
+            wallet_data.json
+
+          git diff --staged --quiet || git commit -m "Update scanner and paper trading state"
           git push origin main
