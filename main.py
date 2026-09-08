@@ -84,7 +84,7 @@ def liquidity_for(a,ld):
 def liquidity_text(x):
     if not isinstance(x,dict):return "Liquidity: UNKNOWN"
     st=str(x.get("quote_status") or x.get("status") or "").upper()
-    if x.get("amount_out_token_18dec") is not None and st in {"VALIDATED_READ_ONLY","AMOUNT_OUT_VALIDATED","READ_ONLY_QUOTE_AVAILABLE"}:
+    if x.get("amount_out_token_18dec") is not None and st in {"VALIDATED_READ_ONLY","AMOUNT_OUT_VALIDATED","READ_ONLY_QUOTE_AVAILABLE","OBSERVED_QUOTE","VALIDATED"}:
         return f"Liquidity quote: {num(x['amount_out_token_18dec']):.8f} token"
     if x.get("observed_sda_in") is not None and x.get("observed_token_out") is not None:
         return f"Liquidity observed: {num(x['observed_sda_in']):.2f} SDA → {num(x['observed_token_out']):.8f} token"
@@ -116,17 +116,47 @@ def wallet_snapshot(md,meta):
     except Exception as e:w["error"]=f"native balance: {e}"
     try:
         d=api_get(f"/addresses/{WALLET_ADDRESS}/token-balances")
-        bs=d if isinstance(d,list) else d.get("items",[])
+        bs=d if isinstance(d,list) else ((d.get("items") or d.get("balances") or d.get("result") or []) if isinstance(d,dict) else [])
+
+        def pick(obj, keys):
+            if isinstance(obj,dict):
+                for k in keys:
+                    v=obj.get(k)
+                    if isinstance(v,str) and v:return v
+                    if isinstance(v,dict):
+                        z=pick(v,keys)
+                        if z:return z
+            return ""
+
+        def pick_num(obj, keys):
+            if isinstance(obj,dict):
+                for k in keys:
+                    if k in obj and obj[k] is not None:
+                        v=obj[k]
+                        if isinstance(v,dict):
+                            z=pick_num(v,("value","raw","amount","balance"))
+                            if z is not None:return z
+                        else:return v
+            return None
+
         for b in bs:
             if not isinstance(b,dict):continue
-            t=b.get("token") or {}; a=str(t.get("address") or b.get("token_address") or "").lower()
+            t=b.get("token") if isinstance(b.get("token"),dict) else {}
+            a=(pick(t,("address","address_hash","hash","contract_address")) or pick(b,("token_address","address","address_hash","contract_address"))).lower()
             if not a:continue
-            dec=int(t.get("decimals") or b.get("decimals") or 18); raw=b.get("value",b.get("balance",b.get("token_balance","0")))
-            try:amt=float(raw)/(10**dec)
+            try:dec=int(pick_num(t,("decimals",)) or pick_num(b,("decimals",)) or 18)
+            except:dec=18
+            raw=pick_num(b,("value","balance","token_balance","amount"))
+            if raw is None:raw=pick_num(t,("value","balance","token_balance","amount"))
+            try:
+                if isinstance(raw,str) and raw.startswith("0x"):raw=int(raw,16)
+                amt=float(raw)/(10**dec)
             except:continue
             if amt<=0:continue
-            mdx=meta.get(a,{}) if isinstance(meta,dict) else {}; sym=mdx.get("symbol") or t.get("symbol") or a[:10]+"..."
-            td=md.get("tokens",{}).get(a,{}) if isinstance(md,dict) else {}; an=td.get("analysis",td) if isinstance(td,dict) else {}
+            mdx=meta.get(a,{}) if isinstance(meta,dict) else {}
+            sym=(mdx.get("symbol") if isinstance(mdx,dict) else None) or pick(t,("symbol","name")) or a[:10]+"..."
+            td=md.get("tokens",{}).get(a,{}) if isinstance(md,dict) else {}
+            an=td.get("analysis",td) if isinstance(td,dict) else {}
             px=num(an.get("price_in_sda")); val=amt*px if px>0 else None
             w["holdings"].append({"address":a,"symbol":sym,"amount":amt,"decimals":dec,"price_sda":px,"value_sda":val})
             if val is not None:w["total_token_value_sda"]+=val
