@@ -88,9 +88,15 @@ jobs:
                   p.write_text("{}\n", encoding="utf-8")
                   print("INITIALIZED:", name)
                   continue
-              with p.open(encoding="utf-8") as f:
-                  json.load(f)
-              print("OK:", name)
+              try:
+                  with p.open(encoding="utf-8") as f:
+                      json.load(f)
+                  print("OK:", name)
+              except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                  backup = p.with_suffix(p.suffix + ".invalid")
+                  p.replace(backup)
+                  p.write_text("{}\n", encoding="utf-8")
+                  print("REPAIRED INVALID JSON:", name, "->", backup.name, "reason:", e)
           PY
 
       - name: Show open paper positions
