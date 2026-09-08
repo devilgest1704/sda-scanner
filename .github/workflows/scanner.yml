@@ -23,6 +23,16 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Ensure state files exist
+        run: |
+          [ -f state.json ] || echo '{}' > state.json
+          [ -f whale_state.json ] || echo '{}' > whale_state.json
+          [ -f whale_data.json ] || echo '{}' > whale_data.json
+          [ -f whale_history.json ] || echo '[]' > whale_history.json
+          [ -f pending_signals.json ] || echo '{}' > pending_signals.json
+          [ -f positions.json ] || echo '{"positions":{},"closed_trades":[]}' > positions.json
+          [ -f wallet_data.json ] || echo '{}' > wallet_data.json
+
       - name: Run whale scanner
         run: python whale_scanner.py
         env:
@@ -66,11 +76,12 @@ jobs:
         run: |
           python - <<'PY'
           import json
-          for path in [
+          files = [
               "whale_data.json", "whale_history.json", "whale_state.json",
               "market_data.json", "token_metadata.json", "liquidity_data.json",
               "positions.json", "wallet_data.json"
-          ]:
+          ]
+          for path in files:
               with open(path, encoding="utf-8") as f:
                   json.load(f)
               print("OK", path)
