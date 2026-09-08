@@ -5,6 +5,7 @@ import os
 import main as engine
 
 STATE_FILE = "decision_state_v12.json"
+_original_portfolio_history = engine.portfolio_history
 
 # V12 parameters: fewer premature entries, stronger confirmation, slower exits.
 engine.BUY_THRESHOLD = 75
@@ -111,7 +112,7 @@ def _primary_open_pnl(portfolio):
 
 
 def portfolio_history_v12(wallet, md, meta, ld, previous=None, wallet_obj=None):
-    p = engine.portfolio_history(wallet, md, meta, ld, previous, wallet_obj)
+    p = _original_portfolio_history(wallet, md, meta, ld, previous, wallet_obj)
     if not isinstance(p, dict):
         return p
 
