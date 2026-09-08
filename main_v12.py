@@ -39,8 +39,6 @@ def _save_state(x):
 
 
 def score_v12(addr, a, ws):
-    # V11 scoring retained, but with cleaner normalization and stronger
-    # preference for sustained trend/flow instead of one large print.
     m = a.get("momentum", {}) or {}
     f1 = engine.flow(a, "1h")
     f15 = engine.flow(a, "15m")
@@ -77,7 +75,6 @@ def score_v12(addr, a, ws):
     if va is not None:
         s += 4 if _n(va) > 15 else (-2 if _n(va) < -20 else 0)
 
-    # Volume is useful, but never enough by itself.
     s += max(0, min(7, tv / 15000 * 7))
 
     if wav:
@@ -88,7 +85,6 @@ def score_v12(addr, a, ws):
         if wn15 > 0: s += 3
         elif wn15 < 0: s -= 3
 
-    # Do not buy an already-extended move without fresh short-term support.
     if m1 >= 12 and m15 <= 0: s -= 8
     if m1 >= 18 and n15 <= 0: s -= 5
     if tt <= 2 and tv < 50: s -= 8
@@ -119,9 +115,6 @@ def portfolio_history_v12(wallet, md, meta, ld, previous=None, wallet_obj=None):
     if not isinstance(p, dict):
         return p
 
-    # Recalculate historical realized P/L conservatively from the matched
-    # portions of completed sells. A partially unmatched sell is excluded in
-    # full: missing acquisition history must never become fake profit.
     realized = 0.0; matched_sells = 0; excluded_sells = 0
     for tr in p.get("trades", []) or []:
         if str(tr.get("side", "")).upper() != "SELL":
@@ -220,8 +213,9 @@ def portfolio_message_v12(portfolio, recommendations):
         else:
             pnl_text = f"{_n(pf.get('unrealized_pnl_sda')):+.2f} SDA ({_n(pct):+.2f}%)"
         value_text = f"{_n(value):.2f} SDA" if value is not None else "UNKNOWN"
+        cost_text = f"{_n(cost):.2f} SDA" if cost is not None else "UNKNOWN"
         lines += [f"• {pf.get('symbol') or token[:10]}",
-                  f"  Amount: {_n(pf.get('amount')):.8f} | Cost: {(_n(cost):.2f} SDA if cost is not None else 'UNKNOWN')}",
+                  f"  Amount: {_n(pf.get('amount')):.8f} | Cost: {cost_text}",
                   f"  Now: {value_text} | P/L: {pnl_text}",
                   f"  Avg cost: {_n(pf.get('avg_cost_sda')):.8f} SDA/token", ""]
 
