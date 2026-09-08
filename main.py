@@ -5,10 +5,10 @@ from datetime import datetime,timezone
 import requests
 
 MARKET_FILE="market_data.json"; WHALE_FILE="whale_data.json"; META_FILE="token_metadata.json"
-LIQUIDITY_FILE="liquidity_data.json"; POSITIONS_FILE="positions.json"; WALLET_FILE="wallet_data.json"
+LIQUIDITY_FILE="liquidity_data.json"; POSITIONS_FILE="positions.json"; WALLET_FILE="wallet_data.json"; PORTFOLIO_FILE="portfolio_data.json"
 INVESTMENT_SDA=50.0; BUY_THRESHOLD=78; MIN_1H_VOLUME_SDA=0.0; MIN_TRADES_1H=2
 TP1_PCT=.05; TP2_PCT=.10; SL_PCT=.04; FEE_RATE=.01; SLIPPAGE_RATE=.001
-MAX_OPEN_POSITIONS=5; MAX_NEW_BUYS_PER_RUN=1
+MAX_OPEN_POSITIONS=5; MAX_NEW_BUYS_PER_RUN=1; MAX_PORTFOLIO_TXS=250
 WALLET_ADDRESS=os.environ.get("WATCH_WALLET","0x0a7415b28d0f3641fd202ced0c4d3a70619e6230").lower()
 EXPLORER_API="https://ledger.sidrachain.com/api/v2"
 TELEGRAM_TOKEN=os.environ.get("TELEGRAM_TOKEN"); CHAT_ID=os.environ.get("CHAT_ID")
@@ -84,7 +84,7 @@ def liquidity_for(a,ld):
 def liquidity_text(x):
     if not isinstance(x,dict):return "Liquidity: UNKNOWN"
     st=str(x.get("quote_status") or x.get("status") or "").upper()
-    if x.get("amount_out_token_18dec") is not None and st in {"VALIDATED_READ_ONLY","AMOUNT_OUT_VALIDATED","READ_ONLY_QUOTE_AVAILABLE","OBSERVED_QUOTE","VALIDATED"}:
+    if x.get("amount_out_token_18dec") is not None and st in {"VALIDATED_READ_ONLY","AMOUNT_OUT_VALIDATED","READ_ONLY_QUOTE_AVAILABLE"}:
         return f"Liquidity quote: {num(x['amount_out_token_18dec']):.8f} token"
     if x.get("observed_sda_in") is not None and x.get("observed_token_out") is not None:
         return f"Liquidity observed: {num(x['observed_sda_in']):.2f} SDA → {num(x['observed_token_out']):.8f} token"
@@ -116,53 +116,255 @@ def wallet_snapshot(md,meta):
     except Exception as e:w["error"]=f"native balance: {e}"
     try:
         d=api_get(f"/addresses/{WALLET_ADDRESS}/token-balances")
-        bs=d if isinstance(d,list) else ((d.get("items") or d.get("balances") or d.get("result") or []) if isinstance(d,dict) else [])
-
-        def pick(obj, keys):
-            if isinstance(obj,dict):
-                for k in keys:
-                    v=obj.get(k)
-                    if isinstance(v,str) and v:return v
-                    if isinstance(v,dict):
-                        z=pick(v,keys)
-                        if z:return z
-            return ""
-
-        def pick_num(obj, keys):
-            if isinstance(obj,dict):
-                for k in keys:
-                    if k in obj and obj[k] is not None:
-                        v=obj[k]
-                        if isinstance(v,dict):
-                            z=pick_num(v,("value","raw","amount","balance"))
-                            if z is not None:return z
-                        else:return v
-            return None
-
+        bs=d if isinstance(d,list) else d.get("items",[])
         for b in bs:
             if not isinstance(b,dict):continue
-            t=b.get("token") if isinstance(b.get("token"),dict) else {}
-            a=(pick(t,("address","address_hash","hash","contract_address")) or pick(b,("token_address","address","address_hash","contract_address"))).lower()
+            t=b.get("token") or {}; a=str(t.get("address") or b.get("token_address") or "").lower()
             if not a:continue
-            try:dec=int(pick_num(t,("decimals",)) or pick_num(b,("decimals",)) or 18)
-            except:dec=18
-            raw=pick_num(b,("value","balance","token_balance","amount"))
-            if raw is None:raw=pick_num(t,("value","balance","token_balance","amount"))
-            try:
-                if isinstance(raw,str) and raw.startswith("0x"):raw=int(raw,16)
-                amt=float(raw)/(10**dec)
+            dec=int(t.get("decimals") or b.get("decimals") or 18); raw=b.get("value",b.get("balance",b.get("token_balance","0")))
+            try:amt=float(raw)/(10**dec)
             except:continue
             if amt<=0:continue
-            mdx=meta.get(a,{}) if isinstance(meta,dict) else {}
-            sym=(mdx.get("symbol") if isinstance(mdx,dict) else None) or pick(t,("symbol","name")) or a[:10]+"..."
-            td=md.get("tokens",{}).get(a,{}) if isinstance(md,dict) else {}
-            an=td.get("analysis",td) if isinstance(td,dict) else {}
+            mdx=meta.get(a,{}) if isinstance(meta,dict) else {}; sym=mdx.get("symbol") or t.get("symbol") or a[:10]+"..."
+            td=md.get("tokens",{}).get(a,{}) if isinstance(md,dict) else {}; an=td.get("analysis",td) if isinstance(td,dict) else {}
             px=num(an.get("price_in_sda")); val=amt*px if px>0 else None
             w["holdings"].append({"address":a,"symbol":sym,"amount":amt,"decimals":dec,"price_sda":px,"value_sda":val})
             if val is not None:w["total_token_value_sda"]+=val
     except Exception as e:w["error"]=f"{w['error'] or ''} token balances: {e}".strip()
     if w["native_sda"] is not None:w["total_value_sda"]=w["native_sda"]+w["total_token_value_sda"]
     save(WALLET_FILE,w); return w
+
+
+def tx_hash(x):
+    if not isinstance(x,dict): return ""
+    h=x.get("hash") or x.get("transaction_hash") or x.get("tx_hash")
+    return h if isinstance(h,str) else ""
+
+def tx_timestamp(x):
+    if not isinstance(x,dict): return ""
+    for k in ("timestamp","block_timestamp","created_at"):
+        v=x.get(k)
+        if v:
+            return str(v)
+    return ""
+
+def raw_input_tx(x):
+    if not isinstance(x,dict): return ""
+    for k in ("raw_input","input","calldata"):
+        v=x.get(k)
+        if isinstance(v,str): return v
+        if isinstance(v,dict):
+            for sk in ("value","data","raw_input","input"):
+                sv=v.get(sk)
+                if isinstance(sv,str): return sv
+    return ""
+
+def token_transfer_items(wallet, txh):
+    try:
+        d=api_get(f"/transactions/{txh}/token-transfers")
+        items=d if isinstance(d,list) else d.get("items",[])
+        return items if isinstance(items,list) else []
+    except Exception:
+        return []
+
+def transfer_addr(x):
+    if isinstance(x,str): return x.lower()
+    if isinstance(x,dict):
+        for k in ("hash","address","value"):
+            v=x.get(k)
+            if isinstance(v,str) and v: return v.lower()
+            if isinstance(v,dict):
+                z=transfer_addr(v)
+                if z:return z
+    return ""
+
+def transfer_amount(t):
+    if not isinstance(t,dict): return 0.0
+    token=t.get("token") or {}
+    dec=num(token.get("decimals",t.get("decimals",18)),18)
+    raw=t.get("total",t.get("value",t.get("amount",t.get("token_value",0))))
+    if isinstance(raw,dict): raw=raw.get("value",raw.get("raw",raw.get("amount",0)))
+    try:return float(raw)/(10**int(dec))
+    except Exception:return num(t.get("value"),0.0)
+
+def transfer_token(t):
+    if not isinstance(t,dict):return ""
+    tok=t.get("token") or {}
+    return transfer_addr(tok.get("address") or t.get("token_address"))
+
+def transfer_from(t): return transfer_addr(t.get("from")) if isinstance(t,dict) else ""
+def transfer_to(t): return transfer_addr(t.get("to")) if isinstance(t,dict) else ""
+
+def explorer_address_transactions(address, limit=MAX_PORTFOLIO_TXS):
+    """Fetch wallet transactions with Blockscout-style pagination, best effort."""
+    out=[]; params={"items_count":min(100,limit)}
+    try:
+        while len(out)<limit:
+            d=api_get(f"/addresses/{address}/transactions", params)
+            items=d if isinstance(d,list) else d.get("items",[])
+            if not isinstance(items,list) or not items: break
+            out.extend(items)
+            nxt=d.get("next_page_params") if isinstance(d,dict) else None
+            if not isinstance(nxt,dict): break
+            params=nxt
+            if len(out)>=limit: break
+        return out[:limit]
+    except Exception:
+        return out[:limit]
+
+def gas_fee_sda(tx):
+    if not isinstance(tx,dict):return 0.0
+    # Blockscout commonly exposes fee directly in wei; otherwise derive gas*gas_price.
+    raw=tx.get("fee")
+    if isinstance(raw,dict): raw=raw.get("value",raw.get("raw"))
+    if raw is not None:
+        try:return float(raw)/1e18
+        except Exception:pass
+    gas=tx.get("gas_used",tx.get("gasUsed"))
+    gp=tx.get("gas_price",tx.get("gasPrice"))
+    try:return float(gas)*float(gp)/1e18
+    except Exception:return 0.0
+
+def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
+    """Build a reusable on-chain portfolio ledger. Read-only; no transaction is sent.
+
+    Buys are inferred from wallet-originated router swaps that transfer a non-WSDA
+    token into the wallet. Cost is native SDA value when available, otherwise the
+    outgoing WSDA transfer in the same transaction. The ledger is rebuilt each run,
+    so future purchases are automatically picked up.
+    """
+    previous=previous if isinstance(previous,dict) else {}
+    router=str(ld.get("router") or ld.get("pool_router") or "0x35cAC72Db00e8dAC0e4f7F8A0F53D339E0cC23fb").lower()
+    wsda="0xe4095a910209d7be03b55d02f40d4554b1666182".lower()
+    txs=explorer_address_transactions(wallet,MAX_PORTFOLIO_TXS)
+    buys=[]; sells=[]
+    seen=set()
+    for tx in txs:
+        h=tx_hash(tx)
+        if not h or h in seen: continue
+        seen.add(h)
+        sender=transfer_addr(tx.get("from"))
+        if sender and sender!=wallet.lower(): continue
+        raw=raw_input_tx(tx); is_buy=(raw[:10].lower()=="0x414bf389")
+        to=transfer_addr(tx.get("to"))
+        if to and to!=router and not is_buy: continue
+        native_raw=tx.get("value",0)
+        if isinstance(native_raw,dict): native_raw=native_raw.get("value",native_raw.get("raw",0))
+        native_sda=num(native_raw)/1e18
+        transfers=token_transfer_items(wallet,h)
+        # Incoming non-WSDA token(s) are buys; outgoing non-WSDA token(s) are sells.
+        incoming=[]; outgoing=[]; wsda_out=0.0
+        for t in transfers:
+            token=transfer_token(t); amt=transfer_amount(t)
+            if not token or amt<=0: continue
+            fr=transfer_from(t); dest=transfer_to(t)
+            if token==wsda:
+                if fr==wallet.lower() and dest: wsda_out += amt
+                continue
+            if dest==wallet.lower(): incoming.append((token,amt,t))
+            elif fr==wallet.lower(): outgoing.append((token,amt,t))
+        if incoming and (is_buy or native_sda>0 or wsda_out>0):
+            total_out=max(native_sda,wsda_out)
+            # Split total SDA cost proportionally if one tx buys multiple tokens.
+            total_tokens=sum(a for _,a,_ in incoming) or 1.0
+            for token,amt,t in incoming:
+                cost=total_out*(amt/total_tokens)
+                mdx=meta.get(token,{}) if isinstance(meta,dict) else {}
+                sym=mdx.get("symbol") or ((t.get("token") or {}).get("symbol") if isinstance(t,dict) else None) or token[:10]+"..."
+                buys.append({"tx":h,"timestamp":tx_timestamp(tx),"block":tx.get("block_number",tx.get("blockNumber")),"token":token,"symbol":sym,"amount":amt,"cost_sda":cost,"gas_fee_sda":gas_fee_sda(tx),"price_sda":cost/amt if amt else 0.0,"side":"BUY"})
+        wsda_in=0.0
+        for t in transfers:
+            token=transfer_token(t); amt=transfer_amount(t)
+            if token==wsda and transfer_to(t)==wallet.lower() and amt>0: wsda_in += amt
+        if outgoing and (raw[:10].lower() in {"0xc04b8d59","0x8ab5246f"} or wsda_in>0):
+            total_proceeds=max(wsda_in,native_sda)
+            total_tokens=sum(a for _,a,_ in outgoing) or 1.0
+            for token,amt,t in outgoing:
+                mdx=meta.get(token,{}) if isinstance(meta,dict) else {}
+                sym=mdx.get("symbol") or ((t.get("token") or {}).get("symbol") if isinstance(t,dict) else None) or token[:10]+"..."
+                proceeds=total_proceeds*(amt/total_tokens)
+                sells.append({"tx":h,"timestamp":tx_timestamp(tx),"block":tx.get("block_number",tx.get("blockNumber")),"token":token,"symbol":sym,"amount":amt,"proceeds_sda":proceeds,"gas_fee_sda":gas_fee_sda(tx),"side":"SELL"})
+    # FIFO accounting against the full detected trade history.
+    trades=sorted(buys+sells,key=lambda x:(str(x.get("timestamp")),str(x.get("block") or ""),str(x.get("tx"))))
+    lots={}; realized={}; history=[]
+    for tr in trades:
+        token=tr["token"]
+        if tr["side"]=="BUY":
+            lots.setdefault(token,[]).append({"amount":tr["amount"],"cost_sda":tr["cost_sda"]})
+            history.append(tr)
+            continue
+        qty=tr["amount"]; cost_removed=0.0
+        q=lots.setdefault(token,[])
+        while qty>1e-12 and q:
+            lot=q[0]; take=min(qty,lot["amount"]); unit=lot["cost_sda"]/lot["amount"] if lot["amount"] else 0
+            cost_removed+=take*unit; lot["amount"]-=take; lot["cost_sda"]-=take*unit; qty-=take
+            if lot["amount"]<=1e-12:q.pop(0)
+        tr["cost_basis_sda"]=cost_removed; realized[token]=realized.get(token,0.0)+(num(tr.get("proceeds_sda"))-cost_removed)
+        history.append(tr)
+    current={}
+    for token,qs in lots.items():
+        amount=sum(x["amount"] for x in qs); cost=sum(x["cost_sda"] for x in qs)
+        if amount>1e-12:
+            token_buys=[x for x in buys if x["token"]==token]
+            first_buy=next((x.get("timestamp") for x in token_buys if x.get("timestamp")),"")
+            last_buy=next((x.get("timestamp") for x in reversed(token_buys) if x.get("timestamp")),"")
+            age_days=None
+            try:
+                from datetime import datetime as _dt
+                ts=_dt.fromisoformat(first_buy.replace("Z","+00:00")); age_days=(datetime.now(timezone.utc)-ts).total_seconds()/86400
+            except Exception: pass
+            current[token]={"amount":amount,"cost_sda":cost,"avg_cost_sda":cost/amount if amount else 0.0,"lots":qs,"first_buy_at":first_buy,"last_buy_at":last_buy,"age_days":age_days}
+    # Current market values from the wallet snapshot / market data.
+    wallet=wallet_obj if isinstance(wallet_obj,dict) else wallet_snapshot(md,meta)
+    for h in wallet.get("holdings",[]):
+        token=str(h.get("address","")).lower()
+        if not token or token not in current: continue
+        cur=current[token]; cur["symbol"]=h.get("symbol") or cur.get("symbol") or token[:10]+"..."; cur["price_sda"]=num(h.get("price_sda")); cur["value_sda"]=num(h.get("value_sda")); cur["unrealized_pnl_sda"]=cur["value_sda"]-cur["cost_sda"] if cur["value_sda"] else None; cur["unrealized_pnl_pct"]=(cur["unrealized_pnl_sda"]/cur["cost_sda"]*100) if cur["cost_sda"] else None
+        for tr in buys:
+            if tr["token"]==token: tr["symbol"]=cur["symbol"]
+    result={"wallet":wallet.lower(),"router":router,"updated_at":now(),"buy_count":len(buys),"sell_count":len(sells),"trades":history[-500:],"current":current,"realized_pnl_sda":sum(realized.values()),"notes":"READ-ONLY inferred on-chain swap ledger; future runs rebuild history."}
+    # Preserve a lightweight fingerprint so repeated runs are easy to audit.
+    result["known_tx_hashes"]=[x["tx"] for x in history[-500:] if x.get("tx")]
+    return result
+
+def portfolio_recommendations(portfolio, md, ws, meta, ld):
+    out=[]
+    current=portfolio.get("current",{}) if isinstance(portfolio,dict) else {}
+    tokens=(md.get("tokens",{}) or {}) if isinstance(md,dict) else {}
+    for token,pf in current.items():
+        an=(tokens.get(token,{}) or {}).get("analysis",tokens.get(token,{}) or {})
+        s=score(token,an,ws) if isinstance(an,dict) and an else {"confidence":0,"m1h":0,"net_1h":0,"trades_1h":0,"whale_net":0}
+        pnl_raw=pf.get("unrealized_pnl_pct"); cost=num(pf.get("cost_sda"),0.0); pnl=num(pnl_raw,0.0); c=s.get("confidence",0); m1=num(s.get("m1h")); flow1=num(s.get("net_1h"));
+        if pnl_raw is None or cost<=0: action="HOLD / NO COST BASIS"
+        elif c>=75 and m1>0 and flow1>=0: action="HOLD / TRAIL"
+        elif pnl>=10 and (c<60 or m1<0 or flow1<0): action="PARTIAL SELL"
+        elif c<45 and (m1<0 or flow1<0): action="SELL / EXIT"
+        else: action="HOLD / WATCH"
+        out.append({"token":token,"symbol":pf.get("symbol") or lbl(token,meta),"action":action,"pnl_pct":pnl,"pnl_sda":num(pf.get("unrealized_pnl_sda"),0.0),"score":c,"m1h":m1,"flow_1h":flow1})
+    return sorted(out,key=lambda x:(x["action"] in {"SELL / EXIT","PARTIAL SELL"},-abs(x["pnl_pct"])),reverse=True)
+
+def portfolio_message(portfolio, recommendations):
+    lines=["📈 REAL PORTFOLIO / P&L (READ-ONLY)",""]
+    cur=portfolio.get("current",{}) if isinstance(portfolio,dict) else {}
+    if not cur: lines.append("No historical BUYs confidently detected yet.")
+    else:
+        for token,pf in sorted(cur.items(),key=lambda x:x[1].get("symbol",x[0])):
+            pnl=num(pf.get("unrealized_pnl_sda"),0.0); pct=pf.get("unrealized_pnl_pct"); age=""
+            cost=pf.get("cost_sda"); pct=pf.get("unrealized_pnl_pct")
+            age=pf.get("age_days")
+            cost_text=f"{num(cost):.2f} SDA" if cost is not None else "UNKNOWN"
+            pnl_text=f"{pnl:+.2f} SDA ({num(pct):+.2f}%)" if pct is not None else "UNKNOWN"
+            age_text=f"{num(age):.1f} days" if age is not None else "UNKNOWN"
+            lines += [f"• {pf.get('symbol') or token[:10]}",f"  Amount: {num(pf.get('amount')):.8f} | Cost: {cost_text}",f"  Now: {num(pf.get('value_sda')):.2f} SDA | P/L: {pnl_text}",f"  Avg cost: {num(pf.get('avg_cost_sda')):.8f} SDA/token | Age: {age_text}",""]
+    lines += [f"Realized P/L: {num(portfolio.get('realized_pnl_sda')):+.2f} SDA",f"Detected trades: {int(portfolio.get('buy_count',0))} BUY / {int(portfolio.get('sell_count',0))} SELL",""]
+    lines.append("🧭 POSITION RECOMMENDATIONS")
+    if not recommendations: lines.append("• No recommendation available.")
+    else:
+        for r in recommendations:
+            icon="🔴" if r["action"]=="SELL / EXIT" else ("🟠" if r["action"]=="PARTIAL SELL" else ("🟢" if r["action"]=="HOLD / TRAIL" else "🟡"))
+            lines.append(f"• {icon} {r['symbol']}: {r['action']} | P/L {r['pnl_pct']:+.2f}% | score {r['score']}/100 | 1h {r['m1h']:+.2f}%")
+    lines += ["","⚠️ Recommendations are informational only; wallet remains READ-ONLY."]
+    return "\n".join(lines)
 
 def wallet_message(w):
     lines=["👛 REAL WALLET (READ-ONLY)","",f"Address: {w.get('wallet')}"]
@@ -183,6 +385,15 @@ def main():
     if not isinstance(p,dict):p={"positions":{},"closed_trades":[]}
     p.setdefault("positions",{});p.setdefault("closed_trades",[]);events=[]
     wallet=wallet_snapshot(md,meta)
+    portfolio_prev=load(PORTFOLIO_FILE,{})
+    try:
+        portfolio=portfolio_history(WALLET_ADDRESS,md,meta,ld,portfolio_prev,wallet)
+        portfolio_recs=portfolio_recommendations(portfolio,md,ws,meta,ld)
+        save(PORTFOLIO_FILE,portfolio)
+    except Exception as e:
+        portfolio=portfolio_prev if isinstance(portfolio_prev,dict) else {"current":{},"realized_pnl_sda":0.0,"buy_count":0,"sell_count":0}
+        portfolio_recs=[]
+        portfolio["error"]=f"portfolio history: {e}"
 
     for a in list(p["positions"]):
         a=str(a).lower(); td=tokens.get(a)
@@ -229,7 +440,7 @@ def main():
         for a,pos in p["positions"].items():
             an=(tokens.get(a,{}) or {}).get("analysis",(tokens.get(a,{}) or {}));cur=num(an.get("price_in_sda"));e=num(pos.get("entry_price"));roi=(cur-e)/e*100 if e>0 and cur>0 else 0
             opens += [f"• {pos.get('label',a)}",f"  Entry: {price(e)} | Now: {price(cur)}",f"  ROI: {roi:+.2f}% | Remaining: {num(pos.get('remaining_fraction',1))*100:.0f}%",f"  TP1: {price(pos.get('tp1'))} | TP2: {price(pos.get('tp2'))}",f"  SL: {price(pos.get('sl'))}",""]
-    save(POSITIONS_FILE,p);send("\n".join(lines));send("\n".join(opens));send(wallet_message(wallet))
+    save(POSITIONS_FILE,p);send("\n".join(lines));send("\n".join(opens));send(wallet_message(wallet));send(portfolio_message(portfolio,portfolio_recs))
     send(f"🤖 SDA PAPER TRADING\n\nOpen positions: {len(p['positions'])}\nClosed trades: {len(p['closed_trades'])}\nBUY candidates: {len(cands)}\nEvents: {len(events)}\n\nInvestment: {INVESTMENT_SDA:.0f} SDA\nFee: {FEE_RATE*100:.1f}%\nSlippage: {SLIPPAGE_RATE*100:.1f}%")
     for e in events:send(e)
 
