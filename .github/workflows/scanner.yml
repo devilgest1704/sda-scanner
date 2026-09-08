@@ -1,62 +1,41 @@
 name: SDA Scanner
 on:
+  workflow_dispatch:
   schedule:
     - cron: "7,22,37,52 * * * *"
-  workflow_dispatch:
 permissions:
   contents: write
 jobs:
-  scan:
+  run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
       - uses: actions/setup-python@v5
-        with: {python-version: "3.12"}
-      - run: pip install requests
-      - name: Ensure state files
-        run: |
-          [ -f state.json ] || echo '{}' > state.json
-          [ -f whale_state.json ] || echo '{}' > whale_state.json
-          [ -f whale_data.json ] || echo '{}' > whale_data.json
-          [ -f whale_history.json ] || echo '[]' > whale_history.json
-          [ -f pending_signals.json ] || echo '{}' > pending_signals.json
-          [ -f positions.json ] || echo '{"positions":{},"closed_trades":[]}' > positions.json
-          [ -f wallet_data.json ] || echo '{}' > wallet_data.json
-          [ -f liquidity_data.json ] || echo '{}' > liquidity_data.json
-      - name: Whale scanner
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Run whale scanner
         run: python whale_scanner.py
-      - name: Market scanner
-        run: python market_scanner.py
-      - name: Token metadata
-        run: python token_metadata.py
-      - name: Liquidity scanner
-        run: python liquidity_scanner.py
-      - name: Validate JSON
-        run: |
-          python - <<'PY'
-          import json
-          for f in ["market_data.json","whale_data.json","whale_history.json","whale_state.json","token_metadata.json","liquidity_data.json","positions.json","wallet_data.json"]:
-              with open(f,encoding="utf-8") as h: json.load(h)
-              print("OK",f)
-          PY
-      - name: Paper engine + real wallet
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-          WATCH_WALLET: "0x0a7415b28d0f3641fd202ced0c4d3a70619e6230"
+      - name: Run market scanner
+        run: python market_scanner.py
+      - name: Update token metadata
+        run: python token_metadata.py
+      - name: Run liquidity scanner
+        run: python liquidity_scanner.py
+      - name: Run main scanner
         run: python main.py
-      - name: Final validation
-        run: |
-          python - <<'PY'
-          import json
-          for f in ["positions.json","wallet_data.json","whale_data.json","whale_history.json"]:
-              with open(f,encoding="utf-8") as h: json.load(h)
-              print("FINAL OK",f)
-          PY
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
       - name: Commit state
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add market_data.json whale_data.json whale_history.json whale_state.json token_metadata.json liquidity_data.json positions.json wallet_data.json state.json pending_signals.json sidra_swap_discovery.json
-          git diff --cached --quiet || git commit -m "Update scanner state"
-          git push
+          git config user.name "sda-scanner-bot"
+          git config user.email "scanner@github.local"
+          git add state.json whale_state.json whale_data.json whale_history.json market_data.json token_metadata.json liquidity_data.json positions.json wallet_data.json portfolio_data.json pending_signals.json sidra_swap_discovery.json
+          git diff --staged --quiet || git commit -m "Update SDA scanner state"
+          git push origin main
