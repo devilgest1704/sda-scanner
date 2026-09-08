@@ -71,6 +71,23 @@ jobs:
       - name: Run liquidity scanner
         run: python liquidity_scanner.py
 
+      - name: Prepare V16 syntax compatibility fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("main.py")
+          s = p.read_text(encoding="utf-8")
+          old = "{(_n(val):.2f) if val is not None else 'UNKNOWN'}"
+          new = "{f'{_n(val):.2f}' if val is not None else 'UNKNOWN'}"
+          if old in s:
+              s = s.replace(old, new, 1)
+              print("FIXED: invalid nested f-string expression in wallet_message_v16")
+          else:
+              print("OK: wallet_message_v16 syntax already fixed")
+          p.write_text(s, encoding="utf-8")
+          PY
+          python -m py_compile main.py
+
       - name: Run SDA main engine (V16)
         run: python main.py
         env:
