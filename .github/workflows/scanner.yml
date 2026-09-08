@@ -1,29 +1,19 @@
 name: SDA Scanner
-
 on:
-  workflow_dispatch:
   schedule:
     - cron: "7,22,37,52 * * * *"
-
+  workflow_dispatch:
 permissions:
   contents: write
-
 jobs:
-  run:
+  scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-
       - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Ensure state files exist
+        with: {python-version: "3.12"}
+      - run: pip install requests
+      - name: Ensure state files
         run: |
           [ -f state.json ] || echo '{}' > state.json
           [ -f whale_state.json ] || echo '{}' > whale_state.json
@@ -32,81 +22,41 @@ jobs:
           [ -f pending_signals.json ] || echo '{}' > pending_signals.json
           [ -f positions.json ] || echo '{"positions":{},"closed_trades":[]}' > positions.json
           [ -f wallet_data.json ] || echo '{}' > wallet_data.json
-
-      - name: Run whale scanner
+          [ -f liquidity_data.json ] || echo '{}' > liquidity_data.json
+      - name: Whale scanner
         run: python whale_scanner.py
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-
-      - name: Run market scanner
+      - name: Market scanner
         run: python market_scanner.py
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-
-      - name: Update token metadata
+      - name: Token metadata
         run: python token_metadata.py
-
-      - name: Run liquidity scanner
+      - name: Liquidity scanner
         run: python liquidity_scanner.py
-
-      - name: Validate generated JSON
+      - name: Validate JSON
         run: |
           python - <<'PY'
           import json
-          files = [
-              "whale_data.json", "whale_history.json", "whale_state.json",
-              "market_data.json", "token_metadata.json", "liquidity_data.json",
-              "positions.json", "wallet_data.json"
-          ]
-          for path in files:
-              with open(path, encoding="utf-8") as f:
-                  json.load(f)
-              print("OK", path)
+          for f in ["market_data.json","whale_data.json","whale_history.json","whale_state.json","token_metadata.json","liquidity_data.json","positions.json","wallet_data.json"]:
+              with open(f,encoding="utf-8") as h: json.load(h)
+              print("OK",f)
           PY
-
-      - name: Run paper trading engine
-        run: python main.py
+      - name: Paper engine + real wallet
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-
-      - name: Validate final JSON
+          WATCH_WALLET: "0x0a7415b28d0f3641fd202ced0c4d3a70619e6230"
+        run: python main.py
+      - name: Final validation
         run: |
           python - <<'PY'
           import json
-          files = [
-              "whale_data.json", "whale_history.json", "whale_state.json",
-              "market_data.json", "token_metadata.json", "liquidity_data.json",
-              "positions.json", "wallet_data.json"
-          ]
-          for path in files:
-              with open(path, encoding="utf-8") as f:
-                  json.load(f)
-              print("OK", path)
+          for f in ["positions.json","wallet_data.json","whale_data.json","whale_history.json"]:
+              with open(f,encoding="utf-8") as h: json.load(h)
+              print("FINAL OK",f)
           PY
-
-      - name: Show open paper positions
+      - name: Commit state
         run: |
-          python - <<'PY'
-          import json
-          with open("positions.json", encoding="utf-8") as f:
-              p = json.load(f)
-          positions = p.get("positions", {})
-          print(f"Open paper positions: {len(positions)}")
-          for address, pos in positions.items():
-              print(
-                  f"- {pos.get('label', address)} | "
-                  f"entry={pos.get('entry_price')} | "
-                  f"TP1={pos.get('tp1')} | TP2={pos.get('tp2')} | SL={pos.get('sl')}"
-              )
-          PY
-
-      - name: Commit state files
-        run: |
-          git config user.name "sda-scanner-bot"
-          git config user.email "scanner@github.local"
-          git add             state.json             whale_state.json             whale_data.json             whale_history.json             market_data.json             token_metadata.json             liquidity_data.json             sidra_swap_discovery.json             pending_signals.json             positions.json             wallet_data.json
-          git diff --staged --quiet || git commit -m "Update scanner and paper trading state"
-          git push origin main
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add market_data.json whale_data.json whale_history.json whale_state.json token_metadata.json liquidity_data.json positions.json wallet_data.json state.json pending_signals.json sidra_swap_discovery.json
+          git diff --cached --quiet || git commit -m "Update scanner state"
+          git push
