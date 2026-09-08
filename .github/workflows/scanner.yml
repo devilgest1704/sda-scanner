@@ -46,8 +46,8 @@ jobs:
       - name: Run liquidity scanner
         run: python liquidity_scanner.py
 
-      - name: Run paper trading engine v12
-        run: python main_v12.py
+      - name: Run paper trading engine v13
+        run: python main_v13.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -57,7 +57,7 @@ jobs:
           touch state.json whale_state.json whale_data.json whale_history.json portfolio_data.json
           touch market_data.json token_metadata.json liquidity_data.json
           touch sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json
-          touch decision_state_v12.json
+          touch decision_state_v13.json
 
       - name: Validate JSON state
         run: |
@@ -68,7 +68,7 @@ jobs:
             "state.json","whale_state.json","whale_data.json","whale_history.json","portfolio_data.json",
             "market_data.json","token_metadata.json","liquidity_data.json",
             "sidra_swap_discovery.json","pending_signals.json","positions.json","wallet_data.json",
-            "decision_state_v12.json"
+            "decision_state_v13.json"
           ]
           for name in files:
               p=Path(name)
@@ -108,7 +108,7 @@ jobs:
           git config user.email "scanner@github.local"
           git add state.json whale_state.json whale_data.json whale_history.json portfolio_data.json \
             market_data.json token_metadata.json liquidity_data.json sidra_swap_discovery.json \
-            pending_signals.json positions.json wallet_data.json decision_state_v12.json
+            pending_signals.json positions.json wallet_data.json decision_state_v13.json
           if git diff --staged --quiet; then
             echo "No state changes to commit."
           else
