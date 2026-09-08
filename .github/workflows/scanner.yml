@@ -49,111 +49,46 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-
-          # 1) Fix the V16 nested f-string syntax permanently in main.py.
-          p = Path("main.py")
-          s = p.read_text(encoding="utf-8")
-          old = "{(_n(val):.2f) if val is not None else 'UNKNOWN'}"
-          new = "{f'{_n(val):.2f}' if val is not None else 'UNKNOWN'}"
-          if old in s:
-              s = s.replace(old, new, 1)
-              print("FIXED main.py syntax")
-          else:
-              print("main.py syntax already fixed")
-          p.write_text(s, encoding="utf-8")
-
-          # 2) Make the post-TP1 protection genuinely trailing and fee-aware.
-          p = Path("engine.py")
-          s = p.read_text(encoding="utf-8")
-          old = 'pos["tp1_hit"]=True;pos["remaining_fraction"]=num(pos.get("remaining_fraction",1))-frac;pos["sl"]=e'
-          new = 'pos["tp1_hit"]=True;pos["remaining_fraction"]=num(pos.get("remaining_fraction",1))-frac;pos["sl"]=max(e*(1+FEE_RATE)/((1-SLIPPAGE_RATE)*(1-FEE_RATE)),e)'
-          if old in s:
-              s = s.replace(old, new, 1)
-              print("FIXED engine.py TP1 protection stop")
-          else:
-              print("engine.py TP1 protection stop already fixed")
-
-          old = '        if cur>=num(pos.get("tp2")):\n'
-          new = '''        # After TP1, trail the remaining half upward. The stop never moves down\n        # and never falls below the fee/slippage-adjusted net breakeven level.\n        if pos.get("tp1_hit") and num(pos.get("remaining_fraction",0)) > 0 and cur > 0:\n            net_breakeven=e*(1+FEE_RATE)/((1-SLIPPAGE_RATE)*(1-FEE_RATE)) if e>0 else e\n            trailing=cur*(1-SL_PCT)\n            pos["sl"]=max(num(pos.get("sl")),net_breakeven,trailing)\n\n        if cur>=num(pos.get("tp2")):\n'''
-          if old in s and 'trailing=cur*(1-SL_PCT)' not in s:
-              s = s.replace(old, new, 1)
-              print("FIXED engine.py trailing stop")
-          else:
-              print("engine.py trailing stop already fixed")
-
-          old = 'reason="BREAKEVEN" if pos.get("tp1_hit") else "SL"'
-          new = 'reason="PROTECTED SL" if pos.get("tp1_hit") else "SL"'
-          if old in s:
-              s = s.replace(old, new, 1)
-              print("FIXED protected-stop event label")
-          else:
-              print("protected-stop event label already fixed")
-
-          old = '🔒 Remaining 50% protected at breakeven'
-          new = '🔒 Remaining 50% protected at fee-adjusted breakeven + trailing stop'
-          if old in s:
-              s = s.replace(old, new, 1)
-              print("FIXED TP1 Telegram wording")
-          else:
-              print("TP1 Telegram wording already fixed")
-
-          p.write_text(s, encoding="utf-8")
+          p=Path("main.py"); s=p.read_text(encoding="utf-8")
+          s=s.replace("{(_n(val):.2f) if val is not None else 'UNKNOWN'}","{f'{_n(val):.2f}' if val is not None else 'UNKNOWN'}",1)
+          p.write_text(s,encoding="utf-8")
+          p=Path("engine.py"); s=p.read_text(encoding="utf-8")
+          old='pos["tp1_hit"]=True;pos["remaining_fraction"]=num(pos.get("remaining_fraction",1))-frac;pos["sl"]=e'
+          new='pos["tp1_hit"]=True;pos["remaining_fraction"]=num(pos.get("remaining_fraction",1))-frac;pos["sl"]=max(e*(1+FEE_RATE)/((1-SLIPPAGE_RATE)*(1-FEE_RATE)),e)'
+          s=s.replace(old,new,1)
+          old='        if cur>=num(pos.get("tp2")):\n'
+          new='''        # V16: after TP1, protect the remaining half at net breakeven and trail upward.\n        if pos.get("tp1_hit") and num(pos.get("remaining_fraction",0)) > 0 and cur > 0:\n            net_breakeven=e*(1+FEE_RATE)/((1-SLIPPAGE_RATE)*(1-FEE_RATE)) if e>0 else e\n            trailing=cur*(1-SL_PCT)\n            pos["sl"]=max(num(pos.get("sl")),net_breakeven,trailing)\n\n        if cur>=num(pos.get("tp2")):\n'''
+          if old in s and 'trailing=cur*(1-SL_PCT)' not in s: s=s.replace(old,new,1)
+          s=s.replace('reason="BREAKEVEN" if pos.get("tp1_hit") else "SL"','reason="PROTECTED SL" if pos.get("tp1_hit") else "SL"',1)
+          s=s.replace('🔒 Remaining 50% protected at breakeven','🔒 Remaining 50% protected at fee-adjusted breakeven + trailing stop',1)
+          p.write_text(s,encoding="utf-8")
           PY
           python -m py_compile main.py engine.py
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
           git add main.py engine.py
-          if git diff --staged --quiet; then
-            echo "No source changes to commit."
-          else
-            git commit -m "Fix V16 position protection and trailing stop"
-            git push origin main
-          fi
+          if ! git diff --staged --quiet; then git commit -m "Fix V16 position protection and trailing stop"; git push origin main; fi
 
-      - name: Prepare liquidity scanner compatibility fixes
+      - name: Prepare liquidity scanner fixes
         run: |
           python - <<'PY'
           from pathlib import Path
-          p = Path("liquidity_scanner.py")
-          s = p.read_text(encoding="utf-8")
-          old1 = '"token_decimals": token_out["decimals"] if token_out else None,'
-          new1 = '"token_decimals": token_out.get("decimals") if token_out else None,'
-          old2 = 'bool(discovery.get("v25_50_sda_quote_probe", {}).get("ok"))'
-          new2 = 'bool((discovery.get("v25_50_sda_quote_probe") or {}).get("ok"))'
-          if old1 in s:
-              s = s.replace(old1, new1, 1)
-              print("FIXED: token_out decimals access")
-          else:
-              print("OK: token_out decimals access already safe")
-          if old2 in s:
-              s = s.replace(old2, new2, 1)
-              print("FIXED: None-safe quote probe access")
-          else:
-              print("OK: quote probe access already None-safe")
-          p.write_text(s, encoding="utf-8")
+          p=Path("liquidity_scanner.py"); s=p.read_text(encoding="utf-8")
+          s=s.replace('"token_decimals": token_out["decimals"] if token_out else None,','"token_decimals": token_out.get("decimals") if token_out else None,',1)
+          s=s.replace('bool(discovery.get("v25_50_sda_quote_probe", {}).get("ok"))','bool((discovery.get("v25_50_sda_quote_probe") or {}).get("ok"))',1)
+          # receipt logs do not carry decimals; enrich every decoded transfer from token_metadata.json.\n          marker='''    transfers = receipt_erc20_transfers(h)\n    if not transfers:\n        transfers = transfers_for_tx(h)\n'''
+          replacement='''    transfers = receipt_erc20_transfers(h)\n    if not transfers:\n        transfers = transfers_for_tx(h)\n    # Resolve token decimals from the scanner's authoritative Blockscout metadata.\n    metadata = load_json("token_metadata.json", {})\n    if isinstance(metadata, dict):\n        for t in transfers:\n            a = addr(t.get("token_address"))\n            meta = metadata.get(a) or metadata.get(a.lower())\n            if isinstance(meta, dict) and meta.get("decimals") is not None:\n                try:\n                    d = int(meta.get("decimals"))\n                    if 0 <= d <= 36 and t.get("raw_value") is not None:\n                        t["decimals"] = d\n                        t["value"] = float(Decimal(t["raw_value"]) / (Decimal(10) ** d))\n                except Exception:\n                    pass\n'''
+          if marker in s and 'authoritative Blockscout metadata' not in s:
+              s=s.replace(marker,replacement,1)
+              print("Added token decimals enrichment")
+          p.write_text(s,encoding="utf-8")
           PY
+          python -m py_compile liquidity_scanner.py
 
       - name: Run liquidity scanner
         run: python liquidity_scanner.py
 
-      - name: Prepare V16 syntax compatibility fix
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path("main.py")
-          s = p.read_text(encoding="utf-8")
-          old = "{(_n(val):.2f) if val is not None else 'UNKNOWN'}"
-          new = "{f'{_n(val):.2f}' if val is not None else 'UNKNOWN'}"
-          if old in s:
-              s = s.replace(old, new, 1)
-              print("FIXED: invalid nested f-string expression in wallet_message_v16")
-          else:
-              print("OK: wallet_message_v16 syntax already fixed")
-          p.write_text(s, encoding="utf-8")
-          PY
-          python -m py_compile main.py
-
-      - name: Run SDA main engine (V16)
+      - name: Run SDA main engine V16
         run: python main.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -171,71 +106,38 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
 
-      - name: Ensure state files exist
-        run: |
-          touch state.json whale_state.json whale_data.json whale_history.json portfolio_data.json
-          touch market_data.json token_metadata.json liquidity_data.json paper_stats.json
-          touch sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json
-
-      - name: Ensure JSON state files are valid
+      - name: Validate JSON state
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          files = [
-            "state.json","whale_state.json","whale_data.json","whale_history.json","portfolio_data.json",
-            "market_data.json","token_metadata.json","liquidity_data.json","paper_stats.json",
-            "sidra_swap_discovery.json","pending_signals.json","positions.json","wallet_data.json","decision_state_v15.json"
-          ]
+          files=["state.json","whale_state.json","whale_data.json","whale_history.json","portfolio_data.json","market_data.json","token_metadata.json","liquidity_data.json","paper_stats.json","sidra_swap_discovery.json","pending_signals.json","positions.json","wallet_data.json","decision_state_v15.json"]
           for name in files:
-              p = Path(name)
-              if not p.exists() or p.stat().st_size == 0:
-                  p.write_text("{}\n", encoding="utf-8")
-                  print("INITIALIZED:", name)
-                  continue
+              p=Path(name)
+              if not p.exists() or p.stat().st_size==0:
+                  p.write_text("{}\n",encoding="utf-8"); print("INITIALIZED:",name); continue
               try:
-                  with p.open(encoding="utf-8") as f:
-                      json.load(f)
-                  print("OK:", name)
-              except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                  backup = p.with_suffix(p.suffix + ".invalid")
-                  p.replace(backup)
-                  p.write_text("{}\n", encoding="utf-8")
-                  print("REPAIRED INVALID JSON:", name, "->", backup.name, "reason:", e)
+                  json.loads(p.read_text(encoding="utf-8")); print("OK:",name)
+              except (json.JSONDecodeError,UnicodeDecodeError) as e:
+                  b=p.with_suffix(p.suffix+".invalid"); p.replace(b); p.write_text("{}\n",encoding="utf-8"); print("REPAIRED:",name,e)
           PY
 
       - name: Show open paper positions
         run: |
           python - <<'PY'
           import json
-          try:
-              with open("positions.json",encoding="utf-8") as f: data=json.load(f)
-          except Exception as e:
-              print("Could not read positions.json:",e); raise SystemExit(0)
-          positions=data.get("positions",{})
+          try: d=json.load(open("positions.json",encoding="utf-8"))
+          except Exception as e: print(e); raise SystemExit(0)
+          ps=d.get("positions",{})
           print("========== OPEN PAPER POSITIONS ==========")
-          if not positions:
-              print("No open paper positions.")
-          else:
-              for address,p in positions.items():
-                  print(p.get("label",address))
-                  print("  Entry:",p.get("entry_price"))
-                  print("  TP1:",p.get("tp1"))
-                  print("  TP2:",p.get("tp2"))
-                  print("  SL:",p.get("sl"))
-                  print("  Investment:",p.get("investment_sda"))
-                  print("  Confidence:",p.get("entry_confidence"))
+          for a,p in ps.items():
+              print(p.get("label",a),"Entry",p.get("entry_price"),"TP1",p.get("tp1"),"TP2",p.get("tp2"),"SL",p.get("sl"),"Remaining",p.get("remaining_fraction"),"TP1 hit",p.get("tp1_hit"))
+          if not ps: print("No open paper positions.")
           print("===========================================")
-          PY
 
       - name: Commit state files
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
-          git add state.json whale_state.json whale_data.json whale_history.json portfolio_data.json             market_data.json token_metadata.json liquidity_data.json paper_stats.json             sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json
-          if git diff --staged --quiet; then
-            echo "No state changes to commit."
-          else
-            git commit -m "Update SDA scanner state"
-            git push origin main
-          fi
+          git add state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json
+          if ! git diff --staged --quiet; then git commit -m "Update SDA scanner state"; git push origin main; else echo "No state changes to commit."; fi
