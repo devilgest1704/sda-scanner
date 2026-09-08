@@ -45,6 +45,71 @@ jobs:
       - name: Discover token icons
         run: python token_icons.py
 
+      - name: Persist V16 source fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # 1) Fix the V16 nested f-string syntax permanently in main.py.
+          p = Path("main.py")
+          s = p.read_text(encoding="utf-8")
+          old = "{(_n(val):.2f) if val is not None else 'UNKNOWN'}"
+          new = "{f'{_n(val):.2f}' if val is not None else 'UNKNOWN'}"
+          if old in s:
+              s = s.replace(old, new, 1)
+              print("FIXED main.py syntax")
+          else:
+              print("main.py syntax already fixed")
+          p.write_text(s, encoding="utf-8")
+
+          # 2) Make the post-TP1 protection genuinely trailing and fee-aware.
+          p = Path("engine.py")
+          s = p.read_text(encoding="utf-8")
+          old = 'pos["tp1_hit"]=True;pos["remaining_fraction"]=num(pos.get("remaining_fraction",1))-frac;pos["sl"]=e'
+          new = 'pos["tp1_hit"]=True;pos["remaining_fraction"]=num(pos.get("remaining_fraction",1))-frac;pos["sl"]=max(e*(1+FEE_RATE)/((1-SLIPPAGE_RATE)*(1-FEE_RATE)),e)'
+          if old in s:
+              s = s.replace(old, new, 1)
+              print("FIXED engine.py TP1 protection stop")
+          else:
+              print("engine.py TP1 protection stop already fixed")
+
+          old = '        if cur>=num(pos.get("tp2")):\n'
+          new = '''        # After TP1, trail the remaining half upward. The stop never moves down\n        # and never falls below the fee/slippage-adjusted net breakeven level.\n        if pos.get("tp1_hit") and num(pos.get("remaining_fraction",0)) > 0 and cur > 0:\n            net_breakeven=e*(1+FEE_RATE)/((1-SLIPPAGE_RATE)*(1-FEE_RATE)) if e>0 else e\n            trailing=cur*(1-SL_PCT)\n            pos["sl"]=max(num(pos.get("sl")),net_breakeven,trailing)\n\n        if cur>=num(pos.get("tp2")):\n'''
+          if old in s and 'trailing=cur*(1-SL_PCT)' not in s:
+              s = s.replace(old, new, 1)
+              print("FIXED engine.py trailing stop")
+          else:
+              print("engine.py trailing stop already fixed")
+
+          old = 'reason="BREAKEVEN" if pos.get("tp1_hit") else "SL"'
+          new = 'reason="PROTECTED SL" if pos.get("tp1_hit") else "SL"'
+          if old in s:
+              s = s.replace(old, new, 1)
+              print("FIXED protected-stop event label")
+          else:
+              print("protected-stop event label already fixed")
+
+          old = '🔒 Remaining 50% protected at breakeven'
+          new = '🔒 Remaining 50% protected at fee-adjusted breakeven + trailing stop'
+          if old in s:
+              s = s.replace(old, new, 1)
+              print("FIXED TP1 Telegram wording")
+          else:
+              print("TP1 Telegram wording already fixed")
+
+          p.write_text(s, encoding="utf-8")
+          PY
+          python -m py_compile main.py engine.py
+          git config user.name "sda-scanner-bot"
+          git config user.email "scanner@github.local"
+          git add main.py engine.py
+          if git diff --staged --quiet; then
+            echo "No source changes to commit."
+          else
+            git commit -m "Fix V16 position protection and trailing stop"
+            git push origin main
+          fi
+
       - name: Prepare liquidity scanner compatibility fixes
         run: |
           python - <<'PY'
