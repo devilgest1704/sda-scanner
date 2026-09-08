@@ -696,6 +696,52 @@ def validate_router_return_against_history(buys, funded, limit=8):
     return rows
 
 
+
+
+def load_market_candidates():
+    data=load_json("market_data.json",{})
+    tokens=data.get("tokens",{}) if isinstance(data,dict) else {}
+    if not isinstance(tokens,dict):return []
+    out=[]
+    for a,item in tokens.items():
+        a=addr(a)
+        if not a or not isinstance(item,dict):continue
+        an=item.get("analysis",item)
+        try:px=float(an.get("price_in_sda") or 0)
+        except:px=0
+        if px>0:out.append(a)
+    return out
+
+def build_candidate_quotes(buys,funded):
+    candidates=load_market_candidates()
+    if not funded or not candidates or not buys:return []
+    by_token={}
+    for b in buys:
+        wa=b.get("word_addresses") or []
+        if len(wa)>=2 and wa[1]:by_token.setdefault(addr(wa[1]),b)
+    default_base=buys[0]
+    rows=[]
+    for token in candidates:
+        base=by_token.get(token,default_base)
+        if len(base.get("word_uints") or [])<8:continue
+        modified=build_exact_input_single_from_words(
+            base,funded,int(TRADE_SIZE_SDA*10**18),0,
+            int(datetime.now(timezone.utc).timestamp())+600)
+        if not modified:continue
+        sim=eth_call(modified,to_address=ROUTER,from_address=funded,
+                     value_wei=int(TRADE_SIZE_SDA*10**18),block_tag="latest")
+        returned=decode_uint256_result(sim.get("result")) if sim.get("ok") else None
+        rows.append({
+            "token":token,"fee":base["word_uints"][2],"ok":bool(sim.get("ok")),
+            "returned_amount_out_raw":returned,
+            "returned_amount_out_token_18dec":float(Decimal(returned)/Decimal(10**18)) if returned is not None else None,
+            "error":sim.get("error"),"base_tx":base.get("tx"),
+            "source":"historical_token" if token in by_token else "fallback_fee",
+            "amount_in_sda":TRADE_SIZE_SDA,
+            "quote_status":"VALIDATED_READ_ONLY" if returned is not None else "REVERT"
+        })
+    return rows
+
 def main():
     print("💧 LIQUIDITY V25 — FAST/CONCURRENT ROUTER FORENSICS + HISTORICAL BUY CALL VALIDATION")
     print(f"Pool: {POOL}")
@@ -956,6 +1002,8 @@ def main():
             else:
                 print(f"  {token}: REVERT")
     discovery["v25_current_50_sda_quote_sweep"] = quote_sweep
+    candidate_quote_sweep = build_candidate_quotes(buys, funded)
+    discovery["v25_market_candidate_quote_sweep"] = candidate_quote_sweep
 
     # --- Carry forward pool read-only probes ---
     print()
@@ -1009,27 +1057,41 @@ def main():
     save_json(DISCOVERY_FILE, discovery)
 
     liquidity = load_json(LIQUIDITY_FILE, {})
+    quotes_50_sda={}
+    for row in quote_sweep + candidate_quote_sweep:
+        token=addr(row.get("token"))
+        if token and row.get("ok") and row.get("returned_amount_out_token_18dec") is not None:
+            quotes_50_sda[token]={
+                "amount_out_token_18dec":row["returned_amount_out_token_18dec"],
+                "amount_out_raw":row.get("returned_amount_out_raw"),
+                "fee":row.get("fee"),
+                "quote_status":row.get("quote_status") or "VALIDATED_READ_ONLY",
+                "source":row.get("source") or "historical_buy",
+                "base_tx":row.get("base_tx"),
+                "amount_in_sda":TRADE_SIZE_SDA
+            }
     liquidity.update({
-        "updated_at": now(),
-        "version": 25,
-        "pool": POOL,
-        "router": ROUTER,
-        "trade_size_sda": TRADE_SIZE_SDA,
-        "status": "UNKNOWN",
-        "reason": "V25 reverse-engineers the live Sidra helper/router path using historical 0x414bf389 BUY calls and read-only eth_call simulations. No live liquidity or quote is promoted until return semantics are proven.",
-        "observed_buy_samples": len(usable),
-        "arg1_values": sorted(set(a["arg1"] for a in usable if a.get("arg1") is not None)),
-        "arg2_exact_raw_output_matches": sum(1 for a in usable if a["arg2_matches_raw_output"]),
-        "v25_router_buy_calls": len(buys),
-        "v25_historical_eth_call_successes": sum(1 for x in historical_call_results if x["eth_call_ok"]),
-        "v25_50_sda_probe_ok": bool(discovery.get("v25_50_sda_quote_probe", {}).get("ok")),
-        "v25_historical_return_validation_successes": sum(1 for x in history_validation if x.get("sim_ok")),
-        "v25_historical_return_validation_matched": sum(1 for x in history_validation if x.get("relative_error_pct") is not None and abs(x.get("relative_error_pct")) < 0.01),
-        "v25_quote_sweep_successes": sum(1 for x in quote_sweep if x.get("ok")),
-        "v25_quote_status": "AMOUNT_OUT_VALIDATED" if any(x.get("relative_error_pct") is not None and abs(x.get("relative_error_pct")) < 0.01 for x in history_validation) else ("READ_ONLY_QUOTE_AVAILABLE" if quote_sweep else "UNVERIFIED"),
-        "v25_note": "0x414bf389 matches the 8-word exactInputSingle ABI shape. eth_call returns a uint256 amountOut for funded read-only simulations. Historical return validation compares that value with the actual pool->buyer token transfer; no transaction is broadcast.",
+        "updated_at":now(),"version":26,"pool":POOL,"router":ROUTER,
+        "trade_size_sda":TRADE_SIZE_SDA,
+        "status":"QUOTES_AVAILABLE" if quotes_50_sda else "UNKNOWN",
+        "reason":"V26 promotes successful read-only 50 SDA amountOut results into quotes_50_sda. No live transaction is broadcast.",
+        "observed_buy_samples":len(usable),
+        "arg1_values":sorted(set(a["arg1"] for a in usable if a.get("arg1") is not None)),
+        "arg2_exact_raw_output_matches":sum(1 for a in usable if a["arg2_matches_raw_output"]),
+        "v26_router_buy_calls":len(buys),
+        "v26_historical_eth_call_successes":sum(1 for x in historical_call_results if x["eth_call_ok"]),
+        "v26_50_sda_probe_ok":bool(discovery.get("v25_50_sda_quote_probe",{}).get("ok")),
+        "v26_historical_return_validation_successes":sum(1 for x in history_validation if x.get("sim_ok")),
+        "v26_historical_return_validation_matched":sum(1 for x in history_validation if x.get("relative_error_pct") is not None and abs(x.get("relative_error_pct")) < 0.01),
+        "v26_historical_quote_sweep_successes":sum(1 for x in quote_sweep if x.get("ok")),
+        "v26_candidate_quote_sweep_successes":sum(1 for x in candidate_quote_sweep if x.get("ok")),
+        "v26_quote_count":len(quotes_50_sda),
+        "v26_quote_status":"AMOUNT_OUT_VALIDATED" if quotes_50_sda else ("READ_ONLY_QUOTE_AVAILABLE" if quote_sweep else "UNVERIFIED"),
+        "quotes_50_sda":quotes_50_sda,
+        "v26_note":"Read-only router amountOut quotes are exposed per token. Candidate tokens use their historical BUY calldata when available, otherwise the latest observed fee tier. No transaction is broadcast."
     })
-    save_json(LIQUIDITY_FILE, liquidity)
+    save_json(LIQUIDITY_FILE,liquidity)
+
 
     print()
     print("Saved " + DISCOVERY_FILE)
