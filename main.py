@@ -373,6 +373,104 @@ def gas_fee_sda(tx):
     try:return float(gas)*float(gp)/1e18
     except Exception:return 0.0
 
+
+PINET_SUPABASE_URL="https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/token_transactions"
+PINET_SUPABASE_HEADERS={
+    "apikey":"sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z",
+    "accept-profile":"public",
+}
+PINET_PAGE_SIZE=1000
+PINET_MAX_PORTFOLIO_ROWS=5000
+
+def fetch_pinet_wallet_trades(wallet, max_rows=PINET_MAX_PORTFOLIO_ROWS):
+    """Read-only PinetSwap trade ledger for one wallet.
+
+    PinetSwap's token_transactions rows expose tx_type, volume_in_sda and
+    price_in_sda directly. BUY rows credit the trader at to_address; SELL
+    rows debit the trader at from_address. We use the wallet direction to
+    avoid treating pool-side addresses as the user's trades.
+    """
+    wallet=str(wallet).lower()
+    out=[]
+    offset=0
+    while len(out)<max_rows:
+        params={
+            "select":"id,tx_hash,token_address,from_address,to_address,price_in_sda,volume_in_sda,tx_timestamp,tx_type",
+            "or":f"(from_address.eq.{wallet},to_address.eq.{wallet})",
+            "order":"tx_timestamp.asc",
+            "limit":str(min(PINET_PAGE_SIZE,max_rows-len(out))),
+            "offset":str(offset),
+        }
+        try:
+            r=requests.get(PINET_SUPABASE_URL,params=params,headers=PINET_SUPABASE_HEADERS,timeout=30)
+            r.raise_for_status()
+            page=r.json()
+            if not isinstance(page,list) or not page: break
+            out.extend(page)
+            if len(page)<int(params["limit"]): break
+            offset += len(page)
+        except Exception:
+            break
+    return out[:max_rows]
+
+def portfolio_from_pinet(wallet, meta, max_rows=PINET_MAX_PORTFOLIO_ROWS):
+    """Build FIFO portfolio from PinetSwap's own trade ledger, if available."""
+    rows=fetch_pinet_wallet_trades(wallet,max_rows)
+    if not rows: return None
+    buys=[]; sells=[]; seen=set(); wallet=str(wallet).lower()
+    for x in rows:
+        if not isinstance(x,dict): continue
+        h=str(x.get("tx_hash") or x.get("id") or "")
+        if not h or h in seen: continue
+        token=str(x.get("token_address") or "").lower()
+        side=str(x.get("tx_type") or "").lower().strip()
+        fr=str(x.get("from_address") or "").lower()
+        to=str(x.get("to_address") or "").lower()
+        vol=num(x.get("volume_in_sda")); px=num(x.get("price_in_sda"))
+        if not token or side not in {"buy","sell"} or vol<=0 or px<=0: continue
+        # Direction used by PinetSwap: BUY credits token to to_address; SELL
+        # sends token from from_address. This also prevents pool-side rows
+        # from being attributed to the wallet.
+        if side=="buy" and to!=wallet: continue
+        if side=="sell" and fr!=wallet: continue
+        seen.add(h)
+        amount=vol/px
+        sym=(meta.get(token,{}) or {}).get("symbol") if isinstance(meta,dict) else None
+        base={"tx":h,"timestamp":str(x.get("tx_timestamp") or ""),"token":token,"symbol":sym or token[:10]+"...","amount":amount,"gas_fee_sda":0.0,"side":side.upper()}
+        if side=="buy":
+            base.update({"cost_sda":vol,"price_sda":px}); buys.append(base)
+        else:
+            base.update({"proceeds_sda":vol,"price_sda":px}); sells.append(base)
+    if not buys and not sells: return None
+
+    trades=sorted(buys+sells,key=lambda x:(str(x.get("timestamp")),str(x.get("tx"))))
+    lots={}; realized={}; history=[]
+    for tr in trades:
+        token=tr["token"]
+        if tr["side"]=="BUY":
+            lots.setdefault(token,[]).append({"amount":tr["amount"],"cost_sda":tr["cost_sda"]})
+            history.append(tr)
+        else:
+            qty=tr["amount"]; removed=0.0; q=lots.setdefault(token,[])
+            while qty>1e-12 and q:
+                lot=q[0]; take=min(qty,lot["amount"]); unit=lot["cost_sda"]/lot["amount"] if lot["amount"] else 0.0
+                removed += take*unit; lot["amount"]-=take; lot["cost_sda"]-=take*unit; qty-=take
+                if lot["amount"]<=1e-12: q.pop(0)
+            tr["cost_basis_sda"]=removed
+            realized[token]=realized.get(token,0.0)+(tr.get("proceeds_sda",0.0)-removed)
+            history.append(tr)
+    current={}
+    for token,q in lots.items():
+        amount=sum(z["amount"] for z in q); cost=sum(z["cost_sda"] for z in q)
+        if amount<=1e-12: continue
+        tb=[x for x in buys if x["token"]==token]
+        current[token]={"amount":amount,"cost_sda":cost,"avg_cost_sda":cost/amount if amount else 0.0,"lots":q,
+                        "first_buy_at":tb[0].get("timestamp","") if tb else "","last_buy_at":tb[-1].get("timestamp","") if tb else "",
+                        "age_days":None,"symbol":tb[-1].get("symbol") if tb else token[:10]+"..."}
+    return {"wallet":wallet,"router":"pinet-supabase","updated_at":now(),"buy_count":len(buys),"sell_count":len(sells),
+            "trades":history[-500:],"current":current,"realized_pnl_sda":sum(realized.values()),
+            "source":"PinetSwap token_transactions","source_rows":len(rows),"known_tx_hashes":[x["tx"] for x in history[-500:] if x.get("tx")]}
+
 def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
     """Build a reusable on-chain portfolio ledger. Read-only; no transaction is sent.
 
@@ -382,6 +480,30 @@ def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
     so future purchases are automatically picked up.
     """
     previous=previous if isinstance(previous,dict) else {}
+    # Prefer PinetSwap's exact trade ledger. It contains the same BUY/SELL,
+    # price and SDA volume data used by the Whale Alerts UI, so it gives us
+    # a much cleaner cost basis than guessing router methods.
+    pinet=portfolio_from_pinet(wallet,meta)
+    if pinet and pinet.get("buy_count",0)+pinet.get("sell_count",0)>0:
+        wallet_data=wallet_obj if isinstance(wallet_obj,dict) else wallet_snapshot(md,meta)
+        for token,cur in pinet.get("current",{}).items():
+            h=next((z for z in wallet_data.get("holdings",[]) if str(z.get("address","")).lower()==token),None)
+            if h:
+                cur["symbol"]=h.get("symbol") or cur.get("symbol")
+                cur["price_sda"]=num(h.get("price_sda")); cur["value_sda"]=h.get("value_sda")
+                cur["unrealized_pnl_sda"]=num(cur.get("value_sda"))-num(cur.get("cost_sda")) if cur.get("value_sda") is not None else None
+                cur["unrealized_pnl_pct"]=(cur["unrealized_pnl_sda"]/num(cur.get("cost_sda"))*100) if num(cur.get("cost_sda")) else None
+                cur["cost_basis_status"]="DETECTED"
+        # Keep currently held tokens whose historical trades are outside the
+        # retained ledger, but never invent their cost basis.
+        for h in wallet_data.get("holdings",[]):
+            token=str(h.get("address","")).lower()
+            if not token or token in pinet["current"]: continue
+            pinet["current"][token]={"amount":num(h.get("amount")),"cost_sda":None,"avg_cost_sda":None,"lots":[],
+                "first_buy_at":"","last_buy_at":"","age_days":None,"symbol":h.get("symbol"),
+                "price_sda":num(h.get("price_sda")),"value_sda":h.get("value_sda"),
+                "unrealized_pnl_sda":None,"unrealized_pnl_pct":None,"cost_basis_status":"UNKNOWN"}
+        return pinet
     router=str(ld.get("router") or ld.get("pool_router") or "0x35cAC72Db00e8dAC0e4f7F8A0F53D339E0cC23fb").lower()
     wsda="0xe4095a910209d7be03b55d02f40d4554b1666182".lower()
     txs=explorer_address_transactions(wallet,MAX_PORTFOLIO_TXS)
