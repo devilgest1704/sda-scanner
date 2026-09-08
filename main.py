@@ -8,7 +8,7 @@ MARKET_FILE="market_data.json"; WHALE_FILE="whale_data.json"; META_FILE="token_m
 LIQUIDITY_FILE="liquidity_data.json"; POSITIONS_FILE="positions.json"; WALLET_FILE="wallet_data.json"; PORTFOLIO_FILE="portfolio_data.json"
 INVESTMENT_SDA=50.0; BUY_THRESHOLD=78; MIN_1H_VOLUME_SDA=0.0; MIN_TRADES_1H=2
 TP1_PCT=.05; TP2_PCT=.10; SL_PCT=.04; FEE_RATE=.01; SLIPPAGE_RATE=.001
-MAX_OPEN_POSITIONS=5; MAX_NEW_BUYS_PER_RUN=1; MAX_PORTFOLIO_TXS=1000
+MAX_OPEN_POSITIONS=5; MAX_NEW_BUYS_PER_RUN=1; MAX_PORTFOLIO_TXS=5000
 WALLET_ADDRESS=os.environ.get("WATCH_WALLET","0x0a7415b28d0f3641fd202ced0c4d3a70619e6230").lower()
 EXPLORER_API="https://ledger.sidrachain.com/api/v2"
 TELEGRAM_TOKEN=os.environ.get("TELEGRAM_TOKEN"); CHAT_ID=os.environ.get("CHAT_ID")
@@ -326,6 +326,23 @@ def transfer_token(t):
 def transfer_from(t): return transfer_addr(t.get('from')) if isinstance(t,dict) else ''
 def transfer_to(t): return transfer_addr(t.get('to')) if isinstance(t,dict) else ''
 
+def internal_transactions_for_address(address, limit=5000):
+    """Fetch internal/native SDA movements for the wallet, best effort."""
+    out=[]; params={"items_count":min(100,limit)}
+    try:
+        while len(out)<limit:
+            d=api_get(f"/addresses/{address}/internal-transactions", params)
+            items=d if isinstance(d,list) else d.get("items",[])
+            if not isinstance(items,list) or not items: break
+            out.extend(items)
+            nxt=d.get("next_page_params") if isinstance(d,dict) else None
+            if not isinstance(nxt,dict): break
+            params=nxt
+        return out[:limit]
+    except Exception:
+        return out[:limit]
+
+
 def explorer_address_transactions(address, limit=MAX_PORTFOLIO_TXS):
     """Fetch wallet transactions with Blockscout-style pagination, best effort."""
     out=[]; params={"items_count":min(100,limit)}
@@ -368,6 +385,11 @@ def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
     router=str(ld.get("router") or ld.get("pool_router") or "0x35cAC72Db00e8dAC0e4f7F8A0F53D339E0cC23fb").lower()
     wsda="0xe4095a910209d7be03b55d02f40d4554b1666182".lower()
     txs=explorer_address_transactions(wallet,MAX_PORTFOLIO_TXS)
+    internal_txs=internal_transactions_for_address(wallet,MAX_PORTFOLIO_TXS)
+    internal_by_hash={}
+    for it in internal_txs:
+        ih=tx_hash(it)
+        if ih: internal_by_hash.setdefault(ih,[]).append(it)
     buys=[]; sells=[]
     seen=set()
     for tx in txs:
@@ -376,11 +398,20 @@ def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
         seen.add(h)
         sender=transfer_addr(tx.get("from"))
         if sender and sender!=wallet.lower(): continue
-        raw=raw_input_tx(tx); is_buy=(raw[:10].lower()=="0x414bf389")
+        raw=raw_input_tx(tx); method=raw[:10].lower(); is_buy=(method=="0x414bf389")
         to=transfer_addr(tx.get("to"))
         native_raw=tx.get("value",0)
         if isinstance(native_raw,dict): native_raw=native_raw.get("value",native_raw.get("raw",0))
         native_sda=num(native_raw)/1e18
+        native_in_sda=0.0; native_out_sda=0.0
+        for it in internal_by_hash.get(h,[]):
+            val=it.get("value",it.get("amount",it.get("fee",0)))
+            if isinstance(val,dict): val=val.get("value",val.get("raw",0))
+            try: val_sda=float(val)/1e18
+            except Exception: val_sda=0.0
+            fr=transfer_addr(it.get("from")); to_addr=transfer_addr(it.get("to"))
+            if to_addr==wallet.lower(): native_in_sda += val_sda
+            if fr==wallet.lower(): native_out_sda += val_sda
         transfers=token_transfer_items(wallet,h)
         # Incoming non-WSDA token(s) are buys; outgoing non-WSDA token(s) are sells.
         incoming=[]; outgoing=[]; wsda_out=0.0
@@ -393,8 +424,8 @@ def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
                 continue
             if dest==wallet.lower(): incoming.append((token,amt,t))
             elif fr==wallet.lower(): outgoing.append((token,amt,t))
-        if incoming and (native_sda>0 or wsda_out>0 or method in {"0x414bf389","0x8ab5246f","0xc04b8d59"}):
-            total_out=max(native_sda,wsda_out)
+        if incoming and (native_sda>0 or native_out_sda>0 or wsda_out>0 or method in {"0x414bf389","0x8ab5246f","0xc04b8d59"}):
+            total_out=max(native_sda,native_out_sda,wsda_out)
             # Split total SDA cost proportionally if one tx buys multiple tokens.
             total_tokens=sum(a for _,a,_ in incoming) or 1.0
             for token,amt,t in incoming:
@@ -406,8 +437,8 @@ def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
         for t in transfers:
             token=transfer_token(t); amt=transfer_amount(t)
             if token==wsda and transfer_to(t)==wallet.lower() and amt>0: wsda_in += amt
-        if outgoing and (wsda_in>0 or native_sda>0 or method in {"0xc04b8d59","0x8ab5246f","0x414bf389"}):
-            total_proceeds=max(wsda_in,native_sda)
+        if outgoing and (wsda_in>0 or native_in_sda>0 or native_sda>0 or method in {"0xc04b8d59","0x8ab5246f","0x414bf389"}):
+            total_proceeds=max(wsda_in,native_in_sda,native_sda)
             total_tokens=sum(a for _,a,_ in outgoing) or 1.0
             for token,amt,t in outgoing:
                 mdx=meta.get(token,{}) if isinstance(meta,dict) else {}
@@ -449,7 +480,7 @@ def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
     for h in wallet_data.get("holdings",[]):
         token=str(h.get("address","")).lower()
         if not token or token not in current: continue
-        cur=current[token]; cur["symbol"]=h.get("symbol") or cur.get("symbol") or token[:10]+"..."; cur["price_sda"]=num(h.get("price_sda")); cur["value_sda"]=num(h.get("value_sda")); cur["unrealized_pnl_sda"]=cur["value_sda"]-cur["cost_sda"] if cur["value_sda"] else None; cur["unrealized_pnl_pct"]=(cur["unrealized_pnl_sda"]/cur["cost_sda"]*100) if cur["cost_sda"] else None
+        cur=current[token]; cur["symbol"]=h.get("symbol") or cur.get("symbol") or token[:10]+"..."; cur["price_sda"]=num(h.get("price_sda")); cur["value_sda"]=num(h.get("value_sda")); cur["unrealized_pnl_sda"]=cur["value_sda"]-cur["cost_sda"] if cur["value_sda"] is not None else None; cur["unrealized_pnl_pct"]=(cur["unrealized_pnl_sda"]/cur["cost_sda"]*100) if cur["cost_sda"] else None
         for tr in buys:
             if tr["token"]==token: tr["symbol"]=cur["symbol"]
     # If trade history is incomplete, still expose every token currently held.
