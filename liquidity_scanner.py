@@ -23,7 +23,7 @@ DISCOVERY_FILE = "sidra_swap_discovery.json"
 LIQUIDITY_FILE = "liquidity_data.json"
 
 session = requests.Session()
-session.headers.update({"User-Agent": "sda-scanner/21.0"})
+session.headers.update({"User-Agent": "sda-scanner/22.0"})
 
 
 def now():
@@ -50,7 +50,19 @@ def save_json(path, data):
 
 
 def addr(x):
-    return (x or "").lower()
+    """Normalize Blockscout address fields, which may be strings or nested dicts."""
+    if isinstance(x, str):
+        return x.lower()
+    if isinstance(x, dict):
+        for key in ("hash", "address", "value"):
+            v = x.get(key)
+            if isinstance(v, str) and v:
+                return v.lower()
+            if isinstance(v, dict):
+                nested = addr(v)
+                if nested:
+                    return nested
+    return ""
 
 
 def selector(raw):
@@ -142,9 +154,46 @@ def list_router_txs():
 
 def transaction_detail(tx_hash):
     try:
-        return get_json(f"{EXPLORER_API}/transactions/{tx_hash}")
+        data = get_json(f"{EXPLORER_API}/transactions/{tx_hash}")
+        return data if isinstance(data, dict) else None
     except Exception:
         return None
+
+
+def tx_hash_of(tx):
+    h = tx.get("hash") or tx.get("transaction_hash") or tx.get("tx_hash")
+    return h if isinstance(h, str) else addr(h)
+
+
+def raw_input_of(obj):
+    for key in ("raw_input", "input", "calldata"):
+        v = obj.get(key) if isinstance(obj, dict) else None
+        if isinstance(v, str):
+            return v
+        if isinstance(v, dict):
+            for sub in ("value", "data", "raw_input", "input"):
+                sv = v.get(sub)
+                if isinstance(sv, str):
+                    return sv
+    return ""
+
+
+def numeric_wei(x):
+    if isinstance(x, dict):
+        for key in ("value", "raw", "amount"):
+            if key in x:
+                return numeric_wei(x[key])
+        return 0
+    if x is None:
+        return 0
+    if isinstance(x, int):
+        return x
+    if isinstance(x, str):
+        try:
+            return int(x, 0) if x.startswith("0x") else int(x)
+        except Exception:
+            return 0
+    return 0
 
 
 def transfers_for_tx(tx_hash):
@@ -221,13 +270,13 @@ def decode_uint256_result(result):
 
 
 def analyze(tx):
-    raw = tx.get("raw_input") or ""
+    raw = raw_input_of(tx)
     if selector(raw) != SWAP_SELECTOR:
         return None
     call = decode_call(raw)
     h = tx.get("hash") or tx.get("transaction_hash")
     transfers = transfers_for_tx(h)
-    target = call["token"].lower()
+    target = addr(call["token"])
     wsda = WSDA.lower()
     pool = POOL.lower()
     buyers = [t["from"] for t in transfers if t["token_address"] == wsda and t["to"] == pool and t["value"] > 0]
@@ -299,19 +348,19 @@ def fetch_router_forensics():
     interesting = []
     methods = {}
     for tx in txs:
-        h = tx.get("hash") or tx.get("transaction_hash")
+        h = tx_hash_of(tx)
         if not h:
             continue
         detail = transaction_detail(h)
         if not detail:
             continue
-        raw = detail.get("raw_input") or detail.get("input") or ""
+        raw = raw_input_of(detail)
         sel = selector(raw)
         methods[sel] = methods.get(sel, 0) + 1
         if sel in {BUY_SELECTOR, SELL_SELECTOR}:
             words = decode_words(raw[10:])
             try:
-                value_wei = int(detail.get("value") or "0")
+                value_wei = numeric_wei(detail.get("value"))
             except Exception:
                 value_wei = 0
             transfers = transfers_for_tx(h)
@@ -470,7 +519,7 @@ def validate_historical_math(item, swap):
 
 
 def main():
-    print("💧 LIQUIDITY V21 — ROUTER FORENSICS + HISTORICAL BUY CALL VALIDATION")
+    print("💧 LIQUIDITY V22 — ROBUST ROUTER FORENSICS + HISTORICAL BUY CALL VALIDATION")
     print(f"Pool: {POOL}")
     print(f"Router/helper: {ROUTER}")
     print(f"Target trade: {TRADE_SIZE_SDA:.0f} SDA")
@@ -488,7 +537,7 @@ def main():
     selector_counts = {}
     real = []
     for tx in pool_txs:
-        raw = tx.get("raw_input") or ""
+        raw = raw_input_of(tx)
         sel = selector(raw)
         selector_counts[sel] = selector_counts.get(sel, 0) + 1
         if sel == SWAP_SELECTOR:
@@ -529,11 +578,11 @@ def main():
         for t in item["transfers"]:
             print(f"    {t['symbol'] or t['token_address']} {t['value']} {t['from'][:10]}→{t['to'][:10]}")
 
-    discovery["v21_pool_samples"] = usable
+    discovery["v22_pool_samples"] = usable
 
     # --- Router bytecode / selector inventory ---
     print()
-    print("🧩 V21 ROUTER / HELPER FORENSICS")
+    print("🧩 V22 ROUTER / HELPER FORENSICS")
     code, code_err = eth_get_code(ROUTER)
     if code:
         router_selectors = extract_push4(code)
@@ -555,9 +604,9 @@ def main():
     for sel, count in sorted(router_methods.items(), key=lambda x: -x[1]):
         print(f"    {sel}: {count}")
 
-    discovery["v21_router_selectors"] = router_selectors
-    discovery["v21_router_method_counts"] = router_methods
-    discovery["v21_router_transactions"] = router_interesting[:ROUTER_SAMPLE_COUNT]
+    discovery["v22_router_selectors"] = router_selectors
+    discovery["v22_router_method_counts"] = router_methods
+    discovery["v22_router_transactions"] = router_interesting[:ROUTER_SAMPLE_COUNT]
 
     # --- Historical buy calls: decode calldata and simulate exact historical tx via eth_call ---
     buys = [x for x in router_interesting if x["method"] == BUY_SELECTOR]
@@ -614,7 +663,7 @@ def main():
             "observed_token_output_raw": observed_output,
         })
 
-    discovery["v21_historical_buy_eth_calls"] = historical_call_results
+    discovery["v22_historical_buy_eth_calls"] = historical_call_results
 
     # --- Try exact calldata with 50 SDA only for the first successful historical BUY shape.
     # This is still eth_call only. We do NOT claim it is a quote until the return
@@ -624,7 +673,7 @@ def main():
         target_probe = buys[0]
         words = target_probe["words"]
         print()
-        print("🧪 V21 50 SDA PROBE — SAME BUY METHOD, MODIFIED NATIVE VALUE")
+        print("🧪 V22 50 SDA PROBE — SAME BUY METHOD, MODIFIED NATIVE VALUE")
         print(f"  base tx={target_probe['tx']}")
         print(f"  method={target_probe['method']}")
         print(f"  from={target_probe['from']}")
@@ -645,7 +694,7 @@ def main():
                 print(f"    return[{i}] uint={word_as_uint(w)}")
         else:
             print(f"  error={sim50.get('error')}")
-        discovery["v21_50_sda_probe"] = {
+        discovery["v22_50_sda_probe"] = {
             "base_tx": target_probe["tx"],
             "method": target_probe["method"],
             "from": target_probe["from"],
@@ -659,7 +708,7 @@ def main():
 
     # --- Carry forward pool read-only probes ---
     print()
-    print("🔬 V21 READ-ONLY POOL STATE PROBES")
+    print("🔬 V22 READ-ONLY POOL STATE PROBES")
     probes = []
     for sel, name in KNOWN_READ_SELECTORS.items():
         p = probe_selector(sel, name, POOL)
@@ -669,7 +718,7 @@ def main():
             print(f"  {sel} {name}: OK words={len(words)} result={p['result']}")
         else:
             print(f"  {sel} {name}: REVERT/UNSUPPORTED")
-    discovery["v21_pool_read_only_probes"] = probes
+    discovery["v22_pool_read_only_probes"] = probes
 
     # --- Historical V3 event evidence / math ---
     event_evidence = []
@@ -686,10 +735,10 @@ def main():
                 print(f"    liquidity={sw['liquidity']}")
                 print(f"    tick={sw['tick']}")
 
-    discovery["v21_swap_events"] = event_evidence
+    discovery["v22_swap_events"] = event_evidence
 
     print()
-    print("🧮 V21 HISTORICAL V3 MATH VALIDATION")
+    print("🧮 V22 HISTORICAL V3 MATH VALIDATION")
     math_checks = []
     for ev_item in event_evidence:
         for sw in ev_item.get("swap_events", []):
@@ -703,28 +752,28 @@ def main():
                 chk["observed_token_out"] = item.get("token_out")
                 math_checks.append(chk)
                 print(f"  {ev_item['tx']}: {chk['direction']} error={chk['relative_error_pct']:.6f}%")
-    discovery["v21_math_checks"] = math_checks
-    discovery["v21_math_max_abs_error_pct"] = max((abs(x["relative_error_pct"]) for x in math_checks), default=None)
+    discovery["v22_math_checks"] = math_checks
+    discovery["v22_math_max_abs_error_pct"] = max((abs(x["relative_error_pct"]) for x in math_checks), default=None)
 
     save_json(DISCOVERY_FILE, discovery)
 
     liquidity = load_json(LIQUIDITY_FILE, {})
     liquidity.update({
         "updated_at": now(),
-        "version": 21,
+        "version": 22,
         "pool": POOL,
         "router": ROUTER,
         "trade_size_sda": TRADE_SIZE_SDA,
         "status": "UNKNOWN",
-        "reason": "V21 reverse-engineers the live Sidra helper/router path using historical 0x414bf389 BUY calls and read-only eth_call simulations. No live liquidity or quote is promoted until return semantics are proven.",
+        "reason": "V22 reverse-engineers the live Sidra helper/router path using historical 0x414bf389 BUY calls and read-only eth_call simulations. No live liquidity or quote is promoted until return semantics are proven.",
         "observed_buy_samples": len(usable),
         "arg1_values": sorted(set(a["arg1"] for a in usable if a.get("arg1") is not None)),
         "arg2_exact_raw_output_matches": sum(1 for a in usable if a["arg2_matches_raw_output"]),
-        "v21_router_buy_calls": len(buys),
-        "v21_historical_eth_call_successes": sum(1 for x in historical_call_results if x["eth_call_ok"]),
-        "v21_50_sda_probe_ok": bool(discovery.get("v21_50_sda_probe", {}).get("ok")),
-        "v21_quote_status": "UNVERIFIED",
-        "v21_note": "Historical router BUY calls are simulated with eth_call only. A successful return is not promoted as a quote until it is matched against observed token output and calldata semantics.",
+        "v22_router_buy_calls": len(buys),
+        "v22_historical_eth_call_successes": sum(1 for x in historical_call_results if x["eth_call_ok"]),
+        "v22_50_sda_probe_ok": bool(discovery.get("v22_50_sda_probe", {}).get("ok")),
+        "v22_quote_status": "UNVERIFIED",
+        "v22_note": "Historical router BUY calls are simulated with eth_call only. A successful return is not promoted as a quote until it is matched against observed token output and calldata semantics.",
     })
     save_json(LIQUIDITY_FILE, liquidity)
 
@@ -732,7 +781,7 @@ def main():
     print("Saved " + DISCOVERY_FILE)
     print("Saved " + LIQUIDITY_FILE)
     print("Overall liquidity status: UNKNOWN")
-    print("Next: identify 0x414bf389 argument semantics and whether its eth_call return contains the exact current token quote.")
+    print("Next: decode 0x414bf389 arguments and validate its eth_call return against observed BUY outputs; no live quote is promoted yet.")
 
 
 if __name__ == "__main__":
