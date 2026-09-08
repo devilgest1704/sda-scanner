@@ -42,6 +42,9 @@ jobs:
       - name: Update token metadata
         run: python token_metadata.py
 
+      - name: Discover token icons
+        run: python token_icons.py
+
       - name: Run liquidity scanner
         run: python liquidity_scanner.py
 
@@ -51,10 +54,16 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
 
+      - name: Calculate paper trading statistics
+        run: python paper_stats.py
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+
       - name: Ensure state files exist
         run: |
           touch state.json whale_state.json whale_data.json whale_history.json portfolio_data.json
-          touch market_data.json token_metadata.json liquidity_data.json
+          touch market_data.json token_metadata.json liquidity_data.json paper_stats.json
           touch sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json portfolio_data.json
 
       - name: Validate JSON state
@@ -64,7 +73,7 @@ jobs:
           from pathlib import Path
           files = [
             "state.json","whale_state.json","whale_data.json","whale_history.json","portfolio_data.json",
-            "market_data.json","token_metadata.json","liquidity_data.json",
+            "market_data.json","token_metadata.json","liquidity_data.json","paper_stats.json",
             "sidra_swap_discovery.json","pending_signals.json","positions.json","wallet_data.json"
           ]
           for name in files:
@@ -103,7 +112,7 @@ jobs:
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
-          git add state.json whale_state.json whale_data.json whale_history.json portfolio_data.json             market_data.json token_metadata.json liquidity_data.json sidra_swap_discovery.json             pending_signals.json positions.json wallet_data.json
+          git add state.json whale_state.json whale_data.json whale_history.json portfolio_data.json             market_data.json token_metadata.json liquidity_data.json paper_stats.json             sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json
           if git diff --staged --quiet; then
             echo "No state changes to commit."
           else
