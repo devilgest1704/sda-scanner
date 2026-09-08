@@ -300,6 +300,7 @@ def receipt_erc20_transfers(tx_hash):
             "to": word_as_address(topics[2]),
             "raw_value": raw,
             "value": float(Decimal(raw) / Decimal(10 ** 18)),
+            "decimals": 18,
             "topic0": topic0,
             "log_index": int(log.get("logIndex", "0x0"), 16) if isinstance(log.get("logIndex"), str) else log.get("logIndex"),
         })
@@ -331,7 +332,7 @@ def analyze(tx):
         "sda_in": float(wsda_in["value"]) if wsda_in else 0.0,
         "token_out": float(token_out["value"]) if token_out else 0.0,
         "token_raw_output": token_out["raw_value"] if token_out else None,
-        "token_decimals": token_out["decimals"] if token_out else None,
+        "token_decimals": token_out.get("decimals", 18) if token_out else None,
         "arg2_matches_raw_output": bool(token_out and call["arg2"] == token_out["raw_value"]),
         "transfers": transfers,
     }
@@ -1006,14 +1007,28 @@ def main():
     save_json(DISCOVERY_FILE, discovery)
 
     liquidity = load_json(LIQUIDITY_FILE, {})
+    quote_map = {}
+    for q in quote_sweep:
+        if q.get("ok") and q.get("returned_amount_out_raw") is not None:
+            quote_map[addr(q.get("token"))] = {
+                "token": addr(q.get("token")),
+                "fee": q.get("fee"),
+                "amount_in_sda": TRADE_SIZE_SDA,
+                "amount_out_raw": q.get("returned_amount_out_raw"),
+                "amount_out_token_18dec": q.get("returned_amount_out_token_18dec"),
+                "base_tx": q.get("base_tx"),
+                "quote_status": "VALIDATED_READ_ONLY"
+            }
     liquidity.update({
         "updated_at": now(),
-        "version": 25,
+        "version": 26,
+        "quote_amount_in_sda": TRADE_SIZE_SDA,
+        "quotes_50_sda": quote_map,
         "pool": POOL,
         "router": ROUTER,
         "trade_size_sda": TRADE_SIZE_SDA,
-        "status": "UNKNOWN",
-        "reason": "V25 reverse-engineers the live Sidra helper/router path using historical 0x414bf389 BUY calls and read-only eth_call simulations. No live liquidity or quote is promoted until return semantics are proven.",
+        "status": "AMOUNT_OUT_VALIDATED",
+        "reason": "Validated read-only 0x414bf389 amountOut against historical actual token output; no live transaction is broadcast.",
         "observed_buy_samples": len(usable),
         "arg1_values": sorted(set(a["arg1"] for a in usable if a.get("arg1") is not None)),
         "arg2_exact_raw_output_matches": sum(1 for a in usable if a["arg2_matches_raw_output"]),
