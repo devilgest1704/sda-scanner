@@ -109,715 +109,370 @@ def close(p,a,current,reason):
     p["closed_trades"].append(z); del p["positions"][a]; p["closed_trades"]=p["closed_trades"][-500:]; return z
 
 def _append_holding(w, md, meta, address, amount, decimals=18, symbol=None):
-    address=str(address or '').lower()
-    amount=num(amount)
+    address=str(address or '').lower(); amount=num(amount)
     if not address or amount <= 0:return
-    mdx=meta.get(address,{}) if isinstance(meta,dict) else {}
-    sym=mdx.get('symbol') or symbol or address[:10]+'...'
-    td=(md.get('tokens',{}) or {}).get(address,{}) if isinstance(md,dict) else {}
-    an=td.get('analysis',td) if isinstance(td,dict) else {}
-    px=num(an.get('price_in_sda'))
-    val=amount*px if px>0 else None
+    mdx=meta.get(address,{}) if isinstance(meta,dict) else {}; sym=mdx.get('symbol') or symbol or address[:10]+'...'
+    td=(md.get('tokens',{}) or {}).get(address,{}) if isinstance(md,dict) else {}; an=td.get('analysis',td) if isinstance(td,dict) else {}
+    px=num(an.get('price_in_sda')); val=amount*px if px>0 else None
     for h in w['holdings']:
         if h.get('address')==address:
-            h['amount'] += amount
-            h['decimals'] = int(decimals or h.get('decimals',18))
-            if symbol and not h.get('symbol'): h['symbol']=symbol
-            if val is not None: h['value_sda']=h['amount']*px
+            h['amount'] += amount; h['decimals']=int(decimals or h.get('decimals',18));
+            if symbol and not h.get('symbol'):h['symbol']=symbol
+            if val is not None:h['value_sda']=h['amount']*px
             return
     w['holdings'].append({'address':address,'symbol':sym,'amount':amount,'decimals':int(decimals or 18),'price_sda':px,'value_sda':val})
 
 def _unwrap_items(obj):
-    if isinstance(obj,list): return obj
-    if not isinstance(obj,dict): return []
+    if isinstance(obj,list):return obj
+    if not isinstance(obj,dict):return []
     for k in ('items','balances','result','data','tokens','token_balances'):
         v=obj.get(k)
-        if isinstance(v,list): return v
+        if isinstance(v,list):return v
         if isinstance(v,dict):
             x=_unwrap_items(v)
             if x:return x
     return []
 
 def _token_address(obj):
-    if isinstance(obj,str):
-        return obj.lower() if obj.startswith('0x') else ''
-    if not isinstance(obj,dict): return ''
+    if isinstance(obj,str):return obj.lower() if obj.startswith('0x') else ''
+    if not isinstance(obj,dict):return ''
     for k in ('address','address_hash','hash','token_address','tokenAddress','contract_address','contract'):
         v=obj.get(k)
-        if isinstance(v,str) and v.startswith('0x'): return v.lower()
+        if isinstance(v,str) and v.startswith('0x'):return v.lower()
     return ''
 
 def _token_info(b):
-    t=b.get('token') if isinstance(b,dict) else {}
-    if not isinstance(t,dict): t={}
-    a=_token_address(t) or _token_address(b)
-    sym=t.get('symbol') or b.get('symbol')
-    dec=t.get('decimals',b.get('decimals',18))
-    try: dec=int(dec)
-    except: dec=18
+    t=b.get('token') if isinstance(b,dict) else {}; t=t if isinstance(t,dict) else {}
+    a=_token_address(t) or _token_address(b); sym=t.get('symbol') or b.get('symbol'); dec=t.get('decimals',b.get('decimals',18))
+    try:dec=int(dec)
+    except:dec=18
     return a,sym,dec
 
 def _raw_balance(b):
-    # Blockscout variants: value/balance/token_balance, sometimes nested.
     candidates=[]
     if isinstance(b,dict):
         for k in ('value','balance','token_balance','tokenBalance','amount','raw_value','rawValue','total'):
-            if b.get(k) not in (None,''): candidates.append(b.get(k))
+            if b.get(k) not in (None,''):candidates.append(b.get(k))
         t=b.get('token')
         if isinstance(t,dict):
             for k in ('balance','value','token_balance'):
-                if t.get(k) not in (None,''): candidates.append(t.get(k))
+                if t.get(k) not in (None,''):candidates.append(t.get(k))
     for raw in candidates:
-        if isinstance(raw,dict): raw=raw.get('value',raw.get('raw',raw.get('amount')))
+        if isinstance(raw,dict):raw=raw.get('value',raw.get('raw',raw.get('amount')))
         try:
-            if isinstance(raw,str) and raw.lower().startswith('0x'): return int(raw,16)
+            if isinstance(raw,str) and raw.lower().startswith('0x'):return int(raw,16)
             return float(raw)
-        except: continue
+        except:continue
     return None
 
 def _amount_from_transfer(t):
-    if not isinstance(t,dict): return 0.0
+    if not isinstance(t,dict):return 0.0
     tok=t.get('token') or {}
-    try: dec=int(tok.get('decimals',t.get('decimals',18)))
-    except: dec=18
+    try:dec=int(tok.get('decimals',t.get('decimals',18)))
+    except:dec=18
     raw=t.get('total',t.get('value',t.get('amount',t.get('token_value',t.get('tokenValue',0)))))
-    if isinstance(raw,dict):
-        raw=raw.get('value',raw.get('raw',raw.get('amount')))
-    try:
-        return float(raw)/(10**dec)
-    except: return 0.0
+    if isinstance(raw,dict):raw=raw.get('value',raw.get('raw',raw.get('amount')))
+    try:return float(raw)/(10**dec)
+    except:return 0.0
 
-def token_transfers_for_address(address, limit=5000):
+def token_transfers_for_address(address,limit=5000):
     out=[]; params={'items_count':min(100,limit)}
     try:
         while len(out)<limit:
-            d=api_get(f'/addresses/{address}/token-transfers',params)
-            items=d if isinstance(d,list) else d.get('items',[])
-            if not isinstance(items,list) or not items: break
-            out.extend(items)
-            nxt=d.get('next_page_params') if isinstance(d,dict) else None
-            if not isinstance(nxt,dict): break
+            d=api_get(f'/addresses/{address}/token-transfers',params); items=d if isinstance(d,list) else d.get('items',[])
+            if not isinstance(items,list) or not items:break
+            out.extend(items); nxt=d.get('next_page_params') if isinstance(d,dict) else None
+            if not isinstance(nxt,dict):break
             params=nxt
         return out[:limit]
-    except Exception as e:
-        return out[:limit]
+    except:return out[:limit]
 
 def wallet_snapshot(md,meta):
     w={'wallet':WALLET_ADDRESS,'native_sda':None,'holdings':[],'total_token_value_sda':0.0,'total_value_sda':None,'updated_at':now(),'error':None,'holding_source':None}
     try:
-        d=api_get(f'/addresses/{WALLET_ADDRESS}')
-        raw=d.get('coin_balance',d.get('balance')) if isinstance(d,dict) else None
-        if isinstance(raw,dict): raw=raw.get('value',raw.get('raw',raw.get('balance')))
+        d=api_get(f'/addresses/{WALLET_ADDRESS}'); raw=d.get('coin_balance',d.get('balance')) if isinstance(d,dict) else None
+        if isinstance(raw,dict):raw=raw.get('value',raw.get('raw',raw.get('balance')))
         if raw is not None:
-            if isinstance(raw,str) and raw.lower().startswith('0x'): raw=int(raw,16)
+            if isinstance(raw,str) and raw.lower().startswith('0x'):raw=int(raw,16)
             w['native_sda']=num(raw)/1e18
-    except Exception as e: w['error']=f'native balance: {e}'
-
-    # Blockscout exposes both /token-balances (array) and /tokens (paginated).
+    except Exception as e:w['error']=f'native balance: {e}'
     sources=[]
-    for path,params in [
-        (f'/addresses/{WALLET_ADDRESS}/token-balances',None),
-        (f'/addresses/{WALLET_ADDRESS}/tokens',{'type':'ERC-20','items_count':100})
-    ]:
+    for path,params in [(f'/addresses/{WALLET_ADDRESS}/token-balances',None),(f'/addresses/{WALLET_ADDRESS}/tokens',{'type':'ERC-20','items_count':100})]:
         try:
-            d=api_get(path,params)
-            items=_unwrap_items(d)
-            if items: sources.append((path,items))
+            d=api_get(path,params); items=_unwrap_items(d)
+            if items:sources.append((path,items))
         except Exception as e:
-            if not sources:
-                if w['error']: w['error'] += f' | {path}: {e}'
-                else: w['error']=f'{path}: {e}'
+            if not sources:w['error']=f'{w["error"]+" | " if w["error"] else ""}{path}: {e}'
     for path,items in sources:
         before=len(w['holdings'])
         for b in items:
-            if not isinstance(b,dict): continue
+            if not isinstance(b,dict):continue
             a,sym,dec=_token_info(b)
-            if not a: continue
+            if not a:continue
             raw=_raw_balance(b)
-            if raw is None: continue
-            # /tokens and /token-balances normally expose integer token units.
-            # Guard against already-formatted decimal balances by only scaling when needed.
-            try: amt=float(raw)/(10**dec)
-            except: continue
-            if amt>0: _append_holding(w,md,meta,a,amt,dec,sym)
-        if len(w['holdings'])>before:
-            w['holding_source']=path
-            break
-
-    # Last-resort reconstruction from ERC-20 transfer deltas.
+            if raw is None:continue
+            try:amt=float(raw)/(10**dec)
+            except:continue
+            if amt>0:_append_holding(w,md,meta,a,amt,dec,sym)
+        if len(w['holdings'])>before:w['holding_source']=path;break
     if not w['holdings']:
         try:
-            transfers=token_transfers_for_address(WALLET_ADDRESS,5000)
-            net={}; info={}; wallet=WALLET_ADDRESS.lower()
+            transfers=token_transfers_for_address(WALLET_ADDRESS,5000); net={};info={};wallet=WALLET_ADDRESS.lower()
             for t in transfers:
-                if not isinstance(t,dict): continue
-                tok=t.get('token') or {}
-                a=_token_address(tok) or _token_address(t)
-                amt=_amount_from_transfer(t)
-                if not a or amt<=0: continue
-                fr=transfer_addr(t.get('from')); to=transfer_addr(t.get('to'))
-                if to==wallet: net[a]=net.get(a,0.0)+amt
-                if fr==wallet: net[a]=net.get(a,0.0)-amt
-                try: dec=int(tok.get('decimals',t.get('decimals',18)))
-                except: dec=18
+                if not isinstance(t,dict):continue
+                tok=t.get('token') or {}; a=_token_address(tok) or _token_address(t); amt=_amount_from_transfer(t)
+                if not a or amt<=0:continue
+                fr=transfer_addr(t.get('from'));to=transfer_addr(t.get('to'))
+                if to==wallet:net[a]=net.get(a,0)+amt
+                if fr==wallet:net[a]=net.get(a,0)-amt
+                try:dec=int(tok.get('decimals',t.get('decimals',18)))
+                except:dec=18
                 info[a]=(dec,tok.get('symbol') or t.get('symbol'))
             for a,amt in net.items():
                 if amt>1e-12:
-                    dec,sym=info.get(a,(18,None)); _append_holding(w,md,meta,a,amt,dec,sym)
-            if w['holdings']: w['holding_source']='reconstructed from token-transfers'
-        except Exception as e:
-            w['error']=f"{w['error'] or ''} transfer fallback: {e}".strip()
+                    dec,sym=info.get(a,(18,None));_append_holding(w,md,meta,a,amt,dec,sym)
+            if w['holdings']:w['holding_source']='reconstructed from token-transfers'
+        except Exception as e:w['error']=f"{w['error'] or ''} transfer fallback: {e}".strip()
     w['total_token_value_sda']=sum(num(h.get('value_sda')) for h in w['holdings'] if h.get('value_sda') is not None)
-    if w['native_sda'] is not None: w['total_value_sda']=w['native_sda']+w['total_token_value_sda']
-    save(WALLET_FILE,w); return w
-
+    if w['native_sda'] is not None:w['total_value_sda']=w['native_sda']+w['total_token_value_sda']
+    save(WALLET_FILE,w);return w
 
 def tx_hash(x):
-    if not isinstance(x,dict): return ""
-    h=x.get("hash") or x.get("transaction_hash") or x.get("tx_hash")
-    return h if isinstance(h,str) else ""
-
+    if not isinstance(x,dict):return ''
+    h=x.get('hash') or x.get('transaction_hash') or x.get('tx_hash');return h if isinstance(h,str) else ''
 def tx_timestamp(x):
-    if not isinstance(x,dict): return ""
-    for k in ("timestamp","block_timestamp","created_at"):
+    if not isinstance(x,dict):return ''
+    for k in ('timestamp','block_timestamp','created_at'):
         v=x.get(k)
-        if v:
-            return str(v)
-    return ""
-
+        if v:return str(v)
+    return ''
 def raw_input_tx(x):
-    if not isinstance(x,dict): return ""
-    for k in ("raw_input","input","calldata"):
+    if not isinstance(x,dict):return ''
+    for k in ('raw_input','input','calldata'):
         v=x.get(k)
-        if isinstance(v,str): return v
+        if isinstance(v,str):return v
         if isinstance(v,dict):
-            for sk in ("value","data","raw_input","input"):
+            for sk in ('value','data','raw_input','input'):
                 sv=v.get(sk)
-                if isinstance(sv,str): return sv
-    return ""
-
-def token_transfer_items(wallet, txh):
+                if isinstance(sv,str):return sv
+    return ''
+def token_transfer_items(wallet,txh):
     try:
-        d=api_get(f"/transactions/{txh}/token-transfers")
-        items=d if isinstance(d,list) else d.get("items",[])
-        return items if isinstance(items,list) else []
-    except Exception:
-        return []
-
+        d=api_get(f'/transactions/{txh}/token-transfers');items=d if isinstance(d,list) else d.get('items',[]);return items if isinstance(items,list) else []
+    except:return []
 def transfer_addr(x):
-    if isinstance(x,str): return x.lower()
+    if isinstance(x,str):return x.lower()
     if isinstance(x,dict):
         for k in ('hash','address','address_hash','value'):
             v=x.get(k)
-            if isinstance(v,str) and v.startswith('0x'): return v.lower()
+            if isinstance(v,str) and v.startswith('0x'):return v.lower()
             if isinstance(v,dict):
                 z=transfer_addr(v)
                 if z:return z
     return ''
-
-def transfer_amount(t):
-    return _amount_from_transfer(t)
-
+def transfer_amount(t):return _amount_from_transfer(t)
 def transfer_token(t):
-    if not isinstance(t,dict): return ''
-    tok=t.get('token') or {}
-    return _token_address(tok) or _token_address(t)
-
-def transfer_from(t): return transfer_addr(t.get('from')) if isinstance(t,dict) else ''
-def transfer_to(t): return transfer_addr(t.get('to')) if isinstance(t,dict) else ''
-
-def internal_transactions_for_address(address, limit=5000):
-    """Fetch internal/native SDA movements for the wallet, best effort."""
-    out=[]; params={"items_count":min(100,limit)}
+    if not isinstance(t,dict):return ''
+    tok=t.get('token') or {};return _token_address(tok) or _token_address(t)
+def transfer_from(t):return transfer_addr(t.get('from')) if isinstance(t,dict) else ''
+def transfer_to(t):return transfer_addr(t.get('to')) if isinstance(t,dict) else ''
+def internal_transactions_for_address(address,limit=5000):
+    out=[];params={'items_count':min(100,limit)}
     try:
         while len(out)<limit:
-            d=api_get(f"/addresses/{address}/internal-transactions", params)
-            items=d if isinstance(d,list) else d.get("items",[])
-            if not isinstance(items,list) or not items: break
-            out.extend(items)
-            nxt=d.get("next_page_params") if isinstance(d,dict) else None
-            if not isinstance(nxt,dict): break
+            d=api_get(f'/addresses/{address}/internal-transactions',params);items=d if isinstance(d,list) else d.get('items',[])
+            if not isinstance(items,list) or not items:break
+            out.extend(items);nxt=d.get('next_page_params') if isinstance(d,dict) else None
+            if not isinstance(nxt,dict):break
             params=nxt
         return out[:limit]
-    except Exception:
-        return out[:limit]
-
-
-def explorer_address_transactions(address, limit=MAX_PORTFOLIO_TXS):
-    """Fetch wallet transactions with Blockscout-style pagination, best effort."""
-    out=[]; params={"items_count":min(100,limit)}
+    except:return out[:limit]
+def explorer_address_transactions(address,limit=MAX_PORTFOLIO_TXS):
+    out=[];params={'items_count':min(100,limit)}
     try:
         while len(out)<limit:
-            d=api_get(f"/addresses/{address}/transactions", params)
-            items=d if isinstance(d,list) else d.get("items",[])
-            if not isinstance(items,list) or not items: break
-            out.extend(items)
-            nxt=d.get("next_page_params") if isinstance(d,dict) else None
-            if not isinstance(nxt,dict): break
+            d=api_get(f'/addresses/{address}/transactions',params);items=d if isinstance(d,list) else d.get('items',[])
+            if not isinstance(items,list) or not items:break
+            out.extend(items);nxt=d.get('next_page_params') if isinstance(d,dict) else None
+            if not isinstance(nxt,dict):break
             params=nxt
-            if len(out)>=limit: break
         return out[:limit]
-    except Exception:
-        return out[:limit]
-
+    except:return out[:limit]
 def gas_fee_sda(tx):
     if not isinstance(tx,dict):return 0.0
-    # Blockscout commonly exposes fee directly in wei; otherwise derive gas*gas_price.
-    raw=tx.get("fee")
-    if isinstance(raw,dict): raw=raw.get("value",raw.get("raw"))
+    raw=tx.get('fee');raw=raw.get('value',raw.get('raw')) if isinstance(raw,dict) else raw
     if raw is not None:
         try:return float(raw)/1e18
-        except Exception:pass
-    gas=tx.get("gas_used",tx.get("gasUsed"))
-    gp=tx.get("gas_price",tx.get("gasPrice"))
+        except:pass
+    gas=tx.get('gas_used',tx.get('gasUsed'));gp=tx.get('gas_price',tx.get('gasPrice'))
     try:return float(gas)*float(gp)/1e18
-    except Exception:return 0.0
-
+    except:return 0.0
 
 PINET_SUPABASE_URL="https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/token_transactions"
-PINET_SUPABASE_HEADERS={
-    "apikey":"sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z",
-    "accept-profile":"public",
-}
-PINET_PAGE_SIZE=1000
-PINET_MAX_PORTFOLIO_ROWS=5000
+PINET_SUPABASE_HEADERS={"apikey":"sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z","accept-profile":"public"}
+PINET_PAGE_SIZE=1000;PINET_MAX_PORTFOLIO_ROWS=5000
 
-def fetch_pinet_wallet_trades(wallet, max_rows=PINET_MAX_PORTFOLIO_ROWS):
-    """Fetch the wallet's own PinetSwap trade history using PinetSwap's exact query.
-
-    This mirrors the request used by the PinetSwap Wallet/P&L view:
-      BUY  => tx_type=buy  AND to_address=wallet
-      SELL => tx_type=sell AND from_address=wallet
-
-    Unlike the whale feed, these address fields are intentionally used here because
-    PinetSwap itself uses them to identify the wallet's side of a swap.  The `amount`
-    column is the actual token quantity, so it is preferred over volume/price math.
-    """
+def fetch_pinet_wallet_trades(wallet,max_rows=PINET_MAX_PORTFOLIO_ROWS):
     wallet=str(wallet).lower()
-    if not wallet: return []
-    out=[]
-    offset=0
-    page_size=min(PINET_PAGE_SIZE,max_rows)
+    if not wallet:return []
+    out=[];offset=0;page_size=min(PINET_PAGE_SIZE,max_rows)
     while len(out)<max_rows:
-        take=min(page_size,max_rows-len(out))
-        params={
-            'select':'tx_hash,token_address,amount,volume_in_sda,price_in_sda,block_number,tx_timestamp,tx_type',
-            'or':f'(and(tx_type.eq.buy,to_address.eq.{wallet}),and(tx_type.eq.sell,from_address.eq.{wallet}))',
-            'order':'block_number.asc',
-            'offset':str(offset),
-            'limit':str(take),
-        }
+        take=min(page_size,max_rows-len(out));params={'select':'tx_hash,token_address,amount,volume_in_sda,price_in_sda,block_number,tx_timestamp,tx_type','or':f'(and(tx_type.eq.buy,to_address.eq.{wallet}),and(tx_type.eq.sell,from_address.eq.{wallet}))','order':'block_number.asc','offset':str(offset),'limit':str(take)}
         try:
-            r=requests.get(PINET_SUPABASE_URL,params=params,headers=PINET_SUPABASE_HEADERS,timeout=30)
-            r.raise_for_status()
-            page=r.json()
-        except Exception:
-            break
-        if not isinstance(page,list) or not page:
-            break
+            r=requests.get(PINET_SUPABASE_URL,params=params,headers=PINET_SUPABASE_HEADERS,timeout=30);r.raise_for_status();page=r.json()
+        except:break
+        if not isinstance(page,list) or not page:break
         out.extend(page)
-        if len(page)<take:
-            break
-        offset += len(page)
+        if len(page)<take:break
+        offset+=len(page)
     return out[:max_rows]
 
-def portfolio_from_pinet(wallet, meta, max_rows=PINET_MAX_PORTFOLIO_ROWS):
-    """Build FIFO portfolio from PinetSwap's wallet trade ledger."""
+def portfolio_from_pinet(wallet,meta,max_rows=PINET_MAX_PORTFOLIO_ROWS):
     rows=fetch_pinet_wallet_trades(wallet,max_rows)
-    if not rows: return None
-    buys=[]; sells=[]; seen=set(); wallet=str(wallet).lower()
+    if not rows:return None
+    buys=[];sells=[];seen=set();wallet=str(wallet).lower()
     for x in rows:
-        if not isinstance(x,dict): continue
-        h=str(x.get("tx_hash") or "")
-        token=str(x.get("token_address") or "").lower()
-        side=str(x.get("tx_type") or "").lower().strip()
-        vol=num(x.get("volume_in_sda")); px=num(x.get("price_in_sda"))
-        amount=num(x.get("amount"))
-        # PinetSwap supplies the exact token amount. Only fall back to volume/price
-        # for older rows where amount is absent.
-        if amount<=0 and vol>0 and px>0: amount=vol/px
-        if not h or not token or side not in {"buy","sell"} or amount<=0 or vol<=0: continue
+        if not isinstance(x,dict):continue
+        h=str(x.get('tx_hash') or '');token=str(x.get('token_address') or '').lower();side=str(x.get('tx_type') or '').lower().strip();vol=num(x.get('volume_in_sda'));px=num(x.get('price_in_sda'));amount=num(x.get('amount'))
+        if amount<=0 and vol>0 and px>0:amount=vol/px
+        if not h or not token or side not in {'buy','sell'} or amount<=0 or vol<=0:continue
         key=(h.lower(),token,side)
-        if key in seen: continue
-        seen.add(key)
-        sym=(meta.get(token,{}) or {}).get("symbol") if isinstance(meta,dict) else None
-        base={
-            "tx":h,
-            "block_number":int(num(x.get("block_number"))) if num(x.get("block_number")) else 0,
-            "timestamp":str(x.get("tx_timestamp") or ""),
-            "token":token,
-            "symbol":sym or token[:10]+"...",
-            "amount":amount,
-            "gas_fee_sda":0.0,
-            "side":side.upper(),
-            "price_sda":px,
-        }
-        if side=="buy":
-            base["cost_sda"]=vol; buys.append(base)
-        else:
-            base["proceeds_sda"]=vol; sells.append(base)
-
-    if not buys and not sells: return None
-
-    trades=sorted(buys+sells,key=lambda x:(x.get("block_number",0),str(x.get("timestamp")),str(x.get("tx"))))
-    lots={}; realized={}; history=[]
+        if key in seen:continue
+        seen.add(key);sym=(meta.get(token,{}) or {}).get('symbol') if isinstance(meta,dict) else None
+        base={'tx':h,'block_number':int(num(x.get('block_number'))) if num(x.get('block_number')) else 0,'timestamp':str(x.get('tx_timestamp') or ''),'token':token,'symbol':sym or token[:10]+'...','amount':amount,'gas_fee_sda':0.0,'side':side.upper(),'price_sda':px}
+        if side=='buy':base['cost_sda']=vol;buys.append(base)
+        else:base['proceeds_sda']=vol;sells.append(base)
+    if not buys and not sells:return None
+    trades=sorted(buys+sells,key=lambda x:(x.get('block_number',0),str(x.get('timestamp')),str(x.get('tx'))));lots={};realized={};history=[]
     for tr in trades:
-        token=tr["token"]
-        if tr["side"]=="BUY":
-            lots.setdefault(token,[]).append({"amount":tr["amount"],"cost_sda":tr["cost_sda"]})
-            history.append(tr)
-        else:
-            qty=tr["amount"]; removed=0.0; q=lots.setdefault(token,[])
-            while qty>1e-12 and q:
-                lot=q[0]
-                take=min(qty,lot["amount"])
-                unit=lot["cost_sda"]/lot["amount"] if lot["amount"] else 0.0
-                removed += take*unit
-                lot["amount"]-=take
-                lot["cost_sda"]-=take*unit
-                qty-=take
-                if lot["amount"]<=1e-12: q.pop(0)
-            tr["cost_basis_sda"]=removed
-            tr["unmatched_amount"]=max(0.0,qty)
-            realized[token]=realized.get(token,0.0)+(tr.get("proceeds_sda",0.0)-removed)
-            history.append(tr)
-
-    current={}
-    for token,q in lots.items():
-        amount=sum(z["amount"] for z in q); cost=sum(z["cost_sda"] for z in q)
-        if amount<=1e-12: continue
-        tb=[x for x in buys if x["token"]==token]
-        current[token]={
-            "amount":amount,
-            "cost_sda":cost,
-            "avg_cost_sda":cost/amount if amount else 0.0,
-            "lots":q,
-            "first_buy_at":tb[0].get("timestamp","") if tb else "",
-            "last_buy_at":tb[-1].get("timestamp","") if tb else "",
-            "age_days":None,
-            "symbol":tb[-1].get("symbol") if tb else token[:10]+"...",
-        }
-    return {
-        "wallet":wallet,
-        "router":"pinet-supabase-wallet-query",
-        "updated_at":now(),
-        "buy_count":len(buys),
-        "sell_count":len(sells),
-        "trades":history[-500:],
-        "current":current,
-        "realized_pnl_sda":sum(realized.values()),
-        "source":"PinetSwap token_transactions wallet query",
-        "source_rows":len(rows),
-        "known_tx_hashes":[x["tx"] for x in history[-500:] if x.get("tx")],
-    }
-
-def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
-    """Build a reusable on-chain portfolio ledger. Read-only; no transaction is sent.
-
-    Buys are inferred from wallet-originated router swaps that transfer a non-WSDA
-    token into the wallet. Cost is native SDA value when available, otherwise the
-    outgoing WSDA transfer in the same transaction. The ledger is rebuilt each run,
-    so future purchases are automatically picked up.
-    """
-    previous=previous if isinstance(previous,dict) else {}
-    # Prefer PinetSwap's exact trade ledger. It contains the same BUY/SELL,
-    # price and SDA volume data used by the Whale Alerts UI, so it gives us
-    # a much cleaner cost basis than guessing router methods.
-    pinet=portfolio_from_pinet(wallet,meta)
-    if pinet and pinet.get("buy_count",0)+pinet.get("sell_count",0)>0:
-        wallet_data=wallet_obj if isinstance(wallet_obj,dict) else wallet_snapshot(md,meta)
-        for token,cur in pinet.get("current",{}).items():
-            h=next((z for z in wallet_data.get("holdings",[]) if str(z.get("address","")).lower()==token),None)
-            if h:
-                cur["symbol"]=h.get("symbol") or cur.get("symbol")
-                cur["price_sda"]=num(h.get("price_sda")); cur["value_sda"]=h.get("value_sda")
-                cur["unrealized_pnl_sda"]=num(cur.get("value_sda"))-num(cur.get("cost_sda")) if cur.get("value_sda") is not None else None
-                cur["unrealized_pnl_pct"]=(cur["unrealized_pnl_sda"]/num(cur.get("cost_sda"))*100) if num(cur.get("cost_sda")) else None
-                cur["cost_basis_status"]="DETECTED"
-        # Keep currently held tokens whose historical trades are outside the
-        # retained ledger, but never invent their cost basis.
-        for h in wallet_data.get("holdings",[]):
-            token=str(h.get("address","")).lower()
-            if not token or token in pinet["current"]: continue
-            pinet["current"][token]={"amount":num(h.get("amount")),"cost_sda":None,"avg_cost_sda":None,"lots":[],
-                "first_buy_at":"","last_buy_at":"","age_days":None,"symbol":h.get("symbol"),
-                "price_sda":num(h.get("price_sda")),"value_sda":h.get("value_sda"),
-                "unrealized_pnl_sda":None,"unrealized_pnl_pct":None,"cost_basis_status":"UNKNOWN"}
-        return pinet
-    router=str(ld.get("router") or ld.get("pool_router") or "0x35cAC72Db00e8dAC0e4f7F8A0F53D339E0cC23fb").lower()
-    wsda="0xe4095a910209d7be03b55d02f40d4554b1666182".lower()
-    txs=explorer_address_transactions(wallet,MAX_PORTFOLIO_TXS)
-    internal_txs=internal_transactions_for_address(wallet,MAX_PORTFOLIO_TXS)
-    internal_by_hash={}
-    for it in internal_txs:
-        ih=tx_hash(it)
-        if ih: internal_by_hash.setdefault(ih,[]).append(it)
-    buys=[]; sells=[]
-    seen=set()
-    for tx in txs:
-        h=tx_hash(tx)
-        if not h or h in seen: continue
-        seen.add(h)
-        sender=transfer_addr(tx.get("from"))
-        if sender and sender!=wallet.lower(): continue
-        raw=raw_input_tx(tx); method=raw[:10].lower(); is_buy=(method=="0x414bf389")
-        to=transfer_addr(tx.get("to"))
-        native_raw=tx.get("value",0)
-        if isinstance(native_raw,dict): native_raw=native_raw.get("value",native_raw.get("raw",0))
-        native_sda=num(native_raw)/1e18
-        native_in_sda=0.0; native_out_sda=0.0
-        for it in internal_by_hash.get(h,[]):
-            val=it.get("value",it.get("amount",it.get("fee",0)))
-            if isinstance(val,dict): val=val.get("value",val.get("raw",0))
-            try: val_sda=float(val)/1e18
-            except Exception: val_sda=0.0
-            fr=transfer_addr(it.get("from")); to_addr=transfer_addr(it.get("to"))
-            if to_addr==wallet.lower(): native_in_sda += val_sda
-            if fr==wallet.lower(): native_out_sda += val_sda
-        transfers=token_transfer_items(wallet,h)
-        # Incoming non-WSDA token(s) are buys; outgoing non-WSDA token(s) are sells.
-        incoming=[]; outgoing=[]; wsda_out=0.0
-        for t in transfers:
-            token=transfer_token(t); amt=transfer_amount(t)
-            if not token or amt<=0: continue
-            fr=transfer_from(t); dest=transfer_to(t)
-            if token==wsda:
-                if fr==wallet.lower() and dest: wsda_out += amt
-                continue
-            if dest==wallet.lower(): incoming.append((token,amt,t))
-            elif fr==wallet.lower(): outgoing.append((token,amt,t))
-        if incoming and (native_sda>0 or native_out_sda>0 or wsda_out>0 or method in {"0x414bf389","0x8ab5246f","0xc04b8d59"}):
-            total_out=max(native_sda,native_out_sda,wsda_out)
-            # Split total SDA cost proportionally if one tx buys multiple tokens.
-            total_tokens=sum(a for _,a,_ in incoming) or 1.0
-            for token,amt,t in incoming:
-                cost=total_out*(amt/total_tokens)
-                mdx=meta.get(token,{}) if isinstance(meta,dict) else {}
-                sym=mdx.get("symbol") or ((t.get("token") or {}).get("symbol") if isinstance(t,dict) else None) or token[:10]+"..."
-                buys.append({"tx":h,"timestamp":tx_timestamp(tx),"block":tx.get("block_number",tx.get("blockNumber")),"token":token,"symbol":sym,"amount":amt,"cost_sda":cost,"gas_fee_sda":gas_fee_sda(tx),"price_sda":cost/amt if amt else 0.0,"side":"BUY"})
-        wsda_in=0.0
-        for t in transfers:
-            token=transfer_token(t); amt=transfer_amount(t)
-            if token==wsda and transfer_to(t)==wallet.lower() and amt>0: wsda_in += amt
-        if outgoing and (wsda_in>0 or native_in_sda>0 or native_sda>0 or method in {"0xc04b8d59","0x8ab5246f","0x414bf389"}):
-            total_proceeds=max(wsda_in,native_in_sda,native_sda)
-            total_tokens=sum(a for _,a,_ in outgoing) or 1.0
-            for token,amt,t in outgoing:
-                mdx=meta.get(token,{}) if isinstance(meta,dict) else {}
-                sym=mdx.get("symbol") or ((t.get("token") or {}).get("symbol") if isinstance(t,dict) else None) or token[:10]+"..."
-                proceeds=total_proceeds*(amt/total_tokens)
-                sells.append({"tx":h,"timestamp":tx_timestamp(tx),"block":tx.get("block_number",tx.get("blockNumber")),"token":token,"symbol":sym,"amount":amt,"proceeds_sda":proceeds,"gas_fee_sda":gas_fee_sda(tx),"side":"SELL"})
-    # FIFO accounting against the full detected trade history.
-    trades=sorted(buys+sells,key=lambda x:(str(x.get("timestamp")),str(x.get("block") or ""),str(x.get("tx"))))
-    lots={}; realized={}; history=[]
-    for tr in trades:
-        token=tr["token"]
-        if tr["side"]=="BUY":
-            lots.setdefault(token,[]).append({"amount":tr["amount"],"cost_sda":tr["cost_sda"]})
-            history.append(tr)
-            continue
-        qty=tr["amount"]; cost_removed=0.0
-        q=lots.setdefault(token,[])
+        token=tr['token']
+        if tr['side']=='BUY':
+            lots.setdefault(token,[]).append({'amount':tr['amount'],'cost_sda':tr['cost_sda']});history.append(tr);continue
+        qty=tr['amount'];removed=0.0;q=lots.setdefault(token,[])
         while qty>1e-12 and q:
-            lot=q[0]; take=min(qty,lot["amount"]); unit=lot["cost_sda"]/lot["amount"] if lot["amount"] else 0
-            cost_removed+=take*unit; lot["amount"]-=take; lot["cost_sda"]-=take*unit; qty-=take
-            if lot["amount"]<=1e-12:q.pop(0)
-        tr["cost_basis_sda"]=cost_removed; realized[token]=realized.get(token,0.0)+(num(tr.get("proceeds_sda"))-cost_removed)
+            lot=q[0];take=min(qty,lot['amount']);unit=lot['cost_sda']/lot['amount'] if lot['amount'] else 0.0;removed+=take*unit;lot['amount']-=take;lot['cost_sda']-=take*unit;qty-=take
+            if lot['amount']<=1e-12:q.pop(0)
+        tr['cost_basis_sda']=removed;tr['matched_amount']=tr['amount']-qty;tr['unmatched_amount']=max(0.0,qty)
+        # IMPORTANT: an unmatched SELL is not a profitable trade. It means the
+        # retained BUY history is incomplete (or the token was acquired elsewhere).
+        # Never add its whole proceeds to realized P/L.
+        matched_proceeds=(tr.get('proceeds_sda',0.0)*(tr['matched_amount']/tr['amount'])) if tr['amount']>0 else 0.0
+        tr['matched_proceeds_sda']=matched_proceeds
+        if tr['matched_amount']>1e-12:
+            realized[token]=realized.get(token,0.0)+(matched_proceeds-removed)
         history.append(tr)
     current={}
-    for token,qs in lots.items():
-        amount=sum(x["amount"] for x in qs); cost=sum(x["cost_sda"] for x in qs)
-        if amount>1e-12:
-            token_buys=[x for x in buys if x["token"]==token]
-            first_buy=next((x.get("timestamp") for x in token_buys if x.get("timestamp")),"")
-            last_buy=next((x.get("timestamp") for x in reversed(token_buys) if x.get("timestamp")),"")
-            age_days=None
-            try:
-                from datetime import datetime as _dt
-                ts=_dt.fromisoformat(first_buy.replace("Z","+00:00")); age_days=(datetime.now(timezone.utc)-ts).total_seconds()/86400
-            except Exception: pass
-            current[token]={"amount":amount,"cost_sda":cost,"avg_cost_sda":cost/amount if amount else 0.0,"lots":qs,"first_buy_at":first_buy,"last_buy_at":last_buy,"age_days":age_days}
-    # Current market values from the wallet snapshot / market data.
-    wallet_data=wallet_obj if isinstance(wallet_obj,dict) else wallet_snapshot(md,meta)
-    for h in wallet_data.get("holdings",[]):
-        token=str(h.get("address","")).lower()
-        if not token or token not in current: continue
-        cur=current[token]; cur["symbol"]=h.get("symbol") or cur.get("symbol") or token[:10]+"..."; cur["price_sda"]=num(h.get("price_sda")); cur["value_sda"]=num(h.get("value_sda")); cur["unrealized_pnl_sda"]=cur["value_sda"]-cur["cost_sda"] if cur["value_sda"] is not None else None; cur["unrealized_pnl_pct"]=(cur["unrealized_pnl_sda"]/cur["cost_sda"]*100) if cur["cost_sda"] else None
-        for tr in buys:
-            if tr["token"]==token: tr["symbol"]=cur["symbol"]
-    # If trade history is incomplete, still expose every token currently held.
-    # Cost/P&L remains unknown rather than inventing a purchase price.
-    for h in wallet_data.get("holdings",[]):
-        token=str(h.get("address","")).lower()
-        if not token or token in current:continue
-        current[token]={"amount":num(h.get("amount")),"cost_sda":None,"avg_cost_sda":None,"lots":[],
-                        "first_buy_at":"","last_buy_at":"","age_days":None,"symbol":h.get("symbol"),
-                        "price_sda":num(h.get("price_sda")),"value_sda":h.get("value_sda"),
-                        "unrealized_pnl_sda":None,"unrealized_pnl_pct":None,"cost_basis_status":"UNKNOWN"}
-    # Always expose actual current wallet holdings, even when historical cost basis
-    # cannot be proven. Never invent a cost basis.
-    for h in wallet_data.get('holdings',[]):
-        token=str(h.get('address','')).lower()
-        if not token: continue
-        if token not in current:
-            current[token]={
-                'amount':num(h.get('amount')),
-                'cost_sda':None,
-                'avg_cost_sda':None,
-                'lots':[],
-                'first_buy_at':'',
-                'last_buy_at':'',
-                'age_days':None,
-                'symbol':h.get('symbol'),
-                'price_sda':num(h.get('price_sda')),
-                'value_sda':h.get('value_sda'),
-                'unrealized_pnl_sda':None,
-                'unrealized_pnl_pct':None,
-                'cost_basis_status':'UNKNOWN'
-            }
-        else:
-            cur=current[token]
-            cur['symbol']=h.get('symbol') or cur.get('symbol')
-            cur['price_sda']=num(h.get('price_sda'))
-            cur['value_sda']=h.get('value_sda')
-            if cur.get('cost_sda') is not None:
-                cur['unrealized_pnl_sda']=num(cur.get('value_sda'))-num(cur.get('cost_sda')) if cur.get('value_sda') is not None else None
-                cur['unrealized_pnl_pct']=cur['unrealized_pnl_sda']/num(cur.get('cost_sda'))*100 if num(cur.get('cost_sda')) else None
-                cur['cost_basis_status']='DETECTED'
-            else:
-                cur['cost_basis_status']='UNKNOWN'
+    for token,q in lots.items():
+        amount=sum(z['amount'] for z in q);cost=sum(z['cost_sda'] for z in q)
+        if amount<=1e-12:continue
+        tb=[x for x in buys if x['token']==token]
+        current[token]={'amount':amount,'cost_sda':cost,'avg_cost_sda':cost/amount if amount else 0.0,'lots':q,'first_buy_at':tb[0].get('timestamp','') if tb else '','last_buy_at':tb[-1].get('timestamp','') if tb else '','age_days':None,'symbol':tb[-1].get('symbol') if tb else token[:10]+'...'}
+    return {'wallet':wallet,'router':'pinet-supabase-wallet-query','updated_at':now(),'buy_count':len(buys),'sell_count':len(sells),'trades':history[-500:],'current':current,'realized_pnl_sda':sum(realized.values()),'source':'PinetSwap token_transactions wallet query','source_rows':len(rows),'known_tx_hashes':[x['tx'] for x in history[-500:] if x.get('tx')]}
 
-    result={"wallet":str(wallet).lower(),"router":router,"updated_at":now(),"buy_count":len(buys),"sell_count":len(sells),"trades":history[-500:],"current":current,"realized_pnl_sda":sum(realized.values()),"notes":"READ-ONLY inferred on-chain swap ledger; future runs rebuild history."}
-    # Preserve a lightweight fingerprint so repeated runs are easy to audit.
-    result["known_tx_hashes"]=[x["tx"] for x in history[-500:] if x.get("tx")]
-    return result
+def portfolio_history(wallet,md,meta,ld,previous=None,wallet_obj=None):
+    previous=previous if isinstance(previous,dict) else {}
+    pinet=portfolio_from_pinet(wallet,meta)
+    if pinet and pinet.get('buy_count',0)+pinet.get('sell_count',0)>0:
+        wallet_data=wallet_obj if isinstance(wallet_obj,dict) else wallet_snapshot(md,meta)
+        for token,cur in pinet.get('current',{}).items():
+            h=next((z for z in wallet_data.get('holdings',[]) if str(z.get('address','')).lower()==token),None)
+            if h:
+                cur['symbol']=h.get('symbol') or cur.get('symbol');cur['price_sda']=num(h.get('price_sda'));cur['value_sda']=h.get('value_sda');cur['unrealized_pnl_sda']=num(cur.get('value_sda'))-num(cur.get('cost_sda')) if cur.get('value_sda') is not None else None;cur['unrealized_pnl_pct']=(cur['unrealized_pnl_sda']/num(cur.get('cost_sda'))*100) if num(cur.get('cost_sda')) else None;cur['cost_basis_status']='DETECTED'
+        for h in wallet_data.get('holdings',[]):
+            token=str(h.get('address','')).lower()
+            if not token or token in pinet['current']:continue
+            pinet['current'][token]={'amount':num(h.get('amount')),'cost_sda':None,'avg_cost_sda':None,'lots':[],'first_buy_at':'','last_buy_at':'','age_days':None,'symbol':h.get('symbol'),'price_sda':num(h.get('price_sda')),'value_sda':h.get('value_sda'),'unrealized_pnl_sda':None,'unrealized_pnl_pct':None,'cost_basis_status':'UNKNOWN'}
+        return pinet
+    return previous if isinstance(previous,dict) and previous.get('current') else {'wallet':wallet,'current':{},'realized_pnl_sda':0.0,'buy_count':0,'sell_count':0,'source':'No trusted wallet trade ledger available'}
 
-def portfolio_recommendations(portfolio, md, ws, meta, ld):
-    out=[]
-    current=portfolio.get("current",{}) if isinstance(portfolio,dict) else {}
-    tokens=(md.get("tokens",{}) or {}) if isinstance(md,dict) else {}
-    for token,pf in current.items():
-        an=(tokens.get(token,{}) or {}).get("analysis",tokens.get(token,{}) or {})
-        s=score(token,an,ws) if isinstance(an,dict) and an else {"confidence":0,"m1h":0,"net_1h":0,"trades_1h":0,"whale_net":0}
-        pnl_raw=pf.get("unrealized_pnl_pct"); cost=num(pf.get("cost_sda"),0.0); pnl=num(pnl_raw,0.0); c=s.get("confidence",0); m1=num(s.get("m1h")); flow1=num(s.get("net_1h"));
-        if pnl_raw is None or cost<=0: action="HOLD / NO COST BASIS"
-        elif c>=75 and m1>0 and flow1>=0: action="HOLD / TRAIL"
-        elif pnl>=10 and (c<60 or m1<0 or flow1<0): action="PARTIAL SELL"
-        elif c<45 and (m1<0 or flow1<0): action="SELL / EXIT"
-        else: action="HOLD / WATCH"
-        out.append({"token":token,"symbol":pf.get("symbol") or lbl(token,meta),"action":action,"pnl_pct":pnl,"pnl_sda":num(pf.get("unrealized_pnl_sda"),0.0),"score":c,"m1h":m1,"flow_1h":flow1})
-    return sorted(out,key=lambda x:(x["action"] in {"SELL / EXIT","PARTIAL SELL"},-abs(x["pnl_pct"])),reverse=True)
+def portfolio_recommendations(portfolio,md,ws,meta,ld):
+    out=[];cur=portfolio.get('current',{}) if isinstance(portfolio,dict) else {};tokens=md.get('tokens',{}) if isinstance(md,dict) else {}
+    for token,pf in cur.items():
+        an=(tokens.get(token,{}) or {}).get('analysis',tokens.get(token,{}) or {});s=score(token,an,ws) if isinstance(an,dict) and an else {'confidence':0,'m1h':0,'net_1h':0,'trades_1h':0,'whale_net':0}
+        pnl_raw=pf.get('unrealized_pnl_pct');cost=num(pf.get('cost_sda'),0.0);pnl=num(pnl_raw,0.0);c=s.get('confidence',0);m1=num(s.get('m1h'));flow1=num(s.get('net_1h'))
+        if pnl_raw is None or cost<=0:action='HOLD / NO COST BASIS'
+        elif c>=75 and m1>0 and flow1>=0:action='HOLD / TRAIL'
+        elif pnl>=10 and (c<60 or m1<0 or flow1<0):action='PARTIAL SELL'
+        elif c<45 and (m1<0 or flow1<0):action='SELL / EXIT'
+        else:action='HOLD / WATCH'
+        out.append({'token':token,'symbol':pf.get('symbol') or lbl(token,meta),'action':action,'pnl_pct':pnl,'pnl_sda':num(pf.get('unrealized_pnl_sda'),0.0),'score':c,'m1h':m1,'flow_1h':flow1})
+    return sorted(out,key=lambda x:(x['action'] in {'SELL / EXIT','PARTIAL SELL'},-abs(x['pnl_pct'])),reverse=True)
 
-def portfolio_message(portfolio, recommendations):
-    lines=["📈 REAL PORTFOLIO / P&L (READ-ONLY)",""]
-    cur=portfolio.get("current",{}) if isinstance(portfolio,dict) else {}
-    if not cur: lines.append("No historical BUYs confidently detected yet.")
+def portfolio_message(portfolio,recommendations):
+    lines=['📈 REAL PORTFOLIO / P&L (READ-ONLY)',''];cur=portfolio.get('current',{}) if isinstance(portfolio,dict) else {}
+    if not cur:lines.append('No historical BUYs confidently detected yet.')
     else:
-        for token,pf in sorted(cur.items(),key=lambda x:x[1].get("symbol",x[0])):
-            pnl=num(pf.get("unrealized_pnl_sda"),0.0); pct=pf.get("unrealized_pnl_pct"); age=""
-            cost=pf.get("cost_sda"); pct=pf.get("unrealized_pnl_pct")
-            age=pf.get("age_days")
-            cost_text=f"{num(cost):.2f} SDA" if cost is not None else "UNKNOWN"
-            pnl_text=f"{pnl:+.2f} SDA ({num(pct):+.2f}%)" if pct is not None else "UNKNOWN (cost basis not detected)"
-            age_text=f"{num(age):.1f} days" if age is not None else "UNKNOWN"
+        for token,pf in sorted(cur.items(),key=lambda x:x[1].get('symbol',x[0])):
+            pnl=num(pf.get('unrealized_pnl_sda'),0.0);pct=pf.get('unrealized_pnl_pct');cost=pf.get('cost_sda');age=pf.get('age_days');cost_text=f'{num(cost):.2f} SDA' if cost is not None else 'UNKNOWN';pnl_text=f'{pnl:+.2f} SDA ({num(pct):+.2f}%)' if pct is not None else 'UNKNOWN (cost basis not detected)';age_text=f'{num(age):.1f} days' if age is not None else 'UNKNOWN'
             lines += [f"• {pf.get('symbol') or token[:10]}",f"  Amount: {num(pf.get('amount')):.8f} | Cost: {cost_text}",f"  Now: {num(pf.get('value_sda')):.2f} SDA | P/L: {pnl_text}",f"  Avg cost: {num(pf.get('avg_cost_sda')):.8f} SDA/token | Age: {age_text}",""]
-    lines += [f"Realized P/L: {num(portfolio.get('realized_pnl_sda')):+.2f} SDA",f"Detected trades: {int(portfolio.get('buy_count',0))} BUY / {int(portfolio.get('sell_count',0))} SELL",""]
-    lines.append("🧭 POSITION RECOMMENDATIONS")
-    if not recommendations: lines.append("• No recommendation available.")
+    lines += [f"Realized P/L: {num(portfolio.get('realized_pnl_sda')):+.2f} SDA",f"Detected trades: {int(portfolio.get('buy_count',0))} BUY / {int(portfolio.get('sell_count',0))} SELL",'','🧭 POSITION RECOMMENDATIONS']
+    if not recommendations:lines.append('• No recommendation available.')
     else:
         for r in recommendations:
-            icon="🔴" if r["action"]=="SELL / EXIT" else ("🟠" if r["action"]=="PARTIAL SELL" else ("🟢" if r["action"]=="HOLD / TRAIL" else "🟡"))
-            lines.append(f"• {icon} {r['symbol']}: {r['action']} | P/L {r['pnl_pct']:+.2f}% | score {r['score']}/100 | 1h {r['m1h']:+.2f}%")
-    lines += ["","⚠️ Recommendations are informational only; wallet remains READ-ONLY."]
-    return "\n".join(lines)
+            icon='🔴' if r['action']=='SELL / EXIT' else ('🟠' if r['action']=='PARTIAL SELL' else ('🟢' if r['action']=='HOLD / TRAIL' else '🟡'));lines.append(f"• {icon} {r['symbol']}: {r['action']} | P/L {r['pnl_pct']:+.2f}% | score {r['score']}/100 | 1h {r['m1h']:+.2f}%")
+    lines += ['','⚠️ Recommendations are informational only; wallet remains READ-ONLY.'];return '\n'.join(lines)
 
 def wallet_message(w):
-    lines=["👛 REAL WALLET (READ-ONLY)","",f"Address: {w.get('wallet')}"]
-    lines.append(f"SDA: {num(w.get('native_sda')):.4f}" if w.get('native_sda') is not None else "SDA: unavailable")
-    hs=w.get("holdings") or []
-    lines += ["","📊 REAL POSITIONS"]
+    lines=['👛 REAL WALLET (READ-ONLY)','','Address: '+str(w.get('wallet'))];lines.append(f"SDA: {num(w.get('native_sda')):.4f}" if w.get('native_sda') is not None else 'SDA: unavailable');hs=w.get('holdings') or [];lines += ['','📊 REAL POSITIONS']
     if hs:
-        for h in sorted(hs,key=lambda x:x.get("symbol","")):
-            v=h.get("value_sda"); px=h.get("price_sda")
-            lines.append(f"• {h.get('symbol') or h.get('address','')[:10]}")
-            lines.append(f"  Amount: {num(h.get('amount')):.8f} | Price: {num(px):.8f} SDA" if px else f"  Amount: {num(h.get('amount')):.8f}")
-            lines.append(f"  Value: {num(v):.2f} SDA" if v is not None else "  Value: UNKNOWN")
-    else:lines.append("• No token balances detected")
+        for h in sorted(hs,key=lambda x:x.get('symbol','')):
+            v=h.get('value_sda');px=h.get('price_sda');lines.append(f"• {h.get('symbol') or h.get('address','')[:10]}");lines.append(f"  Amount: {num(h.get('amount')):.8f} | Price: {num(px):.8f} SDA" if px else f"  Amount: {num(h.get('amount')):.8f}");lines.append(f"  Value: {num(v):.2f} SDA" if v is not None else '  Value: UNKNOWN')
+    else:lines.append('• No token balances detected')
     if w.get('holding_source'):lines.append(f"  Source: {w['holding_source']}")
-    if w.get('total_value_sda') is not None:lines += ["",f"💰 TOTAL WALLET VALUE: {num(w['total_value_sda']):.2f} SDA"]
-    if w.get('error'):lines += ["",f"⚠️ {w['error'][:900]}"]
-    return "\n".join(lines)
+    if w.get('total_value_sda') is not None:lines += ['','💰 TOTAL WALLET VALUE: '+f"{num(w['total_value_sda']):.2f} SDA"]
+    if w.get('error'):lines += ['','⚠️ '+str(w['error'])[:900]]
+    return '\n'.join(lines)
 
 def main():
-    md=load(MARKET_FILE,{"tokens":{}}); tokens=md.get("tokens",{}) or {}; ws=load(WHALE_FILE,{}); meta=load(META_FILE,{})
-    ld=load(LIQUIDITY_FILE,{}); p=load(POSITIONS_FILE,{"positions":{},"closed_trades":[]})
-    if not isinstance(p,dict):p={"positions":{},"closed_trades":[]}
-    p.setdefault("positions",{});p.setdefault("closed_trades",[]);events=[]
-    wallet=wallet_snapshot(md,meta)
-    portfolio_prev=load(PORTFOLIO_FILE,{})
+    md=load(MARKET_FILE,{'tokens':{}});tokens=md.get('tokens',{}) or {};ws=load(WHALE_FILE,{});meta=load(META_FILE,{});ld=load(LIQUIDITY_FILE,{});p=load(POSITIONS_FILE,{'positions':{},'closed_trades':[]})
+    if not isinstance(p,dict):p={'positions':{},'closed_trades':[]}
+    p.setdefault('positions',{});p.setdefault('closed_trades',[]);events=[];wallet=wallet_snapshot(md,meta);portfolio_prev=load(PORTFOLIO_FILE,{})
     try:
-        portfolio=portfolio_history(WALLET_ADDRESS,md,meta,ld,portfolio_prev,wallet)
-        portfolio_recs=portfolio_recommendations(portfolio,md,ws,meta,ld)
-        save(PORTFOLIO_FILE,portfolio)
+        portfolio=portfolio_history(WALLET_ADDRESS,md,meta,ld,portfolio_prev,wallet);portfolio_recs=portfolio_recommendations(portfolio,md,ws,meta,ld);save(PORTFOLIO_FILE,portfolio)
     except Exception as e:
-        portfolio=portfolio_prev if isinstance(portfolio_prev,dict) else {"current":{},"realized_pnl_sda":0.0,"buy_count":0,"sell_count":0}
-        portfolio_recs=[]
-        portfolio["error"]=f"portfolio history: {e}"
-
-    for a in list(p["positions"]):
-        a=str(a).lower(); td=tokens.get(a)
+        portfolio=portfolio_prev if isinstance(portfolio_prev,dict) else {'current':{},'realized_pnl_sda':0.0,'buy_count':0,'sell_count':0};portfolio_recs=[];portfolio['error']=f'portfolio history: {e}'
+    for a in list(p['positions']):
+        a=str(a).lower();td=tokens.get(a)
         if not td:continue
-        an=td.get("analysis",td); cur=num(an.get("price_in_sda"))
+        an=td.get('analysis',td);cur=num(an.get('price_in_sda'))
         if cur<=0:continue
-        pos=p["positions"][a];pos["updated_at"]=now()
-        if not pos.get("tp1_hit") and cur>=num(pos.get("tp1")):
-            frac=min(.5,num(pos.get("remaining_fraction",1)));e=num(pos.get("entry_price"));inv=num(pos.get("investment_sda"))*frac;qty=inv/e if e>0 else 0
-            v=qty*cur*(1-SLIPPAGE_RATE)*(1-FEE_RATE);cost=inv*(1+FEE_RATE);profit=v-cost;roi=profit/cost*100 if cost else 0
-            pos["tp1_hit"]=True;pos["remaining_fraction"]=num(pos.get("remaining_fraction",1))-frac;pos["sl"]=e
-            events.append(f"💰 TAKE PROFIT 1/2 {pos['label']}\n\nEntry: {price(e)} SDA\nCurrent: {price(cur)} SDA\nClosed: 50%\nProfit: {profit:+.2f} SDA\nROI: {roi:+.2f}%\n\n🔒 Remaining 50% protected at breakeven")
-        if a not in p["positions"]:continue
-        pos=p["positions"][a]
-        if cur>=num(pos.get("tp2")):
-            z=close(p,a,cur,"TP2")
+        pos=p['positions'][a];pos['updated_at']=now()
+        if not pos.get('tp1_hit') and cur>=num(pos.get('tp1')):
+            frac=min(.5,num(pos.get('remaining_fraction',1)));e=num(pos.get('entry_price'));inv=num(pos.get('investment_sda'))*frac;qty=inv/e if e>0 else 0;v=qty*cur*(1-SLIPPAGE_RATE)*(1-FEE_RATE);cost=inv*(1+FEE_RATE);profit=v-cost;roi=profit/cost*100 if cost else 0;pos['tp1_hit']=True;pos['remaining_fraction']=num(pos.get('remaining_fraction',1))-frac;pos['sl']=e;events.append(f"💰 TAKE PROFIT 1/2 {pos['label']}\n\nEntry: {price(e)} SDA\nCurrent: {price(cur)} SDA\nClosed: 50%\nProfit: {profit:+.2f} SDA\nROI: {roi:+.2f}%\n\n🔒 Remaining 50% protected at breakeven")
+        if a not in p['positions']:continue
+        pos=p['positions'][a]
+        if cur>=num(pos.get('tp2')):
+            z=close(p,a,cur,'TP2')
             if z:events.append(f"💰 TP2 {z['label']}\n\nEntry: {price(z['entry_price'])} SDA\nCurrent: {price(z['close_price'])} SDA\nProfit: {z['closed_profit_sda']:+.2f} SDA\nROI: {z['closed_roi_pct']:+.2f}%\n\nMode: PAPER TRADING")
-        elif cur<=num(pos.get("sl")):
-            reason="BREAKEVEN" if pos.get("tp1_hit") else "SL";z=close(p,a,cur,reason)
+        elif cur<=num(pos.get('sl')):
+            reason='BREAKEVEN' if pos.get('tp1_hit') else 'SL';z=close(p,a,cur,reason)
             if z:events.append(f"💰 {reason} {z['label']}\n\nEntry: {price(z['entry_price'])} SDA\nCurrent: {price(z['close_price'])} SDA\nProfit: {z['closed_profit_sda']:+.2f} SDA\nROI: {z['closed_roi_pct']:+.2f}%\n\nMode: PAPER TRADING")
-
     ranks=[];cands=[]
     for raw,td in tokens.items():
         a=str(raw).lower()
-        if a in p["positions"] or not isinstance(td,dict):continue
-        an=td.get("analysis",td)
-        if not isinstance(an,dict) or num(an.get("price_in_sda"))<=0:continue
-        f=flow(an,"1h");vol=num(f.get("buy_volume"))+num(f.get("sell_volume"));tr=num(f.get("buy_count"))+num(f.get("sell_count"))
-        s=score(a,an,ws);eligible=vol>=MIN_1H_VOLUME_SDA and tr>=MIN_TRADES_1H;s["eligible_for_buy"]=eligible
-        ranks.append((s["confidence"],a,an,s,tr))
-        if s["confidence"]>=BUY_THRESHOLD and eligible:cands.append((s["confidence"],a,an,s))
-    ranks.sort(key=lambda x:(x[0],x[4]),reverse=True);cands.sort(reverse=True)
-    lines=["🔎 TOP BUY CANDIDATES",""]
+        if a in p['positions'] or not isinstance(td,dict):continue
+        an=td.get('analysis',td)
+        if not isinstance(an,dict) or num(an.get('price_in_sda'))<=0:continue
+        f=flow(an,'1h');vol=num(f.get('buy_volume'))+num(f.get('sell_volume'));tr=num(f.get('buy_count'))+num(f.get('sell_count'));s=score(a,an,ws);eligible=vol>=MIN_1H_VOLUME_SDA and tr>=MIN_TRADES_1H;s['eligible_for_buy']=eligible;ranks.append((s['confidence'],a,an,s,tr))
+        if s['confidence']>=BUY_THRESHOLD and eligible:cands.append((s['confidence'],a,an,s))
+    ranks.sort(key=lambda x:(x[0],x[4]),reverse=True);cands.sort(reverse=True);lines=['🔎 TOP BUY CANDIDATES','']
     for i,(c,a,an,s,tr) in enumerate(ranks[:5],1):
-        st="🟢 BUY" if c>=BUY_THRESHOLD and tr>=MIN_TRADES_1H else ("🟠 NEAR BUY" if c>=75 else ("🟡 WATCH" if c>=55 else "⚪ WEAK"))
-        lines += [f"{i}. {st} {lbl(a,meta)} — {c}/100",f"   1h {s['m1h']:+.2f}% | flow {s['net_1h']:+.0f} SDA | trades {int(tr)} | whale 1h {s['whale_net']:+.0f}",f"   {liquidity_text(liquidity_for(a,ld))}"]
-    slots=max(0,MAX_OPEN_POSITIONS-len(p["positions"]))
+        st='🟢 BUY' if c>=BUY_THRESHOLD and tr>=MIN_TRADES_1H else ('🟠 NEAR BUY' if c>=75 else ('🟡 WATCH' if c>=55 else '⚪ WEAK'));lines += [f"{i}. {st} {lbl(a,meta)} — {c}/100",f"   1h {s['m1h']:+.2f}% | flow {s['net_1h']:+.0f} SDA | trades {int(tr)} | whale 1h {s['whale_net']:+.0f}",f"   {liquidity_text(liquidity_for(a,ld))}"]
+    slots=max(0,MAX_OPEN_POSITIONS-len(p['positions']))
     for _,a,an,s in cands[:min(slots,MAX_NEW_BUYS_PER_RUN)]:
-        liq=liquidity_for(a,ld);pos=create(a,an,s,meta,liq);p["positions"][a]=pos
-        events.append(f"🟢 BUY {pos['label']}\n\nEntry: {price(pos['entry_price'])} SDA\nTP1: {price(pos['tp1'])} SDA (+5.0%)\nTP2: {price(pos['tp2'])} SDA (+10.0%)\nSL: {price(pos['sl'])} SDA (-4.0%)\n\nInvested: {INVESTMENT_SDA:.0f} SDA\nConfidence: {pos['entry_confidence']}/100\n{liquidity_text(liq)}\n\nMode: PAPER TRADING")
-    opens=["📊 OPEN PAPER POSITIONS",""]
-    if not p["positions"]:opens.append("No open paper positions.")
+        liq=liquidity_for(a,ld);pos=create(a,an,s,meta,liq);p['positions'][a]=pos;events.append(f"🟢 BUY {pos['label']}\n\nEntry: {price(pos['entry_price'])} SDA\nTP1: {price(pos['tp1'])} SDA (+5.0%)\nTP2: {price(pos['tp2'])} SDA (+10.0%)\nSL: {price(pos['sl'])} SDA (-4.0%)\n\nInvested: {INVESTMENT_SDA:.0f} SDA\nConfidence: {pos['entry_confidence']}/100\n{liquidity_text(liq)}\n\nMode: PAPER TRADING")
+    opens=['📊 OPEN PAPER POSITIONS','']
+    if not p['positions']:opens.append('No open paper positions.')
     else:
-        for a,pos in p["positions"].items():
-            an=(tokens.get(a,{}) or {}).get("analysis",(tokens.get(a,{}) or {}));cur=num(an.get("price_in_sda"));e=num(pos.get("entry_price"));roi=(cur-e)/e*100 if e>0 and cur>0 else 0
-            opens += [f"• {pos.get('label',a)}",f"  Entry: {price(e)} | Now: {price(cur)}",f"  ROI: {roi:+.2f}% | Remaining: {num(pos.get('remaining_fraction',1))*100:.0f}%",f"  TP1: {price(pos.get('tp1'))} | TP2: {price(pos.get('tp2'))}",f"  SL: {price(pos.get('sl'))}",""]
-    save(POSITIONS_FILE,p);send("\n".join(lines));send("\n".join(opens));send(wallet_message(wallet));send(portfolio_message(portfolio,portfolio_recs))
-    send(f"🤖 SDA PAPER TRADING\n\nOpen positions: {len(p['positions'])}\nClosed trades: {len(p['closed_trades'])}\nBUY candidates: {len(cands)}\nEvents: {len(events)}\n\nInvestment: {INVESTMENT_SDA:.0f} SDA\nFee: {FEE_RATE*100:.1f}%\nSlippage: {SLIPPAGE_RATE*100:.1f}%")
+        for a,pos in p['positions'].items():
+            an=(tokens.get(a,{}) or {}).get('analysis',(tokens.get(a,{}) or {}));cur=num(an.get('price_in_sda'));e=num(pos.get('entry_price'));roi=(cur-e)/e*100 if e>0 and cur>0 else 0;opens += [f"• {pos.get('label',a)}",f"  Entry: {price(e)} | Now: {price(cur)}",f"  ROI: {roi:+.2f}% | Remaining: {num(pos.get('remaining_fraction',1))*100:.0f}%",f"  TP1: {price(pos.get('tp1'))} | TP2: {price(pos.get('tp2'))}",f"  SL: {price(pos.get('sl'))}",""]
+    save(POSITIONS_FILE,p);send('\n'.join(lines));send('\n'.join(opens));send(wallet_message(wallet));send(portfolio_message(portfolio,portfolio_recs));send(f"🤖 SDA PAPER TRADING\n\nOpen positions: {len(p['positions'])}\nClosed trades: {len(p['closed_trades'])}\nBUY candidates: {len(cands)}\nEvents: {len(events)}\n\nInvestment: {INVESTMENT_SDA:.0f} SDA\nFee: {FEE_RATE*100:.1f}%\nSlippage: {SLIPPAGE_RATE*100:.1f}%")
     for e in events:send(e)
-
-if __name__=="__main__":
+if __name__=='__main__':
     try:main()
     except Exception:
         e=traceback.format_exc();print(e)
         if TELEGRAM_TOKEN and CHAT_ID:
-            try:requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",json={"chat_id":CHAT_ID,"text":"PAPER TRADING ENGINE ERROR\n\n"+e[:3500]},timeout=30)
+            try:requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",json={'chat_id':CHAT_ID,'text':'PAPER TRADING ENGINE ERROR\n\n'+e[:3500]},timeout=30)
             except Exception:pass
         raise
