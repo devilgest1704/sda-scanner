@@ -383,34 +383,50 @@ PINET_PAGE_SIZE=1000
 PINET_MAX_PORTFOLIO_ROWS=5000
 
 def fetch_pinet_wallet_trades(wallet, max_rows=PINET_MAX_PORTFOLIO_ROWS):
-    """Read-only PinetSwap trade ledger for one wallet.
+    """Read-only PinetSwap trades that can be proven to belong to the wallet.
 
-    PinetSwap's token_transactions rows expose tx_type, volume_in_sda and
-    price_in_sda directly. BUY rows credit the trader at to_address; SELL
-    rows debit the trader at from_address. We use the wallet direction to
-    avoid treating pool-side addresses as the user's trades.
+    Important: the PinetSwap token_transactions table is a global swap ledger.
+    Its from_address/to_address fields are not guaranteed to be the trader's
+    wallet (they can be pool/router/token-side addresses). Therefore we do NOT
+    filter the Supabase table by from/to=wallet. Instead we first obtain the
+    wallet's on-chain transaction hashes and then ask Supabase for rows whose
+    tx_hash matches those hashes. This is the reliable join between the two
+    data sources.
     """
     wallet=str(wallet).lower()
+    try:
+        txs=explorer_address_transactions(wallet,max_rows)
+    except Exception:
+        txs=[]
+    hashes=[]; seen=set()
+    for tx in txs:
+        h=tx_hash(tx).lower()
+        if h and h not in seen:
+            seen.add(h); hashes.append(h)
+    if not hashes:
+        return []
+
     out=[]
-    offset=0
-    while len(out)<max_rows:
+    # PostgREST supports tx_hash=in.(...). Keep batches modest to avoid URL
+    # length/proxy limits. The same transaction can have multiple token rows.
+    batch_size=40
+    for i in range(0,len(hashes),batch_size):
+        batch=hashes[i:i+batch_size]
+        in_value='(' + ','.join(batch) + ')'
         params={
-            "select":"id,tx_hash,token_address,from_address,to_address,price_in_sda,volume_in_sda,tx_timestamp,tx_type",
-            "or":f"(from_address.eq.{wallet},to_address.eq.{wallet})",
-            "order":"tx_timestamp.asc",
-            "limit":str(min(PINET_PAGE_SIZE,max_rows-len(out))),
-            "offset":str(offset),
+            'select':'id,tx_hash,token_address,from_address,to_address,price_in_sda,volume_in_sda,tx_timestamp,tx_type',
+            'tx_hash':f'in.{in_value}',
+            'order':'tx_timestamp.asc',
+            'limit':str(min(PINET_PAGE_SIZE,max_rows-len(out))),
         }
         try:
             r=requests.get(PINET_SUPABASE_URL,params=params,headers=PINET_SUPABASE_HEADERS,timeout=30)
             r.raise_for_status()
             page=r.json()
-            if not isinstance(page,list) or not page: break
-            out.extend(page)
-            if len(page)<int(params["limit"]): break
-            offset += len(page)
+            if isinstance(page,list): out.extend(page)
         except Exception:
-            break
+            continue
+        if len(out)>=max_rows: break
     return out[:max_rows]
 
 def portfolio_from_pinet(wallet, meta, max_rows=PINET_MAX_PORTFOLIO_ROWS):
@@ -421,19 +437,17 @@ def portfolio_from_pinet(wallet, meta, max_rows=PINET_MAX_PORTFOLIO_ROWS):
     for x in rows:
         if not isinstance(x,dict): continue
         h=str(x.get("tx_hash") or x.get("id") or "")
-        if not h or h in seen: continue
         token=str(x.get("token_address") or "").lower()
         side=str(x.get("tx_type") or "").lower().strip()
-        fr=str(x.get("from_address") or "").lower()
-        to=str(x.get("to_address") or "").lower()
         vol=num(x.get("volume_in_sda")); px=num(x.get("price_in_sda"))
-        if not token or side not in {"buy","sell"} or vol<=0 or px<=0: continue
-        # Direction used by PinetSwap: BUY credits token to to_address; SELL
-        # sends token from from_address. This also prevents pool-side rows
-        # from being attributed to the wallet.
-        if side=="buy" and to!=wallet: continue
-        if side=="sell" and fr!=wallet: continue
-        seen.add(h)
+        if not h or not token or side not in {"buy","sell"} or vol<=0 or px<=0: continue
+        # The wallet ownership proof is the on-chain transaction-hash join
+        # performed by fetch_pinet_wallet_trades(). Do not require the PinetSwap
+        # from/to fields to equal the wallet: those fields may identify the
+        # pool/router side of the swap rather than the trader.
+        key=(h.lower(),token,side)
+        if key in seen: continue
+        seen.add(key)
         amount=vol/px
         sym=(meta.get(token,{}) or {}).get("symbol") if isinstance(meta,dict) else None
         base={"tx":h,"timestamp":str(x.get("tx_timestamp") or ""),"token":token,"symbol":sym or token[:10]+"...","amount":amount,"gas_fee_sda":0.0,"side":side.upper()}
