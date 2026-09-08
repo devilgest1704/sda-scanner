@@ -1,5 +1,5 @@
 # SDA Scanner v9 wrapper
-# Runs the existing paper-trading engine but replaces only the real-wallet
+# Keeps the existing paper-trading engine and replaces only the real-wallet
 # portfolio/P&L layer with PinetSwap's exact wallet trade ledger query.
 import os
 from datetime import datetime, timezone
@@ -13,6 +13,7 @@ PINET_HEADERS = {
 }
 MAX_ROWS = int(os.environ.get("PINET_WALLET_TRADE_LIMIT", "5000"))
 PAGE = 1000
+_ORIGINAL_PORTFOLIO_MESSAGE = engine.portfolio_message
 
 def _num(v, d=0.0):
     try: return d if v is None else float(v)
@@ -104,8 +105,8 @@ def portfolio_history_v9(wallet, md, meta, ld, previous=None, wallet_obj=None):
         amount=sum(z["amount"] for z in q); cost=sum(z["cost_sda"] for z in q)
         if amount<=1e-12: continue
         h=current_wallet.get(token,{})
-        age=None
         first=next((z["timestamp"] for z in buys if z["token"]==token and z["timestamp"]),"")
+        age=None
         if first:
             try: age=(datetime.now(timezone.utc)-datetime.fromisoformat(first.replace("Z","+00:00"))).total_seconds()/86400
             except Exception: pass
@@ -119,8 +120,8 @@ def portfolio_history_v9(wallet, md, meta, ld, previous=None, wallet_obj=None):
     return {"wallet":wallet,"router":"pinet-supabase-wallet-query-v9","updated_at":_now(),"buy_count":len(buys),"sell_count":len(sells),"trades":history[-500:],"current":current,"realized_pnl_sda":realized,"source":"PinetSwap token_transactions exact wallet query","source_rows":len(rows),"http_status":status,"query_error":error,"unmatched_sell_amount":unmatched,"ledger_ok":bool(rows) and error is None}
 
 def portfolio_message_v9(portfolio, recommendations):
-    text=engine.portfolio_message(portfolio,recommendations)
-    diag=["","🔧 PinetSwap P/L DEBUG",f"Ledger HTTP: {portfolio.get('http_status')}",f"Ledger rows: {portfolio.get('source_rows',0)}",f"Detected: {portfolio.get('buy_count',0)} BUY / {portfolio.get('sell_count',0)} SELL",f"Source: {portfolio.get('source','UNKNOWN')}"]
+    text=_ORIGINAL_PORTFOLIO_MESSAGE(portfolio,recommendations)
+    diag=["","🔧 PinetSwap P/L DEBUG",f"Ledger HTTP: {portfolio.get('http_status')}",f"Ledger rows: {portfolio.get('source_rows',0)}",f"Detected: {portfolio.get('buy_count',0)} BUY / {portfolio.get('sell_count',0)} SELL",f"Source: {portfolio.get('source','UNKNOWN')}" ]
     if portfolio.get("query_error"): diag.append(f"⚠️ Query error: {portfolio['query_error'][:500]}")
     return text+"\n"+"\n".join(diag)
 
