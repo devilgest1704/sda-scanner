@@ -383,81 +383,83 @@ PINET_PAGE_SIZE=1000
 PINET_MAX_PORTFOLIO_ROWS=5000
 
 def fetch_pinet_wallet_trades(wallet, max_rows=PINET_MAX_PORTFOLIO_ROWS):
-    """Read-only PinetSwap trades that can be proven to belong to the wallet.
+    """Fetch the wallet's own PinetSwap trade history using PinetSwap's exact query.
 
-    Important: the PinetSwap token_transactions table is a global swap ledger.
-    Its from_address/to_address fields are not guaranteed to be the trader's
-    wallet (they can be pool/router/token-side addresses). Therefore we do NOT
-    filter the Supabase table by from/to=wallet. Instead we first obtain the
-    wallet's on-chain transaction hashes and then ask Supabase for rows whose
-    tx_hash matches those hashes. This is the reliable join between the two
-    data sources.
+    This mirrors the request used by the PinetSwap Wallet/P&L view:
+      BUY  => tx_type=buy  AND to_address=wallet
+      SELL => tx_type=sell AND from_address=wallet
+
+    Unlike the whale feed, these address fields are intentionally used here because
+    PinetSwap itself uses them to identify the wallet's side of a swap.  The `amount`
+    column is the actual token quantity, so it is preferred over volume/price math.
     """
     wallet=str(wallet).lower()
-    try:
-        txs=explorer_address_transactions(wallet,max_rows)
-    except Exception:
-        txs=[]
-    hashes=[]; seen=set()
-    for tx in txs:
-        h=tx_hash(tx).lower()
-        if h and h not in seen:
-            seen.add(h); hashes.append(h)
-    if not hashes:
-        return []
-
+    if not wallet: return []
     out=[]
-    # PostgREST supports tx_hash=in.(...). Keep batches modest to avoid URL
-    # length/proxy limits. The same transaction can have multiple token rows.
-    batch_size=40
-    for i in range(0,len(hashes),batch_size):
-        batch=hashes[i:i+batch_size]
-        in_value='(' + ','.join(batch) + ')'
+    offset=0
+    page_size=min(PINET_PAGE_SIZE,max_rows)
+    while len(out)<max_rows:
+        take=min(page_size,max_rows-len(out))
         params={
-            'select':'id,tx_hash,token_address,from_address,to_address,price_in_sda,volume_in_sda,tx_timestamp,tx_type',
-            'tx_hash':f'in.{in_value}',
-            'order':'tx_timestamp.asc',
-            'limit':str(min(PINET_PAGE_SIZE,max_rows-len(out))),
+            'select':'tx_hash,token_address,amount,volume_in_sda,price_in_sda,block_number,tx_timestamp,tx_type',
+            'or':f'(and(tx_type.eq.buy,to_address.eq.{wallet}),and(tx_type.eq.sell,from_address.eq.{wallet}))',
+            'order':'block_number.asc',
+            'offset':str(offset),
+            'limit':str(take),
         }
         try:
             r=requests.get(PINET_SUPABASE_URL,params=params,headers=PINET_SUPABASE_HEADERS,timeout=30)
             r.raise_for_status()
             page=r.json()
-            if isinstance(page,list): out.extend(page)
         except Exception:
-            continue
-        if len(out)>=max_rows: break
+            break
+        if not isinstance(page,list) or not page:
+            break
+        out.extend(page)
+        if len(page)<take:
+            break
+        offset += len(page)
     return out[:max_rows]
 
 def portfolio_from_pinet(wallet, meta, max_rows=PINET_MAX_PORTFOLIO_ROWS):
-    """Build FIFO portfolio from PinetSwap's own trade ledger, if available."""
+    """Build FIFO portfolio from PinetSwap's wallet trade ledger."""
     rows=fetch_pinet_wallet_trades(wallet,max_rows)
     if not rows: return None
     buys=[]; sells=[]; seen=set(); wallet=str(wallet).lower()
     for x in rows:
         if not isinstance(x,dict): continue
-        h=str(x.get("tx_hash") or x.get("id") or "")
+        h=str(x.get("tx_hash") or "")
         token=str(x.get("token_address") or "").lower()
         side=str(x.get("tx_type") or "").lower().strip()
         vol=num(x.get("volume_in_sda")); px=num(x.get("price_in_sda"))
-        if not h or not token or side not in {"buy","sell"} or vol<=0 or px<=0: continue
-        # The wallet ownership proof is the on-chain transaction-hash join
-        # performed by fetch_pinet_wallet_trades(). Do not require the PinetSwap
-        # from/to fields to equal the wallet: those fields may identify the
-        # pool/router side of the swap rather than the trader.
+        amount=num(x.get("amount"))
+        # PinetSwap supplies the exact token amount. Only fall back to volume/price
+        # for older rows where amount is absent.
+        if amount<=0 and vol>0 and px>0: amount=vol/px
+        if not h or not token or side not in {"buy","sell"} or amount<=0 or vol<=0: continue
         key=(h.lower(),token,side)
         if key in seen: continue
         seen.add(key)
-        amount=vol/px
         sym=(meta.get(token,{}) or {}).get("symbol") if isinstance(meta,dict) else None
-        base={"tx":h,"timestamp":str(x.get("tx_timestamp") or ""),"token":token,"symbol":sym or token[:10]+"...","amount":amount,"gas_fee_sda":0.0,"side":side.upper()}
+        base={
+            "tx":h,
+            "block_number":int(num(x.get("block_number"))) if num(x.get("block_number")) else 0,
+            "timestamp":str(x.get("tx_timestamp") or ""),
+            "token":token,
+            "symbol":sym or token[:10]+"...",
+            "amount":amount,
+            "gas_fee_sda":0.0,
+            "side":side.upper(),
+            "price_sda":px,
+        }
         if side=="buy":
-            base.update({"cost_sda":vol,"price_sda":px}); buys.append(base)
+            base["cost_sda"]=vol; buys.append(base)
         else:
-            base.update({"proceeds_sda":vol,"price_sda":px}); sells.append(base)
+            base["proceeds_sda"]=vol; sells.append(base)
+
     if not buys and not sells: return None
 
-    trades=sorted(buys+sells,key=lambda x:(str(x.get("timestamp")),str(x.get("tx"))))
+    trades=sorted(buys+sells,key=lambda x:(x.get("block_number",0),str(x.get("timestamp")),str(x.get("tx"))))
     lots={}; realized={}; history=[]
     for tr in trades:
         token=tr["token"]
@@ -467,23 +469,47 @@ def portfolio_from_pinet(wallet, meta, max_rows=PINET_MAX_PORTFOLIO_ROWS):
         else:
             qty=tr["amount"]; removed=0.0; q=lots.setdefault(token,[])
             while qty>1e-12 and q:
-                lot=q[0]; take=min(qty,lot["amount"]); unit=lot["cost_sda"]/lot["amount"] if lot["amount"] else 0.0
-                removed += take*unit; lot["amount"]-=take; lot["cost_sda"]-=take*unit; qty-=take
+                lot=q[0]
+                take=min(qty,lot["amount"])
+                unit=lot["cost_sda"]/lot["amount"] if lot["amount"] else 0.0
+                removed += take*unit
+                lot["amount"]-=take
+                lot["cost_sda"]-=take*unit
+                qty-=take
                 if lot["amount"]<=1e-12: q.pop(0)
             tr["cost_basis_sda"]=removed
+            tr["unmatched_amount"]=max(0.0,qty)
             realized[token]=realized.get(token,0.0)+(tr.get("proceeds_sda",0.0)-removed)
             history.append(tr)
+
     current={}
     for token,q in lots.items():
         amount=sum(z["amount"] for z in q); cost=sum(z["cost_sda"] for z in q)
         if amount<=1e-12: continue
         tb=[x for x in buys if x["token"]==token]
-        current[token]={"amount":amount,"cost_sda":cost,"avg_cost_sda":cost/amount if amount else 0.0,"lots":q,
-                        "first_buy_at":tb[0].get("timestamp","") if tb else "","last_buy_at":tb[-1].get("timestamp","") if tb else "",
-                        "age_days":None,"symbol":tb[-1].get("symbol") if tb else token[:10]+"..."}
-    return {"wallet":wallet,"router":"pinet-supabase","updated_at":now(),"buy_count":len(buys),"sell_count":len(sells),
-            "trades":history[-500:],"current":current,"realized_pnl_sda":sum(realized.values()),
-            "source":"PinetSwap token_transactions","source_rows":len(rows),"known_tx_hashes":[x["tx"] for x in history[-500:] if x.get("tx")]}
+        current[token]={
+            "amount":amount,
+            "cost_sda":cost,
+            "avg_cost_sda":cost/amount if amount else 0.0,
+            "lots":q,
+            "first_buy_at":tb[0].get("timestamp","") if tb else "",
+            "last_buy_at":tb[-1].get("timestamp","") if tb else "",
+            "age_days":None,
+            "symbol":tb[-1].get("symbol") if tb else token[:10]+"...",
+        }
+    return {
+        "wallet":wallet,
+        "router":"pinet-supabase-wallet-query",
+        "updated_at":now(),
+        "buy_count":len(buys),
+        "sell_count":len(sells),
+        "trades":history[-500:],
+        "current":current,
+        "realized_pnl_sda":sum(realized.values()),
+        "source":"PinetSwap token_transactions wallet query",
+        "source_rows":len(rows),
+        "known_tx_hashes":[x["tx"] for x in history[-500:] if x.get("tx")],
+    }
 
 def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
     """Build a reusable on-chain portfolio ledger. Read-only; no transaction is sent.
