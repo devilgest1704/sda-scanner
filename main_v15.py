@@ -109,7 +109,7 @@ def wallet_message_v15(w):
         token = str(h.get("address", "")).lower(); m = meta.get(token, {}) if isinstance(meta, dict) else {}
         symbol = h.get("symbol") or m.get("symbol") or token[:10] + "..."; name = m.get("name") or symbol; val = h.get("value_sda"); px = _num(h.get("price_sda"))
         if val is not None: total_known += _num(val)
-        value_text = f"{_num(val):.2f} SDA" if val is not None else "UNKNOWN"; price_text = f"{price(px)} SDA" if px > 0 else "UNKNOWN"
+        value_text = f"{_num(val):.2f} SDA" if val is not None else "UNKNOWN"; price_text = v14.price(px) + " SDA" if px > 0 else "UNKNOWN"
         lines += [f"🪙 {symbol} — {name}", f"   {v14._fmt_amount(h.get('amount'))} {symbol}  •  {value_text}", f"   Price: {price_text}", ""]
     lines += ["────────────────────────", f"📊 Known token value: {total_known:.2f} SDA"]
     if w.get("native_sda") is not None and w.get("total_value_sda") is not None: lines.append(f"💼 TOTAL WALLET VALUE: {_num(w.get('total_value_sda')):.2f} SDA")
@@ -119,7 +119,7 @@ def wallet_message_v15(w):
 
 engine.wallet_message = wallet_message_v15
 portfolio_history = portfolio_history_v15
-portfolio_recommendations = v14.portfolio_recommendations_v14
+portfolio_recommendations = v14.portfolio_recommendations_v15
 portfolio_message = portfolio_message_v15
 wallet_message = wallet_message_v15
 
