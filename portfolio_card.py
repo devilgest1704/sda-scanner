@@ -11,10 +11,9 @@ META_FILE = "token_metadata.json"
 OUT_FILE = "portfolio_card.png"
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-DEX_ICON_HOSTS = (
-    "https://normal-sidra-dx.vercel.app/tokens/{symbol}.png",
-    "https://web3.sidradex.pw/tokens/{symbol}.png",
-)
+
+# The DEX page currently references a broken /tokens/*.png path from the old
+# frontend. token_icons.py stores working public logo sources instead.
 
 
 def load(path, default):
@@ -36,36 +35,33 @@ def font(size, bold=False):
     return ImageFont.load_default()
 
 
-def load_icon_url(url):
+def load_icon_url(url, crop=None):
     if not isinstance(url, str) or not url.strip():
         return None
     try:
-        r = requests.get(url.strip(), timeout=12, headers={"User-Agent": "sda-scanner/1.0"})
+        r = requests.get(url.strip(), timeout=15, headers={"User-Agent": "sda-scanner/1.0"})
         r.raise_for_status()
         ctype = str(r.headers.get("content-type") or "").lower()
         if not ctype.startswith("image/"):
             return None
-        im = Image.open(io.BytesIO(r.content)).convert("RGBA")
-        return ImageOps.fit(im, (78, 78), method=Image.Resampling.LANCZOS)
+        src = Image.open(io.BytesIO(r.content)).convert("RGBA")
+        if crop == "left":
+            w, h = src.size
+            src = src.crop((0, 0, w * 0.34, h))
+        elif crop == "center":
+            w, h = src.size
+            src = src.crop((w * 0.33, 0, w * 0.67, h))
+        elif crop == "right":
+            w, h = src.size
+            src = src.crop((w * 0.66, 0, w, h))
+        return ImageOps.fit(src, (78, 78), method=Image.Resampling.LANCZOS)
     except Exception as exc:
         print("Icon download failed:", url, exc)
         return None
 
 
-def icon(symbol, url=None):
-    ico = load_icon_url(url)
-    if ico:
-        return ico
-
-    symbol = str(symbol or "?").strip()
-    candidates = []
-    for template in DEX_ICON_HOSTS:
-        candidates.append(template.format(symbol=symbol.upper()))
-    for candidate in candidates:
-        ico = load_icon_url(candidate)
-        if ico:
-            return ico
-    return None
+def icon(symbol, url=None, crop=None):
+    return load_icon_url(url, crop=crop)
 
 
 def fmt_amount(x):
@@ -83,7 +79,7 @@ def fmt_amount(x):
 
 
 def fallback_badge(d, symbol, x, y):
-    # Never show a confusing '?' placeholder. Use the token symbol as a clear fallback.
+    # Only used when no real logo source exists. Never use '?'.
     d.ellipse((x, y, x + 78, y + 78), fill=(35, 45, 55), outline=(120, 135, 150), width=2)
     text = str(symbol or "?")[:5].upper()
     f = font(20 if len(text) <= 4 else 16, True)
@@ -105,7 +101,14 @@ def main():
         value = pf.get("value_sda")
         pnl = pf.get("unrealized_pnl_sda")
         pct = pf.get("unrealized_pnl_pct")
-        rows.append((token, symbol, name, pf.get("amount"), value, pnl, pct, m.get("icon_url")))
+        crop = m.get("icon_crop")
+        # A held token with zero/invalid value is not a real 0-SDA position.
+        # Keep it UNKNOWN and never manufacture -100% P/L.
+        if pf.get("cost_basis_status") in {"PRICE_UNKNOWN", "UNKNOWN"} or value is None or float(value or 0) <= 0:
+            value = None
+            pnl = None
+            pct = None
+        rows.append((token, symbol, name, pf.get("amount"), value, pnl, pct, m.get("icon_url"), crop))
 
     W = 1200
     header_h = 150
@@ -125,9 +128,9 @@ def main():
     d.text((48, 92), "SDA accumulation • current wallet positions", font=sub, fill=(190, 205, 215))
 
     y = header_h
-    for token, symbol, name, amount, value, pnl, pct, icon_url in rows:
+    for token, symbol, name, amount, value, pnl, pct, icon_url, crop in rows:
         d.rectangle((25, y + 8, W - 25, y + row_h - 8), fill=(255, 255, 255), outline=(215, 220, 225), width=2)
-        ico = icon(symbol, icon_url)
+        ico = icon(symbol, icon_url, crop=crop)
         if ico:
             im.paste(ico, (48, y + 28), ico)
         else:
@@ -166,7 +169,7 @@ def main():
         d.text((430, sy), f"{v:+.2f} SDA", font=pnlf, fill=fill)
         sy += 40
     d.text((760, y + 45), "READ-ONLY", font=small, fill=(80, 85, 90))
-    d.text((760, y + 85), "Token logos: SidraDEX / Blockscout", font=small, fill=(80, 85, 90))
+    d.text((760, y + 85), "Token logos: sourced public project logos", font=small, fill=(80, 85, 90))
 
     im.save(OUT_FILE, quality=95)
     print(f"Created {OUT_FILE}: {W}x{H}")
@@ -176,7 +179,7 @@ def main():
             with open(OUT_FILE, "rb") as f:
                 r = requests.post(
                     f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
-                    data={"chat_id": CHAT_ID, "caption": "🖼️ REAL PORTFOLIO — token icons + P/L"},
+                    data={"chat_id": CHAT_ID, "caption": "🖼️ REAL PORTFOLIO — token logos + P/L"},
                     files={"photo": (OUT_FILE, f, "image/png")},
                     timeout=30,
                 )
