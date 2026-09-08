@@ -8,25 +8,33 @@ EXPLORER_API = "https://ledger.sidrachain.com/api/v2"
 RPC = "https://node.sidrachain.com"
 POOL = "0xCB94460F967f49E3a955278f252Ca9D6056ecE75"
 WSDA = "0xE4095a910209D7BE03B55D02F40d4554B1666182"
+ROUTER = "0x35cAC72Db00e8dAC0e4f7F8A0F53D339E0cC23fb"
 SWAP_SELECTOR = "0x8ab5246f"
+BUY_SELECTOR = "0x414bf389"
+SELL_SELECTOR = "0xc04b8d59"
 TRADE_SIZE_SDA = 50.0
 MAX_TXS = 50
+ROUTER_MAX_TXS = 50
 SAMPLE_COUNT = 10
-TIMEOUT = 8
-RPC_TIMEOUT = 12
+ROUTER_SAMPLE_COUNT = 15
+TIMEOUT = 10
+RPC_TIMEOUT = 15
 DISCOVERY_FILE = "sidra_swap_discovery.json"
 LIQUIDITY_FILE = "liquidity_data.json"
 
 session = requests.Session()
-session.headers.update({"User-Agent": "sda-scanner/18.0"})
+session.headers.update({"User-Agent": "sda-scanner/21.0"})
+
 
 def now():
     return datetime.now(timezone.utc).isoformat()
+
 
 def get_json(url, params=None):
     r = session.get(url, params=params or {}, timeout=TIMEOUT)
     r.raise_for_status()
     return r.json()
+
 
 def load_json(path, default):
     try:
@@ -35,65 +43,86 @@ def load_json(path, default):
     except Exception:
         return default
 
+
 def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
+
 def addr(x):
-    if isinstance(x, dict):
-        return x.get("hash") or x.get("address_hash") or ""
-    return str(x or "")
+    return (x or "").lower()
+
 
 def selector(raw):
-    return raw[:10].lower() if isinstance(raw, str) and raw.startswith("0x") and len(raw) >= 10 else ""
+    if not isinstance(raw, str) or not raw.startswith("0x") or len(raw) < 10:
+        return ""
+    return raw[:10].lower()
+
 
 def decode_call(raw):
-    if selector(raw) != SWAP_SELECTOR:
-        return None
+    raw = raw or ""
     body = raw[10:]
-    if len(body) < 192:
-        return None
+    words = []
+    for i in range(0, len(body), 64):
+        w = body[i:i + 64]
+        if len(w) == 64:
+            words.append("0x" + w)
+    token = ""
+    if words:
+        token = "0x" + words[0][-40:]
     return {
-        "token": "0x" + body[24:64],
-        "arg1": int(body[64:128], 16),
-        "arg2": int(body[128:192], 16),
+        "selector": selector(raw),
+        "words": words,
+        "token": token,
+        "arg1": int(words[1], 16) if len(words) > 1 else None,
+        "arg2": int(words[2], 16) if len(words) > 2 else None,
     }
 
+
 def transfer_value(t):
-    total = t.get("total")
-    if isinstance(total, dict):
-        raw = total.get("value")
-        decimals = total.get("decimals")
-    else:
-        raw = t.get("value") or t.get("amount") or t.get("raw_value")
-        decimals = t.get("decimals")
-    try:
-        raw_int = int(raw) if raw is not None else None
-    except Exception:
-        raw_int = None
-    try:
-        dec = int(decimals) if decimals is not None else None
-    except Exception:
-        dec = None
-    formatted = None
-    if raw_int is not None and dec is not None:
-        formatted = float(Decimal(raw_int) / (Decimal(10) ** dec))
-    return raw_int, dec, formatted
+    for key in ("total", "value", "amount"):
+        v = t.get(key)
+        if isinstance(v, dict):
+            v = v.get("value") or v.get("raw")
+        if v is not None:
+            try:
+                return Decimal(str(v))
+            except Exception:
+                pass
+    return Decimal(0)
+
 
 def normalize_transfer(t):
     token = t.get("token") or {}
-    raw, dec, formatted = transfer_value(t)
+    raw = t.get("total") or {}
+    if isinstance(raw, dict):
+        raw_value = raw.get("value") or raw.get("raw") or "0"
+        formatted = raw.get("formatted")
+    else:
+        raw_value = raw
+        formatted = None
+    try:
+        raw_int = int(raw_value)
+    except Exception:
+        raw_int = 0
+    if formatted is None:
+        decimals = token.get("decimals")
+        try:
+            formatted = float(Decimal(raw_int) / (Decimal(10) ** int(decimals))) if decimals is not None else float(raw_int)
+        except Exception:
+            formatted = float(raw_int)
     return {
-        "token": (token.get("address_hash") or "").lower(),
-        "symbol": token.get("symbol"),
-        "decimals": dec,
-        "raw_value": raw,
+        "token_address": addr(token.get("address") or t.get("token_address")),
+        "symbol": token.get("symbol") or "",
+        "decimals": token.get("decimals"),
+        "raw_value": raw_int,
         "value": formatted,
-        "from": addr(t.get("from")).lower(),
-        "to": addr(t.get("to")).lower(),
+        "from": addr(t.get("from")),
+        "to": addr(t.get("to")),
         "log_index": t.get("log_index"),
         "method": t.get("method"),
     }
+
 
 def list_pool_txs():
     data = get_json(
@@ -102,57 +131,82 @@ def list_pool_txs():
     )
     return data.get("items", []) if isinstance(data, dict) else []
 
+
+def list_router_txs():
+    data = get_json(
+        f"{EXPLORER_API}/addresses/{ROUTER}/transactions",
+        {"filter": "to", "items_count": ROUTER_MAX_TXS},
+    )
+    return data.get("items", []) if isinstance(data, dict) else []
+
+
+def transaction_detail(tx_hash):
+    try:
+        return get_json(f"{EXPLORER_API}/transactions/{tx_hash}")
+    except Exception:
+        return None
+
+
 def transfers_for_tx(tx_hash):
     data = get_json(f"{EXPLORER_API}/transactions/{tx_hash}/token-transfers")
     items = data.get("items", []) if isinstance(data, dict) else []
     return [normalize_transfer(x) for x in items]
 
+
 def pad_word(value):
     return f"{int(value):064x}"
+
 
 def build_observed_calldata(token, fee_tier, arg2):
     return SWAP_SELECTOR + pad_word(int(token, 16)) + pad_word(fee_tier) + pad_word(arg2)
 
+
 def rpc_json(method, params, timeout=RPC_TIMEOUT):
     r = requests.post(
         RPC,
-        json={"jsonrpc": "2.0", "id": 17, "method": method, "params": params},
+        json={"jsonrpc": "2.0", "id": 21, "method": method, "params": params},
         timeout=timeout,
         headers={"Content-Type": "application/json"},
     )
     r.raise_for_status()
     return r.json()
 
+
 def eth_call(data, to_address=POOL, from_address=None, value_wei=0, block_tag="latest"):
-    payload = {
-        "jsonrpc": "2.0",
-        "id": 17,
-        "method": "eth_call",
-        "params": [{
-            "to": to_address,
-            "from": from_address or "0x0000000000000000000000000000000000000001",
-            "data": data,
-            "value": hex(int(value_wei)),
-        }, block_tag if isinstance(block_tag, str) else hex(int(block_tag))],
-    }
+    params = [{
+        "to": to_address,
+        "from": from_address or "0x0000000000000000000000000000000000000001",
+        "data": data,
+        "value": hex(int(value_wei)),
+    }, block_tag if isinstance(block_tag, str) else hex(int(block_tag))]
     try:
-        out = rpc_json("eth_call", payload["params"], timeout=RPC_TIMEOUT)
+        out = rpc_json("eth_call", params, timeout=RPC_TIMEOUT)
         if "error" in out:
             return {"ok": False, "result": None, "error": out["error"]}
         return {"ok": True, "result": out.get("result"), "error": None}
     except Exception as e:
         return {"ok": False, "result": None, "error": str(e)}
 
+
 def eth_get_balance(address, block_tag="latest"):
     try:
-        out = rpc_json("eth_getBalance", [
-            address, block_tag if isinstance(block_tag, str) else hex(int(block_tag))
-        ])
+        out = rpc_json("eth_getBalance", [address, block_tag if isinstance(block_tag, str) else hex(int(block_tag))])
         if "error" in out:
             return None, out["error"]
         return int(out.get("result", "0x0"), 16), None
     except Exception as e:
         return None, str(e)
+
+
+def eth_get_code(address, block_tag="latest"):
+    try:
+        out = rpc_json("eth_getCode", [address, block_tag if isinstance(block_tag, str) else hex(int(block_tag))])
+        if "error" in out:
+            return None, out["error"]
+        return out.get("result", "0x"), None
+    except Exception as e:
+        return None, str(e)
+
 
 def decode_uint256_result(result):
     if not isinstance(result, str) or not result.startswith("0x"):
@@ -165,6 +219,7 @@ def decode_uint256_result(result):
     except Exception:
         return None
 
+
 def analyze(tx):
     raw = tx.get("raw_input") or ""
     if selector(raw) != SWAP_SELECTOR:
@@ -175,181 +230,51 @@ def analyze(tx):
     target = call["token"].lower()
     wsda = WSDA.lower()
     pool = POOL.lower()
-
-    buyers = [
-        t["from"] for t in transfers
-        if t["token"] == wsda and t["to"] == pool and t["value"] is not None
-    ]
+    buyers = [t["from"] for t in transfers if t["token_address"] == wsda and t["to"] == pool and t["value"] > 0]
     buyer = buyers[0] if buyers else ""
-
-    sda_in = sum(
-        t["value"] for t in transfers
-        if t["token"] == wsda and t["from"] == buyer and t["to"] == pool
-        and t["value"] is not None
-    )
-    token_out_transfers = [
-        t for t in transfers
-        if t["token"] == target and t["from"] == pool and t["to"] == buyer
-        and t["value"] is not None
-    ]
-    token_out = sum(t["value"] for t in token_out_transfers)
-    token_out_raw = sum(
-        int(t["raw_value"]) for t in token_out_transfers
-        if t.get("raw_value") is not None
-    )
-    token_decimals = token_out_transfers[0].get("decimals") if token_out_transfers else None
-
+    token_out = next((t for t in transfers if t["token_address"] == target and t["from"] == pool), None)
+    wsda_in = next((t for t in transfers if t["token_address"] == wsda and t["to"] == pool), None)
     return {
         "tx": h,
-        "block": tx.get("block_number"),
-        "status": tx.get("status"),
-        "method": tx.get("method"),
-        "selector": selector(raw),
-        "raw_input": raw,
-        "token": call["token"],
+        "token": target,
         "arg1": call["arg1"],
         "arg2": call["arg2"],
         "buyer": buyer,
-        "sda_in": sda_in,
-        "token_out": token_out,
-        "token_out_raw": token_out_raw,
-        "token_decimals": token_decimals,
-        "arg2_matches_raw_output": token_out_raw > 0 and call["arg2"] == token_out_raw,
-        "arg2_difference_raw": call["arg2"] - token_out_raw if token_out_raw > 0 else None,
-        "tokens_per_sda": token_out / sda_in if sda_in > 0 else None,
-        "arg2_per_sda": call["arg2"] / sda_in if sda_in > 0 else None,
+        "sda_in": float(wsda_in["value"]) if wsda_in else 0.0,
+        "token_out": float(token_out["value"]) if token_out else 0.0,
+        "token_raw_output": token_out["raw_value"] if token_out else None,
+        "token_decimals": token_out["decimals"] if token_out else None,
+        "arg2_matches_raw_output": bool(token_out and call["arg2"] == token_out["raw_value"]),
         "transfers": transfers,
     }
 
-TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
-def keccak_topic(signature):
+def pad_hex_bytes(data):
+    return data[2:] if isinstance(data, str) and data.startswith("0x") else data
+
+
+def decode_words(raw):
+    body = pad_hex_bytes(raw or "")
+    words = []
+    for i in range(0, len(body), 64):
+        w = body[i:i + 64]
+        if len(w) == 64:
+            words.append("0x" + w)
+    return words
+
+
+def word_as_uint(word):
     try:
-        from Crypto.Hash import keccak
-        k = keccak.new(digest_bits=256)
-        k.update(signature.encode())
-        return "0x" + k.hexdigest()
+        return int(word, 16)
     except Exception:
         return None
 
-APPROVAL_TOPIC = keccak_topic("Approval(address,address,uint256)")
 
-def topic_name(topic):
-    t = (topic or "").lower()
-    if t == TRANSFER_TOPIC:
-        return "Transfer"
-    if APPROVAL_TOPIC and t == APPROVAL_TOPIC.lower():
-        return "Approval"
-    return "UNKNOWN"
+def word_as_address(word):
+    if not isinstance(word, str) or len(word) < 42:
+        return ""
+    return "0x" + word[-40:].lower()
 
-def topic_address(topic):
-    if isinstance(topic, str) and len(topic) >= 40:
-        return "0x" + topic[-40:]
-    return ""
-
-def decode_word(data):
-    if not isinstance(data, str) or not data.startswith("0x"):
-        return None
-    try:
-        return int(data, 16)
-    except Exception:
-        return None
-
-def decode_receipt_logs(receipt):
-    out = []
-    for i, log in enumerate((receipt or {}).get("logs") or []):
-        topics = log.get("topics") or []
-        data = log.get("data") or "0x"
-        t0 = topics[0].lower() if topics else None
-        item = {
-            "index": i,
-            "address": (log.get("address") or "").lower(),
-            "topic0": t0,
-            "event": topic_name(t0),
-            "topics": topics,
-            "data": data,
-        }
-        if t0 == TRANSFER_TOPIC and len(topics) >= 3:
-            item["from"] = topic_address(topics[1]).lower()
-            item["to"] = topic_address(topics[2]).lower()
-            item["amount_raw"] = decode_word(data)
-        elif APPROVAL_TOPIC and t0 == APPROVAL_TOPIC.lower() and len(topics) >= 3:
-            item["owner"] = topic_address(topics[1]).lower()
-            item["spender"] = topic_address(topics[2]).lower()
-            item["amount_raw"] = decode_word(data)
-        else:
-            h = data[2:] if data.startswith("0x") else data
-            item["data_words"] = [
-                "0x" + h[i:i+64] for i in range(0, len(h), 64)
-                if len(h[i:i+64]) == 64
-            ]
-        out.append(item)
-    return out
-
-def get_internal_txs(tx_hash):
-    try:
-        data = get_json(f"{EXPLORER_API}/transactions/{tx_hash}/internal-transactions")
-        return data.get("items", []) if isinstance(data, dict) else []
-    except Exception:
-        return []
-
-def rpc_trace(tx_hash):
-    attempts = []
-    for method, params in [
-        ("trace_transaction", [tx_hash]),
-        ("debug_traceTransaction", [tx_hash, {"tracer": "callTracer"}]),
-        ("trace_replayTransaction", [tx_hash, ["trace"]]),
-    ]:
-        try:
-            out = rpc_json(method, params, timeout=20)
-            attempts.append({"method": method, "response": out})
-            if out.get("result") is not None:
-                return {"method": method, "result": out["result"], "attempts": attempts}
-        except Exception as e:
-            attempts.append({"method": method, "exception": str(e)})
-    return {"method": None, "result": None, "attempts": attempts}
-
-def flatten_trace_calls(node, out=None, depth=0):
-    if out is None:
-        out = []
-    if not isinstance(node, dict):
-        return out
-    typ = node.get("type")
-    if typ in ("CALL", "DELEGATECALL", "STATICCALL", "CALLCODE", "CREATE", "CREATE2"):
-        inp = node.get("input") or node.get("data") or ""
-        out.append({
-            "depth": depth,
-            "type": typ,
-            "from": (node.get("from") or "").lower(),
-            "to": (node.get("to") or "").lower(),
-            "value": node.get("value"),
-            "input": inp,
-            "selector": selector(inp),
-            "output": node.get("output"),
-            "error": node.get("error"),
-        })
-    for child in node.get("calls") or []:
-        flatten_trace_calls(child, out, depth + 1)
-    return out
-
-def trace_calls(trace):
-    result = trace.get("result") if trace else None
-    if isinstance(result, list):
-        return [
-            {
-                "depth": 0,
-                "type": x.get("type"),
-                "from": (x.get("action", {}).get("from") or "").lower(),
-                "to": (x.get("action", {}).get("to") or "").lower(),
-                "value": x.get("action", {}).get("value"),
-                "input": x.get("action", {}).get("input") or "",
-                "selector": selector(x.get("action", {}).get("input") or ""),
-                "output": x.get("result"),
-                "error": x.get("error"),
-            }
-            for x in result if isinstance(x, dict)
-        ]
-    return flatten_trace_calls(result)
 
 def extract_push4(bytecode):
     if not isinstance(bytecode, str) or not bytecode.startswith("0x"):
@@ -357,10 +282,10 @@ def extract_push4(bytecode):
     raw = bytecode[2:]
     out, i = [], 0
     while i + 2 <= len(raw):
-        op = int(raw[i:i+2], 16)
+        op = int(raw[i:i + 2], 16)
         i += 2
         if op == 0x63 and i + 8 <= len(raw):
-            s = "0x" + raw[i:i+8].lower()
+            s = "0x" + raw[i:i + 8].lower()
             if s not in out:
                 out.append(s)
             i += 8
@@ -369,8 +294,45 @@ def extract_push4(bytecode):
     return out
 
 
-# Known selectors used by common V3-style pools. We probe them with eth_call only;
-# unsupported selectors simply revert and are recorded as such.
+def fetch_router_forensics():
+    txs = list_router_txs()
+    interesting = []
+    methods = {}
+    for tx in txs:
+        h = tx.get("hash") or tx.get("transaction_hash")
+        if not h:
+            continue
+        detail = transaction_detail(h)
+        if not detail:
+            continue
+        raw = detail.get("raw_input") or detail.get("input") or ""
+        sel = selector(raw)
+        methods[sel] = methods.get(sel, 0) + 1
+        if sel in {BUY_SELECTOR, SELL_SELECTOR}:
+            words = decode_words(raw[10:])
+            try:
+                value_wei = int(detail.get("value") or "0")
+            except Exception:
+                value_wei = 0
+            transfers = transfers_for_tx(h)
+            interesting.append({
+                "tx": h,
+                "method": sel,
+                "from": addr(detail.get("from")),
+                "to": addr(detail.get("to")),
+                "block": int(detail.get("block") or 0),
+                "value_wei": value_wei,
+                "value_sda": float(Decimal(value_wei) / Decimal(10 ** 18)),
+                "raw_input": raw,
+                "words": words,
+                "word_uints": [word_as_uint(w) for w in words],
+                "word_addresses": [word_as_address(w) for w in words],
+                "transfers": transfers,
+            })
+    return txs, methods, interesting
+
+
+# Known selectors used by common V3-style pools. Read-only only.
 KNOWN_READ_SELECTORS = {
     "0x0dfe1681": "token0()",
     "0xd21220a7": "token1()",
@@ -382,52 +344,23 @@ KNOWN_READ_SELECTORS = {
     "0x70a08231": "balanceOf(address)",
 }
 
-# Correct canonical ERC-20 Transfer topic.
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+SWAP_EVENT_TOPIC = "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"
+Q96 = 1 << 96
 
 
-def probe_selector(sel, name):
-    r = eth_call(sel, to_address=POOL, from_address="0x0000000000000000000000000000000000000001")
-    return {
-        "selector": sel,
-        "name": name,
-        "ok": bool(r.get("ok")),
-        "result": r.get("result"),
-        "error": r.get("error"),
-    }
+def probe_selector(sel, name, target=POOL):
+    r = eth_call(sel, to_address=target, from_address="0x0000000000000000000000000000000000000001")
+    return {"selector": sel, "name": name, "target": target, "ok": bool(r.get("ok")), "result": r.get("result"), "error": r.get("error")}
 
 
 def decode_static_words(result):
-    if not isinstance(result, str) or not result.startswith("0x"):
-        return []
-    raw = result[2:]
-    if len(raw) % 64:
-        return []
-    return ["0x" + raw[i:i+64] for i in range(0, len(raw), 64)]
+    return decode_words(result)
 
 
 def signed_int256_word(word):
     x = int(word, 16)
     return x - (1 << 256) if x >= (1 << 255) else x
-
-
-def decode_swap_event_log(log):
-    topics = log.get("topics") or []
-    data = log.get("data") or ""
-    if not topics or topics[0].lower() != "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67":
-        return None
-    words = decode_static_words(data)
-    if len(words) != 5:
-        return None
-    return {
-        "sender": topic_address(topics[1]) if len(topics) > 1 else "",
-        "recipient": topic_address(topics[2]) if len(topics) > 2 else "",
-        "amount0": signed_int256_word(words[0]),
-        "amount1": signed_int256_word(words[1]),
-        "sqrt_price_x96": int(words[2], 16),
-        "liquidity": int(words[3], 16),
-        "tick": signed_int256_word(words[4]),
-    }
 
 
 def fetch_receipt(tx_hash):
@@ -438,6 +371,24 @@ def fetch_receipt(tx_hash):
         return None
 
 
+def decode_swap_event_log(log):
+    topics = log.get("topics") or []
+    if not topics or topics[0].lower() != SWAP_EVENT_TOPIC:
+        return None
+    words = decode_static_words(log.get("data") or "")
+    if len(words) != 5:
+        return None
+    return {
+        "sender": word_as_address(topics[1]) if len(topics) > 1 else "",
+        "recipient": word_as_address(topics[2]) if len(topics) > 2 else "",
+        "amount0": signed_int256_word(words[0]),
+        "amount1": signed_int256_word(words[1]),
+        "sqrt_price_x96": int(words[2], 16),
+        "liquidity": int(words[3], 16),
+        "tick": signed_int256_word(words[4]),
+    }
+
+
 def event_analysis(tx_hash):
     receipt = fetch_receipt(tx_hash)
     if not receipt:
@@ -446,7 +397,7 @@ def event_analysis(tx_hash):
     for log in receipt.get("logs") or []:
         item = decode_swap_event_log(log)
         if item:
-            item["address"] = (log.get("address") or "").lower()
+            item["address"] = addr(log.get("address"))
             swaps.append(item)
     return {
         "tx": tx_hash,
@@ -457,44 +408,7 @@ def event_analysis(tx_hash):
     }
 
 
-SWAP_EVENT_TOPIC = "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67"
-Q96 = 1 << 96
-
-
-def signed_int256(word):
-    x = int(word, 16) if isinstance(word, str) else int(word)
-    return x - (1 << 256) if x >= (1 << 255) else x
-
-
-def decode_swap_events(receipt):
-    out = []
-    for log in (receipt or {}).get("logs") or []:
-        topics = log.get("topics") or []
-        data = log.get("data") or "0x"
-        if not topics or topics[0].lower() != SWAP_EVENT_TOPIC:
-            continue
-        words = []
-        raw = data[2:] if data.startswith("0x") else data
-        for i in range(0, len(raw), 64):
-            if len(raw[i:i+64]) == 64:
-                words.append(int(raw[i:i+64], 16))
-        if len(words) < 5:
-            continue
-        out.append({
-            "address": log.get("address"),
-            "sender": topic_address(topics[1]) if len(topics) > 1 else "",
-            "recipient": topic_address(topics[2]) if len(topics) > 2 else "",
-            "amount0": signed_int256(words[0]),
-            "amount1": signed_int256(words[1]),
-            "sqrt_price_x96": words[2],
-            "liquidity": words[3],
-            "tick": signed_int256(words[4]),
-        })
-    return out
-
-
 def quote_zero_for_one(amount0_in_raw, sqrt_price_x96, liquidity):
-    """Exact single-tick V3 quote, no fee, token0 -> token1."""
     if amount0_in_raw <= 0 or sqrt_price_x96 <= 0 or liquidity <= 0:
         return None
     sp = Decimal(sqrt_price_x96)
@@ -506,7 +420,6 @@ def quote_zero_for_one(amount0_in_raw, sqrt_price_x96, liquidity):
 
 
 def quote_one_for_zero(amount1_in_raw, sqrt_price_x96, liquidity):
-    """Exact single-tick V3 quote, no fee, token1 -> token0."""
     if amount1_in_raw <= 0 or sqrt_price_x96 <= 0 or liquidity <= 0:
         return None
     sp = Decimal(sqrt_price_x96)
@@ -518,8 +431,6 @@ def quote_one_for_zero(amount1_in_raw, sqrt_price_x96, liquidity):
 
 
 def validate_historical_math(item, swap):
-    # The Swap event is post-swap state. Reconstruct the pre-swap sqrt price
-    # from the signed amount and then reproduce the other side of the swap.
     a0, a1 = swap["amount0"], swap["amount1"]
     sp_post = Decimal(swap["sqrt_price_x96"])
     L = Decimal(swap["liquidity"])
@@ -527,7 +438,6 @@ def validate_historical_math(item, swap):
         return None
     try:
         if a0 < 0 and a1 > 0:
-            # token0 in -> token1 out; amount0 is the observed input.
             dx = Decimal(-a0)
             inv_pre = Decimal(1) / sp_post - dx / (L * Q96)
             if inv_pre <= 0:
@@ -537,7 +447,6 @@ def validate_historical_math(item, swap):
             actual = Decimal(a1)
             direction = "token0_in_token1_out"
         elif a1 < 0 and a0 > 0:
-            # token1 in -> token0 out.
             dy = Decimal(-a1)
             sp_pre = sp_post - dy * Q96 / L
             if sp_pre <= 0:
@@ -559,224 +468,210 @@ def validate_historical_math(item, swap):
     except Exception:
         return None
 
+
 def main():
-    print("💧 LIQUIDITY V19 — V3 EVENT MATH + HISTORICAL QUOTE VALIDATION")
+    print("💧 LIQUIDITY V21 — ROUTER FORENSICS + HISTORICAL BUY CALL VALIDATION")
     print(f"Pool: {POOL}")
+    print(f"Router/helper: {ROUTER}")
     print(f"Target trade: {TRADE_SIZE_SDA:.0f} SDA")
     print("Safety: READ-ONLY / no broadcast")
 
+    discovery = load_json(DISCOVERY_FILE, {})
+
+    # --- Pool transaction discovery (carry forward V19/V20 evidence) ---
     try:
-        txs = list_pool_txs()
+        pool_txs = list_pool_txs()
     except Exception as e:
-        print("Pool transaction discovery error:", e)
-        txs = []
+        print(f"Pool discovery failed: {e}")
+        pool_txs = []
 
-    swap_txs = [t for t in txs if selector(t.get("raw_input") or "") == SWAP_SELECTOR]
+    selector_counts = {}
+    real = []
+    for tx in pool_txs:
+        raw = tx.get("raw_input") or ""
+        sel = selector(raw)
+        selector_counts[sel] = selector_counts.get(sel, 0) + 1
+        if sel == SWAP_SELECTOR:
+            real.append(tx)
 
-    counts = {}
-    for t in txs:
-        s = selector(t.get("raw_input") or "")
-        if s:
-            counts[s] = counts.get(s, 0) + 1
-
-    print(f"Pool calls discovered: {len(txs)}")
+    print(f"Pool calls discovered: {len(pool_txs)}")
     print("Selector counts:")
-    for s, n in sorted(counts.items(), key=lambda x: -x[1]):
-        print(f"  {s}: {n}")
-    print(f"Real {SWAP_SELECTOR} transactions: {len(swap_txs)}")
-    print(f"Analyzing {min(SAMPLE_COUNT, len(swap_txs))} samples concurrently")
-
-    samples = []
-    with ThreadPoolExecutor(max_workers=min(5, max(1, len(swap_txs[:SAMPLE_COUNT])))) as ex:
-        futures = [ex.submit(analyze, t) for t in swap_txs[:SAMPLE_COUNT]]
-        for f in as_completed(futures):
-            try:
-                a = f.result()
-                if a:
-                    samples.append(a)
-            except Exception as e:
-                print("Analysis error:", e)
+    for sel, count in sorted(selector_counts.items(), key=lambda x: -x[1]):
+        print(f"  {sel}: {count}")
+    print(f"Real {SWAP_SELECTOR} transactions: {len(real)}")
 
     usable = []
-    for a in sorted(samples, key=lambda x: x.get("tx", "")):
-        print()
-        print("TX " + str(a["tx"]))
-        print("  token=" + a["token"])
-        print("  arg1=" + str(a["arg1"]))
-        print("  arg2=" + str(a["arg2"]))
-        print("  buyer=" + a["buyer"])
-        print("  WSDA user→pool=" + str(a["sda_in"]))
-        print("  token pool→user=" + str(a["token_out"]))
-        print("  token raw output=" + str(a["token_out_raw"]))
-        print("  token decimals=" + str(a["token_decimals"]))
-        print("  arg2 == raw token output: " + str(a["arg2_matches_raw_output"]))
-        print("  arg2 - raw output=" + str(a["arg2_difference_raw"]))
-        print("  tokens/SDA=" + str(a["tokens_per_sda"]))
-
-        for t in a["transfers"]:
-            if t["value"] is not None:
-                print(
-                    f"    {t['symbol'] or t['token']} {t['value']} "
-                    f"{t['from'][:10]}→{t['to'][:10]}"
-                )
-
-        if a["sda_in"] > 0 and a["token_out"] > 0:
-            usable.append(a)
-
-    forensic = None
-    if usable:
-        # Prefer the newest successful BUY sample.
-        forensic_sample = max(usable, key=lambda x: int(x.get("block") or 0))
-        h = forensic_sample["tx"]
-
-        print()
-        print("🔎 FORENSICS TX " + h)
-
-        tx, txerr = None, None
-        rec, recerr = None, None
-        try:
-            txj = rpc_json("eth_getTransactionByHash", [h])
-            tx, txerr = txj.get("result"), txj.get("error")
-        except Exception as e:
-            txerr = str(e)
-
-        try:
-            recj = rpc_json("eth_getTransactionReceipt", [h])
-            rec, recerr = recj.get("result"), recj.get("error")
-        except Exception as e:
-            recerr = str(e)
-
-        print("  RPC from=" + str((tx or {}).get("from")))
-        print("  RPC to=" + str((tx or {}).get("to")))
-        print("  RPC value=" + str((tx or {}).get("value")))
-        print("  RPC block=" + str((tx or {}).get("blockNumber")))
-        print("  receipt status=" + str((rec or {}).get("status")))
-        print("  receipt gasUsed=" + str((rec or {}).get("gasUsed")))
-
-        logs = decode_receipt_logs(rec)
-        print("  receipt logs=" + str(len(logs)))
-        print("  decoded receipt logs=" + str(sum(1 for x in logs if x["event"] != "UNKNOWN")))
-
-        for x in logs:
-            print(
-                "    LOG " + str(x["index"]) +
-                " address=" + str(x["address"]) +
-                " event=" + str(x["event"]) +
-                " topic0=" + str(x["topic0"])
-            )
-            if x["event"] == "Transfer":
-                print(
-                    "      Transfer " + x["from"] + " -> " + x["to"] +
-                    " amount_raw=" + str(x["amount_raw"])
-                )
-            elif x["event"] == "Approval":
-                print(
-                    "      Approval " + x["owner"] + " -> " + x["spender"] +
-                    " amount_raw=" + str(x["amount_raw"])
-                )
-            else:
-                print("      topics=" + str(x["topics"]))
-                print("      data=" + str(x["data"]))
-                if x.get("data_words"):
-                    print("      data_words=" + str(x["data_words"]))
-
-        print()
-        print("  unique topic0 across sampled BUY receipts:")
-        topic_counts = {}
-        for a in usable[:SAMPLE_COUNT]:
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = [ex.submit(analyze, tx) for tx in real[:SAMPLE_COUNT]]
+        for fut in as_completed(futures):
             try:
-                rj = rpc_json("eth_getTransactionReceipt", [a["tx"]])
-                rr = rj.get("result") or {}
-                for lg in rr.get("logs") or []:
-                    ts = lg.get("topics") or []
-                    if ts:
-                        t0 = ts[0].lower()
-                        topic_counts[t0] = topic_counts.get(t0, 0) + 1
+                x = fut.result()
+                if x:
+                    usable.append(x)
             except Exception as e:
-                print("    receipt error:", e)
-
-        for t0, n in sorted(topic_counts.items(), key=lambda x: -x[1]):
-            print("    " + str(n) + "x " + t0 + "  " + topic_name(t0))
-
-        internal = get_internal_txs(h)
+                print(f"Sample error: {e}")
+    usable.sort(key=lambda x: x["tx"])
+    print(f"Analyzing {len(usable)} samples")
+    for item in usable:
         print()
-        print("  explorer internal transactions=" + str(len(internal)))
-        for item in internal[:20]:
-            print(
-                "    " + str(addr(item.get("from"))) + " -> " +
-                str(addr(item.get("to"))) +
-                " type=" + str(item.get("type")) +
-                " method=" + str(item.get("method")) +
-                " value=" + str(item.get("value"))
-            )
+        print(f"TX {item['tx']}")
+        print(f"  token={item['token']}")
+        print(f"  arg1={item['arg1']}")
+        print(f"  arg2={item['arg2']}")
+        print(f"  buyer={item['buyer']}")
+        print(f"  WSDA user→pool={item['sda_in']}")
+        print(f"  token pool→user={item['token_out']}")
+        print(f"  token raw output={item['token_raw_output']}")
+        print(f"  token decimals={item['token_decimals']}")
+        print(f"  arg2 == raw token output: {item['arg2_matches_raw_output']}")
+        if item['sda_in']:
+            print(f"  tokens/SDA={item['token_out'] / item['sda_in']}")
+        for t in item["transfers"]:
+            print(f"    {t['symbol'] or t['token_address']} {t['value']} {t['from'][:10]}→{t['to'][:10]}")
 
-        trace = rpc_trace(h)
-        calls = trace_calls(trace)
-        print("  trace method=" + str(trace.get("method")))
-        print("  trace calls=" + str(len(calls)))
-        for c in calls[:30]:
-            print(
-                "    " * min(c.get("depth", 0) + 1, 6) +
-                str(c.get("type")) + " " + str(c.get("from")) +
-                " -> " + str(c.get("to")) +
-                " value=" + str(c.get("value")) +
-                " selector=" + str(c.get("selector")) +
-                " error=" + str(c.get("error"))
-            )
+    discovery["v21_pool_samples"] = usable
 
-        block = (tx or {}).get("blockNumber") or "latest"
-        code, codeerr = rpc_get_code(POOL, block) if "rpc_get_code" in globals() else (None, None)
-        if code is None:
-            try:
-                cj = rpc_json("eth_getCode", [POOL, block])
-                code, codeerr = cj.get("result"), cj.get("error")
-            except Exception as e:
-                code, codeerr = None, str(e)
+    # --- Router bytecode / selector inventory ---
+    print()
+    print("🧩 V21 ROUTER / HELPER FORENSICS")
+    code, code_err = eth_get_code(ROUTER)
+    if code:
+        router_selectors = extract_push4(code)
+        print(f"  router code bytes={max(0, (len(code) - 2) // 2)}")
+        print(f"  router PUSH4 selectors={len(router_selectors)}")
+        print("  " + ", ".join(router_selectors))
+    else:
+        router_selectors = []
+        print(f"  router code unavailable: {code_err}")
 
-        selectors = extract_push4(code or "0x")
-        print("  pool code bytes=" + str(max(0, (len(code or "") - 2) // 2)))
-        print("  pool PUSH4 selectors=" + str(len(selectors)))
-        print("    " + ", ".join(selectors))
-        print("  pool contains 0x8ab5246f: " + str(SWAP_SELECTOR in selectors))
+    try:
+        router_txs, router_methods, router_interesting = fetch_router_forensics()
+    except Exception as e:
+        router_txs, router_methods, router_interesting = [], {}, []
+        print(f"  router transaction discovery failed: {e}")
 
-        forensic = {
-            "tx": h,
-            "transaction": tx,
-            "receipt": rec,
-            "decoded_logs": logs,
-            "trace": trace,
-            "trace_calls": calls,
-            "internal_transactions": internal,
-            "pool_push4": selectors,
+    print(f"  router transactions discovered: {len(router_txs)}")
+    print("  router method/selector counts:")
+    for sel, count in sorted(router_methods.items(), key=lambda x: -x[1]):
+        print(f"    {sel}: {count}")
+
+    discovery["v21_router_selectors"] = router_selectors
+    discovery["v21_router_method_counts"] = router_methods
+    discovery["v21_router_transactions"] = router_interesting[:ROUTER_SAMPLE_COUNT]
+
+    # --- Historical buy calls: decode calldata and simulate exact historical tx via eth_call ---
+    buys = [x for x in router_interesting if x["method"] == BUY_SELECTOR]
+    print()
+    print(f"🔎 Historical {BUY_SELECTOR} BUY calls: {len(buys)}")
+    historical_call_results = []
+    for x in buys[:ROUTER_SAMPLE_COUNT]:
+        print()
+        print(f"BUY TX {x['tx']}")
+        print(f"  block={x['block']} from={x['from']}")
+        print(f"  native value={x['value_sda']} SDA")
+        print(f"  calldata words={len(x['words'])}")
+        for i, w in enumerate(x["words"]):
+            print(f"    word[{i}] uint={x['word_uints'][i]} address={x['word_addresses'][i]}")
+
+        # Re-run the exact historical call one block before execution. This is
+        # an eth_call simulation only; it cannot broadcast or alter chain state.
+        block_tag = max(0, x["block"] - 1)
+        sim = eth_call(
+            x["raw_input"],
+            to_address=ROUTER,
+            from_address=x["from"] or None,
+            value_wei=x["value_wei"],
+            block_tag=block_tag,
+        )
+        result_decoded = decode_static_words(sim.get("result")) if sim.get("ok") else []
+        print(f"  historical eth_call: {'OK' if sim.get('ok') else 'REVERT'}")
+        if sim.get("ok"):
+            print(f"  return bytes={len(pad_hex_bytes(sim.get('result') or '')) // 2}")
+            print(f"  return words={len(result_decoded)}")
+            for i, w in enumerate(result_decoded[:8]):
+                print(f"    return[{i}] uint={word_as_uint(w)}")
+        else:
+            print(f"  error={sim.get('error')}")
+
+        token_outputs = [
+            t for t in x["transfers"]
+            if t["from"] == addr(ROUTER) and t["to"] == x["from"] and t["token_address"] != WSDA.lower()
+        ]
+        observed_output = token_outputs[0]["raw_value"] if token_outputs else None
+        historical_call_results.append({
+            "tx": x["tx"],
+            "block": x["block"],
+            "from": x["from"],
+            "value_sda": x["value_sda"],
+            "raw_input": x["raw_input"],
+            "words": x["words"],
+            "word_uints": x["word_uints"],
+            "word_addresses": x["word_addresses"],
+            "eth_call_ok": bool(sim.get("ok")),
+            "eth_call_result": sim.get("result"),
+            "eth_call_error": sim.get("error"),
+            "eth_call_return_words": result_decoded,
+            "observed_token_output_raw": observed_output,
+        })
+
+    discovery["v21_historical_buy_eth_calls"] = historical_call_results
+
+    # --- Try exact calldata with 50 SDA only for the first successful historical BUY shape.
+    # This is still eth_call only. We do NOT claim it is a quote until the return
+    # value can be matched to a token output/minimum-output field.
+    target_probe = None
+    if buys:
+        target_probe = buys[0]
+        words = target_probe["words"]
+        print()
+        print("🧪 V21 50 SDA PROBE — SAME BUY METHOD, MODIFIED NATIVE VALUE")
+        print(f"  base tx={target_probe['tx']}")
+        print(f"  method={target_probe['method']}")
+        print(f"  from={target_probe['from']}")
+        print(f"  historical value={target_probe['value_sda']} SDA")
+        print("  test value=50 SDA")
+        sim50 = eth_call(
+            target_probe["raw_input"],
+            to_address=ROUTER,
+            from_address=target_probe["from"] or None,
+            value_wei=int(TRADE_SIZE_SDA * 10**18),
+            block_tag="latest",
+        )
+        print(f"  50 SDA eth_call: {'OK' if sim50.get('ok') else 'REVERT'}")
+        if sim50.get("ok"):
+            ret_words = decode_static_words(sim50.get("result"))
+            print(f"  return words={len(ret_words)}")
+            for i, w in enumerate(ret_words[:8]):
+                print(f"    return[{i}] uint={word_as_uint(w)}")
+        else:
+            print(f"  error={sim50.get('error')}")
+        discovery["v21_50_sda_probe"] = {
+            "base_tx": target_probe["tx"],
+            "method": target_probe["method"],
+            "from": target_probe["from"],
+            "historical_value_sda": target_probe["value_sda"],
+            "test_value_sda": TRADE_SIZE_SDA,
+            "ok": bool(sim50.get("ok")),
+            "result": sim50.get("result"),
+            "error": sim50.get("error"),
+            "return_words": decode_static_words(sim50.get("result")) if sim50.get("ok") else [],
         }
 
-    discovery = load_json(DISCOVERY_FILE, {})
-    discovery["updated_at"] = now()
-    discovery["version"] = 19
-    discovery["pool"] = POOL
-    discovery["swap_selector"] = SWAP_SELECTOR
-    discovery["samples"] = usable
-    discovery["forensics"] = forensic
-    discovery["arg1_observed"] = sorted(set(a["arg1"] for a in usable))
-    discovery["arg2_exact_raw_output_matches"] = sum(
-        1 for a in usable if a["arg2_matches_raw_output"]
-    )
-
-    # V18: probe common read-only state selectors on the pool. No state-changing
-    # transaction is ever sent. This is deliberately separate from the historical
-    # forensic evidence so a guessed ABI can never be treated as verified.
+    # --- Carry forward pool read-only probes ---
     print()
-    print("🔬 V19 READ-ONLY POOL STATE PROBES")
+    print("🔬 V21 READ-ONLY POOL STATE PROBES")
     probes = []
     for sel, name in KNOWN_READ_SELECTORS.items():
-        p = probe_selector(sel, name)
+        p = probe_selector(sel, name, POOL)
         probes.append(p)
         if p["ok"]:
             words = decode_static_words(p["result"])
             print(f"  {sel} {name}: OK words={len(words)} result={p['result']}")
         else:
             print(f"  {sel} {name}: REVERT/UNSUPPORTED")
+    discovery["v21_pool_read_only_probes"] = probes
 
+    # --- Historical V3 event evidence / math ---
     event_evidence = []
     for item in usable[:SAMPLE_COUNT]:
         ev = event_analysis(item["tx"])
@@ -791,11 +686,10 @@ def main():
                 print(f"    liquidity={sw['liquidity']}")
                 print(f"    tick={sw['tick']}")
 
-    discovery["v19_read_only_probes"] = probes
-    discovery["v19_swap_events"] = event_evidence
+    discovery["v21_swap_events"] = event_evidence
 
     print()
-    print("🧮 V19 HISTORICAL V3 MATH VALIDATION")
+    print("🧮 V21 HISTORICAL V3 MATH VALIDATION")
     math_checks = []
     for ev_item in event_evidence:
         for sw in ev_item.get("swap_events", []):
@@ -809,25 +703,28 @@ def main():
                 chk["observed_token_out"] = item.get("token_out")
                 math_checks.append(chk)
                 print(f"  {ev_item['tx']}: {chk['direction']} error={chk['relative_error_pct']:.6f}%")
-    discovery["v19_math_checks"] = math_checks
-    discovery["v19_math_max_abs_error_pct"] = max((abs(x["relative_error_pct"]) for x in math_checks), default=None)
+    discovery["v21_math_checks"] = math_checks
+    discovery["v21_math_max_abs_error_pct"] = max((abs(x["relative_error_pct"]) for x in math_checks), default=None)
+
     save_json(DISCOVERY_FILE, discovery)
 
     liquidity = load_json(LIQUIDITY_FILE, {})
     liquidity.update({
         "updated_at": now(),
-        "version": 19,
+        "version": 21,
         "pool": POOL,
+        "router": ROUTER,
         "trade_size_sda": TRADE_SIZE_SDA,
         "status": "UNKNOWN",
-        "reason": "Historical V3-style Swap math validated from receipts; live quote still requires current-state extraction or a proven quote-call ABI.",
+        "reason": "V21 reverse-engineers the live Sidra helper/router path using historical 0x414bf389 BUY calls and read-only eth_call simulations. No live liquidity or quote is promoted until return semantics are proven.",
         "observed_buy_samples": len(usable),
-        "arg1_values": sorted(set(a["arg1"] for a in usable)),
-        "arg2_exact_raw_output_matches": sum(
-            1 for a in usable if a["arg2_matches_raw_output"]
-        ),
-        "v19_quote_status": "HISTORICAL_MATH_VALIDATED" if math_checks and max(abs(x["relative_error_pct"]) for x in math_checks) < 0.001 else "UNVERIFIED",
-        "v19_note": "Historical Swap event math is reconstructed read-only. No live quote or liquidity value is promoted until current state or quote-call semantics are proven.",
+        "arg1_values": sorted(set(a["arg1"] for a in usable if a.get("arg1") is not None)),
+        "arg2_exact_raw_output_matches": sum(1 for a in usable if a["arg2_matches_raw_output"]),
+        "v21_router_buy_calls": len(buys),
+        "v21_historical_eth_call_successes": sum(1 for x in historical_call_results if x["eth_call_ok"]),
+        "v21_50_sda_probe_ok": bool(discovery.get("v21_50_sda_probe", {}).get("ok")),
+        "v21_quote_status": "UNVERIFIED",
+        "v21_note": "Historical router BUY calls are simulated with eth_call only. A successful return is not promoted as a quote until it is matched against observed token output and calldata semantics.",
     })
     save_json(LIQUIDITY_FILE, liquidity)
 
@@ -835,7 +732,8 @@ def main():
     print("Saved " + DISCOVERY_FILE)
     print("Saved " + LIQUIDITY_FILE)
     print("Overall liquidity status: UNKNOWN")
-    print("Next: use validated historical V3 math to identify the exact current-state/quote path; no live liquidity is promoted yet.")
+    print("Next: identify 0x414bf389 argument semantics and whether its eth_call return contains the exact current token quote.")
+
 
 if __name__ == "__main__":
     main()
