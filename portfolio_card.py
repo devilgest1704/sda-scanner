@@ -11,6 +11,10 @@ META_FILE = "token_metadata.json"
 OUT_FILE = "portfolio_card.png"
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
+DEX_ICON_HOSTS = (
+    "https://normal-sidra-dx.vercel.app/tokens/{symbol}.png",
+    "https://web3.sidradex.pw/tokens/{symbol}.png",
+)
 
 
 def load(path, default):
@@ -32,12 +36,15 @@ def font(size, bold=False):
     return ImageFont.load_default()
 
 
-def icon(url):
+def load_icon_url(url):
     if not isinstance(url, str) or not url.strip():
         return None
     try:
         r = requests.get(url.strip(), timeout=12, headers={"User-Agent": "sda-scanner/1.0"})
         r.raise_for_status()
+        ctype = str(r.headers.get("content-type") or "").lower()
+        if not ctype.startswith("image/"):
+            return None
         im = Image.open(io.BytesIO(r.content)).convert("RGBA")
         return ImageOps.fit(im, (78, 78), method=Image.Resampling.LANCZOS)
     except Exception as exc:
@@ -45,13 +52,45 @@ def icon(url):
         return None
 
 
+def icon(symbol, url=None):
+    ico = load_icon_url(url)
+    if ico:
+        return ico
+
+    symbol = str(symbol or "?").strip()
+    candidates = []
+    for template in DEX_ICON_HOSTS:
+        candidates.append(template.format(symbol=symbol.upper()))
+    for candidate in candidates:
+        ico = load_icon_url(candidate)
+        if ico:
+            return ico
+    return None
+
+
 def fmt_amount(x):
-    try: x = float(x)
-    except Exception: x = 0.0
-    if abs(x) >= 1000000: return f"{x:,.0f}"
-    if abs(x) >= 1000: return f"{x:,.2f}"
-    if abs(x) >= 1: return f"{x:,.4f}".rstrip("0").rstrip(".")
+    try:
+        x = float(x)
+    except Exception:
+        x = 0.0
+    if abs(x) >= 1000000:
+        return f"{x:,.0f}"
+    if abs(x) >= 1000:
+        return f"{x:,.2f}"
+    if abs(x) >= 1:
+        return f"{x:,.4f}".rstrip("0").rstrip(".")
     return f"{x:,.8f}".rstrip("0").rstrip(".")
+
+
+def fallback_badge(d, symbol, x, y):
+    # Never show a confusing '?' placeholder. Use the token symbol as a clear fallback.
+    d.ellipse((x, y, x + 78, y + 78), fill=(35, 45, 55), outline=(120, 135, 150), width=2)
+    text = str(symbol or "?")[:5].upper()
+    f = font(20 if len(text) <= 4 else 16, True)
+    box = d.textbbox((0, 0), text, font=f)
+    tw = box[2] - box[0]
+    th = box[3] - box[1]
+    d.text((x + (78 - tw) / 2, y + (78 - th) / 2 - 2), text, font=f, fill=(235, 240, 245))
 
 
 def main():
@@ -75,21 +114,24 @@ def main():
     H = header_h + max(1, len(rows)) * row_h + footer_h
     im = Image.new("RGB", (W, H), (245, 247, 250))
     d = ImageDraw.Draw(im)
-    title = font(42, True); sub = font(24); namef = font(29, True); small = font(22); pnlf = font(25, True)
+    title = font(42, True)
+    sub = font(24)
+    namef = font(29, True)
+    small = font(22)
+    pnlf = font(25, True)
 
     d.rectangle((0, 0, W, header_h), fill=(24, 31, 38))
     d.text((45, 28), "REAL PORTFOLIO", font=title, fill=(255, 255, 255))
     d.text((48, 92), "SDA accumulation • current wallet positions", font=sub, fill=(190, 205, 215))
 
     y = header_h
-    for i, (token, symbol, name, amount, value, pnl, pct, icon_url) in enumerate(rows):
+    for token, symbol, name, amount, value, pnl, pct, icon_url in rows:
         d.rectangle((25, y + 8, W - 25, y + row_h - 8), fill=(255, 255, 255), outline=(215, 220, 225), width=2)
-        ico = icon(icon_url)
+        ico = icon(symbol, icon_url)
         if ico:
             im.paste(ico, (48, y + 28), ico)
         else:
-            d.ellipse((48, y + 28, 126, y + 106), fill=(225, 230, 235), outline=(180, 188, 195), width=2)
-            d.text((68, y + 48), "?", font=font(32, True), fill=(120, 130, 140))
+            fallback_badge(d, symbol, 48, y + 28)
 
         d.text((150, y + 22), f"{symbol} — {name}", font=namef, fill=(25, 30, 35))
         d.text((150, y + 67), f"{fmt_amount(amount)} {symbol}", font=small, fill=(75, 82, 90))
@@ -100,7 +142,8 @@ def main():
             pnl_txt = "P/L UNKNOWN"
             fill = (115, 120, 125)
         else:
-            pv = float(pnl); pp = float(pct)
+            pv = float(pnl)
+            pp = float(pct)
             pnl_txt = f"P/L {pv:+.2f} SDA ({pp:+.2f}%)"
             fill = (25, 155, 75) if pv > 0 else ((205, 45, 45) if pv < 0 else (100, 105, 110))
         d.text((890, y + 50), pnl_txt, font=pnlf, fill=fill)
@@ -122,8 +165,8 @@ def main():
         d.text((55, sy), label + ":", font=small, fill=(60, 65, 70))
         d.text((430, sy), f"{v:+.2f} SDA", font=pnlf, fill=fill)
         sy += 40
-    d.text((760, y + 45), "🔒 READ-ONLY", font=small, fill=(80, 85, 90))
-    d.text((760, y + 85), "Token logos from Blockscout", font=small, fill=(80, 85, 90))
+    d.text((760, y + 45), "READ-ONLY", font=small, fill=(80, 85, 90))
+    d.text((760, y + 85), "Token logos: SidraDEX / Blockscout", font=small, fill=(80, 85, 90))
 
     im.save(OUT_FILE, quality=95)
     print(f"Created {OUT_FILE}: {W}x{H}")
