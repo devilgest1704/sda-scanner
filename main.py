@@ -8,7 +8,7 @@ MARKET_FILE="market_data.json"; WHALE_FILE="whale_data.json"; META_FILE="token_m
 LIQUIDITY_FILE="liquidity_data.json"; POSITIONS_FILE="positions.json"; WALLET_FILE="wallet_data.json"; PORTFOLIO_FILE="portfolio_data.json"
 INVESTMENT_SDA=50.0; BUY_THRESHOLD=78; MIN_1H_VOLUME_SDA=0.0; MIN_TRADES_1H=2
 TP1_PCT=.05; TP2_PCT=.10; SL_PCT=.04; FEE_RATE=.01; SLIPPAGE_RATE=.001
-MAX_OPEN_POSITIONS=5; MAX_NEW_BUYS_PER_RUN=1; MAX_PORTFOLIO_TXS=250
+MAX_OPEN_POSITIONS=5; MAX_NEW_BUYS_PER_RUN=1; MAX_PORTFOLIO_TXS=1000
 WALLET_ADDRESS=os.environ.get("WATCH_WALLET","0x0a7415b28d0f3641fd202ced0c4d3a70619e6230").lower()
 EXPLORER_API="https://ledger.sidrachain.com/api/v2"
 TELEGRAM_TOKEN=os.environ.get("TELEGRAM_TOKEN"); CHAT_ID=os.environ.get("CHAT_ID")
@@ -30,8 +30,9 @@ def send(s):
     if TELEGRAM_TOKEN and CHAT_ID:
         try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",json={"chat_id":CHAT_ID,"text":s},timeout=30)
         except Exception as e: print("Telegram error:",e)
-def api_get(path):
-    r=requests.get(EXPLORER_API+path,timeout=30); r.raise_for_status(); return r.json()
+def api_get(path, params=None):
+    r=requests.get(EXPLORER_API+path, params=params, timeout=30)
+    r.raise_for_status(); return r.json()
 def lbl(a,meta):
     x=meta.get(str(a).lower(),{}) if isinstance(meta,dict) else {}
     return f"{x.get('symbol')}/SDA" if x.get("symbol") else f"{str(a)[:10]}.../SDA"
@@ -107,31 +108,167 @@ def close(p,a,current,reason):
        "closed_value_sda":value,"closed_profit_sda":profit,"closed_roi_pct":roi}
     p["closed_trades"].append(z); del p["positions"][a]; p["closed_trades"]=p["closed_trades"][-500:]; return z
 
+def _append_holding(w, md, meta, address, amount, decimals=18, symbol=None):
+    address=str(address or '').lower()
+    amount=num(amount)
+    if not address or amount <= 0:return
+    mdx=meta.get(address,{}) if isinstance(meta,dict) else {}
+    sym=mdx.get('symbol') or symbol or address[:10]+'...'
+    td=(md.get('tokens',{}) or {}).get(address,{}) if isinstance(md,dict) else {}
+    an=td.get('analysis',td) if isinstance(td,dict) else {}
+    px=num(an.get('price_in_sda'))
+    val=amount*px if px>0 else None
+    for h in w['holdings']:
+        if h.get('address')==address:
+            h['amount'] += amount
+            h['decimals'] = int(decimals or h.get('decimals',18))
+            if symbol and not h.get('symbol'): h['symbol']=symbol
+            if val is not None: h['value_sda']=h['amount']*px
+            return
+    w['holdings'].append({'address':address,'symbol':sym,'amount':amount,'decimals':int(decimals or 18),'price_sda':px,'value_sda':val})
+
+def _unwrap_items(obj):
+    if isinstance(obj,list): return obj
+    if not isinstance(obj,dict): return []
+    for k in ('items','balances','result','data','tokens','token_balances'):
+        v=obj.get(k)
+        if isinstance(v,list): return v
+        if isinstance(v,dict):
+            x=_unwrap_items(v)
+            if x:return x
+    return []
+
+def _token_address(obj):
+    if isinstance(obj,str):
+        return obj.lower() if obj.startswith('0x') else ''
+    if not isinstance(obj,dict): return ''
+    for k in ('address','address_hash','hash','token_address','tokenAddress','contract_address','contract'):
+        v=obj.get(k)
+        if isinstance(v,str) and v.startswith('0x'): return v.lower()
+    return ''
+
+def _token_info(b):
+    t=b.get('token') if isinstance(b,dict) else {}
+    if not isinstance(t,dict): t={}
+    a=_token_address(t) or _token_address(b)
+    sym=t.get('symbol') or b.get('symbol')
+    dec=t.get('decimals',b.get('decimals',18))
+    try: dec=int(dec)
+    except: dec=18
+    return a,sym,dec
+
+def _raw_balance(b):
+    # Blockscout variants: value/balance/token_balance, sometimes nested.
+    candidates=[]
+    if isinstance(b,dict):
+        for k in ('value','balance','token_balance','tokenBalance','amount','raw_value','rawValue','total'):
+            if b.get(k) not in (None,''): candidates.append(b.get(k))
+        t=b.get('token')
+        if isinstance(t,dict):
+            for k in ('balance','value','token_balance'):
+                if t.get(k) not in (None,''): candidates.append(t.get(k))
+    for raw in candidates:
+        if isinstance(raw,dict): raw=raw.get('value',raw.get('raw',raw.get('amount')))
+        try:
+            if isinstance(raw,str) and raw.lower().startswith('0x'): return int(raw,16)
+            return float(raw)
+        except: continue
+    return None
+
+def _amount_from_transfer(t):
+    if not isinstance(t,dict): return 0.0
+    tok=t.get('token') or {}
+    try: dec=int(tok.get('decimals',t.get('decimals',18)))
+    except: dec=18
+    raw=t.get('total',t.get('value',t.get('amount',t.get('token_value',t.get('tokenValue',0)))))
+    if isinstance(raw,dict):
+        raw=raw.get('value',raw.get('raw',raw.get('amount')))
+    try:
+        return float(raw)/(10**dec)
+    except: return 0.0
+
+def token_transfers_for_address(address, limit=5000):
+    out=[]; params={'items_count':min(100,limit)}
+    try:
+        while len(out)<limit:
+            d=api_get(f'/addresses/{address}/token-transfers',params)
+            items=d if isinstance(d,list) else d.get('items',[])
+            if not isinstance(items,list) or not items: break
+            out.extend(items)
+            nxt=d.get('next_page_params') if isinstance(d,dict) else None
+            if not isinstance(nxt,dict): break
+            params=nxt
+        return out[:limit]
+    except Exception as e:
+        return out[:limit]
+
 def wallet_snapshot(md,meta):
-    w={"wallet":WALLET_ADDRESS,"native_sda":None,"holdings":[],"total_token_value_sda":0.0,"total_value_sda":None,"updated_at":now(),"error":None}
+    w={'wallet':WALLET_ADDRESS,'native_sda':None,'holdings':[],'total_token_value_sda':0.0,'total_value_sda':None,'updated_at':now(),'error':None,'holding_source':None}
     try:
-        d=api_get(f"/addresses/{WALLET_ADDRESS}")
-        raw=d.get("coin_balance",d.get("balance")) if isinstance(d,dict) else None
-        if raw is not None:w["native_sda"]=num(raw)/1e18
-    except Exception as e:w["error"]=f"native balance: {e}"
-    try:
-        d=api_get(f"/addresses/{WALLET_ADDRESS}/token-balances")
-        bs=d if isinstance(d,list) else d.get("items",[])
-        for b in bs:
-            if not isinstance(b,dict):continue
-            t=b.get("token") or {}; a=str(t.get("address") or b.get("token_address") or "").lower()
-            if not a:continue
-            dec=int(t.get("decimals") or b.get("decimals") or 18); raw=b.get("value",b.get("balance",b.get("token_balance","0")))
-            try:amt=float(raw)/(10**dec)
-            except:continue
-            if amt<=0:continue
-            mdx=meta.get(a,{}) if isinstance(meta,dict) else {}; sym=mdx.get("symbol") or t.get("symbol") or a[:10]+"..."
-            td=md.get("tokens",{}).get(a,{}) if isinstance(md,dict) else {}; an=td.get("analysis",td) if isinstance(td,dict) else {}
-            px=num(an.get("price_in_sda")); val=amt*px if px>0 else None
-            w["holdings"].append({"address":a,"symbol":sym,"amount":amt,"decimals":dec,"price_sda":px,"value_sda":val})
-            if val is not None:w["total_token_value_sda"]+=val
-    except Exception as e:w["error"]=f"{w['error'] or ''} token balances: {e}".strip()
-    if w["native_sda"] is not None:w["total_value_sda"]=w["native_sda"]+w["total_token_value_sda"]
+        d=api_get(f'/addresses/{WALLET_ADDRESS}')
+        raw=d.get('coin_balance',d.get('balance')) if isinstance(d,dict) else None
+        if isinstance(raw,dict): raw=raw.get('value',raw.get('raw',raw.get('balance')))
+        if raw is not None:
+            if isinstance(raw,str) and raw.lower().startswith('0x'): raw=int(raw,16)
+            w['native_sda']=num(raw)/1e18
+    except Exception as e: w['error']=f'native balance: {e}'
+
+    # Blockscout exposes both /token-balances (array) and /tokens (paginated).
+    sources=[]
+    for path,params in [
+        (f'/addresses/{WALLET_ADDRESS}/token-balances',None),
+        (f'/addresses/{WALLET_ADDRESS}/tokens',{'type':'ERC-20','items_count':100})
+    ]:
+        try:
+            d=api_get(path,params)
+            items=_unwrap_items(d)
+            if items: sources.append((path,items))
+        except Exception as e:
+            if not sources:
+                if w['error']: w['error'] += f' | {path}: {e}'
+                else: w['error']=f'{path}: {e}'
+    for path,items in sources:
+        before=len(w['holdings'])
+        for b in items:
+            if not isinstance(b,dict): continue
+            a,sym,dec=_token_info(b)
+            if not a: continue
+            raw=_raw_balance(b)
+            if raw is None: continue
+            # /tokens and /token-balances normally expose integer token units.
+            # Guard against already-formatted decimal balances by only scaling when needed.
+            try: amt=float(raw)/(10**dec)
+            except: continue
+            if amt>0: _append_holding(w,md,meta,a,amt,dec,sym)
+        if len(w['holdings'])>before:
+            w['holding_source']=path
+            break
+
+    # Last-resort reconstruction from ERC-20 transfer deltas.
+    if not w['holdings']:
+        try:
+            transfers=token_transfers_for_address(WALLET_ADDRESS,5000)
+            net={}; info={}; wallet=WALLET_ADDRESS.lower()
+            for t in transfers:
+                if not isinstance(t,dict): continue
+                tok=t.get('token') or {}
+                a=_token_address(tok) or _token_address(t)
+                amt=_amount_from_transfer(t)
+                if not a or amt<=0: continue
+                fr=transfer_addr(t.get('from')); to=transfer_addr(t.get('to'))
+                if to==wallet: net[a]=net.get(a,0.0)+amt
+                if fr==wallet: net[a]=net.get(a,0.0)-amt
+                try: dec=int(tok.get('decimals',t.get('decimals',18)))
+                except: dec=18
+                info[a]=(dec,tok.get('symbol') or t.get('symbol'))
+            for a,amt in net.items():
+                if amt>1e-12:
+                    dec,sym=info.get(a,(18,None)); _append_holding(w,md,meta,a,amt,dec,sym)
+            if w['holdings']: w['holding_source']='reconstructed from token-transfers'
+        except Exception as e:
+            w['error']=f"{w['error'] or ''} transfer fallback: {e}".strip()
+    w['total_token_value_sda']=sum(num(h.get('value_sda')) for h in w['holdings'] if h.get('value_sda') is not None)
+    if w['native_sda'] is not None: w['total_value_sda']=w['native_sda']+w['total_token_value_sda']
     save(WALLET_FILE,w); return w
 
 
@@ -170,30 +307,24 @@ def token_transfer_items(wallet, txh):
 def transfer_addr(x):
     if isinstance(x,str): return x.lower()
     if isinstance(x,dict):
-        for k in ("hash","address","value"):
+        for k in ('hash','address','address_hash','value'):
             v=x.get(k)
-            if isinstance(v,str) and v: return v.lower()
+            if isinstance(v,str) and v.startswith('0x'): return v.lower()
             if isinstance(v,dict):
                 z=transfer_addr(v)
                 if z:return z
-    return ""
+    return ''
 
 def transfer_amount(t):
-    if not isinstance(t,dict): return 0.0
-    token=t.get("token") or {}
-    dec=num(token.get("decimals",t.get("decimals",18)),18)
-    raw=t.get("total",t.get("value",t.get("amount",t.get("token_value",0))))
-    if isinstance(raw,dict): raw=raw.get("value",raw.get("raw",raw.get("amount",0)))
-    try:return float(raw)/(10**int(dec))
-    except Exception:return num(t.get("value"),0.0)
+    return _amount_from_transfer(t)
 
 def transfer_token(t):
-    if not isinstance(t,dict):return ""
-    tok=t.get("token") or {}
-    return transfer_addr(tok.get("address") or t.get("token_address"))
+    if not isinstance(t,dict): return ''
+    tok=t.get('token') or {}
+    return _token_address(tok) or _token_address(t)
 
-def transfer_from(t): return transfer_addr(t.get("from")) if isinstance(t,dict) else ""
-def transfer_to(t): return transfer_addr(t.get("to")) if isinstance(t,dict) else ""
+def transfer_from(t): return transfer_addr(t.get('from')) if isinstance(t,dict) else ''
+def transfer_to(t): return transfer_addr(t.get('to')) if isinstance(t,dict) else ''
 
 def explorer_address_transactions(address, limit=MAX_PORTFOLIO_TXS):
     """Fetch wallet transactions with Blockscout-style pagination, best effort."""
@@ -247,7 +378,6 @@ def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
         if sender and sender!=wallet.lower(): continue
         raw=raw_input_tx(tx); is_buy=(raw[:10].lower()=="0x414bf389")
         to=transfer_addr(tx.get("to"))
-        if to and to!=router and not is_buy: continue
         native_raw=tx.get("value",0)
         if isinstance(native_raw,dict): native_raw=native_raw.get("value",native_raw.get("raw",0))
         native_sda=num(native_raw)/1e18
@@ -263,7 +393,7 @@ def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
                 continue
             if dest==wallet.lower(): incoming.append((token,amt,t))
             elif fr==wallet.lower(): outgoing.append((token,amt,t))
-        if incoming and (is_buy or native_sda>0 or wsda_out>0):
+        if incoming and (native_sda>0 or wsda_out>0 or method in {"0x414bf389","0x8ab5246f","0xc04b8d59"}):
             total_out=max(native_sda,wsda_out)
             # Split total SDA cost proportionally if one tx buys multiple tokens.
             total_tokens=sum(a for _,a,_ in incoming) or 1.0
@@ -276,7 +406,7 @@ def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
         for t in transfers:
             token=transfer_token(t); amt=transfer_amount(t)
             if token==wsda and transfer_to(t)==wallet.lower() and amt>0: wsda_in += amt
-        if outgoing and (raw[:10].lower() in {"0xc04b8d59","0x8ab5246f"} or wsda_in>0):
+        if outgoing and (wsda_in>0 or native_sda>0 or method in {"0xc04b8d59","0x8ab5246f","0x414bf389"}):
             total_proceeds=max(wsda_in,native_sda)
             total_tokens=sum(a for _,a,_ in outgoing) or 1.0
             for token,amt,t in outgoing:
@@ -315,14 +445,56 @@ def portfolio_history(wallet, md, meta, ld, previous=None, wallet_obj=None):
             except Exception: pass
             current[token]={"amount":amount,"cost_sda":cost,"avg_cost_sda":cost/amount if amount else 0.0,"lots":qs,"first_buy_at":first_buy,"last_buy_at":last_buy,"age_days":age_days}
     # Current market values from the wallet snapshot / market data.
-    wallet=wallet_obj if isinstance(wallet_obj,dict) else wallet_snapshot(md,meta)
-    for h in wallet.get("holdings",[]):
+    wallet_data=wallet_obj if isinstance(wallet_obj,dict) else wallet_snapshot(md,meta)
+    for h in wallet_data.get("holdings",[]):
         token=str(h.get("address","")).lower()
         if not token or token not in current: continue
         cur=current[token]; cur["symbol"]=h.get("symbol") or cur.get("symbol") or token[:10]+"..."; cur["price_sda"]=num(h.get("price_sda")); cur["value_sda"]=num(h.get("value_sda")); cur["unrealized_pnl_sda"]=cur["value_sda"]-cur["cost_sda"] if cur["value_sda"] else None; cur["unrealized_pnl_pct"]=(cur["unrealized_pnl_sda"]/cur["cost_sda"]*100) if cur["cost_sda"] else None
         for tr in buys:
             if tr["token"]==token: tr["symbol"]=cur["symbol"]
-    result={"wallet":wallet.lower(),"router":router,"updated_at":now(),"buy_count":len(buys),"sell_count":len(sells),"trades":history[-500:],"current":current,"realized_pnl_sda":sum(realized.values()),"notes":"READ-ONLY inferred on-chain swap ledger; future runs rebuild history."}
+    # If trade history is incomplete, still expose every token currently held.
+    # Cost/P&L remains unknown rather than inventing a purchase price.
+    for h in wallet_data.get("holdings",[]):
+        token=str(h.get("address","")).lower()
+        if not token or token in current:continue
+        current[token]={"amount":num(h.get("amount")),"cost_sda":None,"avg_cost_sda":None,"lots":[],
+                        "first_buy_at":"","last_buy_at":"","age_days":None,"symbol":h.get("symbol"),
+                        "price_sda":num(h.get("price_sda")),"value_sda":h.get("value_sda"),
+                        "unrealized_pnl_sda":None,"unrealized_pnl_pct":None,"cost_basis_status":"UNKNOWN"}
+    # Always expose actual current wallet holdings, even when historical cost basis
+    # cannot be proven. Never invent a cost basis.
+    for h in wallet_data.get('holdings',[]):
+        token=str(h.get('address','')).lower()
+        if not token: continue
+        if token not in current:
+            current[token]={
+                'amount':num(h.get('amount')),
+                'cost_sda':None,
+                'avg_cost_sda':None,
+                'lots':[],
+                'first_buy_at':'',
+                'last_buy_at':'',
+                'age_days':None,
+                'symbol':h.get('symbol'),
+                'price_sda':num(h.get('price_sda')),
+                'value_sda':h.get('value_sda'),
+                'unrealized_pnl_sda':None,
+                'unrealized_pnl_pct':None,
+                'cost_basis_status':'UNKNOWN'
+            }
+        else:
+            cur=current[token]
+            cur['symbol']=h.get('symbol') or cur.get('symbol')
+            cur['price_sda']=num(h.get('price_sda'))
+            cur['value_sda']=h.get('value_sda')
+            if cur.get('cost_sda') is not None:
+                cur['unrealized_pnl_sda']=num(cur.get('value_sda'))-num(cur.get('cost_sda')) if cur.get('value_sda') is not None else None
+                cur['unrealized_pnl_pct']=cur['unrealized_pnl_sda']/num(cur.get('cost_sda'))*100 if num(cur.get('cost_sda')) else None
+                cur['cost_basis_status']='DETECTED'
+            else:
+                cur['cost_basis_status']='UNKNOWN'
+
+    result={"wallet":str(wallet).lower(),"router":router,"updated_at":now(),"buy_count":len(buys),"sell_count":len(sells),"trades":history[-500:],"current":current,"realized_pnl_sda":sum(realized.values()),"notes":"READ-ONLY inferred on-chain swap ledger; future runs rebuild history."}
     # Preserve a lightweight fingerprint so repeated runs are easy to audit.
     result["known_tx_hashes"]=[x["tx"] for x in history[-500:] if x.get("tx")]
     return result
@@ -353,7 +525,7 @@ def portfolio_message(portfolio, recommendations):
             cost=pf.get("cost_sda"); pct=pf.get("unrealized_pnl_pct")
             age=pf.get("age_days")
             cost_text=f"{num(cost):.2f} SDA" if cost is not None else "UNKNOWN"
-            pnl_text=f"{pnl:+.2f} SDA ({num(pct):+.2f}%)" if pct is not None else "UNKNOWN"
+            pnl_text=f"{pnl:+.2f} SDA ({num(pct):+.2f}%)" if pct is not None else "UNKNOWN (cost basis not detected)"
             age_text=f"{num(age):.1f} days" if age is not None else "UNKNOWN"
             lines += [f"• {pf.get('symbol') or token[:10]}",f"  Amount: {num(pf.get('amount')):.8f} | Cost: {cost_text}",f"  Now: {num(pf.get('value_sda')):.2f} SDA | P/L: {pnl_text}",f"  Avg cost: {num(pf.get('avg_cost_sda')):.8f} SDA/token | Age: {age_text}",""]
     lines += [f"Realized P/L: {num(portfolio.get('realized_pnl_sda')):+.2f} SDA",f"Detected trades: {int(portfolio.get('buy_count',0))} BUY / {int(portfolio.get('sell_count',0))} SELL",""]
@@ -368,15 +540,19 @@ def portfolio_message(portfolio, recommendations):
 
 def wallet_message(w):
     lines=["👛 REAL WALLET (READ-ONLY)","",f"Address: {w.get('wallet')}"]
-    lines.append(f"SDA: {num(w.get('native_sda')):.4f}" if w.get("native_sda") is not None else "SDA: unavailable")
+    lines.append(f"SDA: {num(w.get('native_sda')):.4f}" if w.get('native_sda') is not None else "SDA: unavailable")
     hs=w.get("holdings") or []
-    lines+=["","TOKEN HOLDINGS"]
+    lines += ["","📊 REAL POSITIONS"]
     if hs:
         for h in sorted(hs,key=lambda x:x.get("symbol","")):
-            v=h.get("value_sda"); lines.append(f"• {h['symbol']}: {num(h['amount']):.8f}"+(f" | {num(v):.2f} SDA" if v is not None else ""))
-    else:lines.append("• None / unavailable")
-    if w.get("total_value_sda") is not None:lines+=["",f"💰 TOTAL VALUE: {num(w['total_value_sda']):.2f} SDA"]
-    if w.get("error"):lines+=["",f"⚠️ {w['error'][:700]}"]
+            v=h.get("value_sda"); px=h.get("price_sda")
+            lines.append(f"• {h.get('symbol') or h.get('address','')[:10]}")
+            lines.append(f"  Amount: {num(h.get('amount')):.8f} | Price: {num(px):.8f} SDA" if px else f"  Amount: {num(h.get('amount')):.8f}")
+            lines.append(f"  Value: {num(v):.2f} SDA" if v is not None else "  Value: UNKNOWN")
+    else:lines.append("• No token balances detected")
+    if w.get('holding_source'):lines.append(f"  Source: {w['holding_source']}")
+    if w.get('total_value_sda') is not None:lines += ["",f"💰 TOTAL WALLET VALUE: {num(w['total_value_sda']):.2f} SDA"]
+    if w.get('error'):lines += ["",f"⚠️ {w['error'][:900]}"]
     return "\n".join(lines)
 
 def main():
@@ -438,8 +614,8 @@ def main():
     if not p["positions"]:opens.append("No open paper positions.")
     else:
         for a,pos in p["positions"].items():
-            an=(tokens.get(a,{}) or {}).get("analysis",(tokens.get(a,{}) or {}));cur=num(an.get("price_in_sda"));e=num(pos.get("entry_price"));frac=num(pos.get("remaining_fraction",1));inv=num(pos.get("investment_sda"));mark=inv*frac*(cur/e) if e>0 and cur>0 else 0.0; pnl=mark-inv*frac; roi=pnl/(inv*frac)*100 if inv*frac>0 else 0.0
-            opens += [f"• {pos.get('label',a)}",f"  Entry: {price(e)} | Now: {price(cur)}",f"  P/L: {pnl:+.2f} SDA | ROI: {roi:+.2f}% | Remaining: {frac*100:.0f}%",f"  Mark value: {mark:.2f} SDA | Invested remaining: {inv*frac:.2f} SDA",f"  TP1: {price(pos.get('tp1'))} | TP2: {price(pos.get('tp2'))}",f"  SL: {price(pos.get('sl'))}",""]
+            an=(tokens.get(a,{}) or {}).get("analysis",(tokens.get(a,{}) or {}));cur=num(an.get("price_in_sda"));e=num(pos.get("entry_price"));roi=(cur-e)/e*100 if e>0 and cur>0 else 0
+            opens += [f"• {pos.get('label',a)}",f"  Entry: {price(e)} | Now: {price(cur)}",f"  ROI: {roi:+.2f}% | Remaining: {num(pos.get('remaining_fraction',1))*100:.0f}%",f"  TP1: {price(pos.get('tp1'))} | TP2: {price(pos.get('tp2'))}",f"  SL: {price(pos.get('sl'))}",""]
     save(POSITIONS_FILE,p);send("\n".join(lines));send("\n".join(opens));send(wallet_message(wallet));send(portfolio_message(portfolio,portfolio_recs))
     send(f"🤖 SDA PAPER TRADING\n\nOpen positions: {len(p['positions'])}\nClosed trades: {len(p['closed_trades'])}\nBUY candidates: {len(cands)}\nEvents: {len(events)}\n\nInvestment: {INVESTMENT_SDA:.0f} SDA\nFee: {FEE_RATE*100:.1f}%\nSlippage: {SLIPPAGE_RATE*100:.1f}%")
     for e in events:send(e)
