@@ -362,7 +362,7 @@ def wallet_message_v16(w):
         px = _n(h.get("price_sda"))
         if val is not None:
             total += _n(val)
-        lines += [f"🪙 {symbol} — {h.get('name') or symbol}", f"   {_fmt_amount(h.get('amount'))} {symbol}  •  {(_n(val):.2f) if val is not None else 'UNKNOWN'} SDA", f"   Price: {engine.price(px) + ' SDA' if px > 0 else 'UNKNOWN'}", ""]
+        lines += [f"🪙 {symbol} — {h.get('name') or symbol}", f"   {_fmt_amount(h.get('amount'))} {symbol}  •  {f'{_n(val):.2f}' if val is not None else 'UNKNOWN'} SDA", f"   Price: {engine.price(px) + ' SDA' if px > 0 else 'UNKNOWN'}", ""]
     lines += ["────────────────────────", f"📊 Known token value: {total:.2f} SDA"]
     if w.get("native_sda") is not None:
         lines.append(f"💼 TOTAL WALLET VALUE: {_n(w.get('native_sda')) + total:.2f} SDA")

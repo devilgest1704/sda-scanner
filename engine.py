@@ -773,15 +773,22 @@ def main():
         if not pos.get("tp1_hit") and cur>=num(pos.get("tp1")):
             frac=min(.5,num(pos.get("remaining_fraction",1)));e=num(pos.get("entry_price"));inv=num(pos.get("investment_sda"))*frac;qty=inv/e if e>0 else 0
             v=qty*cur*(1-SLIPPAGE_RATE)*(1-FEE_RATE);cost=inv*(1+FEE_RATE);profit=v-cost;roi=profit/cost*100 if cost else 0
-            pos["tp1_hit"]=True;pos["remaining_fraction"]=num(pos.get("remaining_fraction",1))-frac;pos["sl"]=e
-            events.append(f"💰 TAKE PROFIT 1/2 {pos['label']}\n\nEntry: {price(e)} SDA\nCurrent: {price(cur)} SDA\nClosed: 50%\nProfit: {profit:+.2f} SDA\nROI: {roi:+.2f}%\n\n🔒 Remaining 50% protected at breakeven")
+            pos["tp1_hit"]=True;pos["remaining_fraction"]=num(pos.get("remaining_fraction",1))-frac;pos["sl"]=max(e*(1+FEE_RATE)/((1-SLIPPAGE_RATE)*(1-FEE_RATE)),e)
+            events.append(f"💰 TAKE PROFIT 1/2 {pos['label']}\n\nEntry: {price(e)} SDA\nCurrent: {price(cur)} SDA\nClosed: 50%\nProfit: {profit:+.2f} SDA\nROI: {roi:+.2f}%\n\n🔒 Remaining 50% protected at fee-adjusted breakeven + trailing stop")
         if a not in p["positions"]:continue
         pos=p["positions"][a]
+        # After TP1, trail the remaining half upward. The stop never moves down
+        # and never falls below the fee/slippage-adjusted net breakeven level.
+        if pos.get("tp1_hit") and num(pos.get("remaining_fraction",0)) > 0 and cur > 0:
+            net_breakeven=e*(1+FEE_RATE)/((1-SLIPPAGE_RATE)*(1-FEE_RATE)) if e>0 else e
+            trailing=cur*(1-SL_PCT)
+            pos["sl"]=max(num(pos.get("sl")),net_breakeven,trailing)
+
         if cur>=num(pos.get("tp2")):
             z=close(p,a,cur,"TP2")
             if z:events.append(f"💰 TP2 {z['label']}\n\nEntry: {price(z['entry_price'])} SDA\nCurrent: {price(z['close_price'])} SDA\nProfit: {z['closed_profit_sda']:+.2f} SDA\nROI: {z['closed_roi_pct']:+.2f}%\n\nMode: PAPER TRADING")
         elif cur<=num(pos.get("sl")):
-            reason="BREAKEVEN" if pos.get("tp1_hit") else "SL";z=close(p,a,cur,reason)
+            reason="PROTECTED SL" if pos.get("tp1_hit") else "SL";z=close(p,a,cur,reason)
             if z:events.append(f"💰 {reason} {z['label']}\n\nEntry: {price(z['entry_price'])} SDA\nCurrent: {price(z['close_price'])} SDA\nProfit: {z['closed_profit_sda']:+.2f} SDA\nROI: {z['closed_roi_pct']:+.2f}%\n\nMode: PAPER TRADING")
 
     ranks=[];cands=[]
