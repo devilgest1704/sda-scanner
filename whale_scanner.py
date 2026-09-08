@@ -21,15 +21,10 @@ def ts(v):
         x=datetime.fromisoformat(str(v).replace("Z","+00:00"));return x if x.tzinfo else x.replace(tzinfo=timezone.utc)
     except:return None
 def main():
-    r=requests.get(URL,headers=HEADERS,timeout=30);r.raise_for_status()
-    payload=r.json()
-    rows=payload if isinstance(payload,list) else (payload.get("items") or payload.get("data") or [])
-    if not isinstance(rows,list):rows=[]
+    r=requests.get(URL,headers=HEADERS,timeout=30);r.raise_for_status();rows=r.json()
     old=load(HISTORY,[]); by={str(x.get("tx_hash")):x for x in old if isinstance(x,dict) and x.get("tx_hash")}
     for x in rows:
-        h=x.get("tx_hash");t=ts(x.get("tx_timestamp"));a=str(x.get("token_address") or "").lower();typ=str(x.get("tx_type") or "").lower()
-        try:v=float(x.get("volume_in_sda") or 0)
-        except:v=0.0
+        h=x.get("tx_hash");t=ts(x.get("tx_timestamp"));a=str(x.get("token_address") or "").lower();typ=str(x.get("tx_type") or "").lower();v=float(x.get("volume_in_sda") or 0)
         if h and t and a and typ in ("buy","sell") and v>0:by[str(h)]={"tx_hash":str(h),"token_address":a,"tx_timestamp":t.isoformat(),"tx_type":typ,"volume_in_sda":v}
     cutoff=datetime.now(timezone.utc)-timedelta(minutes=360)
     hist=[x for x in by.values() if (ts(x.get("tx_timestamp")) or cutoff)>=cutoff]
