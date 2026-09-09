@@ -299,6 +299,23 @@ def technical_report():
     return "\n".join(lines)
 
 
+def _pnl_value(value, unit):
+    """Return a visually color-coded P/L value for Telegram.
+
+    Telegram bot messages do not support arbitrary text colors, so use
+    green/red/neutral emoji as the color indicator while keeping the numeric
+    value unchanged.
+    """
+    value = engine.num(value)
+    if value > 0:
+        icon = "🟢"
+    elif value < 0:
+        icon = "🔴"
+    else:
+        icon = "⚪"
+    return f"{icon} {value:+.2f} {unit}"
+
+
 def paper_report():
     p = load("positions.json", {"positions": {}, "closed_trades": []})
     positions = p.get("positions", {}) or {}
@@ -321,8 +338,8 @@ def paper_report():
     roi = total / invested * 100 if invested else 0.0
     return "\n".join([
         "🤖 SDA PAPER TRADING V18", "", f"Open positions: {len(positions)}", f"Closed trades: {len(closed)}",
-        "────────────────────────", f"Realized P/L: {realized:+.2f} SDA", f"Open P/L: {open_pnl:+.2f} SDA",
-        f"Cumulative P/L: {total:+.2f} SDA", f"ROI: {roi:+.2f}%", f"Invested: {invested:.2f} SDA", "",
+        "────────────────────────", f"Realized P/L: {_pnl_value(realized, 'SDA')}", f"Open P/L: {_pnl_value(open_pnl, 'SDA')}",
+        f"Cumulative P/L: {_pnl_value(total, 'SDA')}", f"ROI: {_pnl_value(roi, '%')}", f"Invested: {invested:.2f} SDA", "",
         "Investment per BUY: 50–100 SDA", "Fee: 1.0% • Slippage: 0.1%", "Auto scan: every 5 minutes"
     ])
 
