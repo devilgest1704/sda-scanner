@@ -37,6 +37,21 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
 
+      - name: Prepare market scanner V18 activity filter
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("market_scanner.py")
+          s = p.read_text(encoding="utf-8")
+          old = '''        "active": (\n            window_1h["total_volume"] >= MIN_RECENT_VOLUME_SDA\n            and window_1h["transactions"] >= MIN_RECENT_TRADES\n        ),'''
+          new = '''        # Active means at least 250 SDA traded during the last hour.\n        # Trade count is intentionally NOT part of the activity filter.\n        "active": window_1h["total_volume"] >= MIN_RECENT_VOLUME_SDA,'''
+          if old not in s:
+              raise SystemExit("Expected market activity block not found")
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding="utf-8")
+          PY
+          python -m py_compile market_scanner.py
+
       - name: Run market scanner
         run: python market_scanner.py
         env:
