@@ -29,5 +29,11 @@ r = requests.post(
     },
     timeout=30,
 )
+
+print("Telegram API status:", r.status_code)
+try:
+    print("Telegram API response:", r.json())
+except ValueError:
+    print("Telegram API response:", r.text[:1000])
+
 r.raise_for_status()
-print(r.json())
