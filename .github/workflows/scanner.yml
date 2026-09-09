@@ -42,9 +42,6 @@ jobs:
       - name: Update token metadata
         run: python token_metadata.py
 
-      - name: Discover token icons
-        run: python token_icons.py
-
       - name: Prepare liquidity scanner compatibility fixes
         run: |
           python - <<'PY'
@@ -53,26 +50,80 @@ jobs:
           s = p.read_text(encoding="utf-8")
           s = s.replace('"token_decimals": token_out["decimals"] if token_out else None,', '"token_decimals": token_out.get("decimals") if token_out else None,', 1)
           s = s.replace('bool(discovery.get("v25_50_sda_quote_probe", {}).get("ok"))', 'bool((discovery.get("v25_50_sda_quote_probe") or {}).get("ok"))', 1)
-          marker = "    transfers = receipt_erc20_transfers(h)\\n    if not transfers:\\n        transfers = transfers_for_tx(h)\\n"
-          replacement = marker + "    metadata = load_json(\"token_metadata.json\", {})\\n    if isinstance(metadata, dict):\\n        for t in transfers:\\n            a = addr(t.get(\"token_address\"))\\n            meta = metadata.get(a) or metadata.get(a.lower())\\n            if isinstance(meta, dict) and meta.get(\"decimals\") is not None:\\n                try:\\n                    d = int(meta.get(\"decimals\"))\\n                    if 0 <= d <= 36 and t.get(\"raw_value\") is not None:\\n                        t[\"decimals\"] = d\\n                        t[\"value\"] = float(Decimal(t[\"raw_value\"]) / (Decimal(10) ** d))\\n                except Exception:\\n                    pass\\n"
-          if marker in s and 'metadata = load_json("token_metadata.json", {})' not in s:
-              s = s.replace(marker, replacement, 1)
-              print("Added token decimals enrichment")
           p.write_text(s, encoding="utf-8")
           PY
-          python -m py_compile liquidity_scanner.py main.py engine.py
 
       - name: Run liquidity scanner
         run: python liquidity_scanner.py
 
-      - name: Run SDA main engine V16
-        run: python main.py
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+      - name: Prepare V16 Telegram display
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("main.py")
+          s = p.read_text(encoding="utf-8")
+          s = s.replace("{(_n(val):.2f) if val is not None else 'UNKNOWN'}", "{f'{_n(val):.2f}' if val is not None else 'UNKNOWN'}", 1)
+          new_fn = '''def _pnl_marker_v16(pnl):
+              if pnl is None:
+                  return "⚪"
+              x = _n(pnl)
+              return "🟢" if x > 0 else ("🔴" if x < 0 else "⚪")
 
-      - name: Generate REAL PORTFOLIO card with token icons
-        run: python portfolio_card.py
+
+          def portfolio_message_v16(portfolio, recommendations):
+              meta = engine.load(engine.META_FILE, {})
+              cur = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
+              lines = ["📊 REAL PORTFOLIO", "", "Current token positions — SDA accumulation", "────────────────────────"]
+              for token, pf in sorted(cur.items(), key=lambda x: (x[1].get("symbol") or x[0]).lower()):
+                  m = meta.get(str(token).lower(), {}) if isinstance(meta, dict) else {}
+                  symbol = pf.get("symbol") or m.get("symbol") or str(token)[:10] + "..."
+                  name = m.get("name") or symbol
+                  amount = _fmt_amount(pf.get("amount"))
+                  val = pf.get("value_sda")
+                  pnl = pf.get("unrealized_pnl_sda")
+                  pct = pf.get("unrealized_pnl_pct")
+                  value_text = f"{_n(val):.2f} SDA" if val is not None else "UNKNOWN"
+                  pnl_text = f"{_n(pnl):+.2f} SDA ({_n(pct):+.2f}%)" if pnl is not None and pct is not None else "UNKNOWN"
+                  lines += [f"🪙 {symbol} — {name}", f"   {amount} {symbol}  •  {value_text}", f"   {_pnl_marker_v16(pnl)} P/L {pnl_text}", ""]
+
+              op = portfolio.get("open_unrealized_pnl_sda")
+              rp = portfolio.get("realized_pnl_sda")
+              tp = portfolio.get("known_total_pnl_sda")
+              cost = _n(portfolio.get("open_cost_sda"))
+              op_pct = (_n(op) / cost * 100) if op is not None and cost else None
+              lines += [
+                  "────────────────────────",
+                  f"{_pnl_marker_v16(op)} Current open P/L: {_n(op):+.2f} SDA" + (f" ({op_pct:+.2f}%)" if op_pct is not None else ""),
+                  f"{_pnl_marker_v16(rp)} Historical matched P/L: {_n(rp):+.2f} SDA",
+                  f"{_pnl_marker_v16(tp)} Known total P/L: {_n(tp):+.2f} SDA",
+                  f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}",
+                  "",
+                  "🧭 POSITION ACTION",
+                  "",
+                  "ℹ️ Token names from Blockscout metadata.",
+                  "ℹ️ Actual token logos are sent as a visual portfolio card when available.",
+                  "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.",
+                  "🔒 Wallet is READ-ONLY.",
+              ]
+              return "\\n".join(lines)
+
+
+          '''
+          pattern = r"def portfolio_message_v16\(portfolio, recommendations\):.*?(?=\ndef wallet_message_v16\()"
+          s2, n = re.subn(pattern, new_fn, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit("Could not patch portfolio_message_v16")
+          s = s2
+          marker = "engine.portfolio_message = portfolio_message_v16"
+          if marker not in s:
+              raise SystemExit("portfolio_message hook missing")
+          p.write_text(s, encoding="utf-8")
+          PY
+          python -m py_compile main.py engine.py
+
+      - name: Run SDA main engine (V16)
+        run: python main.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -95,24 +146,22 @@ jobs:
           import json
           from pathlib import Path
           files = [
-              "state.json", "whale_state.json", "whale_data.json", "whale_history.json", "portfolio_data.json",
-              "market_data.json", "token_metadata.json", "liquidity_data.json", "paper_stats.json",
-              "sidra_swap_discovery.json", "pending_signals.json", "positions.json", "wallet_data.json", "decision_state_v15.json"
+            "state.json","whale_state.json","whale_data.json","whale_history.json","portfolio_data.json",
+            "market_data.json","token_metadata.json","liquidity_data.json","paper_stats.json",
+            "sidra_swap_discovery.json","pending_signals.json","positions.json","wallet_data.json","decision_state_v15.json"
           ]
           for name in files:
               p = Path(name)
               if not p.exists() or p.stat().st_size == 0:
-                  p.write_text("{}\\n", encoding="utf-8")
-                  print("INITIALIZED:", name)
+                  p.write_text("{}\n", encoding="utf-8")
+                  print("INITIALIZED EMPTY JSON:", name)
                   continue
               try:
-                  with p.open(encoding="utf-8") as f:
-                      json.load(f)
-                  print("OK:", name)
-              except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                  json.loads(p.read_text(encoding="utf-8"))
+              except Exception as e:
                   backup = p.with_suffix(p.suffix + ".invalid")
                   p.replace(backup)
-                  p.write_text("{}\\n", encoding="utf-8")
+                  p.write_text("{}\n", encoding="utf-8")
                   print("REPAIRED INVALID JSON:", name, "->", backup.name, "reason:", e)
           PY
 
@@ -120,29 +169,19 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          from pathlib import Path
+          p = Path("positions.json")
           try:
-              with open("positions.json", encoding="utf-8") as f:
-                  data = json.load(f)
-          except Exception as e:
-              print("Could not read positions.json:", e)
-              raise SystemExit(0)
-          positions = data.get("positions", {})
-          print("========== OPEN PAPER POSITIONS ==========")
-          if not positions:
-              print("No open paper positions.")
-          else:
-              for address, p in positions.items():
-                  print(p.get("label", address))
-                  print("  Entry:", p.get("entry_price"))
-                  print("  TP1:", p.get("tp1"))
-                  print("  TP2:", p.get("tp2"))
-                  print("  SL:", p.get("sl"))
-                  print("  Investment:", p.get("investment_sda"))
-                  print("  Confidence:", p.get("entry_confidence"))
-          print("===========================================")
+              data = json.loads(p.read_text(encoding="utf-8"))
+          except Exception:
+              data = {}
+          positions = data.get("positions", []) if isinstance(data, dict) else []
+          print("Open paper positions:", len(positions))
+          for pos in positions:
+              print(pos)
           PY
 
-      - name: Commit state files
+      - name: Commit scanner state
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
