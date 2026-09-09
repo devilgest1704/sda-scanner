@@ -380,10 +380,9 @@ def analyze_token(token_data):
     return {
         "price_in_sda": current_price,
         "last_transaction": latest.get("timestamp"),
-        "active": (
-            window_1h["total_volume"] >= MIN_RECENT_VOLUME_SDA
-            and window_1h["transactions"] >= MIN_RECENT_TRADES
-        ),
+        # Active means at least 250 SDA traded during the last hour.
+        # Trade count is intentionally NOT part of the activity filter.
+        "active": window_1h["total_volume"] >= MIN_RECENT_VOLUME_SDA,
         "momentum": {
             "15m_pct": change_15m,
             "30m_pct": change_30m,

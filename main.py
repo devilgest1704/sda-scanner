@@ -12,7 +12,8 @@ _original_wallet_snapshot = engine.wallet_snapshot
 
 engine.BUY_THRESHOLD = 75
 engine.MIN_TRADES_1H = 3
-engine.MAX_NEW_BUYS_PER_RUN = 1
+engine.MAX_NEW_BUYS_PER_RUN = 5
+engine.MAX_OPEN_POSITIONS = 10
 
 
 def _n(v, default=0.0):
@@ -343,7 +344,22 @@ def portfolio_message_v16(portfolio, recommendations):
     lines.append("⚪ Current open P/L UNKNOWN" if op is None else f"Current open P/L {_n(op):+.2f} SDA" + (f" ({op_pct:+.2f}%)" if op_pct is not None else ""))
     lines.append(f"Historical matched P/L {_n(rp):+.2f} SDA")
     lines.append(f"Known total P/L {_n(tp):+.2f} SDA")
-    lines += [f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}", "", "🧭 POSITION ACTION", "", "ℹ️ Token names from Blockscout metadata.", "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.", "🔒 Wallet is READ-ONLY."]
+    lines += [f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}", "", "🧭 POSITION ACTION"]
+    def _strength(score):
+        s = _n(score)
+        if s < 20: return "VERY WEAK"
+        if s < 40: return "WEAK"
+        if s < 60: return "NEUTRAL"
+        if s < 75: return "GOOD"
+        return "STRONG"
+    for r in recommendations:
+        action = r.get("action")
+        icon = "🔴" if action == "SELL / EXIT" else ("🟠" if action == "PARTIAL SELL" else ("🟢" if action == "HOLD / TRAIL" else "🟡"))
+        pnl = r.get("pnl_sda")
+        pnl_text = f"{_n(pnl):+.2f} SDA" if pnl is not None else "UNKNOWN"
+        score = int(_n(r.get("score")))
+        lines.append(f"{icon} {r['symbol']}: {action}  •  P/L {pnl_text}  •  score {score}/100 — {_strength(score)}")
+    lines += ["", "ℹ️ Score: 0–19 VERY WEAK • 20–39 WEAK • 40–59 NEUTRAL • 60–74 GOOD • 75–100 STRONG", "ℹ️ Token names from Blockscout metadata.", "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.", "🔒 Wallet is READ-ONLY."]
     return "\n".join(lines)
 
 

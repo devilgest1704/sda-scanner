@@ -315,6 +315,19 @@ def analyze(tx):
     transfers = receipt_erc20_transfers(h)
     if not transfers:
         transfers = transfers_for_tx(h)
+    metadata = load_json("token_metadata.json", {})
+    if isinstance(metadata, dict):
+        for t in transfers:
+            a = addr(t.get("token_address"))
+            meta = metadata.get(a) or metadata.get(a.lower())
+            if isinstance(meta, dict) and meta.get("decimals") is not None and t.get("raw_value") is not None:
+                try:
+                    d = int(meta.get("decimals"))
+                    if 0 <= d <= 36:
+                        t["decimals"] = d
+                        t["value"] = float(Decimal(t["raw_value"]) / (Decimal(10) ** d))
+                except Exception:
+                    pass
     target = addr(call["token"])
     wsda = WSDA.lower()
     pool = POOL.lower()
@@ -331,7 +344,7 @@ def analyze(tx):
         "sda_in": float(wsda_in["value"]) if wsda_in else 0.0,
         "token_out": float(token_out["value"]) if token_out else 0.0,
         "token_raw_output": token_out["raw_value"] if token_out else None,
-        "token_decimals": token_out["decimals"] if token_out else None,
+        "token_decimals": token_out.get("decimals") if token_out else None,
         "arg2_matches_raw_output": bool(token_out and call["arg2"] == token_out["raw_value"]),
         "transfers": transfers,
     }
@@ -1022,7 +1035,7 @@ def main():
         "arg2_exact_raw_output_matches": sum(1 for a in usable if a["arg2_matches_raw_output"]),
         "v25_router_buy_calls": len(buys),
         "v25_historical_eth_call_successes": sum(1 for x in historical_call_results if x["eth_call_ok"]),
-        "v25_50_sda_probe_ok": bool(discovery.get("v25_50_sda_quote_probe", {}).get("ok")),
+        "v25_50_sda_probe_ok": bool((discovery.get("v25_50_sda_quote_probe") or {}).get("ok")),
         "v25_historical_return_validation_successes": sum(1 for x in history_validation if x.get("sim_ok")),
         "v25_historical_return_validation_matched": sum(1 for x in history_validation if x.get("relative_error_pct") is not None and abs(x.get("relative_error_pct")) < 0.01),
         "v25_quote_sweep_successes": sum(1 for x in quote_sweep if x.get("ok")),
