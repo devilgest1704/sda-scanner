@@ -38,3 +38,5 @@ async def telegram_webhook(request: Request):
         print(f"Telegram webhook error: {exc}")
         # Telegram should not endlessly redeliver a parsed but unsupported update.
         return "ok"
+
+# Redeploy after webhook-secret changes so Vercel picks up the new environment value.
