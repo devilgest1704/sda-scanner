@@ -25,6 +25,7 @@ METADATA_FILE = "token_metadata.json"
 FETCH_LIMIT = 1000
 MAX_HISTORY_POINTS = 1000
 MIN_RECENT_VOLUME_SDA = 250
+MIN_RECENT_TRADES = 2
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -46,10 +47,12 @@ def load_metadata():
     except Exception:
         return {}
 
+
 def token_label(address, metadata):
     item = metadata.get(str(address).lower(), {}) or metadata.get(str(address), {})
     symbol = item.get("symbol") if isinstance(item, dict) else None
     return f"{symbol}/SDA" if symbol else f"{str(address)[:12]}.../SDA"
+
 
 def resolve_symbol(address, metadata):
     key = str(address).lower()
@@ -74,6 +77,7 @@ def resolve_symbol(address, metadata):
     except Exception:
         pass
     return None
+
 
 def load_market_data():
     if not Path(MARKET_DATA_FILE).exists():
@@ -376,7 +380,10 @@ def analyze_token(token_data):
     return {
         "price_in_sda": current_price,
         "last_transaction": latest.get("timestamp"),
-        "active": window_1h["total_volume"] >= MIN_RECENT_VOLUME_SDA,
+        "active": (
+            window_1h["total_volume"] >= MIN_RECENT_VOLUME_SDA
+            and window_1h["transactions"] >= MIN_RECENT_TRADES
+        ),
         "momentum": {
             "15m_pct": change_15m,
             "30m_pct": change_30m,
@@ -501,6 +508,12 @@ try:
     candidates = []
 
     for address, analysis in analyzed_tokens.items():
+        # MARKET MOMENTUM is a live-market radar: only include tokens
+        # that are currently active. Historical/inactive tokens remain
+        # stored and analyzed for downstream logic.
+        if not analysis.get("active"):
+            continue
+
         one_hour = analysis["momentum"].get("1h_pct")
 
         if one_hour is None:
@@ -518,7 +531,7 @@ try:
     )
 
     if candidates:
-        message = "📈 MARKET MOMENTUM\n\n"
+        message = "📈 MARKET MOMENTUM — ACTIVE ONLY\n\n"
 
         for item in candidates[:10]:
             address = item["address"]
