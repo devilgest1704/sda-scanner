@@ -40,8 +40,6 @@ def _normalize_trade_amount(tr, meta):
     volume = _n(tr.get("cost_sda") if side == "BUY" else tr.get("proceeds_sda"))
     price = _n(tr.get("price_sda"))
     expected = volume / price if volume > 0 and price > 0 else 0.0
-    # Existing engine trades are normally human-readable. Convert only when
-    # the amount is clearly raw-chain data and trustworthy decimals exist.
     if expected > 0 and raw <= expected * 1000:
         return raw
     decimals = _decimals(tr.get("token"), meta)
@@ -110,10 +108,7 @@ def _rebuild_fifo(p, meta):
         if not token:
             continue
         if side == "BUY":
-            lots.setdefault(token, []).append({
-                "amount": tr["amount"],
-                "cost_sda": max(0.0, _n(tr.get("cost_sda")))
-            })
+            lots.setdefault(token, []).append({"amount": tr["amount"], "cost_sda": max(0.0, _n(tr.get("cost_sda")))})
             rebuilt.append(tr)
             continue
         if side != "SELL":
@@ -136,12 +131,7 @@ def _rebuild_fifo(p, meta):
         matched_amount = tr["amount"] - qty
         proceeds = max(0.0, _n(tr.get("proceeds_sda")))
         matched_proceeds = proceeds * (matched_amount / tr["amount"]) if tr["amount"] else 0.0
-        tr.update({
-            "cost_basis_sda": removed,
-            "matched_amount": matched_amount,
-            "unmatched_amount": max(0.0, qty),
-            "matched_proceeds_sda": matched_proceeds,
-        })
+        tr.update({"cost_basis_sda": removed, "matched_amount": matched_amount, "unmatched_amount": max(0.0, qty), "matched_proceeds_sda": matched_proceeds})
         if matched_amount >= tr["amount"] * 0.99:
             realized += matched_proceeds - removed
             matched += 1
@@ -176,7 +166,6 @@ def _rebuild_fifo(p, meta):
 
 
 def portfolio_history_v16(wallet, md, meta, ld, previous=None, wallet_obj=None):
-    # Important: call the original engine implementation, not the patched one.
     p = _original_portfolio_history(wallet, md, meta, ld, previous, wallet_obj)
     if not isinstance(p, dict):
         return p
@@ -211,18 +200,12 @@ def portfolio_history_v16(wallet, md, meta, ld, previous=None, wallet_obj=None):
             continue
         valid = _valuation_status(h) == "VALID"
         p.setdefault("current", {})[token] = {
-            "amount": _n(h.get("amount")),
-            "cost_sda": None,
-            "avg_cost_sda": None,
-            "lots": [],
-            "first_buy_at": "",
-            "last_buy_at": "",
-            "age_days": None,
+            "amount": _n(h.get("amount")), "cost_sda": None, "avg_cost_sda": None, "lots": [],
+            "first_buy_at": "", "last_buy_at": "", "age_days": None,
             "symbol": h.get("symbol") or token[:10] + "...",
             "price_sda": _n(h.get("price_sda")) if valid else 0.0,
             "value_sda": _n(h.get("value_sda")) if valid else None,
-            "unrealized_pnl_sda": None,
-            "unrealized_pnl_pct": None,
+            "unrealized_pnl_sda": None, "unrealized_pnl_pct": None,
             "cost_basis_status": "UNKNOWN" if valid else "PRICE_UNKNOWN",
         }
 
@@ -264,14 +247,10 @@ def portfolio_recommendations_v16(portfolio, md, ws, meta, ld):
     for token, pf in cur.items():
         an = (tokens.get(token, {}) or {}).get("analysis", tokens.get(token, {}) or {})
         s = engine.score(token, an, ws) if isinstance(an, dict) and an else {"confidence": 0, "m1h": 0, "net_1h": 0}
-        score = _n(s.get("confidence"))
-        m1h = _n(s.get("m1h"))
-        flow = _n(s.get("net_1h"))
-        pnl_raw = pf.get("unrealized_pnl_pct")
-        pnl = _n(pnl_raw)
+        score = _n(s.get("confidence")); m1h = _n(s.get("m1h")); flow = _n(s.get("net_1h"))
+        pnl_raw = pf.get("unrealized_pnl_pct"); pnl = _n(pnl_raw)
         old = state.get(token, {}) if isinstance(state.get(token), dict) else {}
-        neg = int(_n(old.get("negative_count")))
-        weak = int(_n(old.get("profit_weakening_count")))
+        neg = int(_n(old.get("negative_count"))); weak = int(_n(old.get("profit_weakening_count")))
         negative = score < 35 and m1h < 0 and flow < 0
         deep = pnl <= -15 and m1h < 0 and flow < 0
         weakening = pnl >= 8 and (m1h < 0 or flow < 0)
@@ -289,18 +268,7 @@ def portfolio_recommendations_v16(portfolio, md, ws, meta, ld):
             action, reason = "HOLD / TRAIL", "positive trend and SDA flow"
         else:
             action, reason = "HOLD / WATCH", "no confirmed exit condition"
-
-        out.append({
-            "token": token,
-            "symbol": pf.get("symbol") or engine.lbl(token, meta),
-            "action": action,
-            "reason": reason,
-            "pnl_pct": pnl_raw,
-            "pnl_sda": pf.get("unrealized_pnl_sda"),
-            "score": score,
-            "m1h": m1h,
-            "flow_1h": flow,
-        })
+        out.append({"token": token, "symbol": pf.get("symbol") or engine.lbl(token, meta), "action": action, "reason": reason, "pnl_pct": pnl_raw, "pnl_sda": pf.get("unrealized_pnl_sda"), "score": score, "m1h": m1h, "flow_1h": flow})
 
     _save_state(nxt)
     order = {"SELL / EXIT": 0, "PARTIAL SELL": 1, "HOLD / TRAIL": 2, "HOLD / WATCH": 3, "HOLD / NO COST BASIS": 4}
@@ -326,28 +294,20 @@ def portfolio_message_v16(portfolio, recommendations):
         m = meta.get(token, {}) or {}
         symbol = pf.get("symbol") or m.get("symbol") or token[:10] + "..."
         name = m.get("name") or symbol
-        val = pf.get("value_sda")
-        pnl = pf.get("unrealized_pnl_sda")
-        pct = pf.get("unrealized_pnl_pct")
+        val = pf.get("value_sda"); pnl = pf.get("unrealized_pnl_sda"); pct = pf.get("unrealized_pnl_pct")
         value_text = f"{_n(val):.2f} SDA" if val is not None else "UNKNOWN"
         pnl_text = "⚪ P/L UNKNOWN" if pnl is None or pct is None else f"P/L {_n(pnl):+.2f} SDA ({_n(pct):+.2f}%)"
-        lines += [f"🔹 {symbol} — {name}", f"   {_fmt_amount(pf.get('amount'))} {symbol}  •  {value_text}", f"   {pnl_text}", ""]
+        price = _n(pf.get("price_sda"))
+        price_text = engine.price(price) + " SDA" if price > 0 else "UNKNOWN"
+        lines += [f"🪙 {symbol} — {name}", f"   {_fmt_amount(pf.get('amount'))} {symbol}  •  {value_text}", f"   Price: {price_text}", f"   {pnl_text}", ""]
 
-    op = portfolio.get("open_unrealized_pnl_sda")
-    rp = portfolio.get("realized_pnl_sda")
-    tp = portfolio.get("known_total_pnl_sda")
-    open_cost = _n(portfolio.get("open_cost_sda"))
-    op_pct = _n(op) / open_cost * 100 if op is not None and open_cost else None
+    op = portfolio.get("open_unrealized_pnl_sda"); rp = portfolio.get("realized_pnl_sda"); tp = portfolio.get("known_total_pnl_sda")
+    open_cost = _n(portfolio.get("open_cost_sda")); op_pct = _n(op) / open_cost * 100 if op is not None and open_cost else None
     lines += ["────────────────────────"]
     lines.append("⚪ Current open P/L UNKNOWN" if op is None else f"Current open P/L {_n(op):+.2f} SDA" + (f" ({op_pct:+.2f}%)" if op_pct is not None else ""))
     lines.append(f"Historical matched P/L {_n(rp):+.2f} SDA")
     lines.append(f"Known total P/L {_n(tp):+.2f} SDA")
-    lines += [f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}", "", "🧭 POSITION ACTION"]
-    for r in recommendations:
-        icon = "🔴" if r["action"] == "SELL / EXIT" else "🟠" if r["action"] == "PARTIAL SELL" else "🟢" if r["action"] == "HOLD / TRAIL" else "🟡"
-        p = "UNKNOWN" if r.get("pnl_sda") is None else f"{_n(r.get('pnl_sda')):+.2f} SDA"
-        lines.append(f"{icon} {r['symbol']}: {r['action']}  •  P/L {p}  •  score {int(_n(r['score']))}/100")
-    lines += ["", "ℹ️ Invalid/inconsistent valuations are UNKNOWN — never a fake loss.", "🔒 Wallet is READ-ONLY."]
+    lines += [f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}", "", "🧭 POSITION ACTION", "", "ℹ️ Token names from Blockscout metadata.", "ℹ️ Actual token logos are sent as a visual portfolio card when available.", "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.", "🔒 Wallet is READ-ONLY."]
     return "\n".join(lines)
 
 
@@ -358,11 +318,11 @@ def wallet_message_v16(w):
     total = 0.0
     for h in sorted(hs, key=lambda x: (x.get("symbol") or "").lower()):
         symbol = h.get("symbol") or str(h.get("address", ""))[:10] + "..."
-        val = h.get("value_sda")
-        px = _n(h.get("price_sda"))
+        val = h.get("value_sda"); px = _n(h.get("price_sda"))
         if val is not None:
             total += _n(val)
-        lines += [f"🪙 {symbol} — {h.get('name') or symbol}", f"   {_fmt_amount(h.get('amount'))} {symbol}  •  {f'{_n(val):.2f}' if val is not None else 'UNKNOWN'} SDA", f"   Price: {engine.price(px) + ' SDA' if px > 0 else 'UNKNOWN'}", ""]
+        val_text = f"{_n(val):.2f}" if val is not None else "UNKNOWN"
+        lines += [f"🪙 {symbol} — {h.get('name') or symbol}", f"   {_fmt_amount(h.get('amount'))} {symbol}  •  {val_text} SDA", f"   Price: {engine.price(px) + ' SDA' if px > 0 else 'UNKNOWN'}", ""]
     lines += ["────────────────────────", f"📊 Known token value: {total:.2f} SDA"]
     if w.get("native_sda") is not None:
         lines.append(f"💼 TOTAL WALLET VALUE: {_n(w.get('native_sda')) + total:.2f} SDA")
@@ -373,7 +333,6 @@ def wallet_message_v16(w):
     return "\n".join(lines)
 
 
-# V16 hooks are installed only after all functions are defined.
 engine.portfolio_history = portfolio_history_v16
 engine.portfolio_recommendations = portfolio_recommendations_v16
 engine.portfolio_message = portfolio_message_v16
