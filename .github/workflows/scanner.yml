@@ -3,10 +3,14 @@ name: SDA Scanner
 on:
   workflow_dispatch:
   schedule:
-    - cron: "7,22,37,52 * * * *"
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
+
+concurrency:
+  group: sda-scanner-paper
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -61,7 +65,7 @@ jobs:
       - name: Run liquidity scanner
         run: python liquidity_scanner.py
 
-      - name: Prepare V17 Telegram display
+      - name: Prepare V18 Telegram display
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -157,7 +161,7 @@ jobs:
           PY
           python -m py_compile main.py engine.py
 
-      - name: Run SDA main engine V17
+      - name: Run SDA main engine V18 AUTO PAPER
         run: python main.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -171,14 +175,14 @@ jobs:
 
       - name: Ensure JSON state files exist
         run: |
-          touch state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json
+          touch state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json paper_auto_state.json
 
       - name: Validate JSON state files
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          files = "state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json".split()
+          files = "state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json paper_auto_state.json".split()
           for name in files:
               p = Path(name)
               if not p.exists() or p.stat().st_size == 0:
@@ -197,7 +201,7 @@ jobs:
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
-          git add state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json
+          git add state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json
           if git diff --staged --quiet; then
             echo "No state changes to commit."
           else
