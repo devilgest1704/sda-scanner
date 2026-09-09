@@ -76,6 +76,16 @@ jobs:
               return "🟢" if x >= 0 else "🔴"
 
 
+          def _action_marker_v16(action):
+              return {
+                  "SELL / EXIT": "🔴",
+                  "PARTIAL SELL": "🟠",
+                  "HOLD / TRAIL": "🟢",
+                  "HOLD / WATCH": "🟡",
+                  "HOLD / NO COST BASIS": "⚪",
+              }.get(str(action or ""), "⚪")
+
+
           def portfolio_message_v16(portfolio, recommendations):
               meta = engine.load(engine.META_FILE, {})
               cur = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
@@ -104,6 +114,18 @@ jobs:
                   f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}",
                   "",
                   "🧭 POSITION ACTION",
+              ]
+              for r in recommendations or []:
+                  action = str(r.get("action") or "")
+                  symbol = r.get("symbol") or str(r.get("token") or "")[:10]
+                  pnl_sda = r.get("pnl_sda")
+                  score = _n(r.get("score"))
+                  if pnl_sda is None:
+                      pnl_text = "UNKNOWN"
+                  else:
+                      pnl_text = f"{_n(pnl_sda):+.2f} SDA"
+                  lines.append(f"{_action_marker_v16(action)} {symbol}: {action}  •  P/L {pnl_text}  •  score {score:.0f}/100")
+              lines += [
                   "",
                   "ℹ️ Token names from Blockscout metadata.",
                   "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.",
