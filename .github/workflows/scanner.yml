@@ -65,99 +65,23 @@ jobs:
       - name: Run liquidity scanner
         run: python liquidity_scanner.py
 
-      - name: Prepare V18 Telegram display
+      - name: Prepare V18 autonomous paper trading configuration
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
           p = Path("main.py")
           s = p.read_text(encoding="utf-8")
-          s = s.replace("{(_n(val):.2f) if val is not None else 'UNKNOWN'}", "{f'{_n(val):.2f}' if val is not None else 'UNKNOWN'}", 1)
-          new_fn = '''def _pnl_marker_v16(pnl):
-              if pnl is None:
-                  return "⚪"
-              x = _n(pnl)
-              return "🟢" if x >= 0 else "🔴"
+          s = s.replace("engine.BUY_THRESHOLD = 75\nengine.MIN_TRADES_1H = 3\nengine.MAX_NEW_BUYS_PER_RUN = 1", "engine.BUY_THRESHOLD = 75\nengine.MIN_TRADES_1H = 3\nengine.MAX_NEW_BUYS_PER_RUN = 5\nengine.MAX_OPEN_POSITIONS = 10", 1)
+          p.write_text(s, encoding="utf-8")
 
-
-          def _action_marker_v16(action):
-              return {
-                  "SELL / EXIT": "🔴",
-                  "PARTIAL SELL": "🟠",
-                  "HOLD / TRAIL": "🟢",
-                  "HOLD / WATCH": "🟡",
-                  "HOLD / NO COST BASIS": "⚪",
-              }.get(str(action or ""), "⚪")
-
-
-          def _score_label_v16(score):
-              x = _n(score)
-              if x >= 75:
-                  return "🚀 STRONG"
-              if x >= 60:
-                  return "🟢 GOOD"
-              if x >= 40:
-                  return "🟡 NEUTRAL"
-              if x >= 20:
-                  return "🟠 WEAK"
-              return "🔴 VERY WEAK"
-
-
-          def portfolio_message_v16(portfolio, recommendations):
-              meta = engine.load(engine.META_FILE, {})
-              cur = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
-              lines = ["📊 REAL PORTFOLIO", "", "Current token positions — SDA accumulation", "────────────────────────"]
-              for token, pf in sorted(cur.items(), key=lambda x: (x[1].get("symbol") or x[0]).lower()):
-                  m = meta.get(str(token).lower(), {}) if isinstance(meta, dict) else {}
-                  symbol = pf.get("symbol") or m.get("symbol") or str(token)[:10] + "..."
-                  name = m.get("name") or symbol
-                  amount = _fmt_amount(pf.get("amount"))
-                  val = pf.get("value_sda")
-                  pnl = pf.get("unrealized_pnl_sda")
-                  pct = pf.get("unrealized_pnl_pct")
-                  value_text = f"{_n(val):.2f} SDA" if val is not None else "UNKNOWN"
-                  pnl_text = f"{_n(pnl):+.2f} SDA ({_n(pct):+.2f}%)" if pnl is not None and pct is not None else "UNKNOWN"
-                  lines += [f"🪙 {symbol} — {name}", f"   {amount} {symbol}  •  {value_text}", f"   {_pnl_marker_v16(pnl)} P/L {pnl_text}", ""]
-              op = portfolio.get("open_unrealized_pnl_sda")
-              rp = portfolio.get("realized_pnl_sda")
-              tp = portfolio.get("known_total_pnl_sda")
-              cost = _n(portfolio.get("open_cost_sda"))
-              op_pct = (_n(op) / cost * 100) if op is not None and cost else None
-              lines += [
-                  "────────────────────────",
-                  f"{_pnl_marker_v16(op)} Current open P/L: {_n(op):+.2f} SDA" + (f" ({op_pct:+.2f}%)" if op_pct is not None else ""),
-                  f"{_pnl_marker_v16(rp)} Historical matched P/L: {_n(rp):+.2f} SDA",
-                  f"{_pnl_marker_v16(tp)} Known total P/L: {_n(tp):+.2f} SDA",
-                  f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}",
-                  "",
-                  "🧭 POSITION ACTION",
-              ]
-              for r in recommendations or []:
-                  action = str(r.get("action") or "")
-                  symbol = r.get("symbol") or str(r.get("token") or "")[:10]
-                  pnl_sda = r.get("pnl_sda")
-                  score = _n(r.get("score"))
-                  if pnl_sda is None:
-                      pnl_text = "UNKNOWN"
-                  else:
-                      pnl_text = f"{_n(pnl_sda):+.2f} SDA"
-                  lines.append(f"{_action_marker_v16(action)} {symbol}: {action}  •  P/L {pnl_text}  •  score {score:.0f}/100 — {_score_label_v16(score)}")
-              lines += [
-                  "",
-                  "ℹ️ Score: 0–19 VERY WEAK • 20–39 WEAK • 40–59 NEUTRAL • 60–74 GOOD • 75–100 STRONG",
-                  "ℹ️ Token names from Blockscout metadata.",
-                  "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.",
-                  "🔒 Wallet is READ-ONLY.",
-              ]
-              return chr(10).join(lines)
-
-
-          '''
-          pattern = r"def portfolio_message_v16\(portfolio, recommendations\):.*?(?=\ndef wallet_message_v16\()"
-          s2, n = re.subn(pattern, new_fn, s, count=1, flags=re.S)
-          if n != 1:
-              raise SystemExit("Could not patch portfolio_message_v16")
-          p.write_text(s2, encoding="utf-8")
+          e = Path("engine.py")
+          s = e.read_text(encoding="utf-8")
+          old = '        state[a]={"neg":neg,"weak":weak}\n        if weak>=2 and not pos.get("tp1_hit"):\n            z=close(p,a,cur,"AUTO PARTIAL SELL",.5)\n            if z:events.append(f"🟠 AUTO PARTIAL SELL {z[\'label\']}\\n\\nPrice: {price(cur)} SDA\\nClosed: 50%\\nProfit: {z[\'closed_profit_sda\']:+.2f} SDA\\nScore: {c:.0f}/100\\nMode: PAPER AUTO")'
+          new = '        partial_done=bool(old.get("partial_done",False))\n        state[a]={"neg":neg,"weak":weak,"partial_done":partial_done}\n        if weak>=2 and not pos.get("tp1_hit") and not partial_done:\n            z=close(p,a,cur,"AUTO PARTIAL SELL",.5)\n            if z:\n                state[a]["partial_done"]=True\n                events.append(f"🟠 AUTO PARTIAL SELL {z[\'label\']}\\n\\nPrice: {price(cur)} SDA\\nClosed: 50%\\nProfit: {z[\'closed_profit_sda\']:+.2f} SDA\\nScore: {c:.0f}/100\\nMode: PAPER AUTO")'
+          if old not in s:
+              raise SystemExit("Expected V18 auto-exit block not found")
+          s = s.replace(old, new, 1)
+          e.write_text(s, encoding="utf-8")
           PY
           python -m py_compile main.py engine.py
 
