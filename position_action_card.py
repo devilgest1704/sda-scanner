@@ -5,7 +5,11 @@ from pathlib import Path
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
+import engine
+
 PORTFOLIO_FILE = "portfolio_data.json"
+MARKET_FILE = "market_data.json"
+WHALE_FILE = "whale_data.json"
 STATE_FILE = "decision_state_v15.json"
 OUT_FILE = "position_action_card.png"
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -66,24 +70,58 @@ def pnl_text(value):
         return "UNKNOWN"
 
 
+def build_recommendation(token, pf, analysis, ws, state):
+    if not isinstance(analysis, dict) or not analysis:
+        return "HOLD / WATCH", 0.0
+
+    s = engine.score(token, analysis, ws)
+    score = float(s.get("confidence", 0) or 0)
+    m1 = float(s.get("m1h", 0) or 0)
+    flow = float(s.get("net_1h", 0) or 0)
+    pnl_raw = pf.get("unrealized_pnl_pct")
+    pnl = float(pnl_raw) if pnl_raw is not None else 0.0
+
+    old = state.get(token, {}) if isinstance(state.get(token), dict) else {}
+    neg = int(float(old.get("negative_count", 0) or 0))
+    weak = int(float(old.get("profit_weakening_count", 0) or 0))
+    loss_weak = int(float(old.get("loss_weakening_count", 0) or 0))
+
+    if pf.get("cost_sda") is None or pnl_raw is None:
+        return "HOLD / NO COST BASIS", score
+    if weak >= 2:
+        return "PARTIAL SELL", score
+    if neg >= 3:
+        return "SELL / EXIT", score
+    if loss_weak >= 3:
+        return "SELL / EXIT", score
+    if score >= 70 and m1 > 0 and flow > 0:
+        return "HOLD / TRAIL", score
+    return "HOLD / WATCH", score
+
+
 def main():
     portfolio = load(PORTFOLIO_FILE, {})
+    market = load(MARKET_FILE, {})
+    whale = load(WHALE_FILE, {})
     state = load(STATE_FILE, {})
     current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
+    tokens = market.get("tokens", {}) if isinstance(market, dict) else {}
 
     rows = []
     for token, pf in current.items():
         if not isinstance(pf, dict):
             continue
-        rec = state.get(token, {}) if isinstance(state, dict) else {}
+        td = tokens.get(token, {}) if isinstance(tokens, dict) else {}
+        analysis = td.get("analysis", td) if isinstance(td, dict) else {}
+        action, score = build_recommendation(token, pf, analysis, whale, state)
         rows.append({
             "symbol": pf.get("symbol") or str(token)[:10] + "...",
-            "action": rec.get("action") or "HOLD / WATCH",
-            "score": rec.get("score", 0),
+            "action": action,
+            "score": score,
             "pnl": pf.get("unrealized_pnl_sda"),
         })
 
-    rows.sort(key=lambda r: ({"SELL / EXIT": 0, "PARTIAL SELL": 1, "HOLD / TRAIL": 2, "HOLD / WATCH": 3}.get(r["action"], 4), -float(r["score"] or 0)))
+    rows.sort(key=lambda r: ({"SELL / EXIT": 0, "PARTIAL SELL": 1, "HOLD / TRAIL": 2, "HOLD / WATCH": 3, "HOLD / NO COST BASIS": 4}.get(r["action"], 5), -float(r["score"] or 0)))
 
     W = 1400
     header_h = 145
@@ -110,10 +148,7 @@ def main():
         d.text((100, y + 24), row["symbol"], font=rowf, fill=(25, 30, 35))
         d.text((270, y + 24), row["action"], font=rowf, fill=text_fill)
         d.text((720, y + 24), f"P/L {pnl_text(row['pnl'])}", font=rowf, fill=text_fill)
-        try:
-            score = float(row["score"] or 0)
-        except Exception:
-            score = 0
+        score = float(row["score"] or 0)
         d.text((1010, y + 24), f"score {score:.0f}/100", font=small, fill=(65, 70, 75))
         d.text((1170, y + 24), strength(score), font=small, fill=text_fill)
         y += row_h
