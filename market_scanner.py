@@ -404,27 +404,10 @@ def analyze_token(token_data):
 # TELEGRAM
 # ============================================================
 
+# Scanner data must not send its own Telegram messages.
+# The dashboard layer owns all Telegram output.
 def send_telegram(text):
-    token = os.environ.get("TELEGRAM_TOKEN")
-    chat_id = os.environ.get("CHAT_ID")
-
-    if not token or not chat_id:
-        print("Telegram credentials not available.")
-        return
-
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-
-    response = requests.post(
-        url,
-        json={"chat_id": chat_id, "text": text},
-        timeout=30,
-    )
-
-    if response.status_code != 200:
-        print(
-            f"Telegram HTTP {response.status_code}: "
-            f"{response.text[:500]}"
-        )
+    print(text)
 
 
 # ============================================================
