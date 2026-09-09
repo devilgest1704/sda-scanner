@@ -61,7 +61,7 @@ jobs:
       - name: Run liquidity scanner
         run: python liquidity_scanner.py
 
-      - name: Prepare V16 Telegram display
+      - name: Prepare V17 Telegram display
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -124,7 +124,7 @@ jobs:
                   f"{_pnl_marker_v16(op)} Current open P/L: {_n(op):+.2f} SDA" + (f" ({op_pct:+.2f}%)" if op_pct is not None else ""),
                   f"{_pnl_marker_v16(rp)} Historical matched P/L: {_n(rp):+.2f} SDA",
                   f"{_pnl_marker_v16(tp)} Known total P/L: {_n(tp):+.2f} SDA",
-                  f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}",
+                  f"Matched sells: {int(_n(portfolio.get('matched_sell_count'))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}",
                   "",
                   "🧭 POSITION ACTION",
               ]
@@ -157,7 +157,7 @@ jobs:
           PY
           python -m py_compile main.py engine.py
 
-      - name: Run SDA main engine V16
+      - name: Run SDA main engine V17
         run: python main.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
