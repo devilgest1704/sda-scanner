@@ -122,9 +122,10 @@ if marker in s and 'metadata = load_json("token_metadata.json", {})' not in s:
 p.write_text(s, encoding='utf-8')
 PY
 
-python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py
+python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py
 python whale_scanner.py
 python market_scanner.py
+python technical_analysis.py
 python token_metadata.py
 python liquidity_scanner.py
 python main.py
