@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # All runtime code/config changes are committed directly to main.
-# Keep this runner deterministic: scan -> TA -> metadata/liquidity -> engine -> reports -> Telegram dashboard.
+# Keep this runner deterministic: scan -> TA -> metadata/liquidity -> engine -> state.
+# Telegram dashboard is intentionally NOT sent here; the hourly workflow owns reporting.
 
 python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py
 python whale_scanner.py
@@ -11,11 +12,9 @@ python technical_analysis.py
 python token_metadata.py
 python liquidity_scanner.py
 
-# Main scanner remains responsible for state generation, but its direct Telegram
-# messages are suppressed so Telegram has one canonical dashboard/menu only.
+# Main scanner remains responsible for state generation. Direct Telegram output is suppressed.
 TELEGRAM_TOKEN="" python main.py
 TELEGRAM_TOKEN="" python paper_stats.py
-python telegram_dashboard.py
 
 python - <<'PY'
 import json
