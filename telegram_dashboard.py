@@ -159,9 +159,62 @@ def market_momentum_report():
     return "\n".join(lines)
 
 
+def _buy_gate_diagnostic(address, analysis, score_data, trades, volume_1h):
+    """Explain every BUY gate without changing trading logic."""
+    score = engine.num(score_data.get("confidence"))
+    eligible = trades >= engine.MIN_TRADES_1H
+    active = volume_1h >= 250
+    reasons = []
+    if score < engine.BUY_THRESHOLD:
+        reasons.append(f"score {score:.0f}<{engine.BUY_THRESHOLD}")
+    if trades < engine.MIN_TRADES_1H:
+        reasons.append(f"trades {trades:.0f}<{engine.MIN_TRADES_1H}")
+    if not active:
+        reasons.append(f"volume {volume_1h:.0f}<250")
+    if not reasons:
+        reasons.append("ALL BUY GATES PASS")
+    return {
+        "address": address,
+        "score": score,
+        "trades": trades,
+        "volume_1h": volume_1h,
+        "eligible_for_buy": eligible,
+        "active": active,
+        "reasons": reasons,
+    }
+
+
+def _buy_gate_rows(md, ws, meta, limit=5):
+    """Return the current TOP BUY rows plus the exact reasons BUY is blocked."""
+    rows = []
+    tokens = md.get("tokens", {}) or {}
+    for address, token_data in tokens.items():
+        analysis = _analysis(token_data)
+        if not analysis or engine.num(analysis.get("price_in_sda")) <= 0:
+            continue
+        flow = analysis.get("flow", {}).get("1h", {}) or {}
+        trades = engine.num(flow.get("buy_count")) + engine.num(flow.get("sell_count"))
+        volume_1h = engine.num(flow.get("total_volume"))
+        if volume_1h < 250:
+            continue
+        try:
+            s = engine.score(address, analysis, ws)
+        except Exception:
+            continue
+        d = _buy_gate_diagnostic(address, analysis, s, trades, volume_1h)
+        d["label"] = engine.lbl(address, meta)
+        d["m1h"] = engine.num(s.get("m1h"))
+        d["net_1h"] = engine.num(s.get("net_1h"))
+        d["whale_net"] = engine.num(s.get("whale_net"))
+        rows.append(d)
+    rows.sort(key=lambda x: (x["score"], x["volume_1h"], x["trades"]), reverse=True)
+    return rows[:limit]
+
+
 def market_debug_report():
     md = load("market_data.json", {"tokens": {}})
     ws = load("whale_data.json", {})
+    meta = load("token_metadata.json", {})
     tokens = md.get("tokens", {}) or {}
     loaded = len(tokens)
     active = 0
@@ -191,7 +244,22 @@ def market_debug_report():
         "",
         "Active rule: 1H volume ≥ 250 SDA",
         "Trades do not control activity filtering",
+        "",
+        "🎯 BUY GATE DIAGNOSTICS",
+        f"BUY threshold: {engine.BUY_THRESHOLD}/100",
+        f"Min trades: {engine.MIN_TRADES_1H}",
+        "Showing current TOP 5 active candidates:",
     ]
+    rows = _buy_gate_rows(md, ws, meta, 5)
+    if not rows:
+        lines.append("⚪ No active candidates")
+    else:
+        for i, row in enumerate(rows, 1):
+            status = "🟢 PASS" if not [x for x in row["reasons"] if x != "ALL BUY GATES PASS"] else "🔴 BLOCKED"
+            lines.append(f"{i}. {status} {row['label']} — {row['score']:.0f}/100")
+            lines.append(f"   Score: {row['score']:.0f}/{engine.BUY_THRESHOLD} • trades: {row['trades']:.0f}/{engine.MIN_TRADES_1H} • vol: {row['volume_1h']:.0f}/250")
+            lines.append(f"   1H: {row['m1h']:+.2f}% • flow: {row['net_1h']:+.0f} SDA • whale: {row['whale_net']:+.0f} SDA")
+            lines.append(f"   Reason: {'; '.join(row['reasons'])}")
     return "\n".join(lines)
 
 
