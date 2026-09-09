@@ -86,6 +86,19 @@ jobs:
               }.get(str(action or ""), "⚪")
 
 
+          def _score_label_v16(score):
+              x = _n(score)
+              if x >= 75:
+                  return "🚀 STRONG"
+              if x >= 60:
+                  return "🟢 GOOD"
+              if x >= 40:
+                  return "🟡 NEUTRAL"
+              if x >= 20:
+                  return "🟠 WEAK"
+              return "🔴 VERY WEAK"
+
+
           def portfolio_message_v16(portfolio, recommendations):
               meta = engine.load(engine.META_FILE, {})
               cur = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
@@ -124,9 +137,10 @@ jobs:
                       pnl_text = "UNKNOWN"
                   else:
                       pnl_text = f"{_n(pnl_sda):+.2f} SDA"
-                  lines.append(f"{_action_marker_v16(action)} {symbol}: {action}  •  P/L {pnl_text}  •  score {score:.0f}/100")
+                  lines.append(f"{_action_marker_v16(action)} {symbol}: {action}  •  P/L {pnl_text}  •  score {score:.0f}/100 — {_score_label_v16(score)}")
               lines += [
                   "",
+                  "ℹ️ Score: 0–19 VERY WEAK • 20–39 WEAK • 40–59 NEUTRAL • 60–74 GOOD • 75–100 STRONG",
                   "ℹ️ Token names from Blockscout metadata.",
                   "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.",
                   "🔒 Wallet is READ-ONLY.",
@@ -183,7 +197,7 @@ jobs:
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
-          git add state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json
+          git add state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json
           if git diff --staged --quiet; then
             echo "No state changes to commit."
           else
