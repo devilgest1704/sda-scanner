@@ -13,11 +13,10 @@ REMOTE_BASE = "https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/
 
 
 def load(path, default):
-    # Webhook deployments must always see the latest scanner state from main.
-    # Local scanner runs continue using the committed files directly.
     if os.environ.get("SDA_REMOTE_STATE") == "1":
         try:
-            r = requests.get(REMOTE_BASE + path, timeout=15)
+            # Cache-bust raw GitHub so the webhook sees the newest scanner commit.
+            r = requests.get(REMOTE_BASE + path, params={"ts": int(time.time())}, timeout=15)
             r.raise_for_status()
             x = r.json()
             return x if isinstance(x, type(default)) else default
@@ -93,11 +92,20 @@ def back_keyboard():
     return {"inline_keyboard": [[{"text": "⬅️ Main dashboard", "callback_data": "MAIN"}]]}
 
 
+def _analysis(token_data):
+    """Return the actual analysis block from the current market_data schema."""
+    if not isinstance(token_data, dict):
+        return {}
+    value = token_data.get("analysis")
+    return value if isinstance(value, dict) else token_data
+
+
 def top_buy(md, ws, meta):
     tokens = md.get("tokens", {}) or {}
     ranks = []
-    for address, analysis in tokens.items():
-        if not isinstance(analysis, dict):
+    for address, token_data in tokens.items():
+        analysis = _analysis(token_data)
+        if not analysis:
             continue
         try:
             s = engine.score(address, analysis, ws)
@@ -107,14 +115,21 @@ def top_buy(md, ws, meta):
             continue
         flow = analysis.get("flow", {}).get("1h", {}) or {}
         trades = engine.num(flow.get("buy_count")) + engine.num(flow.get("sell_count"))
-        ranks.append((s.get("confidence", 0), address, s, trades))
-    ranks.sort(key=lambda x: (x[0], x[3]), reverse=True)
+        volume_1h = engine.num(flow.get("total_volume"))
+        # MARKET MOMENTUM rule: active means >=250 SDA volume in the last hour.
+        if volume_1h < 250:
+            continue
+        ranks.append((s.get("confidence", 0), address, s, trades, volume_1h))
+    ranks.sort(key=lambda x: (x[0], x[4], x[3]), reverse=True)
     lines = ["🔥 TOP BUY CANDIDATES", ""]
-    for i, (score, address, s, trades) in enumerate(ranks[:5], 1):
+    if not ranks:
+        lines.append("⚪ No active candidates (1H volume ≥ 250 SDA)")
+        return "\n".join(lines)
+    for i, (score, address, s, trades, volume_1h) in enumerate(ranks[:5], 1):
         label = engine.lbl(address, meta)
         icon = "🟢 BUY" if score >= engine.BUY_THRESHOLD and trades >= engine.MIN_TRADES_1H else ("🟡 WATCH" if score >= 55 else "⚪ WEAK")
         lines.append(f"{i}. {icon} {label} — {score:.0f}/100")
-        lines.append(f"   1H {s.get('m1h', 0):+.2f}% • flow {s.get('net_1h', 0):+.0f} SDA • trades {trades:.0f}")
+        lines.append(f"   1H {s.get('m1h', 0):+.2f}% • flow {s.get('net_1h', 0):+.0f} SDA • vol {volume_1h:.0f} SDA • trades {trades:.0f}")
     return "\n".join(lines)
 
 
@@ -137,7 +152,10 @@ def technical_report():
     ws = load("whale_data.json", {})
     tokens = md.get("tokens", {}) or {}
     ranked = []
-    for address, analysis in tokens.items():
+    for address, token_data in tokens.items():
+        analysis = _analysis(token_data)
+        if not analysis:
+            continue
         try:
             s = engine.score(address, analysis, ws)
             ranked.append((s.get("confidence", 0), address, analysis))
@@ -187,7 +205,8 @@ def paper_report():
         invested += inv * frac
         entry = engine.num(x.get("entry_price"))
         address = str(x.get("address", "")).lower()
-        cur = engine.num((tokens.get(address, {}) or {}).get("analysis", {}).get("price_in_sda"))
+        token_data = tokens.get(address, {}) or {}
+        cur = engine.num(_analysis(token_data).get("price_in_sda"))
         if entry > 0 and cur > 0:
             open_pnl += (cur / entry - 1) * inv * frac
     total = realized + open_pnl
