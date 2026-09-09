@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import json
 import os
+import sys
+import time
 import requests
 
 import engine
@@ -30,7 +32,11 @@ def api(method, payload):
     if not token:
         return None
     try:
-        r = requests.post(f"https://api.telegram.org/bot{token}/{method}", json=payload, timeout=30)
+        r = requests.post(
+            f"https://api.telegram.org/bot{token}/{method}",
+            json=payload,
+            timeout=30,
+        )
         r.raise_for_status()
         return r.json()
     except Exception as exc:
@@ -176,33 +182,55 @@ def paper_report():
     return "\n".join(lines)
 
 
-def handle_updates():
+def handle_update(update, state):
+    state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
+    cb = update.get("callback_query") or {}
+    data = cb.get("data")
+    msg = cb.get("message") or {}
+    chat_id = (msg.get("chat") or {}).get("id")
+    message_id = msg.get("message_id")
+    answer_callback(cb.get("id"))
+
+    if data == "TECH":
+        edit(chat_id, message_id, technical_report(), back_keyboard())
+    elif data == "PAPER":
+        edit(chat_id, message_id, paper_report(), back_keyboard())
+    elif data == "MAIN":
+        edit(chat_id, message_id, main_dashboard(), menu_keyboard())
+
+
+def listen_loop(duration_seconds=240):
     token = os.environ.get("TELEGRAM_TOKEN")
     if not token:
+        print("TELEGRAM_TOKEN is not configured")
         return
+
     state = load(STATE_FILE, {"offset": 0})
-    offset = int(state.get("offset", 0))
-    result = api("getUpdates", {"offset": offset, "timeout": 1, "allowed_updates": ["callback_query"]})
-    items = (result or {}).get("result", []) if isinstance(result, dict) else []
-    for update in items:
-        state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
-        cb = update.get("callback_query") or {}
-        data = cb.get("data")
-        msg = cb.get("message") or {}
-        chat_id = (msg.get("chat") or {}).get("id")
-        message_id = msg.get("message_id")
-        answer_callback(cb.get("id"))
-        if data == "TECH":
-            edit(chat_id, message_id, technical_report(), back_keyboard())
-        elif data == "PAPER":
-            edit(chat_id, message_id, paper_report(), back_keyboard())
-        elif data == "MAIN":
-            edit(chat_id, message_id, main_dashboard(), menu_keyboard())
+    deadline = time.monotonic() + duration_seconds
+
+    while time.monotonic() < deadline:
+        offset = int(state.get("offset", 0))
+        result = api("getUpdates", {
+            "offset": offset,
+            "timeout": 20,
+            "allowed_updates": ["callback_query"],
+        })
+        items = (result or {}).get("result", []) if isinstance(result, dict) else []
+        if not items:
+            continue
+        for update in items:
+            handle_update(update, state)
+        save(STATE_FILE, state)
+
     save(STATE_FILE, state)
 
 
 def run():
-    handle_updates()
+    if "--listen" in sys.argv or os.environ.get("TELEGRAM_MODE") == "listen":
+        listen_loop()
+        return
+    # Scanner workflow: send the dashboard only. Callback handling runs in the
+    # dedicated Telegram listener workflow so button clicks are near-real-time.
     send(main_dashboard(), menu_keyboard())
 
 
