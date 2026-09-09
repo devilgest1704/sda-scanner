@@ -2,7 +2,6 @@
 import json
 import os
 import requests
-from datetime import datetime, timezone
 
 import engine
 import main as scanner
@@ -50,6 +49,8 @@ def send(text, reply_markup=None, chat_id=None):
 
 
 def edit(chat_id, message_id, text, reply_markup=None):
+    if not chat_id or not message_id:
+        return
     payload = {"chat_id": chat_id, "message_id": message_id, "text": text}
     if reply_markup:
         payload["reply_markup"] = reply_markup
@@ -57,16 +58,15 @@ def edit(chat_id, message_id, text, reply_markup=None):
 
 
 def answer_callback(callback_id):
-    api("answerCallbackQuery", {"callback_query_id": callback_id})
+    if callback_id:
+        api("answerCallbackQuery", {"callback_query_id": callback_id})
 
 
 def menu_keyboard():
-    return {
-        "inline_keyboard": [
-            [{"text": "📐 Technical Analysis", "callback_data": "TECH"}],
-            [{"text": "🤖 Paper Trading", "callback_data": "PAPER"}],
-        ]
-    }
+    return {"inline_keyboard": [
+        [{"text": "📐 Technical Analysis", "callback_data": "TECH"}],
+        [{"text": "🤖 Paper Trading", "callback_data": "PAPER"}],
+    ]}
 
 
 def back_keyboard():
@@ -83,7 +83,7 @@ def top_buy(md, ws, meta):
             s = engine.score(address, analysis, ws)
         except Exception:
             continue
-        if s.get("price_in_sda", analysis.get("price_in_sda", 0)) is None:
+        if engine.num(analysis.get("price_in_sda")) <= 0:
             continue
         flow = analysis.get("flow", {}).get("1h", {}) or {}
         trades = engine.num(flow.get("buy_count")) + engine.num(flow.get("sell_count"))
@@ -104,21 +104,18 @@ def main_dashboard():
     meta = load("token_metadata.json", {})
     wallet = load("wallet_data.json", {})
     portfolio = load("portfolio_data.json", {})
-
     wallet_text = scanner.wallet_message_v16(wallet)
     portfolio_text = scanner.portfolio_message_v16(portfolio, [])
-    text = "📈 SDA MARKET SCANNER\n\n" + top_buy(md, ws, meta) + "\n\n" + wallet_text + "\n\n" + portfolio_text
-    text += "\n\n────────────────────────\n📂 DETAIL MENU"
-    text += "\nTechnical Analysis and Paper Trading are available below."
-    return text
+    return ("📈 SDA MARKET SCANNER\n\n" + top_buy(md, ws, meta) + "\n\n" +
+            wallet_text + "\n\n" + portfolio_text +
+            "\n\n────────────────────────\n📂 DETAIL MENU\nTechnical Analysis and Paper Trading are available below.")
 
 
 def technical_report():
     md = load("market_data.json", {"tokens": {}})
     meta = load("token_metadata.json", {})
-    tokens = md.get("tokens", {}) or {}
-    # Focus on the same five highest current scanner candidates.
     ws = load("whale_data.json", {})
+    tokens = md.get("tokens", {}) or {}
     ranked = []
     for address, analysis in tokens.items():
         try:
@@ -131,7 +128,7 @@ def technical_report():
     lines = ["📐 TECHNICAL ANALYSIS", "", "Analysis only • does not change BUY/SELL logic", "────────────────────────"]
     for score, address, analysis in ranked[:5]:
         symbol = engine.lbl(address, meta)
-        tech = (analysis.get("analysis", {}) or {}).get("technical", {})
+        tech = (analysis.get("technical") or {}) if isinstance(analysis, dict) else {}
         if not tech:
             lines += [f"🪙 {symbol}", "   Technical data: N/A", ""]
             continue
@@ -144,10 +141,12 @@ def technical_report():
             lines.append(f"   {tf.upper():<2} {trend:<8} • {rsi_txt}")
         d = tech.get("1d", {}) or {}
         macd = d.get("macd", {}) if isinstance(d.get("macd"), dict) else {}
-        macd_txt = macd.get("histogram")
-        macd_txt = f"{macd_txt:+.6f}" if isinstance(macd_txt, (int, float)) else "N/A"
+        hist = macd.get("histogram")
+        macd_txt = f"{hist:+.6f}" if isinstance(hist, (int, float)) else "N/A"
+        support = d.get("support", "N/A")
+        resistance = d.get("resistance", "N/A")
         lines.append(f"   MACD 1D histogram: {macd_txt}")
-        lines.append(f"   Support: {d.get('support', 'N/A')} • Resistance: {d.get('resistance', 'N/A')}")
+        lines.append(f"   Support: {support} • Resistance: {resistance}")
         lines.append("")
     lines += ["────────────────────────", "⚪ N/A = insufficient historical coverage"]
     return "\n".join(lines)
@@ -157,15 +156,20 @@ def paper_report():
     p = load("positions.json", {"positions": {}, "closed_trades": []})
     positions = p.get("positions", {}) or {}
     closed = p.get("closed_trades", []) or []
+    market = load("market_data.json", {"tokens": {}})
+    tokens = market.get("tokens", {}) or {}
     realized = sum(engine.num(x.get("closed_profit_sda")) for x in closed)
     open_pnl = 0.0
     invested = 0.0
     for x in positions.values():
-        invested += engine.num(x.get("investment_sda")) * engine.num(x.get("remaining_fraction", 1))
+        frac = engine.num(x.get("remaining_fraction", 1))
+        inv = engine.num(x.get("investment_sda"))
+        invested += inv * frac
         entry = engine.num(x.get("entry_price"))
-        cur = engine.num((load("market_data.json", {"tokens": {}}).get("tokens", {}).get(x.get("address", ""), {}) or {}).get("analysis", {}).get("price_in_sda"))
+        address = str(x.get("address", "")).lower()
+        cur = engine.num((tokens.get(address, {}) or {}).get("analysis", {}).get("price_in_sda"))
         if entry > 0 and cur > 0:
-            open_pnl += (cur / entry - 1) * engine.num(x.get("investment_sda")) * engine.num(x.get("remaining_fraction", 1))
+            open_pnl += (cur / entry - 1) * inv * frac
     total = realized + open_pnl
     roi = total / invested * 100 if invested else 0.0
     lines = ["🤖 SDA PAPER TRADING V18", "", f"Open positions: {len(positions)}", f"Closed trades: {len(closed)}", "────────────────────────", f"Realized P/L: {realized:+.2f} SDA", f"Open P/L: {open_pnl:+.2f} SDA", f"Cumulative P/L: {total:+.2f} SDA", f"ROI: {roi:+.2f}%", f"Invested: {invested:.2f} SDA", "", "Investment per BUY: 50–100 SDA", "Fee: 1.0% • Slippage: 0.1%", "Auto scan: every 5 minutes"]
@@ -181,7 +185,7 @@ def handle_updates():
     result = api("getUpdates", {"offset": offset, "timeout": 1, "allowed_updates": ["callback_query"]})
     items = (result or {}).get("result", []) if isinstance(result, dict) else []
     for update in items:
-        state["offset"] = max(offset, int(update.get("update_id", 0)) + 1)
+        state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
         cb = update.get("callback_query") or {}
         data = cb.get("data")
         msg = cb.get("message") or {}
