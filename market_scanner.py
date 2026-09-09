@@ -22,8 +22,11 @@ SUPABASE_KEY = "sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z"
 MARKET_DATA_FILE = "market_data.json"
 METADATA_FILE = "token_metadata.json"
 
-FETCH_LIMIT = 1000
-MAX_HISTORY_POINTS = 1000
+# Keep substantially more history so the technical-analysis layer has
+# enough candles for RSI/EMA/MACD/ATR and multi-timeframe trend detection.
+# This does NOT change BUY/SELL logic; it only improves the available data.
+FETCH_LIMIT = 5000
+MAX_HISTORY_POINTS = 5000
 MIN_RECENT_VOLUME_SDA = 250
 MIN_RECENT_TRADES = 2
 
@@ -450,14 +453,13 @@ try:
         if analysis is not None:
             analyzed_tokens[token_address] = analysis
 
-    # Trim stored history after analysis.
+    # Persist the latest analysis alongside the transaction history.
     for token_address, analysis in analyzed_tokens.items():
-        # Persist the latest analysis alongside the transaction history so
-        # downstream scanners (main.py) can consume it directly.
         if token_address in tokens:
             tokens[token_address]["analysis"] = analysis
 
-    for token_data in tokens.values():
+    # Trim stored history after analysis.
+    for token_address, token_data in tokens.items():
         history = token_data.get("transactions", [])
         history.sort(key=lambda x: x.get("timestamp", ""))
 
