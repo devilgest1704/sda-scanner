@@ -329,29 +329,63 @@ def portfolio_message_v16(portfolio, recommendations):
     meta = engine.load(engine.META_FILE, {})
     cur = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
     lines = ["📊 REAL PORTFOLIO", "", "Current token positions — SDA accumulation", "────────────────────────"]
+
     for token, pf in sorted(cur.items(), key=lambda x: (x[1].get("symbol") or x[0]).lower()):
         m = meta.get(token, {}) or {}
         symbol = pf.get("symbol") or m.get("symbol") or token[:10] + "..."
         name = m.get("name") or symbol
-        val = pf.get("value_sda"); pnl = pf.get("unrealized_pnl_sda"); pct = pf.get("unrealized_pnl_pct")
+        val = pf.get("value_sda")
+        pnl = pf.get("unrealized_pnl_sda")
+        pct = pf.get("unrealized_pnl_pct")
         value_text = f"{_n(val):.2f} SDA" if val is not None else "UNKNOWN"
-        pnl_text = "⚪ P/L UNKNOWN" if pnl is None or pct is None else f"P/L {_n(pnl):+.2f} SDA ({_n(pct):+.2f}%)"
-        lines += [f"🪙 {symbol} — {name}", f"   {_fmt_amount(pf.get('amount'))} {symbol}  •  {value_text}", f"   {pnl_text}", ""]
+        if pnl is None or pct is None:
+            pnl_text = "⚪ P/L UNKNOWN"
+        else:
+            pnl_icon = "🟢" if _n(pnl) >= 0 else "🔴"
+            pnl_text = f"{pnl_icon} P/L {_n(pnl):+.2f} SDA ({_n(pct):+.2f}%)"
+        lines += [
+            f"🪙 {symbol} — {name}",
+            f"   {_fmt_amount(pf.get('amount'))} {symbol}  •  {value_text}",
+            f"   {pnl_text}",
+            "",
+        ]
 
-    op = portfolio.get("open_unrealized_pnl_sda"); rp = portfolio.get("realized_pnl_sda"); tp = portfolio.get("known_total_pnl_sda")
-    open_cost = _n(portfolio.get("open_cost_sda")); op_pct = _n(op) / open_cost * 100 if op is not None and open_cost else None
+    op = portfolio.get("open_unrealized_pnl_sda")
+    rp = portfolio.get("realized_pnl_sda")
+    tp = portfolio.get("known_total_pnl_sda")
+    open_cost = _n(portfolio.get("open_cost_sda"))
+    op_pct = _n(op) / open_cost * 100 if op is not None and open_cost else None
+
     lines += ["────────────────────────"]
-    lines.append("⚪ Current open P/L UNKNOWN" if op is None else f"Current open P/L {_n(op):+.2f} SDA" + (f" ({op_pct:+.2f}%)" if op_pct is not None else ""))
-    lines.append(f"Historical matched P/L {_n(rp):+.2f} SDA")
-    lines.append(f"Known total P/L {_n(tp):+.2f} SDA")
-    lines += [f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}", "", "🧭 POSITION ACTION"]
+    if op is None:
+        lines.append("⚪ Current open P/L UNKNOWN")
+    else:
+        icon = "🟢" if _n(op) >= 0 else "🔴"
+        suffix = f" ({op_pct:+.2f}%)" if op_pct is not None else ""
+        lines.append(f"{icon} Current open P/L {_n(op):+.2f} SDA{suffix}")
+
+    r_icon = "🟢" if _n(rp) >= 0 else "🔴"
+    t_icon = "🟢" if _n(tp) >= 0 else "🔴"
+    lines.append(f"{r_icon} Historical matched P/L {_n(rp):+.2f} SDA")
+    lines.append(f"{t_icon} Known total P/L {_n(tp):+.2f} SDA")
+    lines += [
+        f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}",
+        "",
+        "🧭 POSITION ACTION",
+    ]
+
     def _strength(score):
         s = _n(score)
-        if s < 20: return "VERY WEAK"
-        if s < 40: return "WEAK"
-        if s < 60: return "NEUTRAL"
-        if s < 75: return "GOOD"
-        return "STRONG"
+        if s < 20:
+            return "🔴 VERY WEAK"
+        if s < 40:
+            return "🟠 WEAK"
+        if s < 60:
+            return "🟡 NEUTRAL"
+        if s < 75:
+            return "🟢 GOOD"
+        return "🟢 STRONG"
+
     for r in recommendations:
         action = r.get("action")
         icon = "🔴" if action == "SELL / EXIT" else ("🟠" if action == "PARTIAL SELL" else ("🟢" if action == "HOLD / TRAIL" else "🟡"))
@@ -359,9 +393,15 @@ def portfolio_message_v16(portfolio, recommendations):
         pnl_text = f"{_n(pnl):+.2f} SDA" if pnl is not None else "UNKNOWN"
         score = int(_n(r.get("score")))
         lines.append(f"{icon} {r['symbol']}: {action}  •  P/L {pnl_text}  •  score {score}/100 — {_strength(score)}")
-    lines += ["", "ℹ️ Score: 0–19 VERY WEAK • 20–39 WEAK • 40–59 NEUTRAL • 60–74 GOOD • 75–100 STRONG", "ℹ️ Token names from Blockscout metadata.", "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.", "🔒 Wallet is READ-ONLY."]
-    return "\n".join(lines)
 
+    lines += [
+        "",
+        "ℹ️ Score: 0–19 VERY WEAK • 20–39 WEAK • 40–59 NEUTRAL • 60–74 GOOD • 75–100 STRONG",
+        "ℹ️ Token names from Blockscout metadata.",
+        "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.",
+        "🔒 Wallet is READ-ONLY.",
+    ]
+    return "\n".join(lines)
 
 def wallet_message_v16(w):
     w = _sanitize_wallet(w)
