@@ -1,4 +1,4 @@
-# SDA Scanner V16 — canonical main entry point
+# SDA Scanner V17 — canonical main entry point
 # Portfolio valuation/accounting is centralized here; engine remains the scanner core.
 import json
 import math
@@ -238,6 +238,13 @@ def _save_state(data):
 
 
 def portfolio_recommendations_v16(portfolio, md, ws, meta, ld):
+    """V17: score is confirmation, not a standalone exit trigger.
+
+    BUY execution remains unchanged: engine threshold 75, positive momentum/flow,
+    trade-count and liquidity gates. Portfolio recommendations add stricter exits:
+    profitable weakening positions can be partially reduced, while losing very-weak
+    positions need confirmed deterioration before SELL / EXIT.
+    """
     out = []
     cur = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
     tokens = md.get("tokens", {}) if isinstance(md, dict) else {}
@@ -250,25 +257,56 @@ def portfolio_recommendations_v16(portfolio, md, ws, meta, ld):
         score = _n(s.get("confidence")); m1h = _n(s.get("m1h")); flow = _n(s.get("net_1h"))
         pnl_raw = pf.get("unrealized_pnl_pct"); pnl = _n(pnl_raw)
         old = state.get(token, {}) if isinstance(state.get(token), dict) else {}
-        neg = int(_n(old.get("negative_count"))); weak = int(_n(old.get("profit_weakening_count")))
+        neg = int(_n(old.get("negative_count")))
+        weak = int(_n(old.get("profit_weakening_count")))
+        loss_weak = int(_n(old.get("loss_weakening_count")))
+
+        # Core deterioration: score is used together with both negative momentum and flow.
         negative = score < 35 and m1h < 0 and flow < 0
         deep = pnl <= -15 and m1h < 0 and flow < 0
-        weakening = pnl >= 8 and (m1h < 0 or flow < 0)
+
+        # Profitable position losing momentum/flow: candidate for scale-out, but only
+        # after two consecutive scans. This prevents one noisy scan from selling.
+        weakening = pnl > 0 and score < 40 and (m1h < 0 or flow < 0)
+
+        # Losing position with a very weak score and deterioration: this is the new
+        # V17 exit path. It still requires 3 confirmations and never triggers from
+        # score alone. A larger loss relaxes the score threshold slightly.
+        loss_weakening = pnl <= -8 and (score < 20 or (pnl <= -12 and score < 35)) and (m1h < 0 or flow < 0)
+
         neg = min(5, neg + 1) if (negative or deep) else 0
         weak = min(5, weak + 1) if weakening else 0
-        nxt[token] = {"negative_count": neg, "profit_weakening_count": weak}
+        loss_weak = min(5, loss_weak + 1) if loss_weakening else 0
+        nxt[token] = {
+            "negative_count": neg,
+            "profit_weakening_count": weak,
+            "loss_weakening_count": loss_weak,
+        }
 
         if pf.get("cost_sda") is None or pnl_raw is None:
             action, reason = "HOLD / NO COST BASIS", "cost basis or valid valuation unavailable"
         elif weak >= 2:
-            action, reason = "PARTIAL SELL", "profit + weakening confirmed twice"
+            action, reason = "PARTIAL SELL", "profitable position + weak score/momentum/flow confirmed twice"
         elif neg >= 3:
             action, reason = "SELL / EXIT", "trend + negative SDA flow confirmed 3 times"
+        elif loss_weak >= 3:
+            action, reason = "SELL / EXIT", "losing position + very weak score + deterioration confirmed 3 times"
         elif score >= 70 and m1h > 0 and flow > 0:
             action, reason = "HOLD / TRAIL", "positive trend and SDA flow"
         else:
             action, reason = "HOLD / WATCH", "no confirmed exit condition"
-        out.append({"token": token, "symbol": pf.get("symbol") or engine.lbl(token, meta), "action": action, "reason": reason, "pnl_pct": pnl_raw, "pnl_sda": pf.get("unrealized_pnl_sda"), "score": score, "m1h": m1h, "flow_1h": flow})
+
+        out.append({
+            "token": token,
+            "symbol": pf.get("symbol") or engine.lbl(token, meta),
+            "action": action,
+            "reason": reason,
+            "pnl_pct": pnl_raw,
+            "pnl_sda": pf.get("unrealized_pnl_sda"),
+            "score": score,
+            "m1h": m1h,
+            "flow_1h": flow,
+        })
 
     _save_state(nxt)
     order = {"SELL / EXIT": 0, "PARTIAL SELL": 1, "HOLD / TRAIL": 2, "HOLD / WATCH": 3, "HOLD / NO COST BASIS": 4}
@@ -297,9 +335,7 @@ def portfolio_message_v16(portfolio, recommendations):
         val = pf.get("value_sda"); pnl = pf.get("unrealized_pnl_sda"); pct = pf.get("unrealized_pnl_pct")
         value_text = f"{_n(val):.2f} SDA" if val is not None else "UNKNOWN"
         pnl_text = "⚪ P/L UNKNOWN" if pnl is None or pct is None else f"P/L {_n(pnl):+.2f} SDA ({_n(pct):+.2f}%)"
-        price = _n(pf.get("price_sda"))
-        price_text = engine.price(price) + " SDA" if price > 0 else "UNKNOWN"
-        lines += [f"🪙 {symbol} — {name}", f"   {_fmt_amount(pf.get('amount'))} {symbol}  •  {value_text}", f"   Price: {price_text}", f"   {pnl_text}", ""]
+        lines += [f"🪙 {symbol} — {name}", f"   {_fmt_amount(pf.get('amount'))} {symbol}  •  {value_text}", f"   {pnl_text}", ""]
 
     op = portfolio.get("open_unrealized_pnl_sda"); rp = portfolio.get("realized_pnl_sda"); tp = portfolio.get("known_total_pnl_sda")
     open_cost = _n(portfolio.get("open_cost_sda")); op_pct = _n(op) / open_cost * 100 if op is not None and open_cost else None
@@ -307,7 +343,7 @@ def portfolio_message_v16(portfolio, recommendations):
     lines.append("⚪ Current open P/L UNKNOWN" if op is None else f"Current open P/L {_n(op):+.2f} SDA" + (f" ({op_pct:+.2f}%)" if op_pct is not None else ""))
     lines.append(f"Historical matched P/L {_n(rp):+.2f} SDA")
     lines.append(f"Known total P/L {_n(tp):+.2f} SDA")
-    lines += [f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}", "", "🧭 POSITION ACTION", "", "ℹ️ Token names from Blockscout metadata.", "ℹ️ Actual token logos are sent as a visual portfolio card when available.", "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.", "🔒 Wallet is READ-ONLY."]
+    lines += [f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}", "", "🧭 POSITION ACTION", "", "ℹ️ Token names from Blockscout metadata.", "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.", "🔒 Wallet is READ-ONLY."]
     return "\n".join(lines)
 
 
