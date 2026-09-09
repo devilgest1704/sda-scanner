@@ -1,22 +1,10 @@
 #!/usr/bin/env python3
 """Technical-analysis layer for SDA market data.
 
-This module is deliberately ANALYTICAL ONLY in V1.  It does not change BUY/SELL
-logic.  It derives candles from the transaction history already collected by
+This module is deliberately ANALYTICAL ONLY in V1. It does not change BUY/SELL
+logic. It derives candles from the transaction history already collected by
 market_scanner.py and writes the results back into market_data.json under
 analysis['technical'].
-
-Indicators:
-- RSI(14)
-- EMA20 / EMA50
-- MACD(12,26,9)
-- ATR(14)
-- rolling support / resistance from the latest 20 completed/available candles
-- distance to support / resistance
-- trend state for 1h / 4h / 1d / 1w
-
-If a timeframe does not have enough history, the corresponding values are None
-and `available` is false.  We never manufacture a signal from insufficient data.
 """
 
 import json
@@ -25,12 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 MARKET_FILE = "market_data.json"
-TIMEFRAMES = {
-    "1h": 3600,
-    "4h": 14400,
-    "1d": 86400,
-    "1w": 604800,
-}
+TIMEFRAMES = {"1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800}
 MIN_RSI_POINTS = 15
 MIN_MACD_POINTS = 35
 MIN_TREND_POINTS = 20
@@ -60,8 +43,7 @@ def parse_ts(v):
 
 
 def bucket_ts(dt, seconds):
-    epoch = int(dt.timestamp())
-    return (epoch // seconds) * seconds
+    return (int(dt.timestamp()) // seconds) * seconds
 
 
 def build_candles(history, seconds):
@@ -114,8 +96,7 @@ def sma(values, period):
 def rsi(values, period=14):
     if len(values) < period + 1:
         return None
-    gains = []
-    losses = []
+    gains, losses = [], []
     for i in range(1, len(values)):
         d = values[i] - values[i - 1]
         gains.append(max(d, 0.0))
@@ -127,8 +108,7 @@ def rsi(values, period=14):
         avg_loss = ((avg_loss * (period - 1)) + losses[i]) / period
     if avg_loss == 0:
         return 100.0 if avg_gain > 0 else 50.0
-    rs = avg_gain / avg_loss
-    return 100.0 - (100.0 / (1.0 + rs))
+    return 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
 
 
 def macd(values):
@@ -138,12 +118,14 @@ def macd(values):
     slow = ema(values, 26)
     line = [a - b for a, b in zip(fast, slow)]
     signal = ema(line, 9)
+    histogram = line[-1] - signal[-1]
+    previous_histogram = line[-2] - signal[-2]
     return {
         "macd": line[-1],
         "signal": signal[-1],
-        "histogram": line[-1] - signal[-1],
+        "histogram": histogram,
         "bullish": line[-1] > signal[-1],
-        "histogram_rising": len(line) >= 2 and (line[-1] - signal[-1]) > (line[-2] - signal[-2]),
+        "histogram_rising": histogram > previous_histogram,
     }
 
 
@@ -167,18 +149,31 @@ def timeframe_analysis(candles):
         return {"available": False, "candles": 0}
 
     current = closes[-1]
+    rsi_value = rsi(closes, 14)
+    ema20 = ema(closes, 20)[-1] if len(closes) >= 20 else None
+    ema50 = ema(closes, 50)[-1] if len(closes) >= 50 else None
+    atr14 = atr(candles, 14)
+    macd_value = macd(closes)
+    first_ts = parse_ts(candles[0]["timestamp"])
+    last_ts = parse_ts(candles[-1]["timestamp"])
+    coverage_days = max(0.0, (last_ts - first_ts).total_seconds() / 86400.0) if first_ts and last_ts else 0.0
+
     result = {
         "available": len(candles) >= MIN_TREND_POINTS,
         "candles": len(candles),
         "current_close": current,
         "first_timestamp": candles[0]["timestamp"],
         "last_timestamp": candles[-1]["timestamp"],
-        "coverage_days": max(0.0, (parse_ts(candles[-1]["timestamp"]) - parse_ts(candles[0]["timestamp"])).total_seconds() / 86400.0) if len(candles) > 1 else 0.0,
-        "rsi_14": rsi(closes, 14),
-        "ema_20": ema(closes, 20)[-1] if len(closes) >= 20 else None,
-        "ema_50": ema(closes, 50)[-1] if len(closes) >= 50 else None,
-        "atr_14": atr(candles, 14),
-        "macd": macd(closes),
+        "coverage_days": coverage_days,
+        "rsi_14": rsi_value,
+        "rsi14": rsi_value,
+        "ema_20": ema20,
+        "ema20": ema20,
+        "ema_50": ema50,
+        "ema50": ema50,
+        "atr_14": atr14,
+        "atr14": atr14,
+        "macd": macd_value,
     }
 
     recent = candles[-SR_LOOKBACK:]
@@ -188,24 +183,32 @@ def timeframe_analysis(candles):
     result["resistance"] = resistance
     result["distance_to_support_pct"] = ((current - support) / current * 100.0) if current else None
     result["distance_to_resistance_pct"] = ((resistance - current) / current * 100.0) if current else None
+    result["support_distance_pct"] = result["distance_to_support_pct"]
+    result["resistance_distance_pct"] = result["distance_to_resistance_pct"]
 
-    if result["ema_20"] is not None and result["ema_50"] is not None:
-        if current > result["ema_20"] > result["ema_50"]:
+    if ema20 is not None and ema50 is not None:
+        if current > ema20 > ema50:
             trend = "BULLISH"
-        elif current < result["ema_20"] < result["ema_50"]:
+        elif current < ema20 < ema50:
             trend = "BEARISH"
         else:
             trend = "MIXED"
+    elif ema20 is not None:
+        if current > ema20:
+            trend = "BULLISH_SHORT"
+        elif current < ema20:
+            trend = "BEARISH_SHORT"
+        else:
+            trend = "FLAT_SHORT"
     else:
         trend = "INSUFFICIENT_DATA"
     result["trend"] = trend
 
-    r = result["rsi_14"]
-    if r is None:
+    if rsi_value is None:
         result["rsi_state"] = "INSUFFICIENT_DATA"
-    elif r >= 70:
+    elif rsi_value >= 70:
         result["rsi_state"] = "OVERBOUGHT"
-    elif r <= 30:
+    elif rsi_value <= 30:
         result["rsi_state"] = "OVERSOLD"
     else:
         result["rsi_state"] = "NEUTRAL"
@@ -215,11 +218,7 @@ def timeframe_analysis(candles):
 
 def analyze_token(token_data):
     history = token_data.get("transactions", []) if isinstance(token_data, dict) else []
-    out = {}
-    for name, seconds in TIMEFRAMES.items():
-        candles = build_candles(history, seconds)
-        out[name] = timeframe_analysis(candles)
-    return out
+    return {name: timeframe_analysis(build_candles(history, seconds)) for name, seconds in TIMEFRAMES.items()}
 
 
 def main():
@@ -241,17 +240,18 @@ def main():
         analysis = token_data.get("analysis")
         if not isinstance(analysis, dict):
             continue
-        technical = analyze_token(token_data)
-        analysis["technical"] = technical
+        analysis["technical"] = analyze_token(token_data)
         analyzed += 1
 
     market["technical_analysis"] = {
-        "version": 1,
+        "version": 2,
         "mode": "analysis_only",
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "timeframes": list(TIMEFRAMES.keys()),
         "indicators": ["RSI14", "EMA20", "EMA50", "MACD12_26_9", "ATR14", "SUPPORT20", "RESISTANCE20"],
         "tokens_analyzed": analyzed,
+        "history_source": "market_scanner transaction history",
+        "history_expanded": True,
     }
     tmp = str(path) + ".tmp"
     Path(tmp).write_text(json.dumps(market, indent=2, ensure_ascii=False), encoding="utf-8")
