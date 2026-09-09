@@ -9,9 +9,20 @@ import engine
 import main as scanner
 
 STATE_FILE = "telegram_menu_state.json"
+REMOTE_BASE = "https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/"
 
 
 def load(path, default):
+    # Webhook deployments must always see the latest scanner state from main.
+    # Local scanner runs continue using the committed files directly.
+    if os.environ.get("SDA_REMOTE_STATE") == "1":
+        try:
+            r = requests.get(REMOTE_BASE + path, timeout=15)
+            r.raise_for_status()
+            x = r.json()
+            return x if isinstance(x, type(default)) else default
+        except Exception as exc:
+            print(f"Remote state {path} error: {exc}")
     try:
         with open(path, encoding="utf-8") as f:
             x = json.load(f)
@@ -63,9 +74,12 @@ def edit(chat_id, message_id, text, reply_markup=None):
     api("editMessageText", payload)
 
 
-def answer_callback(callback_id):
+def answer_callback(callback_id, text=None):
     if callback_id:
-        api("answerCallbackQuery", {"callback_query_id": callback_id})
+        payload = {"callback_query_id": callback_id}
+        if text:
+            payload["text"] = text
+        api("answerCallbackQuery", payload)
 
 
 def menu_keyboard():
@@ -182,21 +196,28 @@ def paper_report():
     return "\n".join(lines)
 
 
-def handle_update(update, state):
+def handle_update(update, state=None):
+    state = state if state is not None else {"offset": 0}
     state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
     cb = update.get("callback_query") or {}
     data = cb.get("data")
     msg = cb.get("message") or {}
     chat_id = (msg.get("chat") or {}).get("id")
     message_id = msg.get("message_id")
-    answer_callback(cb.get("id"))
 
+    configured_chat = os.environ.get("CHAT_ID")
+    if configured_chat and str(chat_id) != str(configured_chat):
+        answer_callback(cb.get("id"), "Unauthorized")
+        return state
+
+    answer_callback(cb.get("id"))
     if data == "TECH":
         edit(chat_id, message_id, technical_report(), back_keyboard())
     elif data == "PAPER":
         edit(chat_id, message_id, paper_report(), back_keyboard())
     elif data == "MAIN":
         edit(chat_id, message_id, main_dashboard(), menu_keyboard())
+    return state
 
 
 def listen_loop(duration_seconds=240):
@@ -207,7 +228,6 @@ def listen_loop(duration_seconds=240):
 
     state = load(STATE_FILE, {"offset": 0})
     deadline = time.monotonic() + duration_seconds
-
     while time.monotonic() < deadline:
         offset = int(state.get("offset", 0))
         result = api("getUpdates", {
@@ -221,7 +241,6 @@ def listen_loop(duration_seconds=240):
         for update in items:
             handle_update(update, state)
         save(STATE_FILE, state)
-
     save(STATE_FILE, state)
 
 
@@ -229,8 +248,6 @@ def run():
     if "--listen" in sys.argv or os.environ.get("TELEGRAM_MODE") == "listen":
         listen_loop()
         return
-    # Scanner workflow: send the dashboard only. Callback handling runs in the
-    # dedicated Telegram listener workflow so button clicks are near-real-time.
     send(main_dashboard(), menu_keyboard())
 
 
