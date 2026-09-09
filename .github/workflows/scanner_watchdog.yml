@@ -1,0 +1,29 @@
+name: SDA Scanner Watchdog
+
+on:
+  schedule:
+    # Run off the top of the hour to reduce GitHub scheduler congestion.
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: sda-scanner-watchdog
+  cancel-in-progress: false
+
+jobs:
+  dispatch-scanner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch scanner
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run scanner_v18.yml \
+            --repo "${{ github.repository }}" \
+            --ref main \
+            -f run_reason=watchdog
+          echo 'Scanner workflow dispatched by watchdog.'
