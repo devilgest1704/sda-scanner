@@ -3,6 +3,7 @@ set -euo pipefail
 
 python - <<'PY'
 from pathlib import Path
+import re
 
 # Market activity: >=250 SDA in last hour; trade count is NOT a gate.
 p = Path('market_scanner.py')
@@ -13,19 +14,31 @@ if old in s:
     s = s.replace(old, new, 1)
 p.write_text(s, encoding='utf-8')
 
-# V18 paper configuration + integrated POSITION ACTION in REAL PORTFOLIO.
+# V18 paper configuration.
 p = Path('main.py')
 s = p.read_text(encoding='utf-8')
 s = s.replace('engine.MAX_NEW_BUYS_PER_RUN = 1', 'engine.MAX_NEW_BUYS_PER_RUN = 5\nengine.MAX_OPEN_POSITIONS = 10', 1)
-old = '''    lines += [f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}", "", "🧭 POSITION ACTION", "", "ℹ️ Token names from Blockscout metadata.", "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.", "🔒 Wallet is READ-ONLY."]'''
-new = '''    lines += [f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}", "", "🧭 POSITION ACTION"]
+
+# Canonical Telegram REAL PORTFOLIO visual block.
+# Replace either the old V17 block or the already-patched V18 block.
+pattern = re.compile(
+    r'    lines \+= \[f"Matched sells:.*?\n    return "\\n"\.join\(lines\)',
+    re.S,
+)
+replacement = '''    lines += [f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}", "", "🧭 POSITION ACTION"]
+
     def _strength(score):
         s = _n(score)
-        if s < 20: return "VERY WEAK"
-        if s < 40: return "WEAK"
-        if s < 60: return "NEUTRAL"
-        if s < 75: return "GOOD"
-        return "STRONG"
+        if s < 20:
+            return "🔴 VERY WEAK"
+        if s < 40:
+            return "🟠 WEAK"
+        if s < 60:
+            return "🟡 NEUTRAL"
+        if s < 75:
+            return "🟢 GOOD"
+        return "🟢 STRONG"
+
     for r in recommendations:
         action = r.get("action")
         icon = "🔴" if action == "SELL / EXIT" else ("🟠" if action == "PARTIAL SELL" else ("🟢" if action == "HOLD / TRAIL" else "🟡"))
@@ -33,9 +46,17 @@ new = '''    lines += [f"Matched sells: {int(_n(portfolio.get('matched_sell_coun
         pnl_text = f"{_n(pnl):+.2f} SDA" if pnl is not None else "UNKNOWN"
         score = int(_n(r.get("score")))
         lines.append(f"{icon} {r['symbol']}: {action}  •  P/L {pnl_text}  •  score {score}/100 — {_strength(score)}")
-    lines += ["", "ℹ️ Score: 0–19 VERY WEAK • 20–39 WEAK • 40–59 NEUTRAL • 60–74 GOOD • 75–100 STRONG", "ℹ️ Token names from Blockscout metadata.", "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.", "🔒 Wallet is READ-ONLY."]'''
-if old in s:
-    s = s.replace(old, new, 1)
+
+    lines += [
+        "",
+        "ℹ️ Score: 0–19 VERY WEAK • 20–39 WEAK • 40–59 NEUTRAL • 60–74 GOOD • 75–100 STRONG",
+        "ℹ️ Token names from Blockscout metadata.",
+        "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.",
+        "🔒 Wallet is READ-ONLY.",
+    ]
+    return "\\n".join(lines)'''
+if pattern.search(s):
+    s = pattern.sub(replacement, s, count=1)
 p.write_text(s, encoding='utf-8')
 
 # Liquidity scanner compatibility fixes.
