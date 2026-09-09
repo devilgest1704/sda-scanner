@@ -73,7 +73,7 @@ jobs:
               if pnl is None:
                   return "⚪"
               x = _n(pnl)
-              return "🟢" if x > 0 else ("🔴" if x < 0 else "⚪")
+              return "🟢" if x >= 0 else "🔴"
 
 
           def portfolio_message_v16(portfolio, recommendations):
@@ -106,11 +106,10 @@ jobs:
                   "🧭 POSITION ACTION",
                   "",
                   "ℹ️ Token names from Blockscout metadata.",
-                  "ℹ️ Actual token logos are sent as a visual portfolio card when available.",
                   "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.",
                   "🔒 Wallet is READ-ONLY.",
               ]
-              return "\\n".join(lines)
+              return chr(10).join(lines)
 
 
           '''
