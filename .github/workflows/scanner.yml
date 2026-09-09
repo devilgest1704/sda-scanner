@@ -73,15 +73,6 @@ jobs:
           s = p.read_text(encoding="utf-8")
           s = s.replace("engine.BUY_THRESHOLD = 75\nengine.MIN_TRADES_1H = 3\nengine.MAX_NEW_BUYS_PER_RUN = 1", "engine.BUY_THRESHOLD = 75\nengine.MIN_TRADES_1H = 3\nengine.MAX_NEW_BUYS_PER_RUN = 5\nengine.MAX_OPEN_POSITIONS = 10", 1)
           p.write_text(s, encoding="utf-8")
-
-          e = Path("engine.py")
-          s = e.read_text(encoding="utf-8")
-          old = '        state[a]={"neg":neg,"weak":weak}\n        if weak>=2 and not pos.get("tp1_hit"):\n            z=close(p,a,cur,"AUTO PARTIAL SELL",.5)\n            if z:events.append(f"🟠 AUTO PARTIAL SELL {z[\'label\']}\\n\\nPrice: {price(cur)} SDA\\nClosed: 50%\\nProfit: {z[\'closed_profit_sda\']:+.2f} SDA\\nScore: {c:.0f}/100\\nMode: PAPER AUTO")'
-          new = '        partial_done=bool(old.get("partial_done",False))\n        state[a]={"neg":neg,"weak":weak,"partial_done":partial_done}\n        if weak>=2 and not pos.get("tp1_hit") and not partial_done:\n            z=close(p,a,cur,"AUTO PARTIAL SELL",.5)\n            if z:\n                state[a]["partial_done"]=True\n                events.append(f"🟠 AUTO PARTIAL SELL {z[\'label\']}\\n\\nPrice: {price(cur)} SDA\\nClosed: 50%\\nProfit: {z[\'closed_profit_sda\']:+.2f} SDA\\nScore: {c:.0f}/100\\nMode: PAPER AUTO")'
-          if old not in s:
-              raise SystemExit("Expected V18 auto-exit block not found")
-          s = s.replace(old, new, 1)
-          e.write_text(s, encoding="utf-8")
           PY
           python -m py_compile main.py engine.py
 
