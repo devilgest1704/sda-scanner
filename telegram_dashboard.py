@@ -195,6 +195,63 @@ def market_debug_report():
     return "\n".join(lines)
 
 
+def _position_recommendations(md, ws, meta, portfolio):
+    """Recreate the scanner's portfolio actions for display without mutating decision state."""
+    state = load("decision_state_v15.json", {})
+    cur = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
+    tokens = md.get("tokens", {}) if isinstance(md, dict) else {}
+    out = []
+
+    for token, pf in cur.items():
+        an = (tokens.get(token, {}) or {}).get("analysis", tokens.get(token, {}) or {})
+        try:
+            s = engine.score(token, an, ws) if isinstance(an, dict) and an else {"confidence": 0, "m1h": 0, "net_1h": 0}
+        except Exception:
+            s = {"confidence": 0, "m1h": 0, "net_1h": 0}
+        score = engine.num(s.get("confidence"))
+        m1h = engine.num(s.get("m1h"))
+        flow = engine.num(s.get("net_1h"))
+        pnl_raw = pf.get("unrealized_pnl_pct")
+        pnl = engine.num(pnl_raw)
+        old = state.get(token, {}) if isinstance(state.get(token), dict) else {}
+        neg = int(engine.num(old.get("negative_count")))
+        weak = int(engine.num(old.get("profit_weakening_count")))
+        loss_weak = int(engine.num(old.get("loss_weakening_count")))
+
+        negative = score < 35 and m1h < 0 and flow < 0
+        deep = pnl <= -15 and m1h < 0 and flow < 0
+        weakening = pnl > 0 and score < 40 and (m1h < 0 or flow < 0)
+        loss_weakening = pnl <= -8 and (score < 20 or (pnl <= -12 and score < 35)) and (m1h < 0 or flow < 0)
+
+        neg = min(5, neg + 1) if (negative or deep) else 0
+        weak = min(5, weak + 1) if weakening else 0
+        loss_weak = min(5, loss_weak + 1) if loss_weakening else 0
+
+        if pf.get("cost_sda") is None or pnl_raw is None:
+            action = "HOLD / NO COST BASIS"
+        elif weak >= 2:
+            action = "PARTIAL SELL"
+        elif neg >= 3:
+            action = "SELL / EXIT"
+        elif loss_weak >= 3:
+            action = "SELL / EXIT"
+        elif score >= 70 and m1h > 0 and flow > 0:
+            action = "HOLD / TRAIL"
+        else:
+            action = "HOLD / WATCH"
+
+        out.append({
+            "token": token,
+            "symbol": pf.get("symbol") or engine.lbl(token, meta),
+            "action": action,
+            "pnl_sda": pf.get("unrealized_pnl_sda"),
+            "score": score,
+        })
+
+    order = {"SELL / EXIT": 0, "PARTIAL SELL": 1, "HOLD / TRAIL": 2, "HOLD / WATCH": 3, "HOLD / NO COST BASIS": 4}
+    return sorted(out, key=lambda x: (order.get(x["action"], 9), -x["score"]))
+
+
 def main_dashboard():
     md = load("market_data.json", {"tokens": {}})
     ws = load("whale_data.json", {})
@@ -202,7 +259,8 @@ def main_dashboard():
     wallet = load("wallet_data.json", {})
     portfolio = load("portfolio_data.json", {})
     wallet_text = scanner.wallet_message_v16(wallet)
-    portfolio_text = scanner.portfolio_message_v16(portfolio, [])
+    recommendations = _position_recommendations(md, ws, meta, portfolio)
+    portfolio_text = scanner.portfolio_message_v16(portfolio, recommendations)
     return (
         "📈 SDA MARKET SCANNER\n\n" +
         top_buy(md, ws, meta) + "\n\n" +
