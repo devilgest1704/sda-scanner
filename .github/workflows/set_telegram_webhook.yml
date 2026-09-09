@@ -1,0 +1,18 @@
+name: Set Telegram webhook
+
+on:
+  workflow_dispatch:
+
+jobs:
+  set-webhook:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set Telegram webhook
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          TELEGRAM_WEBHOOK_URL: https://sda-scanner.vercel.app/api/telegram
+        run: python set_telegram_webhook.py
