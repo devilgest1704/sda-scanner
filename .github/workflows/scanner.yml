@@ -87,18 +87,54 @@ jobs:
           p = Path("main.py")
           s = p.read_text(encoding="utf-8")
           s = s.replace("engine.BUY_THRESHOLD = 75\nengine.MIN_TRADES_1H = 3\nengine.MAX_NEW_BUYS_PER_RUN = 1", "engine.BUY_THRESHOLD = 75\nengine.MIN_TRADES_1H = 3\nengine.MAX_NEW_BUYS_PER_RUN = 5\nengine.MAX_OPEN_POSITIONS = 10", 1)
+
+          old = '''    lines += [f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}", "", "🧭 POSITION ACTION", "", "ℹ️ Token names from Blockscout metadata.", "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.", "🔒 Wallet is READ-ONLY."]'''
+          new = '''    lines += [
+        f"Matched sells: {int(_n(portfolio.get('matched_sell_count')))}  •  Excluded unmatched: {int(_n(portfolio.get('excluded_unmatched_sell_count')))}",
+        "",
+        "🧭 POSITION ACTION",
+    ]
+
+    def _strength(score):
+        s = _n(score)
+        if s < 20:
+            return "VERY WEAK"
+        if s < 40:
+            return "WEAK"
+        if s < 60:
+            return "NEUTRAL"
+        if s < 75:
+            return "GOOD"
+        return "STRONG"
+
+    for r in recommendations:
+        action = r.get("action")
+        icon = "🔴" if action == "SELL / EXIT" else ("🟠" if action == "PARTIAL SELL" else ("🟢" if action == "HOLD / TRAIL" else "🟡"))
+        p = r.get("pnl_sda")
+        pt = f"{_n(p):+.2f} SDA" if p is not None else "UNKNOWN"
+        score = int(_n(r.get("score")))
+        lines.append(f"{icon} {r['symbol']}: {action}  •  P/L {pt}  •  score {score}/100 — {_strength(score)}")
+
+    lines += [
+        "",
+        "ℹ️ Score: 0–19 VERY WEAK • 20–39 WEAK • 40–59 NEUTRAL • 60–74 GOOD • 75–100 STRONG",
+        "ℹ️ Token names from Blockscout metadata.",
+        "ℹ️ Invalid/inconsistent prices are UNKNOWN — never a fake loss.",
+        "🔒 Wallet is READ-ONLY.",
+    ]'''
+          if old in s:
+              s = s.replace(old, new, 1)
+              print("Restored integrated REAL PORTFOLIO + POSITION ACTION UI in main.py")
+          elif "Score: 0–19 VERY WEAK" in s and "for r in recommendations" in s:
+              print("REAL PORTFOLIO + POSITION ACTION UI already restored")
+          else:
+              raise SystemExit("Expected portfolio message block not found")
           p.write_text(s, encoding="utf-8")
           PY
           python -m py_compile main.py engine.py
 
       - name: Run SDA main engine V18 AUTO PAPER
         run: python main.py
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-
-      - name: Generate graphical POSITION ACTION card
-        run: python position_action_card.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -137,7 +173,7 @@ jobs:
         run: |
           git config user.name "sda-scanner-bot"
           git config user.email "scanner@github.local"
-          git add state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json
+          git add main.py state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json
           if git diff --staged --quiet; then
             echo "No state changes to commit."
           else
