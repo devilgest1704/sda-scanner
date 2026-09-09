@@ -18,12 +18,26 @@ jobs:
   dispatch-scanner:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch scanner
+      - name: Dispatch scanner with retry
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh workflow run scanner_v18.yml \
-            --repo "${{ github.repository }}" \
-            --ref main \
-            -f run_reason=watchdog
-          echo 'Scanner workflow dispatched by watchdog.'
+          set -euo pipefail
+
+          for attempt in 1 2 3; do
+            echo "Dispatch attempt ${attempt}/3"
+            if gh workflow run scanner_v18.yml \
+              --repo "${{ github.repository }}" \
+              --ref main \
+              -f run_reason=watchdog; then
+              echo 'Scanner workflow dispatched by watchdog.'
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              sleep 10
+            fi
+          done
+
+          echo 'Scanner dispatch failed after 3 attempts.'
+          exit 1
