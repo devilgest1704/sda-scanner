@@ -47,8 +47,6 @@ jobs:
         run: |
           git config user.name 'sda-scanner-bot'
           git config user.email 'scanner@github.local'
-          # Telegram menu state is owned exclusively by the dedicated listener
-          # workflow to avoid concurrent git push races.
           git add main.py market_scanner.py liquidity_scanner.py state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json
           if git diff --staged --quiet; then
             echo 'No scanner state changes to commit.'
