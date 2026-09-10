@@ -1,14 +1,17 @@
 """Telegram GUI for the separate automated real-trading bot.
 
-This is intentionally separate from the existing REAL wallet dashboard, which
-continues to represent the user's manual real-wallet trading. The bot uses
-real_trade_state.json and the dedicated REAL_TRADING_* wallet configuration.
-No order is executed by this module.
+The existing REAL menu remains the user's manual real-wallet dashboard.
+This module only reports the dedicated automated bot wallet/state; it does not
+execute orders.
 """
 import os
-from datetime import datetime, timezone
 
 import real_trading_config as cfg
+
+# Public address of the dedicated bot wallet used by the dry-run setup.
+# Environment variable still has priority, so the address can be changed without
+# changing source code. Never put the private key here.
+BOT_WALLET_FALLBACK = "0x9e3643f2ac15c91ee83aa2814015f15b18d573f2"
 
 
 def _num(value):
@@ -22,11 +25,9 @@ def _wallet_address():
     value = os.environ.get(cfg.WALLET_ADDRESS_ENV, "").strip()
     if value:
         return value
-    try:
-        from real_trader import wallet_address
-        return wallet_address()
-    except Exception:
-        return ""
+    # Vercel may not have the GitHub Actions environment variable. Use the
+    # already verified public bot address as a read-only fallback.
+    return BOT_WALLET_FALLBACK
 
 
 def _state(dashboard):
@@ -43,23 +44,40 @@ def _status():
 
 
 def _wallet_balance_sda():
-    """Read-only native SDA balance using the public Sidra RPC."""
+    """Read-only native SDA balance and return (balance, error)."""
     address = _wallet_address()
     if not address:
-        return None
+        return None, "wallet address missing"
     try:
         import requests
         response = requests.post(
             cfg.RPC_URL,
-            json={"jsonrpc": "2.0", "id": 1, "method": "eth_getBalance", "params": [address, "latest"]},
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "eth_getBalance",
+                "params": [address, "latest"],
+            },
             timeout=10,
-            headers={"Content-Type": "application/json", "User-Agent": "sda-real-bot-gui/1.0"},
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "sda-real-bot-gui/1.1",
+            },
         )
         response.raise_for_status()
         data = response.json()
-        return int(data["result"], 16) / 10**18
-    except Exception:
-        return None
+        if "error" in data:
+            return None, str(data["error"])
+        result = data.get("result")
+        if not isinstance(result, str):
+            return None, "RPC returned no balance"
+        return int(result, 16) / 10**18, None
+    except Exception as exc:
+        return None, str(exc)
+
+
+def _wallet_short(wallet):
+    return wallet[:10] + "..." + wallet[-6:] if len(wallet) > 20 else (wallet or "NOT CONFIGURED")
 
 
 def bot_report(dashboard):
@@ -68,15 +86,16 @@ def bot_report(dashboard):
     if not isinstance(positions, dict):
         positions = {}
     wallet = _wallet_address()
-    balance = _wallet_balance_sda()
+    balance, balance_error = _wallet_balance_sda()
     daily = _num(state.get("daily_realized_pnl_sda"))
 
+    balance_text = f"{balance:.3f} SDA" if balance is not None else f"RPC ERROR: {balance_error}"
     lines = [
         "🤖 REAL TRADING BOT",
         "",
         f"Status: {_status()}",
-        f"👛 Bot wallet: {wallet[:10] + '...' + wallet[-6:] if len(wallet) > 20 else (wallet or 'NOT CONFIGURED')}",
-        f"💰 SDA balance: {'%.3f SDA' % balance if balance is not None else 'UNKNOWN'}",
+        f"👛 Bot wallet: {_wallet_short(wallet)}",
+        f"💰 SDA balance: {balance_text}",
         f"🎯 Position size: {cfg.POSITION_MIN_SDA:.0f}–{cfg.POSITION_MAX_SDA:.0f} SDA",
         f"📦 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.0f} SDA",
         f"📊 Open positions: {len(positions)}/{cfg.MAX_OPEN_POSITIONS}",
@@ -108,16 +127,11 @@ def statistics_report(dashboard):
     buys = [x for x in trades if isinstance(x, dict) and str(x.get("action", "")).upper() == "BUY"]
     sells = [x for x in trades if isinstance(x, dict) and str(x.get("action", "")).upper() == "SELL"]
     daily = _num(state.get("daily_realized_pnl_sda"))
-    balance = _wallet_balance_sda()
+    balance, balance_error = _wallet_balance_sda()
     wallet = _wallet_address()
     updated = state.get("updated_at")
-    if updated:
-        try:
-            updated = str(updated)[:16].replace("T", " ")
-        except Exception:
-            pass
-    else:
-        updated = "—"
+    updated = str(updated)[:16].replace("T", " ") if updated else "—"
+    balance_text = f"{balance:.3f}" if balance is not None else f"RPC ERROR: {balance_error}"
 
     lines = [
         "📈 REAL TRADING BOT • STATISTICS",
@@ -126,7 +140,7 @@ def statistics_report(dashboard):
         f"📥 Bot BUYs: {len(buys)}",
         f"📤 Bot SELLs: {len(sells)}",
         "────────────────────────",
-        f"💰 Wallet SDA: {'%.3f' % balance if balance is not None else 'UNKNOWN'}",
+        f"💰 Wallet SDA: {balance_text}",
         f"📊 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.2f} SDA",
         f"🎯 Position range: {cfg.POSITION_MIN_SDA:.0f}–{cfg.POSITION_MAX_SDA:.0f} SDA",
         f"📉 Daily realized P/L: {daily:+.2f} SDA",
@@ -139,16 +153,17 @@ def statistics_report(dashboard):
         lines.append("⚪ No bot trades yet")
     else:
         for trade in trades[-15:][::-1]:
+            if not isinstance(trade, dict):
+                continue
             action = str(trade.get("action") or "?").upper()
             symbol = trade.get("symbol") or str(trade.get("token") or "UNKNOWN")[:10]
             amount = trade.get("amount_sda")
             tx = str(trade.get("tx") or "")
-            tx_short = tx[:10] + "..." if len(tx) > 10 else tx
             amount_text = f" • {float(amount):.2f} SDA" if amount is not None else ""
             lines.append(f"{'🟢' if action == 'BUY' else '🔴' if action == 'SELL' else '⚪'} {action} {symbol}{amount_text}")
-            if tx_short:
-                lines.append(f"   tx {tx_short}")
-    lines += ["", "👛 Separate automated-trading wallet"]
+            if tx:
+                lines.append(f"   tx {tx[:10]}...")
+    lines += ["", f"👛 Bot wallet: {_wallet_short(wallet)}", "👛 Separate automated-trading wallet"]
     return "\n".join(lines)
 
 
@@ -160,7 +175,6 @@ def patch_dashboard(dashboard):
         keyboard = original_menu()
         rows = keyboard.get("inline_keyboard", [])
         if not any(row and row[0].get("callback_data") == "REAL_BOT" for row in rows):
-            # Keep existing REAL (manual wallet) and add the bot immediately below it.
             real_index = next((i for i, row in enumerate(rows) if row and row[0].get("callback_data") == "REAL"), None)
             bot_row = [{"text": "🤖 Real Trading Bot", "callback_data": "REAL_BOT"}]
             if real_index is None:
@@ -193,7 +207,10 @@ def patch_dashboard(dashboard):
             ]}
             dashboard.edit(chat_id, message_id, bot_report(dashboard), keyboard)
         else:
-            keyboard = {"inline_keyboard": [[{"text": "⬅️ Real Trading Bot", "callback_data": "REAL_BOT"}], [{"text": "⬅️ Main dashboard", "callback_data": "MAIN"}]]}
+            keyboard = {"inline_keyboard": [
+                [{"text": "⬅️ Real Trading Bot", "callback_data": "REAL_BOT"}],
+                [{"text": "⬅️ Main dashboard", "callback_data": "MAIN"}],
+            ]}
             dashboard.edit(chat_id, message_id, statistics_report(dashboard), keyboard)
         return state
 
