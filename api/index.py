@@ -14,6 +14,7 @@ os.environ["SDA_REMOTE_STATE"] = "1"
 import telegram_dashboard as dashboard
 import telegram_dashboard_compact as compact
 import main as scanner
+import position_action_v20
 
 # Keep the existing dashboard/menu implementation, but replace only the main
 # wallet renderer with the compact merged Wallet + Portfolio version.
@@ -50,6 +51,10 @@ def _position_recommendations_v19(md, ws, meta, portfolio):
 
 dashboard._position_recommendations = _position_recommendations_v19
 
+# V20 shared policy keeps the same emergency rule in every dashboard path
+# and gives EMERGENCY SELL its dedicated 🚨 icon.
+position_action_v20.patch_dashboard(dashboard)
+
 # Add a manual hourly-report refresh button without changing the existing GUI.
 _original_menu_keyboard = dashboard.menu_keyboard
 
@@ -64,7 +69,6 @@ dashboard.menu_keyboard = _menu_keyboard_with_refresh
 # Paper Trading opens directly on the current paper-trading status.
 # Statistics remains the detailed view with current positions + trade history.
 _original_handle_update = dashboard.handle_update
-
 def _handle_update_with_actions(update, state=None):
     cb = update.get("callback_query") or {}
     data = cb.get("data")
