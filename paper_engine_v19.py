@@ -1,16 +1,24 @@
-"""Stable V19 paper-trading entry point.
+"""Stable V19/V21 paper-trading entry point.
 
-Keeps the scanner source untouched at runtime. BUY logic remains in main.py.
-Only paper exits are extended with the V19 emergency protection.
+Keeps scanner source untouched at runtime. BUY logic remains in main.py, with a
+V21 technical-confirmation overlay applied to the shared engine score. Paper
+exits retain the V19 emergency protection and add technical confirmation to
+normal exits.
 """
 import engine
 import main as scanner_main
+from strategy_v21 import patch_engine, technical_sell_confirmed
 
 engine.TELEGRAM_TOKEN = ""
 engine.SL_PCT = 0.05
+engine.BUY_THRESHOLD = 65
+
+# Apply technical confirmation before engine.main() evaluates BUY candidates.
+patch_engine(engine)
+scanner_main.engine.score = engine.score
 
 
-def auto_exit_v19(p, tokens, ws):
+def auto_exit_v21(p, tokens, ws):
     state = engine._load_auto()
     events = []
 
@@ -28,18 +36,31 @@ def auto_exit_v19(p, tokens, ws):
         flow_1h = engine.num(signal.get("net_1h"))
         entry = engine.num(position.get("entry_price"))
         roi = (current - entry) / entry * 100 if entry else 0.0
+        technical_bearish = technical_sell_confirmed(analysis)
 
         old = state.get(address, {}) if isinstance(state.get(address), dict) else {}
         negative_count = int(engine.num(old.get("neg")))
         weakening_count = int(engine.num(old.get("weak")))
 
-        # Hard safety brake: do not wait for confirmation when a position is
-        # deeply underwater and the market signal is clearly negative.
+        # Hard safety brake. Technical indicators can lag a violent sell-off,
+        # therefore they never block the emergency guard.
         emergency = roi <= -15.0 and score < 35 and momentum_1h < 0 and flow_1h < 0
 
-        # Normal V19 AUTO EXIT: still requires three consecutive confirmations.
-        negative = score < 30 and momentum_1h < -1.0 and flow_1h < 0 and roi < -3.0
-        weakening = roi > 0 and score < 40 and (momentum_1h < 0 or flow_1h < 0)
+        # Normal exit now needs both the existing market deterioration and
+        # at least two independent bearish technical confirmations.
+        negative = (
+            score < 30
+            and momentum_1h < -1.0
+            and flow_1h < 0
+            and roi < -3.0
+            and technical_bearish
+        )
+        weakening = (
+            roi > 0
+            and score < 40
+            and (momentum_1h < 0 or flow_1h < 0)
+            and technical_bearish
+        )
 
         negative_count = min(5, negative_count + 1) if negative else 0
         weakening_count = min(5, weakening_count + 1) if weakening else 0
@@ -76,9 +97,10 @@ def auto_exit_v19(p, tokens, ws):
     return events
 
 
-engine._auto_exit = auto_exit_v19
-scanner_main.engine._auto_exit = auto_exit_v19
+engine._auto_exit = auto_exit_v21
+scanner_main.engine._auto_exit = auto_exit_v21
 scanner_main.engine.SL_PCT = 0.05
+scanner_main.engine.BUY_THRESHOLD = 65
 
 if __name__ == "__main__":
     engine.main()
