@@ -171,6 +171,46 @@ def market_momentum_report():
     return "\n".join(lines)
 
 
+def _score_breakdown(addr, analysis, ws):
+    """Reproduce engine.score() exactly and expose every score component."""
+    m = analysis.get("momentum", {}) or {}
+    f1 = engine.flow(analysis, "1h")
+    f15 = engine.flow(analysis, "15m")
+    m15 = engine.num(m.get("15m_pct")); m1 = engine.num(m.get("1h_pct")); m4 = engine.num(m.get("4h_pct"))
+    bv = engine.num(f1.get("buy_volume")); sv = engine.num(f1.get("sell_volume")); bc = engine.num(f1.get("buy_count")); sc = engine.num(f1.get("sell_count"))
+    tv = bv + sv; tt = bc + sc; strength = bv / max(sv, 1); tratio = bc / max(sc, 1)
+    w15 = engine.whale(addr, ws, "15m"); w1 = engine.whale(addr, ws, "1h"); w4 = engine.whale(addr, ws, "4h")
+    wn = engine.num(w1.get("net_flow")); wb = engine.num(w1.get("buy_volume")); wsell = engine.num(w1.get("sell_volume")); wbc = engine.num(w1.get("buy_count")); wsc = engine.num(w1.get("sell_count")); wn15 = engine.num(w15.get("net_flow")); wn4 = engine.num(w4.get("net_flow"))
+    components = []
+    def add(name, value): components.append((name, float(value)))
+    add("1H momentum", max(0, min(1, (m1 + 1) / 9)) * 18)
+    add("4H momentum", max(0, min(1, (m4 + 3) / 10)) * 8)
+    add("B/S volume", max(0, min(1, (strength - .8) / 1.7)) * 18)
+    add("B/S trades", max(0, min(1, (tratio - .8) / 1.7)) * 7)
+    avail = wb > 0 or wsell > 0 or wbc > 0 or wsc > 0
+    if wn > 0: add("Whale 1H net", max(0, min(1, wn / 10000)) * 20)
+    elif wn < 0: add("Whale 1H net", max(-10, min(0, wn / 10000)))
+    else: add("Whale 1H net", 0)
+    add("Whale buy count", 3 if wbc >= 2 else 0)
+    add("Whale sell count", -3 if wsc >= 3 and wn < 0 else 0)
+    add("Whale 15M net", 4 if wn15 > 0 else (-3 if wn15 < 0 else 0))
+    if m1 >= 2 and m15 > .2: add("Momentum combo", 10)
+    elif m1 >= 1 and m15 >= 0: add("Momentum combo", 6)
+    elif m1 >= 4 and m15 < -.5: add("Momentum combo", -5)
+    else: add("Momentum combo", 0)
+    n15 = engine.num(f15.get("net_flow")); add("15M net flow", 3 if n15 > 0 else (-2 if n15 < 0 else 0))
+    va = analysis.get("volume_acceleration_15m_pct"); va_n = engine.num(va) if va is not None else None
+    add("Volume acceleration", 4 if va_n is not None and va_n > 15 else (-2 if va_n is not None and va_n < -20 else 0))
+    add("1H total volume", max(0, min(1, tv / 15000)) * 7)
+    add("1H trade count", 5 if tt >= 8 else (3 if tt >= 4 else (1 if tt >= 2 else -8)))
+    raw_sum = sum(v for _, v in components)
+    final = int(round(max(0, min(100, raw_sum))))
+    cap_applied = False
+    if not avail:
+        capped = min(final, 72); cap_applied = capped != final; final = capped
+    return {"components": components, "final": final, "raw_sum": raw_sum, "m15": m15, "m1": m1, "m4": m4, "bv": bv, "sv": sv, "bc": bc, "sc": sc, "tv": tv, "tt": tt, "strength": strength, "tratio": tratio, "wn": wn, "wbc": wbc, "wsc": wsc, "wn15": wn15, "wn4": wn4, "n15": n15, "va": va_n, "wb": wb, "wsell": wsell, "avail": avail, "cap_applied": cap_applied}
+
+
 def market_debug_report():
     md = load("market_data.json", {"tokens": {}}); ws = load("whale_data.json", {}); meta = load("token_metadata.json", {}); tokens = md.get("tokens", {}) or {}
     loaded = len(tokens); active = 0; analyzed = 0; total_volume = 0.0; total_trades = 0
@@ -184,7 +224,19 @@ def market_debug_report():
     if not rows: lines.append("⚪ No active TOP BUY candidates")
     else:
         for i, row in enumerate(rows, 1):
-            blocked = [x for x in row["reasons"] if x != "ALL BUY GATES PASS"]; status = "🔴 BLOCKED" if blocked else "🟢 BUY READY"; lines.append(f"{i}. {status} {row['label']} — {row['score']:.0f}/100"); lines.append(f"   Score: {row['score']:.0f}/{engine.BUY_THRESHOLD} • trades: {row['trades']:.0f}/{engine.MIN_TRADES_1H} • vol: {row['volume_1h']:.0f}/250"); lines.append(f"   1H: {row['m1h']:+.2f}% • flow: {row['net_1h']:+.0f} SDA • whale: {row['whale_net']:+.0f} SDA"); lines.append(f"   Reason: {'; '.join(row['reasons'])}")
+            bd = _score_breakdown(row["address"], row["analysis"], ws)
+            blocked = [x for x in row["reasons"] if x != "ALL BUY GATES PASS"]; status = "🔴 BLOCKED" if blocked else "🟢 BUY READY"
+            lines.append(f"{i}. {status} {row['label']} — {bd['final']}/100")
+            lines.append(f"   INPUT: 1H {bd['m1']:+.2f}% | 4H {bd['m4']:+.2f}% | 15M {bd['m15']:+.2f}% | vol {bd['tv']:.0f} | trades {bd['tt']:.0f}")
+            lines.append(f"   B/S: vol {bd['bv']:.0f}/{bd['sv']:.0f} ({bd['strength']:.2f}x) | trades {bd['bc']:.0f}/{bd['sc']:.0f} ({bd['tratio']:.2f}x)")
+            lines.append(f"   WHALE: 1H net {bd['wn']:+.0f} | buy {bd['wbc']:.0f} | sell {bd['wsc']:.0f} | 15M net {bd['wn15']:+.0f} | 4H net {bd['wn4']:+.0f}")
+            va_text = "N/A" if bd["va"] is None else f"{bd['va']:+.1f}%"
+            lines.append(f"   FLOW: 15M {bd['n15']:+.0f} | vol accel {va_text}")
+            point_text = " • ".join(f"{name} {pts:+.2f}" for name, pts in bd["components"])
+            lines.append("   POINTS: " + point_text)
+            lines.append(f"   BASE SUM: {bd['raw_sum']:+.2f} → FINAL {bd['final']}/100" + (" • whale cap applied" if bd["cap_applied"] else ""))
+            lines.append(f"   BUY GATE: {'PASS' if not blocked else '; '.join(blocked)}")
+            lines.append("────────────────────────")
     return "\n".join(lines)
 
 
@@ -255,7 +307,7 @@ def _pnl_value(value, unit):
 
 
 def paper_report():
-    p = load("positions.json", {"positions": {}, "closed_trades": []}); positions = p.get("positions", {}) or {}; closed = p.get("closed_trades", []) or []; market = load("market_data.json", {"tokens": {}}); tokens = market.get("tokens", {}) or {}; realized = sum(engine.num(x.get("closed_profit_sda")) for x in closed); open_pnl = 0.0; invested = 0.0
+    p = load("positions.json", {"positions": {}, "closed_trades": []}); positions = p.get("positions", {}) or {}; closed = p.get("closed_trades", []) or {}; market = load("market_data.json", {"tokens": {}}); tokens = market.get("tokens", {}) or {}; realized = sum(engine.num(x.get("closed_profit_sda")) for x in closed); open_pnl = 0.0; invested = 0.0
     for x in positions.values():
         frac = engine.num(x.get("remaining_fraction", 1)); inv = engine.num(x.get("investment_sda")); invested += inv * frac; entry = engine.num(x.get("entry_price")); address = str(x.get("address", "")).lower(); cur = engine.num(_analysis(tokens.get(address, {}) or {}).get("price_in_sda"));
         if entry > 0 and cur > 0: open_pnl += (cur / entry - 1) * inv * frac
@@ -267,7 +319,7 @@ def paper_statistics_report():
     if not isinstance(closed, list): closed = []
     realized = sum(engine.num(x.get("closed_profit_sda")) for x in closed); open_pnl = 0.0; invested = 0.0; open_rows = []
     for x in positions.values():
-        frac = engine.num(x.get("remaining_fraction", 1)); inv = engine.num(x.get("investment_sda")); active_inv = inv * frac; invested += active_inv; entry = engine.num(x.get("entry_price")); address = str(x.get("address", "")).lower(); an = _analysis(tokens.get(address, {}) or {}); cur = engine.num(an.get("price_in_sda")); pnl = (cur / entry - 1) * active_inv if entry > 0 and cur > 0 else 0.0; open_pnl += pnl; label = x.get("label") or engine.lbl(address, meta); open_rows.append((str(x.get("opened_at", "")), label, entry, cur, active_inv, pnl, engine.num(x.get("entry_confidence"))))
+        frac = engine.num(x.get("remaining_fraction", 1)); inv = engine.num(x.get("investment_sda")); active_inv = inv * frac; invested += active_inv; entry = engine.num(x.get("entry_price")); address = str(x.get("address", "")).lower(); an = _analysis(tokens.get(address, {}) or {}); cur = engine.num(an.get("price_in_sda")); pnl = (cur / entry - 1) * active_inv if entry > 0 and cur > 0 else 0.0; open_pnl += pnl; label = x.get("label") or engine.lbl(address, meta); open_rows.append((str(x.get("opened_at", "")), label, entry, cur, active_inv, pnl, engine.num(x.get("entry_confidence")))
     total = realized + open_pnl; roi = total / invested * 100 if invested else 0.0
     lines = ["📊 PAPER TRADING • STATISTICS", "", f"🟢 Open positions: {len(positions)}", f"📁 Closed trades: {len(closed)}", "────────────────────────", f"Realized P/L: {_pnl_value(realized, 'SDA')}", f"Open P/L: {_pnl_value(open_pnl, 'SDA')}", f"Cumulative P/L: {_pnl_value(total, 'SDA')}", f"ROI on open capital: {_pnl_value(roi, '%')}", f"Open capital: {invested:.2f} SDA"]
     lines += ["", "📌 CURRENT POSITIONS", "────────────────────────"]
@@ -286,8 +338,7 @@ def paper_statistics_report():
 def handle_update(update, state=None):
     state = state if state is not None else {"offset": 0}; state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1); cb = update.get("callback_query") or {}; data = cb.get("data"); msg = cb.get("message") or {}; chat_id = (msg.get("chat") or {}).get("id"); message_id = msg.get("message_id"); configured_chat = os.environ.get("CHAT_ID")
     if configured_chat and str(chat_id) != str(configured_chat): answer_callback(cb.get("id"), "Unauthorized"); return state
-    answer_callback(cb.get("id"))
-    reports = {"TECH": technical_report, "PAPER_STATS": paper_statistics_report, "MOMENTUM": market_momentum_report, "DEBUG": market_debug_report, "MAIN": main_dashboard}
+    answer_callback(cb.get("id")); reports = {"TECH": technical_report, "PAPER_STATS": paper_statistics_report, "MOMENTUM": market_momentum_report, "DEBUG": market_debug_report, "MAIN": main_dashboard}
     if data == "PAPER": edit(chat_id, message_id, "🤖 PAPER TRADING\n\nVyber zobrazení:", paper_menu_keyboard())
     elif data in reports: edit(chat_id, message_id, reports[data](), back_keyboard() if data != "MAIN" else menu_keyboard())
     return state
