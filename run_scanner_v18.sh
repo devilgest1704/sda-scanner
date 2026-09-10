@@ -8,8 +8,8 @@ set -euo pipefail
 python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py
 python whale_scanner.py
 python market_scanner.py
-python market_analysis_export.py
 python technical_analysis.py
+python market_analysis_export.py
 python token_metadata.py
 python liquidity_scanner.py
 
