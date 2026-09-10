@@ -15,6 +15,7 @@ python liquidity_scanner.py
 # Paper engine V19 exit tuning. BUY logic remains unchanged.
 # - Normal SL: 5%
 # - AUTO EXIT: score <30, 1h momentum <-1%, 1h flow <0, ROI <-3%, 3 confirmations
+# - Emergency exit: ROI <=-15%, score <35, negative 1h momentum and flow; no confirmation wait
 # - After TP1: protect at about +1%; 5% trailing only after +7% from entry
 TELEGRAM_TOKEN="" python - <<'PY'
 from pathlib import Path
@@ -39,12 +40,20 @@ source = source.replace(
     1,
 )
 
-# Safety check: all three V19 changes must be present before execution.
+# Inject the emergency exit directly into _auto_exit before normal confirmation exits.
+source = source.replace(
+    'negative=c<35 and m1<0 and f1<0;weakening=roi>0 and c<40 and (m1<0 or f1<0)\n        neg=min(5,neg+1) if negative else 0;weak=min(5,weak+1) if weakening else 0;state[a]={"neg":neg,"weak":weak}\n        if weak>=2',
+    'emergency=roi<=-15 and c<35 and m1<0 and f1<0;negative=c<30 and m1<-1 and f1<0 and roi<-3;weakening=roi>0 and c<40 and (m1<0 or f1<0)\n        neg=min(5,neg+1) if negative else 0;weak=min(5,weak+1) if weakening else 0;state[a]={"neg":neg,"weak":weak}\n        if emergency:\n            z=close(p,a,cur,"EMERGENCY SELL")\n            if z:events.append(f"🚨 EMERGENCY SELL {z['label']} | Profit: {z['closed_profit_sda']:+.2f} SDA | Score: {c:.0f}/100 | ROI: {roi:+.2f}%")\n        elif weak>=2',
+    1,
+)
+
 required = [
     'SL_PCT=.05',
     'negative=c<30 and m1<-1 and f1<0 and roi<-3',
     'protected=e*1.01',
     'if cur>=e*1.07:',
+    'emergency=roi<=-15 and c<35 and m1<0 and f1<0',
+    'EMERGENCY SELL',
 ]
 for marker in required:
     if marker not in source:
