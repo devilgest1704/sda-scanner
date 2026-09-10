@@ -33,6 +33,11 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
         if symbol:
             by_symbol[symbol] = value
 
+    # Also index by on-chain address. wallet_data.json contains the address
+    # explicitly, so this is the most reliable fallback when symbols differ
+    # only by case/formatting.
+    by_address = by_key
+
     out = []
     open_pnl = 0.0
     open_cost = 0.0
@@ -59,9 +64,27 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
         if not (line.startswith("🪙 ") and " — " in line):
             continue
 
-        symbol = line[3:].split(" — ", 1)[0].strip()
+        # IMPORTANT: do not use line[3:] here. The 🪙 emoji + space occupy
+        # only two code points, so line[3:] would drop the first symbol letter
+        # (DMCS -> MCS, FBAY -> BAY, etc.) and break portfolio matching.
+        symbol = line[len("🪙 "):].split(" — ", 1)[0].strip()
         pf = by_symbol.get(symbol.upper()) or by_key.get(symbol.lower())
+
+        # If the wallet line has an address, prefer exact address matching.
+        # wallet_message_v16 normally has the address available in wallet data,
+        # but keep symbol matching as the normal path for compatibility.
         if pf is None:
+            for holding in (wallet.get("holdings", []) if isinstance(wallet, dict) else []):
+                if not isinstance(holding, dict):
+                    continue
+                if str(holding.get("symbol") or "").strip().upper() == symbol.upper():
+                    address = str(holding.get("address") or "").lower()
+                    pf = by_address.get(address)
+                    if pf is not None:
+                        break
+
+        if pf is None:
+            out.append("   ⚪ P/L N/A • no matched portfolio position")
             continue
 
         pnl = pf.get("unrealized_pnl_sda")
