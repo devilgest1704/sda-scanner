@@ -267,3 +267,6 @@ async def external_hourly_report(request: Request):
     if ok:
         return PlainTextResponse("ok: hourly report dispatched")
     return PlainTextResponse(f"hourly error: {message}", status_code=502)
+
+
+# Vercel deploy trigger: 2026-09-10 16:45 UTC
