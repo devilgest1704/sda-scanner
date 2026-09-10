@@ -22,6 +22,34 @@ def _compact_wallet_portfolio(wallet, portfolio, md, ws, meta):
 
 dashboard._merge_wallet_portfolio = _compact_wallet_portfolio
 
+# Position Action V19: mirror the paper engine emergency-loss guard.
+# This is display-only; the actual paper exit is enforced in run_scanner_v18.sh.
+_original_position_recommendations = dashboard._position_recommendations
+
+def _position_recommendations_v19(md, ws, meta, portfolio):
+    rows = _original_position_recommendations(md, ws, meta, portfolio)
+    tokens = md.get("tokens", {}) if isinstance(md, dict) else {}
+    current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
+    for row in rows:
+        token = row.get("token")
+        pf = current.get(token, {}) if isinstance(current, dict) else {}
+        pnl = dashboard.engine.num(pf.get("unrealized_pnl_pct"))
+        token_data = tokens.get(token, {}) or {}
+        analysis = dashboard._analysis(token_data)
+        try:
+            s = dashboard.engine.score(token, analysis, ws) if analysis else {"confidence": 0, "m1h": 0, "net_1h": 0}
+        except Exception:
+            s = {"confidence": 0, "m1h": 0, "net_1h": 0}
+        score = dashboard.engine.num(s.get("confidence"))
+        m1h = dashboard.engine.num(s.get("m1h"))
+        flow1 = dashboard.engine.num(s.get("net_1h"))
+        if pf.get("cost_sda") is not None and pf.get("unrealized_pnl_pct") is not None:
+            if pnl <= -15 and score < 35 and m1h < 0 and flow1 < 0:
+                row["action"] = "EMERGENCY SELL"
+    return sorted(rows, key=lambda x: ({"EMERGENCY SELL": -1, "SELL / EXIT": 0, "PARTIAL SELL": 1, "HOLD / TRAIL": 2, "HOLD / WATCH": 3, "HOLD / NO COST BASIS": 4}.get(x.get("action"), 9), -dashboard.engine.num(x.get("score"))))
+
+dashboard._position_recommendations = _position_recommendations_v19
+
 # Add a manual hourly-report refresh button without changing the existing GUI.
 _original_menu_keyboard = dashboard.menu_keyboard
 
