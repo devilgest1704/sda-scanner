@@ -22,6 +22,40 @@ def _compact_wallet_portfolio(wallet, portfolio, md, ws, meta):
 
 dashboard._merge_wallet_portfolio = _compact_wallet_portfolio
 
+# Paper Trading opens directly on the current paper-trading status.
+# Statistics remains the detailed view with current positions + trade history.
+_original_handle_update = dashboard.handle_update
+
+def _handle_update_with_paper_status(update, state=None):
+    cb = update.get("callback_query") or {}
+    if cb.get("data") != "PAPER":
+        return _original_handle_update(update, state)
+
+    state = state if state is not None else {"offset": 0}
+    state["offset"] = max(
+        int(state.get("offset", 0)),
+        int(update.get("update_id", 0)) + 1,
+    )
+    msg = cb.get("message") or {}
+    chat_id = (msg.get("chat") or {}).get("id")
+    message_id = msg.get("message_id")
+    configured_chat = os.environ.get("CHAT_ID")
+
+    if configured_chat and str(chat_id) != str(configured_chat):
+        dashboard.answer_callback(cb.get("id"), "Unauthorized")
+        return state
+
+    dashboard.answer_callback(cb.get("id"))
+    dashboard.edit(
+        chat_id,
+        message_id,
+        dashboard.paper_report(),
+        dashboard.paper_menu_keyboard(),
+    )
+    return state
+
+dashboard.handle_update = _handle_update_with_paper_status
+
 app = FastAPI()
 
 
