@@ -51,6 +51,65 @@ def _rebuild_summary_portfolio(portfolio, scanner, meta):
         return portfolio
 
 
+def _sync_current_to_wallet(wallet, portfolio):
+    """Make live wallet holdings authoritative for current/open P/L.
+
+    portfolio_data can lag a real wallet sale. Scale the remaining FIFO cost
+    to the wallet amount, then recompute P/L from the live wallet value. Do not
+    scale an old P/L number because that double-counts the current market value.
+    """
+    result = copy.deepcopy(portfolio) if isinstance(portfolio, dict) else {}
+    current = result.get("current", {})
+    if not isinstance(current, dict) or not isinstance(wallet, dict):
+        return result
+
+    by_symbol = {}
+    by_address = {}
+    for holding in wallet.get("holdings", []) or []:
+        if not isinstance(holding, dict):
+            continue
+        symbol = str(holding.get("symbol") or "").strip().upper()
+        address = str(holding.get("address") or "").strip().lower()
+        if symbol:
+            by_symbol[symbol] = holding
+        if address:
+            by_address[address] = holding
+
+    open_pnl = 0.0
+    open_cost = 0.0
+    for key, pf in current.items():
+        if not isinstance(pf, dict):
+            continue
+        symbol = str(pf.get("symbol") or "").strip().upper()
+        address = str(pf.get("address") or key).strip().lower()
+        holding = by_address.get(address) or by_symbol.get(symbol)
+        if not holding:
+            continue
+        wallet_amount = engine.num(holding.get("amount"))
+        portfolio_amount = engine.num(pf.get("amount"))
+        if portfolio_amount > 0 and wallet_amount < portfolio_amount:
+            ratio = max(0.0, min(1.0, wallet_amount / portfolio_amount))
+            pf["cost_sda"] = engine.num(pf.get("cost_sda")) * ratio
+            pf["amount"] = wallet_amount
+        elif portfolio_amount <= 0:
+            pf["amount"] = wallet_amount
+
+        cost = engine.num(pf.get("cost_sda"))
+        value = engine.num(holding.get("value_sda"))
+        if value <= 0:
+            value = wallet_amount * engine.num(holding.get("price_sda"))
+        pnl = value - cost
+        pf["unrealized_pnl_sda"] = pnl
+        pf["unrealized_pnl_pct"] = pnl / cost * 100 if cost > 0 else None
+        open_cost += cost
+        open_pnl += pnl
+
+    result["open_pnl_sda"] = open_pnl
+    result["open_unrealized_pnl_sda"] = open_pnl
+    result["open_cost_sda"] = open_cost
+    return result
+
+
 def merge_wallet_portfolio(wallet, portfolio, scanner):
     meta = engine.load(engine.META_FILE, {})
     wallet_text = scanner.wallet_message_v16(wallet)
@@ -66,6 +125,7 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
         if name and current_name.upper() == symbol:
             lines[i] = f"🪙 {symbol} — {name}"
 
+    portfolio = _sync_current_to_wallet(wallet, portfolio)
     current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
     by_key = {str(k).lower(): v for k, v in current.items() if isinstance(v, dict)}
     by_symbol = {}
