@@ -1,6 +1,7 @@
 import telegram_dashboard as dashboard
 import telegram_dashboard_compact as compact
 import main as scanner
+import position_action_v20
 
 
 _original_menu_keyboard = dashboard.menu_keyboard
@@ -18,6 +19,8 @@ def main():
     dashboard._merge_wallet_portfolio = lambda wallet, portfolio, md, ws, meta: compact.merge_wallet_portfolio(
         wallet, portfolio, scanner
     )
+    # Keep hourly dashboard position actions identical to the V19 paper exit guard.
+    position_action_v20.patch_dashboard(dashboard)
     # Hourly reports are sent directly by GitHub Actions, so apply the same
     # Refresh button that the Vercel webhook adds to interactive dashboards.
     dashboard.menu_keyboard = _menu_keyboard_with_refresh
