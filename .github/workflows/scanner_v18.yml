@@ -28,6 +28,10 @@ jobs:
         with:
           persist-credentials: true
 
+      - name: Backup last valid wallet snapshot
+        run: |
+          cp wallet_data.json /tmp/wallet_data.before.json
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -41,11 +45,45 @@ jobs:
       - name: Run SDA Scanner V18
         run: bash run_scanner_v18.sh
 
+      - name: Protect wallet snapshot and sync portfolio
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          wallet_path = Path('wallet_data.json')
+          backup_path = Path('/tmp/wallet_data.before.json')
+          try:
+              current = json.loads(wallet_path.read_text(encoding='utf-8'))
+          except Exception:
+              current = {}
+          try:
+              backup = json.loads(backup_path.read_text(encoding='utf-8'))
+          except Exception:
+              backup = {}
+
+          # Explorer 429/5xx/timeout must never turn a known wallet into an
+          # empty wallet. Preserve the last valid holdings and mark them stale.
+          failed = bool(current.get('error')) or not isinstance(current.get('holdings'), list)
+          if failed and isinstance(backup, dict) and backup.get('holdings'):
+              preserved = dict(backup)
+              preserved['error'] = current.get('error') or 'Wallet refresh failed; preserved previous snapshot.'
+              preserved['stale'] = True
+              preserved['stale_at'] = current.get('updated_at')
+              wallet_path.write_text(json.dumps(preserved, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+              print('Preserved previous valid wallet snapshot after failed refresh.')
+          elif isinstance(current, dict):
+              current['stale'] = False
+              current.pop('stale_at', None)
+              wallet_path.write_text(json.dumps(current, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+          PY
+          python sync_real_wallet.py
+
       - name: Commit scanner state
         run: |
           git config user.name 'sda-scanner-bot'
           git config user.email 'scanner@github.local'
-          git add main.py market_scanner.py liquidity_scanner.py state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json
+          git add main.py market_scanner.py liquidity_scanner.py state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json sync_real_wallet.py
           if git diff --staged --quiet; then
             echo 'No scanner state changes to commit.'
           else
