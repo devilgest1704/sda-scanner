@@ -33,9 +33,6 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
         if symbol:
             by_symbol[symbol] = value
 
-    # Also index by on-chain address. wallet_data.json contains the address
-    # explicitly, so this is the most reliable fallback when symbols differ
-    # only by case/formatting.
     by_address = by_key
 
     out = []
@@ -48,13 +45,12 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
             out.append("👛 REAL WALLET & PORTFOLIO")
             continue
 
-        # The canonical wallet renderer may already contain its own P/L block.
-        # Remove it and append one deterministic block after all holdings.
         if any(marker in line for marker in (
             "Current open P/L",
             "Historical matched P/L",
             "Historical realized P/L",
             "Known total P/L",
+            "Total P/L",
             "Matched sells:",
         )):
             continue
@@ -64,15 +60,9 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
         if not (line.startswith("🪙 ") and " — " in line):
             continue
 
-        # IMPORTANT: do not use line[3:] here. The 🪙 emoji + space occupy
-        # only two code points, so line[3:] would drop the first symbol letter
-        # (DMCS -> MCS, FBAY -> BAY, etc.) and break portfolio matching.
         symbol = line[len("🪙 "):].split(" — ", 1)[0].strip()
         pf = by_symbol.get(symbol.upper()) or by_key.get(symbol.lower())
 
-        # If the wallet line has an address, prefer exact address matching.
-        # wallet_message_v16 normally has the address available in wallet data,
-        # but keep symbol matching as the normal path for compatibility.
         if pf is None:
             for holding in (wallet.get("holdings", []) if isinstance(wallet, dict) else []):
                 if not isinstance(holding, dict):
@@ -91,8 +81,6 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
         pct = pf.get("unrealized_pnl_pct")
         cost = engine.num(pf.get("cost_sda"))
 
-        # Calculate from the displayed wallet value + FIFO cost basis if the
-        # persisted derived P/L fields are temporarily missing.
         if pnl is None and cost > 0:
             value_sda = engine.num(pf.get("value_sda"))
             if value_sda <= 0:
@@ -119,8 +107,6 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
     realized_known = realized is not None
     realized_n = engine.num(realized) if realized_known else 0.0
 
-    # Prefer the engine aggregate when available; otherwise use the same
-    # per-position P/L values that are displayed above.
     engine_open = portfolio.get("open_pnl_sda") if isinstance(portfolio, dict) else None
     open_n = engine.num(engine_open) if engine_open is not None else open_pnl
 
@@ -132,10 +118,10 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
     ]
     if realized_known:
         lines_summary.append(f"{_pnl_icon(realized_n)} Historical realized P/L {realized_n:+.2f} SDA")
-        lines_summary.append(f"{_pnl_icon(total_known)} Known total P/L {total_known:+.2f} SDA")
+        lines_summary.append(f"{_pnl_icon(total_known)} Total P/L {total_known:+.2f} SDA")
     else:
         lines_summary.append("⚪ Historical realized P/L UNKNOWN")
-        lines_summary.append("⚪ Known total P/L UNKNOWN")
+        lines_summary.append("⚪ Total P/L UNKNOWN")
     lines_summary.append(f"Matched positions: {known_open} • Cost basis: {open_cost:.2f} SDA")
 
     out.extend(lines_summary)
