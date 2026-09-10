@@ -257,16 +257,79 @@ def _position_recommendations(md, ws, meta, portfolio):
     return sorted(out, key=lambda x: (order.get(x["action"], 9), -x["score"]))
 
 
+def _merge_wallet_portfolio(wallet, portfolio, md, ws, meta):
+    """Build one compact per-token section from wallet balances and portfolio P/L."""
+    wallet_current = wallet.get("tokens", {}) if isinstance(wallet, dict) else {}
+    if not isinstance(wallet_current, dict):
+        wallet_current = {}
+    portfolio_current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
+    if not isinstance(portfolio_current, dict):
+        portfolio_current = {}
+    recommendations = {x["token"]: x for x in _position_recommendations(md, ws, meta, portfolio)}
+
+    entries = {}
+    for token, data in wallet_current.items():
+        if not isinstance(data, dict):
+            continue
+        entries[str(token)] = {
+            "token": str(token),
+            "symbol": data.get("symbol") or engine.lbl(str(token), meta),
+            "amount": data.get("amount", data.get("balance", 0)),
+            "value_sda": data.get("value_sda"),
+            "price_sda": data.get("price_sda"),
+        }
+    for token, pf in portfolio_current.items():
+        token = str(token)
+        if token not in entries:
+            entries[token] = {
+                "token": token,
+                "symbol": pf.get("symbol") or engine.lbl(token, meta),
+                "amount": pf.get("amount", pf.get("quantity", 0)),
+                "value_sda": None,
+                "price_sda": None,
+            }
+        entries[token]["pnl_sda"] = pf.get("unrealized_pnl_sda")
+        entries[token]["pnl_pct"] = pf.get("unrealized_pnl_pct")
+
+    lines = ["👛 REAL WALLET & PORTFOLIO", "", f"💰 SDA: {engine.num(wallet.get('sda', wallet.get('sda_balance', 0))):.4f}", f"🪙 Token positions: {len(entries)}", "────────────────────────"]
+    for token, row in entries.items():
+        amount = row.get("amount", 0)
+        value = row.get("value_sda")
+        pnl = row.get("pnl_sda")
+        pnl_pct = row.get("pnl_pct")
+        price = row.get("price_sda")
+        symbol = row.get("symbol") or token
+        amount_txt = f"{engine.num(amount):,.4f}" if isinstance(amount, (int, float)) and not float(amount).is_integer() else f"{engine.num(amount):,.0f}"
+        value_txt = f"{engine.num(value):.2f} SDA" if value is not None and engine.num(value) >= 0 else "UNKNOWN SDA"
+        price_txt = f"{engine.num(price):.6f} SDA" if price is not None and engine.num(price) > 0 else "UNKNOWN"
+        lines.append(f"🪙 {token} — {symbol}")
+        lines.append(f"   {amount_txt} {token} • {value_txt}")
+        lines.append(f"   Price: {price_txt}")
+        if pnl is not None:
+            pnl_n = engine.num(pnl)
+            pct_n = engine.num(pnl_pct)
+            icon = "🟢" if pnl_n > 0 else ("🔴" if pnl_n < 0 else "⚪")
+            lines.append(f"   {icon} P/L {pnl_n:+.2f} SDA ({pct_n:+.2f}%)")
+        rec = recommendations.get(token)
+        if rec:
+            lines.append(f"   🧭 {rec['action']} • score {rec['score']:.0f}/100")
+        lines.append("")
+
+    lines.append("────────────────────────")
+    wallet_text = scanner.wallet_message_v16(wallet)
+    for line in wallet_text.splitlines():
+        if "Known token value:" in line or "TOTAL WALLET VALUE:" in line or line.startswith("Source:"):
+            lines.append(line)
+    return "\n".join(lines)
+
+
 def main_dashboard():
     md = load("market_data.json", {"tokens": {}}); ws = load("whale_data.json", {}); meta = load("token_metadata.json", {})
     wallet = load("wallet_data.json", {}); portfolio = load("portfolio_data.json", {})
-    wallet_text = scanner.wallet_message_v16(wallet)
-    portfolio_text = scanner.portfolio_message_v16(portfolio, _position_recommendations(md, ws, meta, portfolio))
-    wallet_lines = wallet_text.splitlines()
-    portfolio_lines = portfolio_text.splitlines()
-    wallet_body = wallet_lines[2:] if len(wallet_lines) > 2 else wallet_lines
-    portfolio_body = portfolio_lines[1:] if len(portfolio_lines) > 1 else portfolio_lines
-    return "📈 SDA MARKET SCANNER\n\n" + top_buy(md, ws, meta) + "\n\n👛 REAL WALLET & PORTFOLIO\n" + "\n".join(wallet_body) + "\n\n" + "\n".join(portfolio_body) + "\n\n────────────────────────\n📂 DETAIL MENU"
+    return "📈 SDA MARKET SCANNER\n\n" + top_buy(md, ws, meta) + "\n\n" + _merge_wallet_portfolio(wallet, portfolio, md, ws, meta) + "\n\n🧭 POSITION ACTION\n" + "\n".join(
+        f"{'🔴' if x['action'] == 'SELL / EXIT' else '🟠' if x['action'] == 'PARTIAL SELL' else '🟡'} {x['symbol']}: {x['action']}  •  P/L {engine.num(x['pnl_sda']):+.2f} SDA  •  score {x['score']:.0f}/100"
+        for x in _position_recommendations(md, ws, meta, portfolio)
+    ) + "\n\n────────────────────────\n📂 DETAIL MENU"
 
 
 def technical_report():
@@ -331,6 +394,11 @@ def handle_update(update, state=None):
     reports = {"TECH": technical_report, "PAPER": paper_report, "MOMENTUM": market_momentum_report, "DEBUG": market_debug_report, "MAIN": main_dashboard}
     if data in reports: edit(chat_id, message_id, reports[data](), back_keyboard() if data != "MAIN" else menu_keyboard())
     return state
+
+
+def save(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def listen_loop(duration_seconds=240):
