@@ -16,6 +16,68 @@ def patch_dashboard(dashboard):
         patch_engine(dashboard.engine)
         dashboard.engine._sda_v21_patched = True
 
+    def _resolve_token_data(tokens, token, pf, meta):
+        """Resolve market analysis by address first, then portfolio symbol.
+
+        Portfolio keys and market-data keys have not always used the same casing
+        or identifier. Position Action must never turn a valid position into a
+        fake score=0 merely because those keys differ.
+        """
+        candidates = []
+        for value in (
+            token,
+            pf.get("address") if isinstance(pf, dict) else None,
+            pf.get("token") if isinstance(pf, dict) else None,
+        ):
+            if value:
+                candidates.append(str(value).strip().lower())
+
+        symbol = str((pf or {}).get("symbol") or "").strip().upper() if isinstance(pf, dict) else ""
+
+        # 1) Direct market-data key / address match.
+        for key in candidates:
+            if key in tokens:
+                return key, dashboard._analysis(tokens.get(key, {}) or {})
+
+        # 2) Case-insensitive scan of market-data keys and embedded addresses.
+        for key, value in tokens.items():
+            key_norm = str(key).strip().lower()
+            if key_norm in candidates:
+                return key, dashboard._analysis(value or {})
+            if isinstance(value, dict):
+                address = str(value.get("address") or "").strip().lower()
+                if address and address in candidates:
+                    return key, dashboard._analysis(value)
+                analysis = value.get("analysis")
+                if isinstance(analysis, dict):
+                    address = str(analysis.get("address") or "").strip().lower()
+                    if address and address in candidates:
+                        return key, dashboard._analysis(value)
+
+        # 3) Symbol match. Metadata is address keyed, so use it as a bridge.
+        if symbol:
+            for key, value in tokens.items():
+                if not isinstance(value, dict):
+                    continue
+                analysis = dashboard._analysis(value)
+                sym = str(value.get("symbol") or analysis.get("symbol") or "").strip().upper()
+                if sym == symbol:
+                    return key, analysis
+
+            for key, value in (meta.items() if isinstance(meta, dict) else []):
+                if not isinstance(value, dict):
+                    continue
+                if str(value.get("symbol") or "").strip().upper() != symbol:
+                    continue
+                address = str(value.get("address") or key).strip().lower()
+                if address in tokens:
+                    return address, dashboard._analysis(tokens.get(address, {}) or {})
+                for market_key, market_value in tokens.items():
+                    if str(market_key).strip().lower() == address:
+                        return market_key, dashboard._analysis(market_value or {})
+
+        return None, {}
+
     def position_recommendations_v21(md, ws, meta, portfolio):
         tokens = md.get("tokens", {}) if isinstance(md, dict) else {}
         current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
@@ -34,9 +96,9 @@ def patch_dashboard(dashboard):
                 m1h = 0
                 flow1 = 0
             else:
-                analysis = dashboard._analysis(tokens.get(token, {}) or {})
+                market_key, analysis = _resolve_token_data(tokens, token, pf, meta)
                 try:
-                    signal = dashboard.engine.score(token, analysis, ws) if analysis else {
+                    signal = dashboard.engine.score(market_key or token, analysis, ws) if analysis else {
                         "confidence": 0, "m1h": 0, "net_1h": 0
                     }
                 except Exception:
@@ -49,6 +111,8 @@ def patch_dashboard(dashboard):
                 bearish = technical_sell_confirmed(analysis) if analysis else False
 
                 old = auto_state.get(token, {}) if isinstance(auto_state, dict) else {}
+                if not old and market_key:
+                    old = auto_state.get(market_key, {}) if isinstance(auto_state, dict) else {}
                 neg = int(dashboard.engine.num(old.get("neg")))
                 weak = int(dashboard.engine.num(old.get("weak")))
                 tp1_hit = bool(pf.get("tp1_hit"))
