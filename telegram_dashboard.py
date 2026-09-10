@@ -7,6 +7,10 @@ import requests
 
 import engine
 import main as scanner
+from strategy_v21 import patch_engine, technical_confirmation
+
+# Use the same V21 scoring overlay as the paper engine.
+patch_engine(engine)
 
 STATE_FILE = "telegram_menu_state.json"
 REMOTE_BASE = "https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/"
@@ -224,39 +228,65 @@ def market_debug_report():
     if not rows: lines.append("⚪ No active TOP BUY candidates")
     else:
         for i, row in enumerate(rows, 1):
-            bd = _score_breakdown(row["address"], row["analysis"], ws)
-            blocked = [x for x in row["reasons"] if x != "ALL BUY GATES PASS"]; status = "🔴 BLOCKED" if blocked else "🟢 BUY READY"
-            lines.append(f"{i}. {status} {row['label']} — {bd['final']}/100")
-            lines.append(f"   INPUT: 1H {bd['m1']:+.2f}% | 4H {bd['m4']:+.2f}% | 15M {bd['m15']:+.2f}% | vol {bd['tv']:.0f} | trades {bd['tt']:.0f}")
-            lines.append(f"   B/S: vol {bd['bv']:.0f}/{bd['sv']:.0f} ({bd['strength']:.2f}x) | trades {bd['bc']:.0f}/{bd['sc']:.0f} ({bd['tratio']:.2f}x)")
-            lines.append(f"   WHALE: 1H net {bd['wn']:+.0f} | buy {bd['wbc']:.0f} | sell {bd['wsc']:.0f} | 15M net {bd['wn15']:+.0f} | 4H net {bd['wn4']:+.0f}")
-            va_text = "N/A" if bd["va"] is None else f"{bd['va']:+.1f}%"
-            lines.append(f"   FLOW: 15M {bd['n15']:+.0f} | vol accel {va_text}")
-            point_text = " • ".join(f"{name} {pts:+.2f}" for name, pts in bd["components"])
-            lines.append("   POINTS: " + point_text)
-            lines.append(f"   BASE SUM: {bd['raw_sum']:+.2f} → FINAL {bd['final']}/100" + (" • whale cap applied" if bd["cap_applied"] else ""))
-            lines.append(f"   BUY GATE: {'PASS' if not blocked else '; '.join(blocked)}")
-            lines.append("────────────────────────")
+            bd = _score_breakdown(row["address"], row["analysis"], ws); tc = technical_confirmation(row["analysis"]); tech_available = bool(row["analysis"].get("technical")); bull = tc["bull"]; bear = tc["bear"]; adj = min(8, bull * 1.5) - min(10, bear * 1.8); v21_score = engine.num(row["score"]); gate = "PASS" if (not tech_available or bull >= 2) else "BLOCK"; blocked = [x for x in row["reasons"] if x != "ALL BUY GATES PASS"]; status = "🔴 BLOCKED" if blocked else "🟢 BUY READY"
+            lines.append(f"{i}. {status} {row['label']} — {v21_score:.0f}/100")
+            lines.append(f"   BASE: {bd['final']:.0f}/100 (raw {bd['raw_sum']:+.1f})")
+            for name, value in bd["components"]:
+                lines.append(f"      {name}: {value:+.2f}")
+            lines.append(f"   INPUT: 1H {bd['m1']:+.2f}% | 4H {bd['m4']:+.2f}% | 15M {bd['m15']:+.2f}% | volume {bd['tv']:.0f} | trades {bd['tt']:.0f}")
+            lines.append(f"   B/S: volume {bd['bv']:.0f}/{bd['sv']:.0f} ({bd['strength']:.2f}x) | trades {bd['bc']:.0f}/{bd['sc']:.0f} ({bd['tratio']:.2f}x)")
+            lines.append(f"   WHALE: 1H {bd['wn']:+.0f} | buys {bd['wbc']:.0f} | sells {bd['wsc']:.0f} | 15M {bd['wn15']:+.0f} | 4H {bd['wn4']:+.0f}")
+            va_text = "N/A" if bd["va"] is None else f"{bd['va']:+.1f}%"; lines.append(f"   FLOW: 15M {bd['n15']:+.0f} | volume accel {va_text}")
+            lines.append(f"   V21: bull {bull} | bear {bear} | adjustment {adj:+.1f} | BUY gate {gate}")
+            if tc["evidence"]: lines.append(f"      Evidence: {', '.join(tc['evidence'])}")
+            lines.append(f"   FINAL: {v21_score:.0f}/100")
+            lines.append(f"   Reason: {'; '.join(row['reasons'])}")
     return "\n".join(lines)
+
+
+def _resolve_market_token(token, pf, tokens, meta):
+    """Resolve a portfolio key/symbol to the market-data address."""
+    candidates = [token, pf.get("address") if isinstance(pf, dict) else None, pf.get("token_address") if isinstance(pf, dict) else None]
+    for c in candidates:
+        if not c:
+            continue
+        c = str(c).strip()
+        if c in tokens:
+            return c
+        if c.lower() in tokens:
+            return c.lower()
+    wanted = str(pf.get("symbol") if isinstance(pf, dict) and pf.get("symbol") else token).strip().upper()
+    for address, td in tokens.items():
+        label = engine.lbl(address, meta)
+        raw = td.get("analysis", td) if isinstance(td, dict) else {}
+        sym = raw.get("symbol") or td.get("symbol") if isinstance(td, dict) else None
+        if str(label).split("/", 1)[0].strip().upper() == wanted or str(sym or "").strip().upper() == wanted:
+            return str(address)
+    return str(token).lower() if str(token).lower() in tokens else ""
 
 
 def _position_recommendations(md, ws, meta, portfolio):
     state = load("decision_state_v15.json", {}); cur = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}; tokens = md.get("tokens", {}) if isinstance(md, dict) else {}; out = []
     for token, pf in cur.items():
-        an = (tokens.get(token, {}) or {}).get("analysis", tokens.get(token, {}) or {})
-        try: s = engine.score(token, an, ws) if isinstance(an, dict) and an else {"confidence": 0, "m1h": 0, "net_1h": 0}
-        except Exception: s = {"confidence": 0, "m1h": 0, "net_1h": 0}
-        score = engine.num(s.get("confidence")); m1h = engine.num(s.get("m1h")); flow = engine.num(s.get("net_1h")); pnl_raw = pf.get("unrealized_pnl_pct"); pnl = engine.num(pnl_raw); old = state.get(token, {}) if isinstance(state.get(token), dict) else {}; neg = int(engine.num(old.get("negative_count"))); weak = int(engine.num(old.get("profit_weakening_count"))); loss_weak = int(engine.num(old.get("loss_weakening_count")))
-        negative = score < 35 and m1h < 0 and flow < 0; deep = pnl <= -15 and m1h < 0 and flow < 0; weakening = pnl > 0 and score < 40 and (m1h < 0 or flow < 0); loss_weakening = pnl <= -8 and (score < 20 or (pnl <= -12 and score < 35)) and (m1h < 0 or flow < 0)
+        address = _resolve_market_token(token, pf, tokens, meta)
+        an = _analysis(tokens.get(address, {}) or {}) if address else {}
+        try:
+            s = engine.score(address, an, ws) if address and an else {"confidence": None, "m1h": None, "net_1h": None}
+        except Exception:
+            s = {"confidence": None, "m1h": None, "net_1h": None}
+        score_raw = s.get("confidence"); score = engine.num(score_raw) if score_raw is not None else None; m1_raw = s.get("m1h"); flow_raw = s.get("net_1h"); m1h = engine.num(m1_raw) if m1_raw is not None else None; flow = engine.num(flow_raw) if flow_raw is not None else None
+        pnl_raw = pf.get("unrealized_pnl_pct"); pnl = engine.num(pnl_raw) if pnl_raw is not None else None; old = state.get(token, {}) if isinstance(state.get(token), dict) else {}; neg = int(engine.num(old.get("negative_count"))); weak = int(engine.num(old.get("profit_weakening_count"))); loss_weak = int(engine.num(old.get("loss_weakening_count")))
+        negative = score is not None and m1h is not None and flow is not None and score < 35 and m1h < 0 and flow < 0; deep = pnl is not None and m1h is not None and flow is not None and pnl <= -15 and m1h < 0 and flow < 0; weakening = pnl is not None and score is not None and m1h is not None and flow is not None and pnl > 0 and score < 40 and (m1h < 0 or flow < 0); loss_weakening = pnl is not None and score is not None and m1h is not None and flow is not None and pnl <= -8 and (score < 20 or (pnl <= -12 and score < 35)) and (m1h < 0 or flow < 0)
         neg = min(5, neg + 1) if (negative or deep) else 0; weak = min(5, weak + 1) if weakening else 0; loss_weak = min(5, loss_weak + 1) if loss_weakening else 0
-        if pf.get("cost_sda") is None or pnl_raw is None: action = "HOLD / NO COST BASIS"
+        if not address or not an or score is None: action = "HOLD / MARKET DATA N/A"
+        elif pf.get("cost_sda") is None or pnl_raw is None: action = "HOLD / NO COST BASIS"
         elif weak >= 2: action = "PARTIAL SELL"
         elif neg >= 3: action = "SELL / EXIT"
         elif loss_weak >= 3: action = "SELL / EXIT"
         elif score >= 70 and m1h > 0 and flow > 0: action = "HOLD / TRAIL"
         else: action = "HOLD / WATCH"
-        out.append({"token": token, "symbol": pf.get("symbol") or engine.lbl(token, meta), "action": action, "pnl_sda": pf.get("unrealized_pnl_sda"), "score": score})
-    order = {"SELL / EXIT": 0, "PARTIAL SELL": 1, "HOLD / TRAIL": 2, "HOLD / WATCH": 3, "HOLD / NO COST BASIS": 4}; return sorted(out, key=lambda x: (order.get(x["action"], 9), -x["score"]))
+        out.append({"token": token, "address": address, "symbol": pf.get("symbol") or engine.lbl(address, meta), "action": action, "pnl_sda": pf.get("unrealized_pnl_sda"), "score": score})
+    order = {"SELL / EXIT": 0, "PARTIAL SELL": 1, "HOLD / TRAIL": 2, "HOLD / WATCH": 3, "HOLD / NO COST BASIS": 4, "HOLD / MARKET DATA N/A": 5}; return sorted(out, key=lambda x: (order.get(x["action"], 9), -(x["score"] if x["score"] is not None else -1)))
 
 
 def _merge_wallet_portfolio(wallet, portfolio, md, ws, meta):
@@ -286,7 +316,7 @@ def _merge_wallet_portfolio(wallet, portfolio, md, ws, meta):
 def main_dashboard():
     md = load("market_data.json", {"tokens": {}}); ws = load("whale_data.json", {}); meta = load("token_metadata.json", {}); wallet = load("wallet_data.json", {}); portfolio = load("portfolio_data.json", {}); recommendations = _position_recommendations(md, ws, meta, portfolio); position_lines = []
     for x in recommendations:
-        icon = "🔴" if x["action"] == "SELL / EXIT" else "🟠" if x["action"] == "PARTIAL SELL" else "🟡"; pnl = "UNKNOWN" if x["pnl_sda"] is None else f"{engine.num(x['pnl_sda']):+.2f} SDA"; position_lines.append(f"{icon} {x['symbol']}: {x['action']}  •  P/L {pnl}  •  score {x['score']:.0f}/100")
+        icon = "🔴" if x["action"] == "SELL / EXIT" else "🟠" if x["action"] == "PARTIAL SELL" else "🟡"; pnl = "UNKNOWN" if x["pnl_sda"] is None else f"{engine.num(x['pnl_sda']):+.2f} SDA"; score_txt = "N/A" if x["score"] is None else f"{x['score']:.0f}/100"; position_lines.append(f"{icon} {x['symbol']}: {x['action']}  •  P/L {pnl}  •  score {score_txt}")
     position_action = "\n".join(position_lines) if position_lines else "⚪ No portfolio positions"; return "📈 SDA MARKET SCANNER\n\n" + top_buy(md, ws, meta) + "\n\n" + _merge_wallet_portfolio(wallet, portfolio, md, ws, meta) + "\n\n🧭 POSITION ACTION\n" + position_action + "\n\n────────────────────────\n📂 DETAIL MENU"
 
 
@@ -307,7 +337,7 @@ def _pnl_value(value, unit):
 
 
 def paper_report():
-    p = load("positions.json", {"positions": {}, "closed_trades": []}); positions = p.get("positions", {}) or {}; closed = p.get("closed_trades", []) or {}; market = load("market_data.json", {"tokens": {}}); tokens = market.get("tokens", {}) or {}; realized = sum(engine.num(x.get("closed_profit_sda")) for x in closed); open_pnl = 0.0; invested = 0.0
+    p = load("positions.json", {"positions": {}, "closed_trades": []}); positions = p.get("positions", {}) or {}; closed = p.get("closed_trades", []) or []; market = load("market_data.json", {"tokens": {}}); tokens = market.get("tokens", {}) or {}; realized = sum(engine.num(x.get("closed_profit_sda")) for x in closed); open_pnl = 0.0; invested = 0.0
     for x in positions.values():
         frac = engine.num(x.get("remaining_fraction", 1)); inv = engine.num(x.get("investment_sda")); invested += inv * frac; entry = engine.num(x.get("entry_price")); address = str(x.get("address", "")).lower(); cur = engine.num(_analysis(tokens.get(address, {}) or {}).get("price_in_sda"));
         if entry > 0 and cur > 0: open_pnl += (cur / entry - 1) * inv * frac
@@ -319,7 +349,7 @@ def paper_statistics_report():
     if not isinstance(closed, list): closed = []
     realized = sum(engine.num(x.get("closed_profit_sda")) for x in closed); open_pnl = 0.0; invested = 0.0; open_rows = []
     for x in positions.values():
-        frac = engine.num(x.get("remaining_fraction", 1)); inv = engine.num(x.get("investment_sda")); active_inv = inv * frac; invested += active_inv; entry = engine.num(x.get("entry_price")); address = str(x.get("address", "")).lower(); an = _analysis(tokens.get(address, {}) or {}); cur = engine.num(an.get("price_in_sda")); pnl = (cur / entry - 1) * active_inv if entry > 0 and cur > 0 else 0.0; open_pnl += pnl; label = x.get("label") or engine.lbl(address, meta); open_rows.append((str(x.get("opened_at", "")), label, entry, cur, active_inv, pnl, engine.num(x.get("entry_confidence"))))
+        frac = engine.num(x.get("remaining_fraction", 1)); inv = engine.num(x.get("investment_sda")); active_inv = inv * frac; invested += active_inv; entry = engine.num(x.get("entry_price")); address = str(x.get("address", "")).lower(); an = _analysis(tokens.get(address, {}) or {}); cur = engine.num(an.get("price_in_sda")); pnl = (cur / entry - 1) * active_inv if entry > 0 and cur > 0 else 0.0; open_pnl += pnl; label = x.get("label") or engine.lbl(address, meta); open_rows.append((str(x.get("opened_at", "")), label, entry, cur, active_inv, pnl, engine.num(x.get("entry_confidence")))
     total = realized + open_pnl; roi = total / invested * 100 if invested else 0.0
     lines = ["📊 PAPER TRADING • STATISTICS", "", f"🟢 Open positions: {len(positions)}", f"📁 Closed trades: {len(closed)}", "────────────────────────", f"Realized P/L: {_pnl_value(realized, 'SDA')}", f"Open P/L: {_pnl_value(open_pnl, 'SDA')}", f"Cumulative P/L: {_pnl_value(total, 'SDA')}", f"ROI on open capital: {_pnl_value(roi, '%')}", f"Open capital: {invested:.2f} SDA"]
     lines += ["", "📌 CURRENT POSITIONS", "────────────────────────"]
@@ -338,7 +368,8 @@ def paper_statistics_report():
 def handle_update(update, state=None):
     state = state if state is not None else {"offset": 0}; state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1); cb = update.get("callback_query") or {}; data = cb.get("data"); msg = cb.get("message") or {}; chat_id = (msg.get("chat") or {}).get("id"); message_id = msg.get("message_id"); configured_chat = os.environ.get("CHAT_ID")
     if configured_chat and str(chat_id) != str(configured_chat): answer_callback(cb.get("id"), "Unauthorized"); return state
-    answer_callback(cb.get("id")); reports = {"TECH": technical_report, "PAPER_STATS": paper_statistics_report, "MOMENTUM": market_momentum_report, "DEBUG": market_debug_report, "MAIN": main_dashboard}
+    answer_callback(cb.get("id"))
+    reports = {"TECH": technical_report, "PAPER_STATS": paper_statistics_report, "MOMENTUM": market_momentum_report, "DEBUG": market_debug_report, "MAIN": main_dashboard}
     if data == "PAPER": edit(chat_id, message_id, "🤖 PAPER TRADING\n\nVyber zobrazení:", paper_menu_keyboard())
     elif data in reports: edit(chat_id, message_id, reports[data](), back_keyboard() if data != "MAIN" else menu_keyboard())
     return state
