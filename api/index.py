@@ -22,13 +22,59 @@ def _compact_wallet_portfolio(wallet, portfolio, md, ws, meta):
 
 dashboard._merge_wallet_portfolio = _compact_wallet_portfolio
 
+# Add a manual hourly-report refresh button without changing the existing GUI.
+_original_menu_keyboard = dashboard.menu_keyboard
+
+def _menu_keyboard_with_refresh():
+    keyboard = _original_menu_keyboard()
+    rows = keyboard.get("inline_keyboard", [])
+    rows.append([{"text": "🔄 Refresh", "callback_data": "REFRESH"}])
+    return keyboard
+
+dashboard.menu_keyboard = _menu_keyboard_with_refresh
+
 # Paper Trading opens directly on the current paper-trading status.
 # Statistics remains the detailed view with current positions + trade history.
 _original_handle_update = dashboard.handle_update
 
-def _handle_update_with_paper_status(update, state=None):
+def _handle_update_with_actions(update, state=None):
     cb = update.get("callback_query") or {}
-    if cb.get("data") != "PAPER":
+    data = cb.get("data")
+
+    if data == "REFRESH":
+        state = state if state is not None else {"offset": 0}
+        state["offset"] = max(
+            int(state.get("offset", 0)),
+            int(update.get("update_id", 0)) + 1,
+        )
+        msg = cb.get("message") or {}
+        chat_id = (msg.get("chat") or {}).get("id")
+        message_id = msg.get("message_id")
+        configured_chat = os.environ.get("CHAT_ID")
+
+        if configured_chat and str(chat_id) != str(configured_chat):
+            dashboard.answer_callback(cb.get("id"), "Unauthorized")
+            return state
+
+        dashboard.answer_callback(cb.get("id"), "Hourly report spouštím…")
+        ok, message = _dispatch_hourly_report()
+        if ok:
+            dashboard.edit(
+                chat_id,
+                message_id,
+                "🔄 HOURLY REPORT\n\nPožadavek byl odeslán.\nNový dashboard přijde za okamžik.",
+                dashboard.menu_keyboard(),
+            )
+        else:
+            dashboard.edit(
+                chat_id,
+                message_id,
+                f"❌ Refresh se nepodařil\n\n{message}",
+                dashboard.menu_keyboard(),
+            )
+        return state
+
+    if data != "PAPER":
         return _original_handle_update(update, state)
 
     state = state if state is not None else {"offset": 0}
@@ -54,7 +100,7 @@ def _handle_update_with_paper_status(update, state=None):
     )
     return state
 
-dashboard.handle_update = _handle_update_with_paper_status
+dashboard.handle_update = _handle_update_with_actions
 
 app = FastAPI()
 
@@ -110,7 +156,7 @@ def _dispatch_scanner() -> tuple[bool, str]:
 
 
 def _dispatch_hourly_report() -> tuple[bool, str]:
-    return _dispatch_workflow("telegram_hourly.yml", "external_hourly")
+    return _dispatch_workflow("telegram_hourly.yml", "manual_refresh")
 
 
 @app.get("/api/telegram", response_class=PlainTextResponse)
