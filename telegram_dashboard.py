@@ -262,7 +262,11 @@ def main_dashboard():
     wallet = load("wallet_data.json", {}); portfolio = load("portfolio_data.json", {})
     wallet_text = scanner.wallet_message_v16(wallet)
     portfolio_text = scanner.portfolio_message_v16(portfolio, _position_recommendations(md, ws, meta, portfolio))
-    return "📈 SDA MARKET SCANNER\n\n" + top_buy(md, ws, meta) + "\n\n" + wallet_text + "\n\n" + portfolio_text + "\n\n────────────────────────\n📂 DETAIL MENU"
+    wallet_lines = wallet_text.splitlines()
+    portfolio_lines = portfolio_text.splitlines()
+    wallet_body = wallet_lines[2:] if len(wallet_lines) > 2 else wallet_lines
+    portfolio_body = portfolio_lines[1:] if len(portfolio_lines) > 1 else portfolio_lines
+    return "📈 SDA MARKET SCANNER\n\n" + top_buy(md, ws, meta) + "\n\n👛 REAL WALLET & PORTFOLIO\n" + "\n".join(wallet_body) + "\n\n" + "\n".join(portfolio_body) + "\n\n────────────────────────\n📂 DETAIL MENU"
 
 
 def technical_report():
