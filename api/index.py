@@ -30,6 +30,21 @@ def _dashboard_load(path, default):
 
 dashboard.load = _dashboard_load
 
+# portfolio_data.json can lag the live wallet after a sale. Make the wallet
+# authoritative for CURRENT positions before any dashboard/position-action code
+# consumes the portfolio. Realized history remains untouched and is still read
+# from the trade ledger.
+_original_load_with_market = dashboard.load
+
+def _dashboard_load_synced(path, default):
+    data = _original_load_with_market(path, default)
+    if path == "portfolio_data.json" and isinstance(data, dict):
+        wallet = _original_dashboard_load("wallet_data.json", {})
+        return compact._sync_current_to_wallet(wallet, data)
+    return data
+
+dashboard.load = _dashboard_load_synced
+
 # Keep the existing dashboard/menu implementation, but replace only the main
 # wallet renderer with the compact merged Wallet + Portfolio version.
 def _compact_wallet_portfolio(wallet, portfolio, md, ws, meta):
