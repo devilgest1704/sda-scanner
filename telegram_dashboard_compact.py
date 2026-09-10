@@ -3,8 +3,25 @@ import re
 import engine
 
 
+def _pnl_icon(value):
+    value = engine.num(value)
+    return "🟢" if value > 0 else ("🔴" if value < 0 else "⚪")
+
+
+def _parse_wallet_value(lines, idx):
+    """Read the SDA value from the wallet holding line following the token name."""
+    for following in lines[idx + 1:idx + 4]:
+        match = re.search(r"•\s*([0-9.,]+)\s+SDA(?:\s|$)", following)
+        if match:
+            try:
+                return float(match.group(1).replace(",", ""))
+            except ValueError:
+                return None
+    return None
+
+
 def merge_wallet_portfolio(wallet, portfolio, scanner):
-    """Render the canonical wallet once and always show P/L when cost basis exists."""
+    """Render one compact wallet/portfolio view with per-token and total P/L."""
     wallet_text = scanner.wallet_message_v16(wallet)
     lines = wallet_text.splitlines()
 
@@ -17,9 +34,17 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
             by_symbol[symbol] = value
 
     out = []
+    open_pnl = 0.0
+    open_cost = 0.0
+    known_open = 0
+
     for idx, line in enumerate(lines):
         if line.startswith("👛 REAL WALLET"):
             out.append("👛 REAL WALLET & PORTFOLIO")
+            continue
+
+        # Do not duplicate the generic P/L block from wallet_message_v16.
+        if line.startswith(("Current open P/L", "Historical matched P/L", "Known total P/L", "Matched sells:")):
             continue
 
         out.append(line)
@@ -34,27 +59,57 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
 
         pnl = pf.get("unrealized_pnl_sda")
         pct = pf.get("unrealized_pnl_pct")
+        cost = engine.num(pf.get("cost_sda"))
 
         # Calculate from the displayed wallet value + FIFO cost basis if the
         # persisted derived P/L fields are temporarily missing.
-        if pnl is None:
-            cost = engine.num(pf.get("cost_sda"))
-            if cost > 0:
-                for following in lines[idx + 1:idx + 4]:
-                    match = re.search(r"•\s*([0-9.,]+)\s+SDA(?:\s|$)", following)
-                    if match:
-                        value_sda = float(match.group(1).replace(",", ""))
-                        pnl = value_sda - cost
-                        pct = pnl / cost * 100
-                        break
+        if pnl is None and cost > 0:
+            value_sda = engine.num(pf.get("value_sda"))
+            if value_sda <= 0:
+                value_sda = _parse_wallet_value(lines, idx) or 0.0
+            if value_sda > 0:
+                pnl = value_sda - cost
+                pct = pnl / cost * 100
 
         if pnl is None:
-            out.append("   ⚪ P/L N/A • no cost basis")
+            out.append("   ⚪ P/L N/A • no valid cost basis")
             continue
 
         pnl_n = engine.num(pnl)
         pct_n = engine.num(pct)
-        icon = "🟢" if pnl_n > 0 else ("🔴" if pnl_n < 0 else "⚪")
+        icon = _pnl_icon(pnl_n)
         out.append(f"   {icon} P/L {pnl_n:+.2f} SDA ({pct_n:+.2f}%)")
 
+        if cost > 0:
+            open_cost += cost
+            open_pnl += pnl_n
+            known_open += 1
+
+    realized = portfolio.get("realized_pnl_sda") if isinstance(portfolio, dict) else None
+    realized_known = realized is not None
+    realized_n = engine.num(realized) if realized_known else 0.0
+
+    # If engine already calculated the aggregate open P/L, prefer it only when
+    # it is a valid numeric value. Otherwise use the per-position total above.
+    engine_open = portfolio.get("open_pnl_sda") if isinstance(portfolio, dict) else None
+    if engine_open is not None:
+        open_n = engine.num(engine_open)
+    else:
+        open_n = open_pnl
+
+    total_known = open_n + realized_n if realized_known else None
+    lines_summary = [
+        "",
+        "💹 P/L SUMMARY",
+        f"{_pnl_icon(open_n)} Current open P/L {open_n:+.2f} SDA" + (f" ({open_n / open_cost * 100:+.2f}%)" if open_cost > 0 else ""),
+    ]
+    if realized_known:
+        lines_summary.append(f"{_pnl_icon(realized_n)} Historical realized P/L {realized_n:+.2f} SDA")
+        lines_summary.append(f"{_pnl_icon(total_known)} Known total P/L {total_known:+.2f} SDA")
+    else:
+        lines_summary.append("⚪ Historical realized P/L UNKNOWN")
+        lines_summary.append("⚪ Known total P/L UNKNOWN")
+    lines_summary.append(f"Matched positions: {known_open} • Cost basis: {open_cost:.2f} SDA")
+
+    out.extend(lines_summary)
     return "\n".join(out)
