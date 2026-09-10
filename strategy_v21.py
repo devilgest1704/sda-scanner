@@ -1,9 +1,4 @@
-"""V21 strategy overlay: technical confirmation for paper BUY/SELL decisions.
-
-Keeps the existing market/whale score as the base signal, then applies RSI,
-EMA, MACD, trend and support/resistance confirmations. Emergency exits remain
-price/risk driven and are never blocked by technical indicators.
-"""
+"""V21 strategy overlay: shared technical confirmation and exit policy."""
 
 
 def _num(v, default=0.0):
@@ -23,7 +18,6 @@ def technical_confirmation(analysis):
     bull = 0
     bear = 0
     evidence = []
-
     for tf in ("1h", "4h", "1d"):
         x = t.get(tf, {}) or {}
         trend = str(x.get("trend", "")).upper()
@@ -81,7 +75,6 @@ def technical_confirmation(analysis):
     if dr >= 0 and dr <= 2.0:
         bear += 1
         evidence.append("near resistance")
-
     return {"bull": bull, "bear": bear, "evidence": evidence}
 
 
@@ -92,19 +85,11 @@ def patch_engine(engine):
         base = original_score(addr, analysis, ws)
         tc = technical_confirmation(analysis)
         score = _num(base.get("confidence"))
-
-        # Technical confirmation adjusts, but does not dominate, the existing score.
-        # This keeps market/whale flow as the primary signal.
         adjustment = min(8, tc["bull"] * 1.5) - min(10, tc["bear"] * 1.8)
         score = max(0, min(100, score + adjustment))
-
-        # At the lower 65 BUY threshold, require at least two bullish technical
-        # confirmations when technical data is available. Otherwise cap the score
-        # just below the buy threshold rather than buying a technically weak setup.
         technical_available = bool(_tech(analysis))
         if technical_available and tc["bull"] < 2:
             score = min(score, 64)
-
         out = dict(base)
         out["confidence"] = int(round(score))
         out["base_confidence"] = int(round(_num(base.get("confidence"))))
@@ -120,5 +105,18 @@ def patch_engine(engine):
 
 
 def technical_sell_confirmed(analysis):
-    tc = technical_confirmation(analysis)
-    return tc["bear"] >= 2
+    return technical_confirmation(analysis)["bear"] >= 2
+
+
+def evaluate_exit(pnl_pct, score, momentum_1h, flow_1h, technical_bearish):
+    """Single source of truth for V21 paper and POSITION ACTION exits."""
+    pnl = _num(pnl_pct)
+    score = _num(score)
+    momentum = _num(momentum_1h)
+    flow = _num(flow_1h)
+    bearish = bool(technical_bearish)
+    return {
+        "emergency": pnl <= -15.0 and score < 35 and momentum < 0 and flow < 0,
+        "negative": score < 30 and momentum < -1.0 and flow < 0 and pnl < -3.0 and bearish,
+        "weakening": pnl > 0 and score < 40 and (momentum < 0 or flow < 0) and bearish,
+    }
