@@ -144,7 +144,6 @@ def patch_dashboard(dashboard):
         rebuild = getattr(dashboard, "_rebuild_summary_portfolio", None)
         if callable(rebuild):
             portfolio = rebuild(portfolio, dashboard.engine, meta) if False else portfolio
-        # The canonical rebuild lives in main.py and is used by the compact wallet renderer.
         import copy
         import main as scanner
         fifo = getattr(scanner, "_rebuild_fifo", None)
@@ -167,8 +166,24 @@ def patch_dashboard(dashboard):
         realized = dashboard.engine.num(portfolio.get("realized_pnl_sda"))
         wins = [x for x in profits if x > 0]
         losses = [x for x in profits if x < 0]
-        open_pnl = sum(dashboard.engine.num(x.get("unrealized_pnl_sda")) for x in current.values() if isinstance(x, dict) and x.get("unrealized_pnl_sda") is not None)
-        open_cost = sum(dashboard.engine.num(x.get("cost_sda")) for x in current.values() if isinstance(x, dict) and x.get("cost_sda") is not None)
+
+        # IMPORTANT: use the exact same canonical open-P/L field as the main dashboard.
+        # Do not recompute it from individual current rows because that can diverge
+        # when the portfolio contains partially matched/unpriced positions.
+        open_pnl_raw = portfolio.get("open_pnl_sda")
+        if open_pnl_raw is None:
+            open_pnl_raw = portfolio.get("open_unrealized_pnl_sda")
+        if open_pnl_raw is None:
+            open_pnl = sum(dashboard.engine.num(x.get("unrealized_pnl_sda")) for x in current.values() if isinstance(x, dict) and x.get("unrealized_pnl_sda") is not None)
+        else:
+            open_pnl = dashboard.engine.num(open_pnl_raw)
+
+        open_cost_raw = portfolio.get("open_cost_sda")
+        if open_cost_raw is None:
+            open_cost = sum(dashboard.engine.num(x.get("cost_sda")) for x in current.values() if isinstance(x, dict) and x.get("cost_sda") is not None)
+        else:
+            open_cost = dashboard.engine.num(open_cost_raw)
+
         total = realized + open_pnl
         win_rate = len(wins) / len(profits) * 100 if profits else 0.0
         profit_factor = sum(wins) / abs(sum(losses)) if losses else (float("inf") if wins else 0.0)
