@@ -43,8 +43,15 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
             out.append("👛 REAL WALLET & PORTFOLIO")
             continue
 
-        # Do not duplicate the generic P/L block from wallet_message_v16.
-        if line.startswith(("Current open P/L", "Historical matched P/L", "Known total P/L", "Matched sells:")):
+        # The canonical wallet renderer may already contain its own P/L block.
+        # Remove it and append one deterministic block after all holdings.
+        if any(marker in line for marker in (
+            "Current open P/L",
+            "Historical matched P/L",
+            "Historical realized P/L",
+            "Known total P/L",
+            "Matched sells:",
+        )):
             continue
 
         out.append(line)
@@ -89,13 +96,10 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
     realized_known = realized is not None
     realized_n = engine.num(realized) if realized_known else 0.0
 
-    # If engine already calculated the aggregate open P/L, prefer it only when
-    # it is a valid numeric value. Otherwise use the per-position total above.
+    # Prefer the engine aggregate when available; otherwise use the same
+    # per-position P/L values that are displayed above.
     engine_open = portfolio.get("open_pnl_sda") if isinstance(portfolio, dict) else None
-    if engine_open is not None:
-        open_n = engine.num(engine_open)
-    else:
-        open_n = open_pnl
+    open_n = engine.num(engine_open) if engine_open is not None else open_pnl
 
     total_known = open_n + realized_n if realized_known else None
     lines_summary = [
