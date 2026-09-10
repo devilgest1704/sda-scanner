@@ -15,6 +15,7 @@ import telegram_dashboard as dashboard
 import telegram_dashboard_compact as compact
 import main as scanner
 import position_action_v20
+import real_bot_menu
 
 # market_data.json contains full transaction history and can become too large for
 # reliable remote dashboard reads. The scanner also publishes a compact snapshot
@@ -83,6 +84,10 @@ dashboard._position_recommendations = _position_recommendations_v19
 # V20 shared policy keeps the same emergency rule in every dashboard path
 # and gives EMERGENCY SELL its dedicated 🚨 icon.
 position_action_v20.patch_dashboard(dashboard)
+
+# Add the separate automated Real Trading Bot menu. The existing REAL menu is
+# deliberately preserved as the user's manual real-wallet dashboard.
+real_bot_menu.patch_dashboard(dashboard)
 
 # Add a manual hourly-report refresh button without changing the existing GUI.
 _original_menu_keyboard = dashboard.menu_keyboard
@@ -178,95 +183,44 @@ def _dispatch_workflow(workflow_file: str, run_reason: str) -> tuple[bool, str]:
     token = os.environ.get("GITHUB_DISPATCH_TOKEN", "")
     if not token:
         return False, "missing GITHUB_DISPATCH_TOKEN"
-
-    url = (
-        "https://api.github.com/repos/devilgest1704/sda-scanner/actions/"
-        f"workflows/{workflow_file}/dispatches"
-    )
-    payload = json.dumps({
-        "ref": "main",
-        "inputs": {"run_reason": run_reason},
-    }).encode("utf-8")
-
-    request = urllib.request.Request(
+    url = f"https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/{workflow_file}/dispatches"
+    payload = json.dumps({"ref": "main", "inputs": {"run_reason": run_reason}}).encode()
+    req = urllib.request.Request(
         url,
         data=payload,
-        method="POST",
         headers={
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {token}",
             "X-GitHub-Api-Version": "2022-11-28",
             "Content-Type": "application/json",
-            "User-Agent": "sda-scanner-watchdog",
         },
+        method="POST",
     )
-
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            if response.status == 204:
-                return True, f"{workflow_file} dispatched"
-            return False, f"GitHub returned HTTP {response.status}"
+        with urllib.request.urlopen(req, timeout=20) as response:
+            return response.status in (200, 201, 204), f"GitHub dispatch HTTP {response.status}"
     except urllib.error.HTTPError as exc:
-        return False, f"GitHub returned HTTP {exc.code}"
+        body = exc.read().decode("utf-8", errors="replace")
+        return False, f"GitHub dispatch HTTP {exc.code}: {body[:300]}"
     except Exception as exc:
-        return False, f"dispatch error: {type(exc).__name__}"
+        return False, str(exc)
 
 
-def _dispatch_scanner() -> tuple[bool, str]:
-    return _dispatch_workflow("scanner_v18.yml", "external_watchdog")
-
-
-def _dispatch_hourly_report() -> tuple[bool, str]:
-    return _dispatch_workflow("telegram_hourly.yml", "manual_refresh")
-
-
-@app.get("/api/telegram", response_class=PlainTextResponse)
-async def telegram_health():
-    return "SDA Telegram webhook online"
-
-
-@app.post("/api/telegram", response_class=PlainTextResponse)
-async def telegram_webhook(request: Request):
-    expected = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
-    received = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    if not expected or not received or not secrets.compare_digest(received, expected):
-        return PlainTextResponse("forbidden", status_code=403)
-
-    try:
-        body = await request.body()
-        if not body or len(body) > 1024 * 1024:
-            return PlainTextResponse("invalid body", status_code=400)
-        payload = json.loads(body.decode("utf-8"))
-        if isinstance(payload, dict) and payload.get("callback_query"):
-            dashboard.handle_update(payload, {"offset": 0})
-        return "ok"
-    except Exception as exc:
-        print(f"Telegram webhook error: {exc}")
-        return "ok"
+def _dispatch_hourly_report():
+    return _dispatch_workflow("scanner_v18.yml", "Telegram manual refresh")
 
 
 @app.get("/api/watchdog", response_class=PlainTextResponse)
-async def external_watchdog(request: Request):
-    """External 5-minute watchdog endpoint."""
+async def watchdog(request: Request):
     if not _cron_authorized(request):
-        return PlainTextResponse("forbidden", status_code=403)
-
-    ok, message = _dispatch_scanner()
-    if ok:
-        return PlainTextResponse("ok: scanner dispatched")
-    return PlainTextResponse(f"watchdog error: {message}", status_code=502)
-
-
-@app.get("/api/hourly", response_class=PlainTextResponse)
-async def external_hourly_report(request: Request):
-    """External hourly Telegram report trigger."""
-    if not _cron_authorized(request):
-        return PlainTextResponse("forbidden", status_code=403)
-
+        return PlainTextResponse("Unauthorized", status_code=401)
     ok, message = _dispatch_hourly_report()
-    if ok:
-        return PlainTextResponse("ok: hourly report dispatched")
-    return PlainTextResponse(f"hourly error: {message}", status_code=502)
+    return PlainTextResponse(message, status_code=200 if ok else 502)
 
 
-# Vercel deploy trigger: 2026-09-10 16:45 UTC
+@app.post("/api/telegram", response_class=PlainTextResponse)
+async def telegram(request: Request):
+    update = await request.json()
+    state = dashboard.load("telegram_menu_state.json", {"offset": 0})
+    dashboard.handle_update(update, state)
+    return PlainTextResponse("ok")
