@@ -12,6 +12,15 @@ from fastapi.responses import PlainTextResponse
 os.environ["SDA_REMOTE_STATE"] = "1"
 
 import telegram_dashboard as dashboard
+import telegram_dashboard_compact as compact
+import main as scanner
+
+# Keep the existing dashboard/menu implementation, but replace only the main
+# wallet renderer with the compact merged Wallet + Portfolio version.
+def _compact_wallet_portfolio(wallet, portfolio, md, ws, meta):
+    return compact.merge_wallet_portfolio(wallet, portfolio, scanner)
+
+dashboard._merge_wallet_portfolio = _compact_wallet_portfolio
 
 app = FastAPI()
 
@@ -92,18 +101,12 @@ async def telegram_webhook(request: Request):
         return "ok"
     except Exception as exc:
         print(f"Telegram webhook error: {exc}")
-        # Telegram should not endlessly redeliver a parsed but unsupported update.
         return "ok"
 
 
 @app.get("/api/watchdog", response_class=PlainTextResponse)
 async def external_watchdog(request: Request):
-    """External 5-minute watchdog endpoint.
-
-    A scheduler outside GitHub (for example cron-job.org) can call this endpoint.
-    It authenticates with CRON_SECRET and dispatches scanner_v18.yml through GitHub.
-    The GitHub scheduled watchdog remains as a fallback.
-    """
+    """External 5-minute watchdog endpoint."""
     if not _cron_authorized(request):
         return PlainTextResponse("forbidden", status_code=403)
 
@@ -115,11 +118,7 @@ async def external_watchdog(request: Request):
 
 @app.get("/api/hourly", response_class=PlainTextResponse)
 async def external_hourly_report(request: Request):
-    """External hourly Telegram report trigger.
-
-    A scheduler outside GitHub calls this endpoint once per hour. It dispatches
-    telegram_hourly.yml through GitHub, where the existing dashboard is sent.
-    """
+    """External hourly Telegram report trigger."""
     if not _cron_authorized(request):
         return PlainTextResponse("forbidden", status_code=403)
 
@@ -127,5 +126,3 @@ async def external_hourly_report(request: Request):
     if ok:
         return PlainTextResponse("ok: hourly report dispatched")
     return PlainTextResponse(f"hourly error: {message}", status_code=502)
-
-# Redeploy after webhook-secret changes so Vercel picks up the new environment value.
