@@ -4,6 +4,8 @@ from strategy_v21 import patch_engine, technical_sell_confirmed, evaluate_exit
 
 def patch_dashboard(dashboard):
     original_main_dashboard = dashboard.main_dashboard
+    original_handle_update = dashboard.handle_update
+    original_menu_keyboard = dashboard.menu_keyboard
 
     if not getattr(dashboard.engine, "_sda_v21_patched", False):
         patch_engine(dashboard.engine)
@@ -61,7 +63,6 @@ def patch_dashboard(dashboard):
                 continue
             pnl_raw = pf.get("unrealized_pnl_pct")
             cost = pf.get("cost_sda")
-            # Wallet-only holdings without a reliable cost basis are not actionable.
             if cost is None or pnl_raw is None:
                 continue
 
@@ -113,6 +114,103 @@ def patch_dashboard(dashboard):
         order = {"EMERGENCY SELL": 0, "SELL / EXIT": 1, "PARTIAL SELL": 2, "HOLD / TRAIL": 3, "HOLD / WATCH": 4}
         return sorted(rows, key=lambda x: (order.get(x.get("action"), 9), -dashboard.engine.num(x.get("score"))))
 
+    def real_trading_report():
+        """Read-only real-wallet view with the same position-action layer as paper trading."""
+        md = dashboard.load("market_data.json", {"tokens": {}})
+        ws = dashboard.load("whale_data.json", {})
+        meta = dashboard.load("token_metadata.json", {})
+        wallet = dashboard.load("wallet_data.json", {})
+        portfolio = dashboard.load("portfolio_data.json", {})
+        wallet_view = dashboard._merge_wallet_portfolio(wallet, portfolio, md, ws, meta)
+        rows = position_recommendations_v21(md, ws, meta, portfolio)
+        lines = [wallet_view, "", "🧭 POSITION ACTION", "────────────────────────"]
+        if not rows:
+            lines.append("⚪ No actionable real positions")
+        else:
+            for row in rows:
+                action = row["action"]
+                icon = "🚨" if action == "EMERGENCY SELL" else "🔴" if action == "SELL / EXIT" else "🟠" if action == "PARTIAL SELL" else "🟡"
+                pnl = "UNKNOWN" if row["pnl_sda"] is None else f"{dashboard.engine.num(row['pnl_sda']):+.2f} SDA"
+                score = "N/A" if row["score"] is None else f"{row['score']:.0f}/100"
+                lines.append(f"{icon} {row['symbol']}: {action} • P/L {pnl} • score {score}")
+                lines.append(f"   {row['reason']}")
+        lines += ["", "────────────────────────", "👁 READ-ONLY • No real order is executed"]
+        return "\n".join(lines)
+
+    def real_statistics_report():
+        """Statistics reconstructed from the real wallet trade ledger, not paper state."""
+        portfolio = dashboard.load("portfolio_data.json", {})
+        meta = dashboard.load("token_metadata.json", {})
+        rebuild = getattr(dashboard, "_rebuild_summary_portfolio", None)
+        if callable(rebuild):
+            portfolio = rebuild(portfolio, dashboard.engine, meta) if False else portfolio
+        # The canonical rebuild lives in main.py and is used by the compact wallet renderer.
+        import copy
+        import main as scanner
+        fifo = getattr(scanner, "_rebuild_fifo", None)
+        if callable(fifo):
+            try:
+                portfolio = fifo(copy.deepcopy(portfolio), meta)
+            except Exception as exc:
+                print(f"Real statistics FIFO rebuild error: {exc}")
+
+        trades = portfolio.get("trades", []) if isinstance(portfolio, dict) else []
+        current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
+        if not isinstance(trades, list):
+            trades = []
+        if not isinstance(current, dict):
+            current = {}
+
+        sells = [x for x in trades if isinstance(x, dict) and str(x.get("side") or "").upper() == "SELL" and dashboard.engine.num(x.get("matched_amount")) > 0 and dashboard.engine.num(x.get("cost_basis_sda")) >= 0]
+        buys = [x for x in trades if isinstance(x, dict) and str(x.get("side") or "").upper() == "BUY"]
+        profits = [dashboard.engine.num(x.get("matched_proceeds_sda")) - dashboard.engine.num(x.get("cost_basis_sda")) for x in sells if dashboard.engine.num(x.get("matched_amount")) > 0]
+        realized = dashboard.engine.num(portfolio.get("realized_pnl_sda"))
+        wins = [x for x in profits if x > 0]
+        losses = [x for x in profits if x < 0]
+        open_pnl = sum(dashboard.engine.num(x.get("unrealized_pnl_sda")) for x in current.values() if isinstance(x, dict) and x.get("unrealized_pnl_sda") is not None)
+        open_cost = sum(dashboard.engine.num(x.get("cost_sda")) for x in current.values() if isinstance(x, dict) and x.get("cost_sda") is not None)
+        total = realized + open_pnl
+        win_rate = len(wins) / len(profits) * 100 if profits else 0.0
+        profit_factor = sum(wins) / abs(sum(losses)) if losses else (float("inf") if wins else 0.0)
+        avg_win = sum(wins) / len(wins) if wins else 0.0
+        avg_loss = sum(losses) / len(losses) if losses else 0.0
+        best = max(profits) if profits else 0.0
+        worst = min(profits) if profits else 0.0
+        fmt_pf = "∞" if profit_factor == float("inf") else f"{profit_factor:.2f}"
+
+        lines = [
+            "📈 REAL TRADING • STATISTICS",
+            "",
+            f"🟢 Open positions: {len(current)}",
+            f"📁 Closed trades: {len(profits)}",
+            f"🔄 Ledger BUYs: {len(buys)} • matched SELLs: {len(sells)}",
+            "────────────────────────",
+            f"Realized P/L: {_pnl_value(realized, 'SDA')}",
+            f"Open P/L: {_pnl_value(open_pnl, 'SDA')}",
+            f"Cumulative P/L: {_pnl_value(total, 'SDA')}",
+            f"Win rate: {win_rate:.1f}%",
+            f"Profit factor: {fmt_pf}",
+            f"Avg win: {avg_win:+.2f} SDA",
+            f"Avg loss: {avg_loss:+.2f} SDA",
+            f"Best trade: {best:+.2f} SDA",
+            f"Worst trade: {worst:+.2f} SDA",
+            f"Open cost basis: {open_cost:.2f} SDA",
+            "",
+            "📜 RECENT REALIZED TRADES",
+            "────────────────────────",
+        ]
+        if not sells:
+            lines.append("⚪ No matched real SELL trades yet")
+        else:
+            for tr in sorted(sells, key=lambda x: str(x.get("timestamp", "")), reverse=True)[:15]:
+                profit = dashboard.engine.num(tr.get("matched_proceeds_sda")) - dashboard.engine.num(tr.get("cost_basis_sda"))
+                icon = "🟢" if profit > 0 else ("🔴" if profit < 0 else "⚪")
+                label = tr.get("symbol") or str(tr.get("token", "UNKNOWN"))[:10]
+                ts = str(tr.get("timestamp", ""))[:16].replace("T", " ")
+                lines.append(f"{icon} {label} • {profit:+.2f} SDA • {ts}")
+        lines += ["", "────────────────────────", "👁 READ-ONLY • Real wallet ledger"]
+        return "\n".join(lines)
+
     def main_dashboard_v21(*args, **kwargs):
         text = original_main_dashboard(*args, **kwargs)
         lines = []
@@ -122,6 +220,48 @@ def patch_dashboard(dashboard):
             lines.append(line)
         return "\n".join(lines)
 
+    def menu_keyboard_v21():
+        keyboard = original_menu_keyboard()
+        rows = keyboard.get("inline_keyboard", [])
+        rows.insert(2, [{"text": "💰 Real Trading", "callback_data": "REAL"},])
+        return keyboard
+
+    def handle_update_v21(update, state=None):
+        cb = update.get("callback_query") or {}
+        data = cb.get("data")
+        if data not in ("REAL", "REAL_STATS"):
+            return original_handle_update(update, state)
+
+        state = state if state is not None else {"offset": 0}
+        state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
+        msg = cb.get("message") or {}
+        chat_id = (msg.get("chat") or {}).get("id")
+        message_id = msg.get("message_id")
+        configured_chat = __import__("os").environ.get("CHAT_ID")
+        if configured_chat and str(chat_id) != str(configured_chat):
+            dashboard.answer_callback(cb.get("id"), "Unauthorized")
+            return state
+        dashboard.answer_callback(cb.get("id"))
+        if data == "REAL":
+            keyboard = {"inline_keyboard": [
+                [{"text": "📈 Statistics", "callback_data": "REAL_STATS"}],
+                [{"text": "⬅️ Main dashboard", "callback_data": "MAIN"}],
+            ]}
+            dashboard.edit(chat_id, message_id, real_trading_report(), keyboard)
+        else:
+            dashboard.edit(chat_id, message_id, real_statistics_report(), dashboard.back_keyboard())
+        return state
+
     dashboard._position_recommendations = position_recommendations_v21
     dashboard.main_dashboard = main_dashboard_v21
+    dashboard.real_trading_report = real_trading_report
+    dashboard.real_statistics_report = real_statistics_report
+    dashboard.menu_keyboard = menu_keyboard_v21
+    dashboard.handle_update = handle_update_v21
     return dashboard
+
+
+def _pnl_value(value, unit):
+    value = float(value or 0)
+    icon = "🟢" if value > 0 else ("🔴" if value < 0 else "⚪")
+    return f"{icon} {value:+.2f} {unit}"
