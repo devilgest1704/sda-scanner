@@ -10,6 +10,8 @@ _original_menu_keyboard = dashboard.menu_keyboard
 def _menu_keyboard_with_refresh():
     keyboard = _original_menu_keyboard()
     rows = keyboard.get("inline_keyboard", [])
+    if not any(row and row[0].get("callback_data") == "REAL" for row in rows):
+        rows.insert(2, [{"text": "💰 Real Trading", "callback_data": "REAL"}])
     if not any(row and row[0].get("callback_data") == "REFRESH" for row in rows):
         rows.append([{"text": "🔄 Refresh", "callback_data": "REFRESH"}])
     return keyboard
@@ -19,10 +21,7 @@ def main():
     dashboard._merge_wallet_portfolio = lambda wallet, portfolio, md, ws, meta: compact.merge_wallet_portfolio(
         wallet, portfolio, scanner
     )
-    # Keep hourly dashboard position actions identical to the V19 paper exit guard.
     position_action_v20.patch_dashboard(dashboard)
-    # Hourly reports are sent directly by GitHub Actions, so apply the same
-    # Refresh button that the Vercel webhook adds to interactive dashboards.
     dashboard.menu_keyboard = _menu_keyboard_with_refresh
     dashboard.run()
 
