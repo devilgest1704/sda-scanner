@@ -1,45 +1,23 @@
-"""Shared V20/V21 position-action policy for Telegram display.
-
-The paper engine remains authoritative for actual exits. This module mirrors the
-same V21 score, technical confirmations, emergency guard, and exit counters so
-POSITION ACTION and paper trading show the same decision state.
-"""
-from strategy_v21 import patch_engine, technical_sell_confirmed
+"""Shared V20/V21 position-action policy for Telegram display."""
+from strategy_v21 import patch_engine, technical_sell_confirmed, evaluate_exit
 
 
 def patch_dashboard(dashboard):
     original_main_dashboard = dashboard.main_dashboard
 
-    # Use the exact same V21 score overlay as paper_engine_v19.py.
-    # Guard against double-patching if the dashboard module is reloaded.
     if not getattr(dashboard.engine, "_sda_v21_patched", False):
         patch_engine(dashboard.engine)
         dashboard.engine._sda_v21_patched = True
 
     def _resolve_token_data(tokens, token, pf, meta):
-        """Resolve market analysis by address first, then portfolio symbol.
-
-        Portfolio keys and market-data keys have not always used the same casing
-        or identifier. Position Action must never turn a valid position into a
-        fake score=0 merely because those keys differ.
-        """
         candidates = []
-        for value in (
-            token,
-            pf.get("address") if isinstance(pf, dict) else None,
-            pf.get("token") if isinstance(pf, dict) else None,
-        ):
+        for value in (token, pf.get("address") if isinstance(pf, dict) else None, pf.get("token") if isinstance(pf, dict) else None):
             if value:
                 candidates.append(str(value).strip().lower())
-
         symbol = str((pf or {}).get("symbol") or "").strip().upper() if isinstance(pf, dict) else ""
-
-        # 1) Direct market-data key / address match.
         for key in candidates:
             if key in tokens:
                 return key, dashboard._analysis(tokens.get(key, {}) or {})
-
-        # 2) Case-insensitive scan of market-data keys and embedded addresses.
         for key, value in tokens.items():
             key_norm = str(key).strip().lower()
             if key_norm in candidates:
@@ -53,8 +31,6 @@ def patch_dashboard(dashboard):
                     address = str(analysis.get("address") or "").strip().lower()
                     if address and address in candidates:
                         return key, dashboard._analysis(value)
-
-        # 3) Symbol match. Metadata is address keyed, so use it as a bridge.
         if symbol:
             for key, value in tokens.items():
                 if not isinstance(value, dict):
@@ -63,11 +39,8 @@ def patch_dashboard(dashboard):
                 sym = str(value.get("symbol") or analysis.get("symbol") or "").strip().upper()
                 if sym == symbol:
                     return key, analysis
-
             for key, value in (meta.items() if isinstance(meta, dict) else []):
-                if not isinstance(value, dict):
-                    continue
-                if str(value.get("symbol") or "").strip().upper() != symbol:
+                if not isinstance(value, dict) or str(value.get("symbol") or "").strip().upper() != symbol:
                     continue
                 address = str(value.get("address") or key).strip().lower()
                 if address in tokens:
@@ -75,7 +48,6 @@ def patch_dashboard(dashboard):
                 for market_key, market_value in tokens.items():
                     if str(market_key).strip().lower() == address:
                         return market_key, dashboard._analysis(market_value or {})
-
         return None, {}
 
     def position_recommendations_v21(md, ws, meta, portfolio):
@@ -86,104 +58,60 @@ def patch_dashboard(dashboard):
 
         for token, pf in current.items():
             if not isinstance(pf, dict):
-                pf = {}
+                continue
             pnl_raw = pf.get("unrealized_pnl_pct")
             cost = pf.get("cost_sda")
+            # Wallet-only holdings without a reliable cost basis are not actionable.
             if cost is None or pnl_raw is None:
-                action = "HOLD / NO COST BASIS"
-                reason = "no cost basis"
-                score = 0
-                m1h = 0
-                flow1 = 0
+                continue
+
+            market_key, analysis = _resolve_token_data(tokens, token, pf, meta)
+            try:
+                signal = dashboard.engine.score(market_key or token, analysis, ws) if analysis else {"confidence": 0, "m1h": 0, "net_1h": 0}
+            except Exception:
+                signal = {"confidence": 0, "m1h": 0, "net_1h": 0}
+            score = dashboard.engine.num(signal.get("confidence"))
+            m1h = dashboard.engine.num(signal.get("m1h"))
+            flow1 = dashboard.engine.num(signal.get("net_1h"))
+            pnl = dashboard.engine.num(pnl_raw)
+            bearish = technical_sell_confirmed(analysis) if analysis else False
+            exit_signal = evaluate_exit(pnl, score, m1h, flow1, bearish)
+
+            old = auto_state.get(token, {}) if isinstance(auto_state, dict) else {}
+            if not old and market_key:
+                old = auto_state.get(market_key, {}) if isinstance(auto_state, dict) else {}
+            neg = int(dashboard.engine.num(old.get("neg")))
+            weak = int(dashboard.engine.num(old.get("weak")))
+            tp1_hit = bool(pf.get("tp1_hit"))
+            neg = min(5, neg + 1) if exit_signal["negative"] else 0
+            weak = min(5, weak + 1) if exit_signal["weakening"] else 0
+
+            if exit_signal["emergency"]:
+                action = "EMERGENCY SELL"
+                reason = "V21 emergency: ROI ≤ -15%, score <35, negative momentum + flow"
+            elif weak >= 2 and not tp1_hit:
+                action = "PARTIAL SELL"
+                reason = "V21 weakening confirmed 2 times"
+            elif neg >= 3:
+                action = "SELL / EXIT"
+                reason = "V21 negative exit confirmed 3 times"
+            elif exit_signal["weakening"]:
+                action = "HOLD / WATCH"
+                reason = f"weakening signal {weak}/2 confirmations"
+            elif exit_signal["negative"]:
+                action = "HOLD / WATCH"
+                reason = f"negative exit signal {neg}/3 confirmations"
+            elif score >= 70 and m1h > 0 and flow1 > 0:
+                action = "HOLD / TRAIL"
+                reason = "positive trend and SDA flow"
             else:
-                market_key, analysis = _resolve_token_data(tokens, token, pf, meta)
-                try:
-                    signal = dashboard.engine.score(market_key or token, analysis, ws) if analysis else {
-                        "confidence": 0, "m1h": 0, "net_1h": 0
-                    }
-                except Exception:
-                    signal = {"confidence": 0, "m1h": 0, "net_1h": 0}
+                action = "HOLD / WATCH"
+                reason = "no confirmed exit condition"
 
-                score = dashboard.engine.num(signal.get("confidence"))
-                m1h = dashboard.engine.num(signal.get("m1h"))
-                flow1 = dashboard.engine.num(signal.get("net_1h"))
-                pnl = dashboard.engine.num(pnl_raw)
-                bearish = technical_sell_confirmed(analysis) if analysis else False
+            rows.append({"token": token, "symbol": pf.get("symbol") or dashboard.engine.lbl(token, meta), "action": action, "reason": reason, "pnl_pct": pnl_raw, "pnl_sda": pf.get("unrealized_pnl_sda"), "score": score, "m1h": m1h, "flow_1h": flow1})
 
-                old = auto_state.get(token, {}) if isinstance(auto_state, dict) else {}
-                if not old and market_key:
-                    old = auto_state.get(market_key, {}) if isinstance(auto_state, dict) else {}
-                neg = int(dashboard.engine.num(old.get("neg")))
-                weak = int(dashboard.engine.num(old.get("weak")))
-                tp1_hit = bool(pf.get("tp1_hit"))
-
-                # Exact V21 paper-engine conditions.
-                emergency = (
-                    pnl <= -15.0
-                    and score < 35
-                    and m1h < 0
-                    and flow1 < 0
-                )
-                negative = (
-                    score < 30
-                    and m1h < -1.0
-                    and flow1 < 0
-                    and pnl < -3.0
-                    and bearish
-                )
-                weakening = (
-                    pnl > 0
-                    and score < 40
-                    and (m1h < 0 or flow1 < 0)
-                    and bearish
-                )
-
-                if emergency:
-                    action = "EMERGENCY SELL"
-                    reason = "V21 emergency: ROI ≤ -15%, score <35, negative momentum + flow"
-                elif weak >= 2 and not tp1_hit:
-                    action = "PARTIAL SELL"
-                    reason = "V21 weakening confirmed 2 times"
-                elif neg >= 3:
-                    action = "SELL / EXIT"
-                    reason = "V21 negative exit confirmed 3 times"
-                elif weakening and not tp1_hit:
-                    action = "HOLD / WATCH"
-                    reason = f"weakening signal {weak}/2 confirmations"
-                elif negative:
-                    action = "HOLD / WATCH"
-                    reason = f"negative exit signal {neg}/3 confirmations"
-                elif score >= 70 and m1h > 0 and flow1 > 0:
-                    action = "HOLD / TRAIL"
-                    reason = "positive trend and SDA flow"
-                else:
-                    action = "HOLD / WATCH"
-                    reason = "no confirmed exit condition"
-
-            rows.append({
-                "token": token,
-                "symbol": pf.get("symbol") or dashboard.engine.lbl(token, meta),
-                "action": action,
-                "reason": reason,
-                "pnl_pct": pnl_raw,
-                "pnl_sda": pf.get("unrealized_pnl_sda"),
-                "score": score,
-                "m1h": m1h,
-                "flow_1h": flow1,
-            })
-
-        order = {
-            "EMERGENCY SELL": 0,
-            "SELL / EXIT": 1,
-            "PARTIAL SELL": 2,
-            "HOLD / TRAIL": 3,
-            "HOLD / WATCH": 4,
-            "HOLD / NO COST BASIS": 5,
-        }
-        return sorted(
-            rows,
-            key=lambda x: (order.get(x.get("action"), 9), -dashboard.engine.num(x.get("score")))
-        )
+        order = {"EMERGENCY SELL": 0, "SELL / EXIT": 1, "PARTIAL SELL": 2, "HOLD / TRAIL": 3, "HOLD / WATCH": 4}
+        return sorted(rows, key=lambda x: (order.get(x.get("action"), 9), -dashboard.engine.num(x.get("score"))))
 
     def main_dashboard_v21(*args, **kwargs):
         text = original_main_dashboard(*args, **kwargs)
