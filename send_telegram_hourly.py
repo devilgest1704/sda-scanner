@@ -2,6 +2,7 @@ import telegram_dashboard as dashboard
 import telegram_dashboard_compact as compact
 import main as scanner
 import position_action_v20
+import real_bot_menu
 
 
 _original_menu_keyboard = dashboard.menu_keyboard
@@ -32,6 +33,7 @@ def main():
         wallet, portfolio, scanner
     )
     position_action_v20.patch_dashboard(dashboard)
+    real_bot_menu.patch_dashboard(dashboard)
     dashboard.menu_keyboard = _menu_keyboard_with_refresh
     dashboard.run()
 
