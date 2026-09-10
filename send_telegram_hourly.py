@@ -5,6 +5,15 @@ import position_action_v20
 
 
 _original_menu_keyboard = dashboard.menu_keyboard
+_original_dashboard_load = dashboard.load
+
+
+def _dashboard_load_synced(path, default):
+    data = _original_dashboard_load(path, default)
+    if path == "portfolio_data.json" and isinstance(data, dict):
+        wallet = _original_dashboard_load("wallet_data.json", {})
+        return compact._sync_current_to_wallet(wallet, data)
+    return data
 
 
 def _menu_keyboard_with_refresh():
@@ -18,6 +27,7 @@ def _menu_keyboard_with_refresh():
 
 
 def main():
+    dashboard.load = _dashboard_load_synced
     dashboard._merge_wallet_portfolio = lambda wallet, portfolio, md, ws, meta: compact.merge_wallet_portfolio(
         wallet, portfolio, scanner
     )
