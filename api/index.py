@@ -24,15 +24,18 @@ def _cron_authorized(request: Request) -> bool:
     return secrets.compare_digest(received, f"Bearer {expected}")
 
 
-def _dispatch_scanner() -> tuple[bool, str]:
+def _dispatch_workflow(workflow_file: str, run_reason: str) -> tuple[bool, str]:
     token = os.environ.get("GITHUB_DISPATCH_TOKEN", "")
     if not token:
         return False, "missing GITHUB_DISPATCH_TOKEN"
 
-    url = "https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/scanner_v18.yml/dispatches"
+    url = (
+        "https://api.github.com/repos/devilgest1704/sda-scanner/actions/"
+        f"workflows/{workflow_file}/dispatches"
+    )
     payload = json.dumps({
         "ref": "main",
-        "inputs": {"run_reason": "external_watchdog"},
+        "inputs": {"run_reason": run_reason},
     }).encode("utf-8")
 
     request = urllib.request.Request(
@@ -51,12 +54,20 @@ def _dispatch_scanner() -> tuple[bool, str]:
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
             if response.status == 204:
-                return True, "scanner dispatched"
+                return True, f"{workflow_file} dispatched"
             return False, f"GitHub returned HTTP {response.status}"
     except urllib.error.HTTPError as exc:
         return False, f"GitHub returned HTTP {exc.code}"
     except Exception as exc:
         return False, f"dispatch error: {type(exc).__name__}"
+
+
+def _dispatch_scanner() -> tuple[bool, str]:
+    return _dispatch_workflow("scanner_v18.yml", "external_watchdog")
+
+
+def _dispatch_hourly_report() -> tuple[bool, str]:
+    return _dispatch_workflow("telegram_hourly.yml", "external_hourly")
 
 
 @app.get("/api/telegram", response_class=PlainTextResponse)
@@ -100,5 +111,21 @@ async def external_watchdog(request: Request):
     if ok:
         return PlainTextResponse("ok: scanner dispatched")
     return PlainTextResponse(f"watchdog error: {message}", status_code=502)
+
+
+@app.get("/api/hourly", response_class=PlainTextResponse)
+async def external_hourly_report(request: Request):
+    """External hourly Telegram report trigger.
+
+    A scheduler outside GitHub calls this endpoint once per hour. It dispatches
+    telegram_hourly.yml through GitHub, where the existing dashboard is sent.
+    """
+    if not _cron_authorized(request):
+        return PlainTextResponse("forbidden", status_code=403)
+
+    ok, message = _dispatch_hourly_report()
+    if ok:
+        return PlainTextResponse("ok: hourly report dispatched")
+    return PlainTextResponse(f"hourly error: {message}", status_code=502)
 
 # Redeploy after webhook-secret changes so Vercel picks up the new environment value.
