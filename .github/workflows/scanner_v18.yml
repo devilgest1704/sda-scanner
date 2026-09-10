@@ -22,6 +22,8 @@ jobs:
     env:
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       CHAT_ID: ${{ secrets.CHAT_ID }}
+      REAL_TRADING_ENABLED: "false"
+      REAL_TRADING_DRY_RUN: "true"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -79,11 +81,14 @@ jobs:
           PY
           python sync_real_wallet.py
 
+      - name: Verify real trader remains disabled
+        run: python real_trader.py
+
       - name: Commit scanner state
         run: |
           git config user.name 'sda-scanner-bot'
           git config user.email 'scanner@github.local'
-          git add main.py market_scanner.py liquidity_scanner.py state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json paper_buy_guard_state.json sync_real_wallet.py
+          git add main.py market_scanner.py liquidity_scanner.py state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json paper_buy_guard_state.json sync_real_wallet.py real_trading_config.py real_trader.py real_trade_state.json
           if git diff --staged --quiet; then
             echo 'No scanner state changes to commit.'
           else
