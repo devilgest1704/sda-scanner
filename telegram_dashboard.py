@@ -78,6 +78,13 @@ def menu_keyboard():
     ]}
 
 
+def paper_menu_keyboard():
+    return {"inline_keyboard": [
+        [{"text": "📊 Statistics", "callback_data": "PAPER_STATS"}],
+        [{"text": "⬅️ Main dashboard", "callback_data": "MAIN"}],
+    ]}
+
+
 def back_keyboard():
     return {"inline_keyboard": [[{"text": "⬅️ Main dashboard", "callback_data": "MAIN"}]]}
 
@@ -266,7 +273,6 @@ def _merge_wallet_portfolio(wallet, portfolio, md, ws, meta):
     if not isinstance(portfolio_current, dict):
         portfolio_current = {}
     portfolio_by_symbol = {str(k).upper(): v for k, v in portfolio_current.items() if isinstance(v, dict)}
-
     entries = {}
     for data in holdings:
         if not isinstance(data, dict):
@@ -274,69 +280,33 @@ def _merge_wallet_portfolio(wallet, portfolio, md, ws, meta):
         token = str(data.get("symbol") or "").strip()
         if not token:
             continue
-        entries[token.upper()] = {
-            "token": token,
-            "symbol": token,
-            "amount": data.get("amount", 0),
-            "value_sda": data.get("value_sda"),
-            "price_sda": data.get("price_sda"),
-        }
-
+        entries[token.upper()] = {"token": token, "symbol": token, "amount": data.get("amount", 0), "value_sda": data.get("value_sda"), "price_sda": data.get("price_sda")}
     for token, pf in portfolio_by_symbol.items():
         if token not in entries:
-            entries[token] = {
-                "token": token,
-                "symbol": pf.get("symbol") or engine.lbl(token, meta),
-                "amount": pf.get("amount", pf.get("quantity", 0)),
-                "value_sda": None,
-                "price_sda": None,
-            }
+            entries[token] = {"token": token, "symbol": pf.get("symbol") or engine.lbl(token, meta), "amount": pf.get("amount", pf.get("quantity", 0)), "value_sda": None, "price_sda": None}
         entries[token]["pnl_sda"] = pf.get("unrealized_pnl_sda")
         entries[token]["pnl_pct"] = pf.get("unrealized_pnl_pct")
-
     native_sda = engine.num(wallet.get("native_sda", 0)) if isinstance(wallet, dict) else 0.0
-    lines = [
-        "👛 REAL WALLET & PORTFOLIO", "",
-        f"💰 SDA: {native_sda:.4f}",
-        f"🪙 Token positions: {len(entries)}",
-        "────────────────────────",
-    ]
+    lines = ["👛 REAL WALLET & PORTFOLIO", "", f"💰 SDA: {native_sda:.4f}", f"🪙 Token positions: {len(entries)}", "────────────────────────"]
     for key in sorted(entries):
-        row = entries[key]
-        token = row["token"]
-        symbol = row.get("symbol") or token
-        amount = engine.num(row.get("amount", 0))
-        value = row.get("value_sda")
-        pnl = row.get("pnl_sda")
-        pnl_pct = row.get("pnl_pct")
-        price = row.get("price_sda")
+        row = entries[key]; token = row["token"]; symbol = row.get("symbol") or token; amount = engine.num(row.get("amount", 0)); value = row.get("value_sda"); pnl = row.get("pnl_sda"); pnl_pct = row.get("pnl_pct"); price = row.get("price_sda")
         amount_txt = f"{amount:,.4f}" if not float(amount).is_integer() else f"{amount:,.0f}"
         value_txt = f"{engine.num(value):.2f} SDA" if value is not None and engine.num(value) >= 0 else "UNKNOWN SDA"
         price_txt = f"{engine.num(price):.6f} SDA" if price is not None and engine.num(price) > 0 else "UNKNOWN"
-        lines.append(f"🪙 {token} — {symbol}")
-        lines.append(f"   {amount_txt} {token} • {value_txt} • Price {price_txt}")
+        lines.append(f"🪙 {token} — {symbol}"); lines.append(f"   {amount_txt} {token} • {value_txt} • Price {price_txt}")
         if pnl is not None:
-            pnl_n = engine.num(pnl)
-            pct_n = engine.num(pnl_pct)
-            icon = "🟢" if pnl_n > 0 else ("🔴" if pnl_n < 0 else "⚪")
-            lines.append(f"   {icon} P/L {pnl_n:+.2f} SDA ({pct_n:+.2f}%)")
+            pnl_n = engine.num(pnl); pct_n = engine.num(pnl_pct); icon = "🟢" if pnl_n > 0 else ("🔴" if pnl_n < 0 else "⚪"); lines.append(f"   {icon} P/L {pnl_n:+.2f} SDA ({pct_n:+.2f}%)")
         lines.append("")
-
-    lines.append("────────────────────────")
-    lines.append(f"📊 Known token value: {engine.num(wallet.get('total_token_value_sda', 0)):.2f} SDA")
-    lines.append(f"💼 TOTAL WALLET VALUE: {engine.num(wallet.get('total_value_sda', native_sda)):.2f} SDA")
+    lines.append("────────────────────────"); lines.append(f"📊 Known token value: {engine.num(wallet.get('total_token_value_sda', 0)):.2f} SDA"); lines.append(f"💼 TOTAL WALLET VALUE: {engine.num(wallet.get('total_value_sda', native_sda)):.2f} SDA")
     return "\n".join(lines)
 
 
 def main_dashboard():
     md = load("market_data.json", {"tokens": {}}); ws = load("whale_data.json", {}); meta = load("token_metadata.json", {})
     wallet = load("wallet_data.json", {}); portfolio = load("portfolio_data.json", {})
-    recommendations = _position_recommendations(md, ws, meta, portfolio)
-    position_lines = []
+    recommendations = _position_recommendations(md, ws, meta, portfolio); position_lines = []
     for x in recommendations:
-        icon = "🔴" if x["action"] == "SELL / EXIT" else "🟠" if x["action"] == "PARTIAL SELL" else "🟡"
-        pnl = "UNKNOWN" if x["pnl_sda"] is None else f"{engine.num(x['pnl_sda']):+.2f} SDA"
-        position_lines.append(f"{icon} {x['symbol']}: {x['action']}  •  P/L {pnl}  •  score {x['score']:.0f}/100")
+        icon = "🔴" if x["action"] == "SELL / EXIT" else "🟠" if x["action"] == "PARTIAL SELL" else "🟡"; pnl = "UNKNOWN" if x["pnl_sda"] is None else f"{engine.num(x['pnl_sda']):+.2f} SDA"; position_lines.append(f"{icon} {x['symbol']}: {x['action']}  •  P/L {pnl}  •  score {x['score']:.0f}/100")
     position_action = "\n".join(position_lines) if position_lines else "⚪ No portfolio positions"
     return "📈 SDA MARKET SCANNER\n\n" + top_buy(md, ws, meta) + "\n\n" + _merge_wallet_portfolio(wallet, portfolio, md, ws, meta) + "\n\n🧭 POSITION ACTION\n" + position_action + "\n\n────────────────────────\n📂 DETAIL MENU"
 
@@ -345,42 +315,19 @@ def technical_report():
     md = load("market_data.json", {"tokens": {}}); meta = load("token_metadata.json", {}); ws = load("whale_data.json", {})
     lines = ["📐 TECHNICAL ANALYSIS", "", "TOP BUY CANDIDATES • analysis only • does not change BUY/SELL logic", "────────────────────────"]
     rows = _buy_gate_rows(md, ws, meta, 5)
-    if not rows:
-        lines.append("⚪ No active TOP BUY candidates")
+    if not rows: lines.append("⚪ No active TOP BUY candidates")
     for i, row in enumerate(rows, 1):
-        tech = row["analysis"].get("technical") or {}
-        lines.append(f"{i}. 🪙 {row['label']} • scanner {row['score']:.0f}/100")
-        lines.append(f"   1H {row['m1h']:+.2f}% • flow {row['net_1h']:+.0f} SDA • vol {row['volume_1h']:.0f} SDA • trades {row['trades']:.0f}")
-        if not tech:
-            lines.append("   Technical data: N/A")
-            lines.append("")
-            continue
+        tech = row["analysis"].get("technical") or {}; lines.append(f"{i}. 🪙 {row['label']} • scanner {row['score']:.0f}/100"); lines.append(f"   1H {row['m1h']:+.2f}% • flow {row['net_1h']:+.0f} SDA • vol {row['volume_1h']:.0f} SDA • trades {row['trades']:.0f}")
+        if not tech: lines.append("   Technical data: N/A"); lines.append(""); continue
         for tf in ("1h", "4h", "1d", "1w"):
-            x = tech.get(tf, {}) or {}
-            trend = x.get("trend", "N/A")
-            rsi = x.get("rsi_14")
-            rsi_txt = f"RSI {rsi:.1f}" if isinstance(rsi, (int, float)) else "RSI N/A"
-            lines.append(f"   {tf.upper():<2} {trend:<18} • {rsi_txt}")
-        d = tech.get("1d", {}) or {}
-        macd = d.get("macd", {}) if isinstance(d.get("macd"), dict) else {}
-        hist = macd.get("histogram")
-        macd_txt = f"{hist:+.6f}" if isinstance(hist, (int, float)) else "N/A"
-        support = d.get("support", "N/A"); resistance = d.get("resistance", "N/A")
-        ds = d.get("distance_to_support_pct"); dr = d.get("distance_to_resistance_pct")
-        ds_txt = f"{ds:+.2f}%" if isinstance(ds, (int, float)) else "N/A"
-        dr_txt = f"{dr:+.2f}%" if isinstance(dr, (int, float)) else "N/A"
-        lines.append(f"   MACD 1D histogram: {macd_txt}")
-        lines.append(f"   Support: {support} ({ds_txt})")
-        lines.append(f"   Resistance: {resistance} ({dr_txt})")
-        lines.append("")
+            x = tech.get(tf, {}) or {}; trend = x.get("trend", "N/A"); rsi = x.get("rsi_14"); rsi_txt = f"RSI {rsi:.1f}" if isinstance(rsi, (int, float)) else "RSI N/A"; lines.append(f"   {tf.upper():<2} {trend:<18} • {rsi_txt}")
+        d = tech.get("1d", {}) or {}; macd = d.get("macd", {}) if isinstance(d.get("macd"), dict) else {}; hist = macd.get("histogram"); macd_txt = f"{hist:+.6f}" if isinstance(hist, (int, float)) else "N/A"; support = d.get("support", "N/A"); resistance = d.get("resistance", "N/A"); ds = d.get("distance_to_support_pct"); dr = d.get("distance_to_resistance_pct"); ds_txt = f"{ds:+.2f}%" if isinstance(ds, (int, float)) else "N/A"; dr_txt = f"{dr:+.2f}%" if isinstance(dr, (int, float)) else "N/A"; lines.append(f"   MACD 1D histogram: {macd_txt}"); lines.append(f"   Support: {support} ({ds_txt})"); lines.append(f"   Resistance: {resistance} ({dr_txt})"); lines.append("")
     lines += ["────────────────────────", "⚪ N/A = insufficient historical coverage"]
     return "\n".join(lines)
 
 
 def _pnl_value(value, unit):
-    value = engine.num(value)
-    icon = "🟢" if value > 0 else ("🔴" if value < 0 else "⚪")
-    return f"{icon} {value:+.2f} {unit}"
+    value = engine.num(value); icon = "🟢" if value > 0 else ("🔴" if value < 0 else "⚪"); return f"{icon} {value:+.2f} {unit}"
 
 
 def paper_report():
@@ -388,11 +335,47 @@ def paper_report():
     market = load("market_data.json", {"tokens": {}}); tokens = market.get("tokens", {}) or {}
     realized = sum(engine.num(x.get("closed_profit_sda")) for x in closed); open_pnl = 0.0; invested = 0.0
     for x in positions.values():
-        frac = engine.num(x.get("remaining_fraction", 1)); inv = engine.num(x.get("investment_sda")); invested += inv * frac
-        entry = engine.num(x.get("entry_price")); address = str(x.get("address", "")).lower(); cur = engine.num(_analysis(tokens.get(address, {}) or {}).get("price_in_sda"))
+        frac = engine.num(x.get("remaining_fraction", 1)); inv = engine.num(x.get("investment_sda")); invested += inv * frac; entry = engine.num(x.get("entry_price")); address = str(x.get("address", "")).lower(); cur = engine.num(_analysis(tokens.get(address, {}) or {}).get("price_in_sda"))
         if entry > 0 and cur > 0: open_pnl += (cur / entry - 1) * inv * frac
     total = realized + open_pnl; roi = total / invested * 100 if invested else 0.0
     return "\n".join(["🤖 SDA PAPER TRADING V18", "", f"Open positions: {len(positions)}", f"Closed trades: {len(closed)}", "────────────────────────", f"Realized P/L: {_pnl_value(realized, 'SDA')}", f"Open P/L: {_pnl_value(open_pnl, 'SDA')}", f"Cumulative P/L: {_pnl_value(total, 'SDA')}", f"ROI: {_pnl_value(roi, '%')}", f"Invested: {invested:.2f} SDA", "", "Investment per BUY: 50–100 SDA", "Fee: 1.0% • Slippage: 0.1%", "Auto scan: every 5 minutes"])
+
+
+def paper_statistics_report():
+    p = load("positions.json", {"positions": {}, "closed_trades": []}); positions = p.get("positions", {}) or {}; closed = p.get("closed_trades", []) or []
+    market = load("market_data.json", {"tokens": {}}); tokens = market.get("tokens", {}) or {}; meta = load("token_metadata.json", {})
+    realized = sum(engine.num(x.get("closed_profit_sda")) for x in closed)
+    open_pnl = 0.0; invested = 0.0
+    open_rows = []
+    for x in positions.values():
+        frac = engine.num(x.get("remaining_fraction", 1)); inv = engine.num(x.get("investment_sda")); active_inv = inv * frac; invested += active_inv
+        entry = engine.num(x.get("entry_price")); address = str(x.get("address", "")).lower(); an = _analysis(tokens.get(address, {}) or {}); cur = engine.num(an.get("price_in_sda"))
+        pnl = (cur / entry - 1) * active_inv if entry > 0 and cur > 0 else 0.0; open_pnl += pnl
+        label = x.get("label") or engine.lbl(address, meta)
+        open_rows.append((str(x.get("opened_at", "")), label, entry, cur, active_inv, pnl, engine.num(x.get("entry_confidence"))))
+    total = realized + open_pnl; roi = total / invested * 100 if invested else 0.0
+    lines = ["📊 PAPER TRADING • STATISTICS", "", f"🟢 Open positions: {len(positions)}", f"📁 Closed trades: {len(closed)}", "────────────────────────", f"Realized P/L: {_pnl_value(realized, 'SDA')}", f"Open P/L: {_pnl_value(open_pnl, 'SDA')}", f"Cumulative P/L: {_pnl_value(total, 'SDA')}", f"ROI on open capital: {_pnl_value(roi, '%')}", f"Open capital: {invested:.2f} SDA"]
+    lines += ["", "📌 CURRENT POSITIONS", "────────────────────────"]
+    if not open_rows:
+        lines.append("⚪ No open paper positions")
+    else:
+        for _, label, entry, cur, inv, pnl, confidence in sorted(open_rows, reverse=True):
+            icon = "🟢" if pnl > 0 else ("🔴" if pnl < 0 else "⚪")
+            change = (cur / entry - 1) * 100 if entry > 0 and cur > 0 else 0.0
+            lines.append(f"{icon} {label}")
+            lines.append(f"   Entry {engine.price(entry) if hasattr(engine, 'price') else entry:.6f} → {engine.price(cur) if hasattr(engine, 'price') else cur:.6f} SDA")
+            lines.append(f"   P/L {pnl:+.2f} SDA ({change:+.2f}%) • {inv:.0f} SDA • score {confidence:.0f}")
+    lines += ["", "📜 HISTORY", "────────────────────────"]
+    if not closed:
+        lines.append("⚪ No closed trades yet")
+    else:
+        for z in sorted(closed, key=lambda x: str(x.get("closed_at", "")), reverse=True)[:15]:
+            label = z.get("label") or z.get("address", "UNKNOWN")
+            profit = engine.num(z.get("closed_profit_sda")); roi_z = engine.num(z.get("closed_roi_pct")); reason = z.get("close_reason", "EXIT"); icon = "🟢" if profit > 0 else ("🔴" if profit < 0 else "⚪")
+            lines.append(f"{icon} {label} • {reason}")
+            lines.append(f"   {profit:+.2f} SDA ({roi_z:+.2f}%) • {str(z.get('closed_at',''))[:16].replace('T',' ')}")
+    lines += ["", "────────────────────────", "Fee 1.0% • Slippage 0.1% • Paper only"]
+    return "\n".join(lines)
 
 
 def handle_update(update, state=None):
@@ -400,8 +383,10 @@ def handle_update(update, state=None):
     cb = update.get("callback_query") or {}; data = cb.get("data"); msg = cb.get("message") or {}; chat_id = (msg.get("chat") or {}).get("id"); message_id = msg.get("message_id"); configured_chat = os.environ.get("CHAT_ID")
     if configured_chat and str(chat_id) != str(configured_chat): answer_callback(cb.get("id"), "Unauthorized"); return state
     answer_callback(cb.get("id"))
-    reports = {"TECH": technical_report, "PAPER": paper_report, "MOMENTUM": market_momentum_report, "DEBUG": market_debug_report, "MAIN": main_dashboard}
-    if data in reports: edit(chat_id, message_id, reports[data](), back_keyboard() if data != "MAIN" else menu_keyboard())
+    reports = {"TECH": technical_report, "PAPER": paper_report, "PAPER_STATS": paper_statistics_report, "MOMENTUM": market_momentum_report, "DEBUG": market_debug_report, "MAIN": main_dashboard}
+    if data == "PAPER": edit(chat_id, message_id, "🤖 PAPER TRADING\n\nVyber zobrazení:", paper_menu_keyboard())
+    elif data == "PAPER_STATS": edit(chat_id, message_id, paper_statistics_report(), back_keyboard())
+    elif data in reports and data != "PAPER": edit(chat_id, message_id, reports[data](), back_keyboard() if data != "MAIN" else menu_keyboard())
     return state
 
 
