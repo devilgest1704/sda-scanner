@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# All runtime code/config changes are committed directly to main.
-# Keep this runner deterministic: scan -> TA -> metadata/liquidity -> engine -> state.
-# Telegram dashboard is intentionally NOT sent here; the hourly workflow owns reporting.
+# Canonical scanner runner: scan -> TA -> metadata/liquidity -> main -> paper stats.
+# No source-code rewriting at runtime. Telegram dashboard is intentionally not sent here;
+# the hourly workflow owns reporting.
 
 python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py
 python whale_scanner.py
@@ -12,56 +12,79 @@ python technical_analysis.py
 python token_metadata.py
 python liquidity_scanner.py
 
-# Paper engine V19 exit tuning. BUY logic remains unchanged.
-# - Normal SL: 5%
-# - AUTO EXIT: score <30, 1h momentum <-1%, 1h flow <0, ROI <-3%, 3 confirmations
-# - Emergency exit: ROI <=-15%, score <35, negative 1h momentum and flow; no confirmation wait
-# - After TP1: protect at about +1%; 5% trailing only after +7% from entry
+# V19 paper exit tuning is applied safely in-process, without rewriting engine.py.
+# BUY logic remains unchanged in main.py.
 TELEGRAM_TOKEN="" python - <<'PY'
-from pathlib import Path
+import engine
+import main as scanner_main
 
-source = Path("engine.py").read_text(encoding="utf-8")
+engine.TELEGRAM_TOKEN = ""
+engine.SL_PCT = 0.05
 
-source = source.replace(
-    'TP1_PCT=.05; TP2_PCT=.10; SL_PCT=.04; FEE_RATE=.01; SLIPPAGE_RATE=.001',
-    'TP1_PCT=.05; TP2_PCT=.10; SL_PCT=.05; FEE_RATE=.01; SLIPPAGE_RATE=.001',
-    1,
-)
+# Keep the existing engine auto-exit confirmation model, but make its thresholds
+# stricter and add a hard emergency protection path. No file/source mutation.
+def auto_exit_v19(p, tokens, ws):
+    state = engine._load_auto()
+    events = []
 
-source = source.replace(
-    'negative=c<35 and m1<0 and f1<0;weakening=roi>0 and c<40 and (m1<0 or f1<0)',
-    'negative=c<30 and m1<-1 and f1<0 and roi<-3;weakening=roi>0 and c<40 and (m1<0 or f1<0)',
-    1,
-)
+    for a in list(p.get("positions", {})):
+        td = tokens.get(a, {}) or {}
+        an = td.get("analysis", td) if isinstance(td, dict) else {}
+        cur = engine.num(an.get("price_in_sda"))
+        pos = p["positions"].get(a)
+        if not pos or cur <= 0:
+            continue
 
-source = source.replace(
-    'if pos.get("tp1_hit"):\n            breakeven=e*(1+FEE_RATE)/((1-SLIPPAGE_RATE)*(1-FEE_RATE));pos["sl"]=max(num(pos.get("sl")),breakeven,cur*(1-SL_PCT))',
-    'if pos.get("tp1_hit"):\n            protected=e*1.01\n            if cur>=e*1.07:\n                pos["sl"]=max(num(pos.get("sl")),protected,cur*(1-SL_PCT))\n            else:\n                pos["sl"]=max(num(pos.get("sl")),protected)',
-    1,
-)
+        s = engine.score(a, an, ws)
+        c = engine.num(s.get("confidence"))
+        m1 = engine.num(s.get("m1h"))
+        f1 = engine.num(s.get("net_1h"))
+        entry = engine.num(pos.get("entry_price"))
+        roi = (cur - entry) / entry * 100 if entry else 0.0
 
-# Inject the emergency exit directly into _auto_exit before normal confirmation exits.
-source = source.replace(
-    'negative=c<35 and m1<0 and f1<0;weakening=roi>0 and c<40 and (m1<0 or f1<0)\n        neg=min(5,neg+1) if negative else 0;weak=min(5,weak+1) if weakening else 0;state[a]={"neg":neg,"weak":weak}\n        if weak>=2',
-    'emergency=roi<=-15 and c<35 and m1<0 and f1<0;negative=c<30 and m1<-1 and f1<0 and roi<-3;weakening=roi>0 and c<40 and (m1<0 or f1<0)\n        neg=min(5,neg+1) if negative else 0;weak=min(5,weak+1) if weakening else 0;state[a]={"neg":neg,"weak":weak}\n        if emergency:\n            z=close(p,a,cur,"EMERGENCY SELL")\n            if z:events.append(f"🚨 EMERGENCY SELL {z['label']} | Profit: {z['closed_profit_sda']:+.2f} SDA | Score: {c:.0f}/100 | ROI: {roi:+.2f}%")\n        elif weak>=2',
-    1,
-)
+        old = state.get(a, {}) if isinstance(state.get(a), dict) else {}
+        neg = int(engine.num(old.get("neg")))
+        weak = int(engine.num(old.get("weak")))
 
-required = [
-    'SL_PCT=.05',
-    'negative=c<30 and m1<-1 and f1<0 and roi<-3',
-    'protected=e*1.01',
-    'if cur>=e*1.07:',
-    'emergency=roi<=-15 and c<35 and m1<0 and f1<0',
-    'EMERGENCY SELL',
-]
-for marker in required:
-    if marker not in source:
-        raise RuntimeError(f"V19 patch marker missing: {marker}")
+        emergency = roi <= -15 and c < 35 and m1 < 0 and f1 < 0
+        negative = c < 30 and m1 < -1 and f1 < 0 and roi < -3
+        weakening = roi > 0 and c < 40 and (m1 < 0 or f1 < 0)
 
-ns = {"__name__": "__main__", "__file__": "engine.py"}
-exec(compile(source, "engine.py [V19 runtime]", "exec"), ns, ns)
+        neg = min(5, neg + 1) if negative else 0
+        weak = min(5, weak + 1) if weakening else 0
+        state[a] = {"neg": neg, "weak": weak}
+
+        if emergency:
+            z = engine.close(p, a, cur, "EMERGENCY SELL")
+            if z:
+                events.append(
+                    f"🚨 EMERGENCY SELL {z['label']} | Profit: {z['closed_profit_sda']:+.2f} SDA | "
+                    f"Score: {c:.0f}/100 | ROI: {roi:+.2f}% | Mode: PAPER AUTO"
+                )
+        elif weak >= 2 and not pos.get("tp1_hit"):
+            z = engine.close(p, a, cur, "AUTO PARTIAL SELL", 0.5)
+            if z:
+                events.append(
+                    f"🟠 AUTO PARTIAL SELL {z['label']} | Price: {engine.price(cur)} SDA | "
+                    f"Profit: {z['closed_profit_sda']:+.2f} SDA | Score: {c:.0f}/100"
+                )
+        elif neg >= 3:
+            z = engine.close(p, a, cur, "AUTO SELL / EXIT")
+            if z:
+                events.append(
+                    f"🔴 AUTO SELL / EXIT {z['label']} | Price: {engine.price(cur)} SDA | "
+                    f"Profit: {z['closed_profit_sda']:+.2f} SDA | Score: {c:.0f}/100"
+                )
+
+    engine._save_auto(state)
+    return events
+
+engine._auto_exit = auto_exit_v19
+scanner_main.engine._auto_exit = auto_exit_v19
+scanner_main.engine.SL_PCT = 0.05
+engine.main()
 PY
+
 TELEGRAM_TOKEN="" python paper_stats.py
 
 python - <<'PY'
