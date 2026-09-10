@@ -3,8 +3,11 @@ import telegram_dashboard_compact as compact
 import main as scanner
 
 
+_original_menu_keyboard = dashboard.menu_keyboard
+
+
 def _menu_keyboard_with_refresh():
-    keyboard = dashboard.menu_keyboard()
+    keyboard = _original_menu_keyboard()
     rows = keyboard.get("inline_keyboard", [])
     if not any(row and row[0].get("callback_data") == "REFRESH" for row in rows):
         rows.append([{"text": "🔄 Refresh", "callback_data": "REFRESH"}])
