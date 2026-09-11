@@ -160,15 +160,22 @@ def _dispatch_workflow(workflow_file: str, run_reason: str, send_report: bool = 
         return False, str(exc)
 
 
+def _dispatch_scanner():
+    return _dispatch_workflow("scanner_v18.yml", "Cron scanner", send_report=False)
+
+
 def _dispatch_hourly_report():
-    return _dispatch_workflow("scanner_v18.yml", "Telegram manual refresh", send_report=True)
+    return _dispatch_workflow("scanner_v18.yml", "Telegram hourly report", send_report=True)
 
 
 @app.get("/api/hourly", response_class=PlainTextResponse)
 async def hourly(request: Request):
+    # Cronjob.org SDA-60 calls this endpoint every minute. It must NEVER send
+    # Telegram on every scan; reporting is handled once per hour by the hourly
+    # workflow. The endpoint only dispatches the scanner.
     if not _cron_authorized(request):
         return PlainTextResponse("Unauthorized", status_code=401)
-    ok, message = _dispatch_hourly_report()
+    ok, message = _dispatch_scanner()
     return PlainTextResponse(message, status_code=200 if ok else 502)
 
 
@@ -176,7 +183,7 @@ async def hourly(request: Request):
 async def watchdog(request: Request):
     if not _cron_authorized(request):
         return PlainTextResponse("Unauthorized", status_code=401)
-    ok, message = _dispatch_hourly_report()
+    ok, message = _dispatch_scanner()
     return PlainTextResponse(message, status_code=200 if ok else 502)
 
 
