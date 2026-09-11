@@ -104,11 +104,14 @@ def _handle_update_with_actions(update, state=None):
             dashboard.answer_callback(cb.get("id"), "Unauthorized")
             return state
         dashboard.answer_callback(cb.get("id"), "Refreshing…")
-        ok, message = _dispatch_hourly_report()
-        if ok:
-            dashboard.edit(chat_id, message_id, "🔄 REFRESH\n\nSkenuji aktuální stav…\nPo dokončení přijde nový dashboard.", dashboard.menu_keyboard())
-        else:
-            dashboard.edit(chat_id, message_id, f"❌ Refresh se nepodařil\n\n{message}", dashboard.menu_keyboard())
+        # REFRESH is deliberately local: rebuild the dashboard directly in the
+        # Vercel webhook. It must never dispatch the GitHub scanner/hourly workflow.
+        dashboard.edit(
+            chat_id,
+            message_id,
+            dashboard.main_dashboard(),
+            dashboard.menu_keyboard(),
+        )
         return state
 
     if data != "PAPER":
