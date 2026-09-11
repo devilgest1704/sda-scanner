@@ -104,23 +104,22 @@ def _handle_update_with_actions(update, state=None):
             dashboard.answer_callback(cb.get("id"), "Unauthorized")
             return state
 
-        dashboard.answer_callback(cb.get("id"), "Scanner started…")
-        # REFRESH deliberately triggers the same manual scanner watchdog path
-        # used for a manual GitHub Actions run. It does NOT run the hourly
-        # Telegram report and does not dispatch Vercel.
-        ok, result = _dispatch_scanner(run_reason="Telegram Refresh")
+        dashboard.answer_callback(cb.get("id"), "Report started…")
+        # REFRESH runs the dedicated SDA Telegram Hourly Report workflow.
+        # It deliberately does NOT run the scanner workflow.
+        ok, result = _dispatch_hourly_report(run_reason="Telegram Refresh")
         if ok:
             dashboard.edit(
                 chat_id,
                 message_id,
-                dashboard.main_dashboard() + "\n\n⏳ Scanner watchdog started manually…",
+                dashboard.main_dashboard() + "\n\n⏳ Telegram Hourly Report started manually…",
                 dashboard.menu_keyboard(),
             )
         else:
             dashboard.edit(
                 chat_id,
                 message_id,
-                dashboard.main_dashboard() + f"\n\n❌ Scanner start failed: {result}",
+                dashboard.main_dashboard() + f"\n\n❌ Hourly Report start failed: {result}",
                 dashboard.menu_keyboard(),
             )
         return state
@@ -154,11 +153,11 @@ def _cron_authorized(request: Request) -> bool:
     return bool(received) and secrets.compare_digest(received, f"Bearer {expected}")
 
 
-def _dispatch_scanner(run_reason="Cron scanner"):
+def _dispatch_workflow(workflow_file, run_reason):
     token = os.environ.get("GITHUB_DISPATCH_TOKEN", "")
     if not token:
         return False, "missing GITHUB_DISPATCH_TOKEN"
-    url = "https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/scanner_v18.yml/dispatches"
+    url = f"https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/{workflow_file}/dispatches"
     payload = json.dumps({
         "ref": "main",
         "inputs": {"run_reason": run_reason},
@@ -184,6 +183,14 @@ def _dispatch_scanner(run_reason="Cron scanner"):
         return False, str(exc)
 
 
+def _dispatch_scanner(run_reason="Cron scanner"):
+    return _dispatch_workflow("scanner_v18.yml", run_reason)
+
+
+def _dispatch_hourly_report(run_reason="Telegram hourly report"):
+    return _dispatch_workflow("telegram_hourly.yml", run_reason)
+
+
 @app.get("/api/hourly", response_class=PlainTextResponse)
 async def hourly(request: Request):
     # Cronjob.org SDA-60 calls this endpoint every minute. It dispatches only
@@ -198,7 +205,7 @@ async def hourly(request: Request):
 async def watchdog(request: Request):
     if not _cron_authorized(request):
         return PlainTextResponse("Unauthorized", status_code=401)
-    ok, message = _dispatch_scanner()
+    ok, message = _dispatch_scanner("Watchdog")
     return PlainTextResponse(message, status_code=200 if ok else 502)
 
 
