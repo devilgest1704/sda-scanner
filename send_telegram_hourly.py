@@ -3,6 +3,7 @@ import telegram_dashboard_compact as compact
 import main as scanner
 import position_action_v20
 import real_bot_menu
+import paper_statistics_fix
 
 
 _original_dashboard_load = dashboard.load
@@ -23,6 +24,7 @@ def main():
     )
     position_action_v20.patch_dashboard(dashboard)
     real_bot_menu.patch_dashboard(dashboard)
+    paper_statistics_fix.patch_dashboard(dashboard)
 
     # IMPORTANT: keep the already-patched menu (including REAL and REAL_BOT)
     # and only add Refresh on top of it. The previous code rebuilt the menu
