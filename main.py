@@ -291,18 +291,102 @@ def _buy_score_v2(s, analysis, pred):
     return _clamp100(final), {"momentum": round(momentum_score, 1), "flow": round(flow_score, 1), "activity": round(activity_score, 1), "prediction": round(prediction_score, 1), "liquidity": round(liquidity_score, 1), "impact_pct": round(impact, 3) if impact > 0 else None}
 
 
+def _v21_buy_decision(buy_score, s, analysis, pred):
+    """Single BUY decision shared by the paper engine and V21 diagnostics.
+
+    Normal entry: score >= 60 and technical confirmation is acceptable.
+    Borderline 58-59 entry: only for an unusually strong momentum/order-flow
+    setup. A neutral 15m/1h flow is allowed; negative flow is not.
+    """
+    threshold = float(getattr(_paper, "BUY_THRESHOLD", 60) or 60)
+    score = float(buy_score or 0)
+    tc = {}
+    try:
+        from strategy_v21 import technical_confirmation
+        tc = technical_confirmation(analysis)
+    except Exception:
+        tc = {"bull": 0, "bear": 0, "evidence": []}
+
+    bull = int(tc.get("bull") or 0)
+    bear = int(tc.get("bear") or 0)
+    evidence = list(tc.get("evidence") or [])
+    adjustment = min(8.0, bull * 1.5) - min(10.0, bear * 1.8)
+    adjusted = _clamp100(score + adjustment)
+
+    bridge = False
+    if 58.0 <= adjusted < threshold and isinstance(pred, dict) and pred.get("ready"):
+        p5 = float(pred.get("p5") or 0)
+        p10 = float(pred.get("p10") or 0)
+        mean_roi = float(pred.get("mean_roi") or 0)
+        m1 = float(s.get("m1h") or 0)
+        m4 = float(s.get("m4h") or 0)
+        m15 = float(s.get("m15") or 0)
+        flow = float(s.get("net_1h") or 0)
+        trades = float(s.get("trades_1h") or 0)
+        f1 = (analysis.get("flow", {}).get("1h", {}) if isinstance(analysis, dict) else {})
+        bv = _metric_number(f1, "buy_volume")
+        sv = _metric_number(f1, "sell_volume")
+        bc = _metric_number(f1, "buy_count")
+        sc = _metric_number(f1, "sell_count")
+        volume_ratio = bv / max(sv, 1.0)
+        trade_ratio = bc / max(sc, 1.0)
+        bridge = (
+            p5 >= 0.62 and p10 >= 0.35 and mean_roi > 0
+            and m1 >= 15.0 and m4 >= 10.0
+            and flow >= 0.0 and m15 >= -0.25
+            and trades >= 10
+            and (volume_ratio >= 10.0 or trade_ratio >= 5.0)
+            and bear <= 1
+            and not any("MACD bearish" in x for x in evidence)
+        )
+
+    technical_ok = (not bool(analysis.get("technical"))) or bull >= 2
+    allowed = adjusted >= threshold and technical_ok
+    if bridge:
+        allowed = True
+
+    reasons = []
+    if not technical_ok and not bridge:
+        reasons.append(f"technical confirmation {bull} bull / {bear} bear")
+    if adjusted < threshold and not bridge:
+        reasons.append(f"BUY score {adjusted:.0f} < {threshold:.0f}")
+    if bridge:
+        reasons.append("V21 exceptional 58-59 bridge")
+
+    return {
+        "allowed": allowed,
+        "score": adjusted,
+        "raw_score": score,
+        "adjustment": adjustment,
+        "technical_bull": bull,
+        "technical_bear": bear,
+        "technical_evidence": evidence,
+        "bridge": bridge,
+        "reason": "; ".join(reasons),
+    }
+
+
 def _paper_score_predictive(address, analysis, whale_state):
     s = _paper_score_guarded(address, analysis, whale_state)
     if not s.get("paper_buy_blocked"):
         pred, ok, text = _predictive_gate(s)
         s = dict(s)
         buy_score, components = _buy_score_v2(s, analysis, pred)
+        decision = _v21_buy_decision(buy_score, s, analysis, pred)
+
         s["paper_raw_confidence"] = s.get("confidence")
-        s["market_score"] = round(float(s.get("confidence") or 0), 1)
+        s["market_score"] = round(float(decision["score"]), 1)
         s["buy_score_components"] = components
         s["paper_prediction"] = pred
         s["paper_prediction_text"] = text
         s["paper_prediction_blocked"] = not ok
+        s["v21_adjustment"] = round(decision["adjustment"], 1)
+        s["technical_bull"] = decision["technical_bull"]
+        s["technical_bear"] = decision["technical_bear"]
+        s["technical_evidence"] = decision["technical_evidence"]
+        s["paper_near_threshold_buy"] = decision["bridge"]
+        s["paper_near_threshold_reason"] = "V21 exceptional 58-59 bridge" if decision["bridge"] else ""
+
         vetoes = []
         impact = components.get("impact_pct")
         if impact is not None and impact > 8.0:
@@ -315,20 +399,16 @@ def _paper_score_predictive(address, analysis, whale_state):
                 vetoes.append("prediction too weak")
             if 65.0 <= buy_score < 70.0 and not (p5 >= 0.62 and p10 >= 0.35 and mean_roi > 0):
                 vetoes.append("score 65-69 needs strong prediction")
-        # Canonical BUY threshold: 60. Scores below 60 are blocked unless the
-        # V21 strategy overlay explicitly promotes a 58-59 exceptional setup.
-        if buy_score < 60.0:
-            vetoes.append(f"BUY score {buy_score:.0f} < 60")
         if not ok:
             vetoes.append(text)
-        s["buy_score"] = round(buy_score, 1)
-        s["buy_score_band"] = ("OPATRNÝ BUY" if buy_score < 75 else "BUY" if buy_score < 85 else "STRONG BUY" if buy_score < 93 else "PUMP BUY")
+        if not decision["allowed"]:
+            vetoes.append(decision["reason"] or f"BUY score {decision['score']:.0f} blocked")
+
+        s["buy_score"] = round(decision["score"], 1)
+        s["buy_score_band"] = ("OPATRNÝ BUY" if decision["score"] < 75 else "BUY" if decision["score"] < 85 else "STRONG BUY" if decision["score"] < 93 else "PUMP BUY")
         s["paper_buy_blocked"] = bool(vetoes)
         s["paper_buy_block_reason"] = "; ".join(vetoes)
-        if vetoes:
-            s["confidence"] = min(buy_score, float(_paper.BUY_THRESHOLD) - 1.0)
-        else:
-            s["confidence"] = buy_score
+        s["confidence"] = decision["score"] if not vetoes else min(decision["score"], float(_paper.BUY_THRESHOLD) - 1.0)
     return s
 
 
