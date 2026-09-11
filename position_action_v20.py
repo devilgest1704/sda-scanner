@@ -91,10 +91,6 @@ def patch_dashboard(dashboard):
             if wallet_amount is None and symbol:
                 wallet_amount = by_symbol.get(symbol)
             portfolio_amount = dashboard.engine.num(pf.get("amount"))
-
-            # If the wallet already contains less than portfolio_data.json, the
-            # ledger is lagging. Scale only the stale OPEN position to the actual
-            # remaining wallet amount so sold tokens are not shown as open P/L.
             if wallet_amount is not None and portfolio_amount > 0 and wallet_amount < portfolio_amount:
                 ratio = max(0.0, min(1.0, wallet_amount / portfolio_amount))
                 if pf.get("cost_sda") is not None:
@@ -106,7 +102,6 @@ def patch_dashboard(dashboard):
                 pnl = dashboard.engine.num(pf.get("unrealized_pnl_sda"))
                 if cost > 0:
                     pf["unrealized_pnl_pct"] = pnl / cost * 100
-
             total_open_cost += dashboard.engine.num(pf.get("cost_sda"))
             total_open_pnl += dashboard.engine.num(pf.get("unrealized_pnl_sda"))
 
@@ -132,9 +127,16 @@ def patch_dashboard(dashboard):
         return result
 
     def position_recommendations_v21(md, ws, meta, portfolio):
+        """Return a graded read-only action for every wallet position.
+
+        This deliberately does not persist confirmation counters: the report is
+        rendered in read-only environments (including Vercel), so a local counter
+        could never reliably represent consecutive scans. Instead, the action uses
+        current P/L plus trend/flow/technical evidence and escalates immediately
+        only when the evidence is strong enough.
+        """
         tokens = md.get("tokens", {}) if isinstance(md, dict) else {}
         current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
-        auto_state = dashboard.load("paper_auto_state.json", {})
         rows = []
         for token, pf in current.items():
             if not isinstance(pf, dict):
@@ -143,40 +145,65 @@ def patch_dashboard(dashboard):
             cost = pf.get("cost_sda")
             if cost is None or pnl_raw is None:
                 continue
+
             market_key, analysis = _resolve_token_data(tokens, token, pf, meta)
             try:
-                signal = dashboard.engine.score(market_key or token, analysis, ws) if analysis else {"confidence": 0, "m1h": 0, "net_1h": 0}
+                signal = dashboard.engine.score(market_key or token, analysis, ws) if analysis else {}
             except Exception:
-                signal = {"confidence": 0, "m1h": 0, "net_1h": 0}
+                signal = {}
             score = dashboard.engine.num(signal.get("confidence"))
             m1h = dashboard.engine.num(signal.get("m1h"))
             flow1 = dashboard.engine.num(signal.get("net_1h"))
             pnl = dashboard.engine.num(pnl_raw)
             bearish = technical_sell_confirmed(analysis) if analysis else False
             exit_signal = evaluate_exit(pnl, score, m1h, flow1, bearish)
-            old = auto_state.get(token, {}) if isinstance(auto_state, dict) else {}
-            if not old and market_key:
-                old = auto_state.get(market_key, {}) if isinstance(auto_state, dict) else {}
-            neg = int(dashboard.engine.num(old.get("neg")))
-            weak = int(dashboard.engine.num(old.get("weak")))
-            tp1_hit = bool(pf.get("tp1_hit"))
-            neg = min(5, neg + 1) if exit_signal["negative"] else 0
-            weak = min(5, weak + 1) if exit_signal["weakening"] else 0
-            if exit_signal["emergency"]:
-                action = "EMERGENCY SELL"; reason = "V21 emergency: ROI ≤ -15%, score <35, negative momentum + flow"
-            elif weak >= 2 and not tp1_hit:
-                action = "PARTIAL SELL"; reason = "V21 weakening confirmed 2 times"
-            elif neg >= 3:
-                action = "SELL / EXIT"; reason = "V21 negative exit confirmed 3 times"
-            elif exit_signal["weakening"]:
-                action = "HOLD / WATCH"; reason = f"weakening signal {weak}/2 confirmations"
-            elif exit_signal["negative"]:
-                action = "HOLD / WATCH"; reason = f"negative exit signal {neg}/3 confirmations"
-            elif score >= 70 and m1h > 0 and flow1 > 0:
-                action = "HOLD / TRAIL"; reason = "positive trend and SDA flow"
+
+            # Evidence flags make the recommendation less binary than the old
+            # score-only view. A missing market match is explicitly reported.
+            data_missing = not bool(analysis)
+            negative_evidence = sum((m1h < 0, flow1 < 0, bearish, score < 40))
+            positive_evidence = sum((m1h > 0, flow1 > 0, score >= 70, not bearish))
+
+            if exit_signal.get("emergency"):
+                action = "EMERGENCY SELL"
+                reason = "ROI ≤ -15% with weak score, momentum and SDA flow"
+            elif pnl <= -8 and score < 35 and m1h < 0 and flow1 < 0:
+                action = "SELL / EXIT"
+                reason = "loss > 8% + weak score + negative momentum + SDA flow"
+            elif pnl <= -4 and negative_evidence >= 3:
+                action = "SELL / EXIT"
+                reason = "loss > 4% with 3+ bearish signals"
+            elif pnl > 5 and score < 40 and (m1h < 0 or flow1 < 0) and bearish:
+                action = "PARTIAL SELL"
+                reason = "profit > 5% but trend/flow is weakening"
+            elif pnl > 10 and score < 45 and negative_evidence >= 2:
+                action = "PARTIAL SELL"
+                reason = "profit > 10% with weakening market evidence"
+            elif pnl > 0 and positive_evidence >= 3 and score >= 55:
+                action = "HOLD / TRAIL"
+                reason = "position profitable with supportive trend/flow"
+            elif pnl < 0 and negative_evidence >= 2:
+                action = "HOLD / WATCH"
+                reason = "loss with mixed-to-bearish evidence; monitor next scan"
+            elif data_missing:
+                action = "HOLD / WATCH"
+                reason = "market data not resolved for this wallet token"
             else:
-                action = "HOLD / WATCH"; reason = "no confirmed exit condition"
-            rows.append({"token": token, "symbol": pf.get("symbol") or dashboard.engine.lbl(token, meta), "action": action, "reason": reason, "pnl_pct": pnl_raw, "pnl_sda": pf.get("unrealized_pnl_sda"), "score": score, "m1h": m1h, "flow_1h": flow1})
+                action = "HOLD / WATCH"
+                reason = "no confirmed exit condition"
+
+            rows.append({
+                "token": token,
+                "symbol": pf.get("symbol") or dashboard.engine.lbl(token, meta),
+                "action": action,
+                "reason": reason,
+                "pnl_pct": pnl_raw,
+                "pnl_sda": pf.get("unrealized_pnl_sda"),
+                "score": score,
+                "m1h": m1h,
+                "flow_1h": flow1,
+            })
+
         order = {"EMERGENCY SELL": 0, "SELL / EXIT": 1, "PARTIAL SELL": 2, "HOLD / TRAIL": 3, "HOLD / WATCH": 4}
         return sorted(rows, key=lambda x: (order.get(x.get("action"), 9), -dashboard.engine.num(x.get("score"))))
 
@@ -194,7 +221,7 @@ def patch_dashboard(dashboard):
         else:
             for row in rows:
                 action = row["action"]
-                icon = "🚨" if action == "EMERGENCY SELL" else "🔴" if action == "SELL / EXIT" else "🟠" if action == "PARTIAL SELL" else "🟡"
+                icon = "🚨" if action == "EMERGENCY SELL" else "🔴" if action == "SELL / EXIT" else "🟠" if action == "PARTIAL SELL" else "🟢" if action == "HOLD / TRAIL" else "🟡"
                 pnl = "UNKNOWN" if row["pnl_sda"] is None else f"{dashboard.engine.num(row['pnl_sda']):+.2f} SDA"
                 score = "N/A" if row["score"] is None else f"{row['score']:.0f}/100"
                 lines.append(f"{icon} {row['symbol']}: {action} • P/L {pnl} • score {score}")
