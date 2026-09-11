@@ -10,7 +10,7 @@ from strategy_v21 import patch_engine, technical_sell_confirmed, evaluate_exit
 
 engine.TELEGRAM_TOKEN = ""
 engine.SL_PCT = 0.05
-engine.BUY_THRESHOLD = 65
+engine.BUY_THRESHOLD = 60
 patch_engine(engine)
 scanner_main.engine.score = engine.score
 
@@ -62,7 +62,7 @@ def auto_exit_v21(p, tokens, ws):
 engine._auto_exit = auto_exit_v21
 scanner_main.engine._auto_exit = auto_exit_v21
 scanner_main.engine.SL_PCT = 0.05
-scanner_main.engine.BUY_THRESHOLD = 65
+scanner_main.engine.BUY_THRESHOLD = 60
 
 if __name__ == "__main__":
     engine.main()
