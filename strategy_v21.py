@@ -65,9 +65,9 @@ def _predictive_score(addr, analysis, ws, engine):
         bear = int(tc.get("bear") or 0)
         bull = int(tc.get("bull") or 0)
 
-        # Neutral technical data is not a veto and must not lose the technical
-        # adjustment twice.  main.py retains the original market confidence,
-        # which is the correct score to use when bull=0 and bear=0.
+        # main.py is the single source of truth for the predictive BUY score.
+        # Neutral technical data (0 bull / 0 bear) must neither add nor subtract.
+        # Bearish evidence remains a hard technical veto.
         if bear == 0 and bull == 0:
             raw = _num(out.get("paper_raw_confidence"), buy_score)
             buy_score = max(buy_score, raw)
@@ -106,6 +106,8 @@ def patch_engine(engine):
         tc = technical_confirmation(analysis)
         score = _num(base.get("confidence"))
         adjustment = min(8, tc["bull"] * 1.5) - min(10, tc["bear"] * 1.8)
+        # Technical confirmation is additive only when it is actually present.
+        # 0 bull / 0 bear is neutral and leaves the base score unchanged.
         score = max(0, min(100, score + adjustment))
         threshold = _num(getattr(engine, "BUY_THRESHOLD", 60), 60)
         if tc["bear"] > 0:
