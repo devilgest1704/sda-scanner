@@ -51,6 +51,35 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Ensure Telegram webhook is active
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          token = os.environ.get("TELEGRAM_TOKEN", "")
+          desired = "https://sda-scanner.vercel.app/api/telegram"
+          if not token:
+              raise SystemExit("TELEGRAM_TOKEN is not configured")
+
+          base = f"https://api.telegram.org/bot{token}"
+          with urllib.request.urlopen(f"{base}/getWebhookInfo", timeout=15) as response:
+              info = json.loads(response.read().decode("utf-8"))
+          current = ((info.get("result") or {}).get("url") or "").strip()
+          if current != desired:
+              payload = urllib.parse.urlencode({"url": desired, "allowed_updates": json.dumps(["callback_query"])}).encode()
+              req = urllib.request.Request(f"{base}/setWebhook", data=payload, method="POST")
+              with urllib.request.urlopen(req, timeout=15) as response:
+                  result = json.loads(response.read().decode("utf-8"))
+              if not result.get("ok"):
+                  raise SystemExit(f"setWebhook failed: {result}")
+              print(f"Telegram webhook set to {desired}")
+          else:
+              print(f"Telegram webhook already active: {desired}")
+          PY
+
       - name: Run SDA Scanner V18
         run: bash run_scanner_v18.sh
 
