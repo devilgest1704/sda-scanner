@@ -1,3 +1,5 @@
+import time
+
 import telegram_dashboard as dashboard
 import telegram_dashboard_compact as compact
 import main as scanner
@@ -17,7 +19,60 @@ def _dashboard_load_synced(path, default):
     return data
 
 
+def _install_dashboard_compat():
+    """Provide the listener API expected by the dashboard patch modules.
+
+    telegram_dashboard is also used as a Vercel/report module and its compact
+    report implementation does not need a Telegram polling loop. The GitHub
+    Actions listener, however, needs handle_update() and run() so the menu
+    patches can be layered safely.
+    """
+    if not hasattr(dashboard, "handle_update"):
+        def handle_update(update, state=None):
+            state = state if state is not None else {"offset": 0}
+            cb = update.get("callback_query") or {}
+            if cb:
+                dashboard._handle_callback(cb)
+                return state
+
+            message = update.get("message") or {}
+            text = str(message.get("text") or "").strip().lower()
+            chat_id = (message.get("chat") or {}).get("id")
+            configured_chat = dashboard.os.environ.get("CHAT_ID")
+            if configured_chat and str(chat_id) != str(configured_chat):
+                return state
+            if text in ("/start", "/menu", "menu"):
+                dashboard.send(dashboard.main_dashboard(), dashboard.menu_keyboard(), chat_id)
+            return state
+
+        dashboard.handle_update = handle_update
+
+    if not hasattr(dashboard, "run"):
+        def run():
+            state = {"offset": 0}
+            while True:
+                result = dashboard.api(
+                    "getUpdates",
+                    {"offset": state["offset"], "timeout": 25, "allowed_updates": ["message", "callback_query"]},
+                )
+                updates = result.get("result", []) if isinstance(result, dict) and result.get("ok") else []
+                for update in updates:
+                    try:
+                        state["offset"] = max(
+                            int(state.get("offset", 0)),
+                            int(update.get("update_id", 0)) + 1,
+                        )
+                        dashboard.handle_update(update, state)
+                    except Exception as exc:
+                        print(f"Telegram update error: {exc}")
+                if not updates:
+                    time.sleep(1)
+
+        dashboard.run = run
+
+
 def main():
+    _install_dashboard_compat()
     dashboard.load = _dashboard_load_synced
     dashboard._merge_wallet_portfolio = lambda wallet, portfolio, md, ws, meta: compact.merge_wallet_portfolio(
         wallet, portfolio, scanner
@@ -38,10 +93,8 @@ def main():
 
     dashboard.menu_keyboard = _menu_keyboard_with_refresh
 
-    # The Actions listener handles Telegram callbacks locally. Previously REFRESH
-    # was only added to the keyboard, but telegram_dashboard.handle_update had no
-    # REFRESH branch, so pressing the button did nothing. Refresh now rebuilds the
-    # dashboard immediately from the latest local state and keeps the menu.
+    # The Actions listener handles Telegram callbacks locally. Refresh rebuilds
+    # the dashboard immediately from the latest local state and keeps the menu.
     _original_handle_update = dashboard.handle_update
 
     def _handle_update_with_refresh(update, state=None):
