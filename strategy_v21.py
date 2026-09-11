@@ -73,18 +73,16 @@ def _predictive_score(addr, analysis, ws, engine):
         reason_text = str(out.get("paper_buy_block_reason") or "")
         reasons = [x.strip() for x in reason_text.split(";") if x.strip()]
 
-        # Remove only the obsolete legacy threshold veto. Other risk/predictive
-        # vetoes remain authoritative.
+        # Remove legacy hard score vetoes. The canonical threshold is applied
+        # here so V21 and main.py cannot disagree about the entry threshold.
         cleaned = []
         for reason in reasons:
-            if reason.startswith("BUY score ") and " < 65" in reason:
-                continue
-            if reason.startswith("BUY score ") and " < 60" in reason:
+            if reason.startswith("BUY score ") and (" < 65" in reason or " < 60" in reason):
                 continue
             cleaned.append(reason)
 
-        # Borderline PAPER bridge: 58-59 can become a BUY only when the market
-        # setup is clearly strong and the empirical predictor confirms upside.
+        # Borderline bridge: 58-59 can become a BUY only for an exceptionally
+        # strong momentum/flow setup with no bearish technical confirmation.
         near_threshold = False
         pred = out.get("paper_prediction") or {}
         if 58.0 <= buy_score < threshold and isinstance(pred, dict) and pred.get("ready"):
@@ -92,21 +90,21 @@ def _predictive_score(addr, analysis, ws, engine):
             p10 = _num(pred.get("p10"))
             mean_roi = _num(pred.get("mean_roi"))
             m1 = _num(out.get("m1h"))
+            m4 = _num(out.get("m4h"))
             flow = _num(out.get("net_1h"))
             m15 = _num(out.get("m15"))
             trades = _num(out.get("trades_1h"))
             tc = technical_confirmation(analysis)
             near_threshold = (
                 p5 >= 0.62 and p10 >= 0.35 and mean_roi > 0
-                and m1 > 0 and flow > 0 and m15 >= -0.25 and trades >= 3
-                and tc["bull"] >= 2
+                and m1 >= 15.0 and m4 >= 10.0 and flow > 0
+                and m15 >= -0.25 and trades >= 3
+                and tc["bull"] >= 2 and tc["bear"] == 0
             )
 
         if near_threshold:
-            # Treat the candidate as meeting the minimum entry threshold while
-            # retaining the actual composite score for diagnostics/display.
             out["paper_near_threshold_buy"] = True
-            out["paper_near_threshold_reason"] = "58-59 bridge: strong prediction + momentum + flow + technical confirmation"
+            out["paper_near_threshold_reason"] = "58-59 bridge: exceptional momentum + flow + prediction + technical confirmation"
             out["confidence"] = threshold
             out["paper_buy_blocked"] = bool(cleaned)
             out["paper_buy_block_reason"] = "; ".join(cleaned)
