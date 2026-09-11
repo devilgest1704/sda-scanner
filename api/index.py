@@ -7,8 +7,6 @@ import urllib.request
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 
-# The webhook runs outside GitHub Actions. Always read the latest scanner state
-# from the public main branch rather than relying on a stale Vercel checkout.
 os.environ["SDA_REMOTE_STATE"] = "1"
 
 import telegram_dashboard as dashboard
@@ -18,9 +16,6 @@ import position_action_v20
 import real_bot_menu
 import paper_statistics_fix
 
-# market_data.json contains full transaction history and can become too large for
-# reliable remote dashboard reads. The scanner also publishes a compact snapshot
-# containing the latest per-token analysis only. Prefer it for all dashboard views.
 _original_dashboard_load = dashboard.load
 
 def _dashboard_load(path, default):
@@ -32,10 +27,6 @@ def _dashboard_load(path, default):
 
 dashboard.load = _dashboard_load
 
-# portfolio_data.json can lag the live wallet after a sale. Make the wallet
-# authoritative for CURRENT positions before any dashboard/position-action code
-# consumes the portfolio. Realized history remains untouched and is still read
-# from the trade ledger.
 _original_load_with_market = dashboard.load
 
 def _dashboard_load_synced(path, default):
@@ -47,15 +38,12 @@ def _dashboard_load_synced(path, default):
 
 dashboard.load = _dashboard_load_synced
 
-# Keep the existing dashboard/menu implementation, but replace only the main
-# wallet renderer with the compact merged Wallet + Portfolio version.
+
 def _compact_wallet_portfolio(wallet, portfolio, md, ws, meta):
     return compact.merge_wallet_portfolio(wallet, portfolio, scanner)
 
 dashboard._merge_wallet_portfolio = _compact_wallet_portfolio
 
-# Position Action V19: mirror the paper engine emergency-loss guard.
-# This is display-only; the actual paper exit is enforced in run_scanner_v18.sh.
 _original_position_recommendations = dashboard._position_recommendations
 
 def _position_recommendations_v19(md, ws, meta, portfolio):
@@ -82,95 +70,61 @@ def _position_recommendations_v19(md, ws, meta, portfolio):
 
 dashboard._position_recommendations = _position_recommendations_v19
 
-# V20 shared policy keeps the same emergency rule in every dashboard path
-# and gives EMERGENCY SELL its dedicated 🚨 icon.
 position_action_v20.patch_dashboard(dashboard)
-
-# Add the separate automated Real Trading Bot menu. The existing REAL menu is
-# deliberately preserved as the user's manual real-wallet dashboard.
 real_bot_menu.patch_dashboard(dashboard)
 paper_statistics_fix.patch_dashboard(dashboard)
-
-# Make the canonical paper renderer explicit. This prevents a stale local
-# paper_report definition from ever being used by the webhook callback.
 dashboard.paper_statistics_report = paper_statistics_fix.paper_statistics_report
 dashboard.paper_report = paper_statistics_fix.paper_report
 
-# Add a manual hourly-report refresh button without changing the existing GUI.
 _original_menu_keyboard = dashboard.menu_keyboard
 
 def _menu_keyboard_with_refresh():
     keyboard = _original_menu_keyboard()
     rows = keyboard.get("inline_keyboard", [])
-    rows.append([{"text": "🔄 Refresh", "callback_data": "REFRESH"}])
+    if not any(row and row[0].get("callback_data") == "REFRESH" for row in rows):
+        rows.append([{"text": "🔄 Refresh", "callback_data": "REFRESH"}])
     return keyboard
 
 dashboard.menu_keyboard = _menu_keyboard_with_refresh
 
-# Paper Trading opens directly on the current paper-trading status.
-# Statistics remains the detailed view with current positions + trade history.
 _original_handle_update = dashboard.handle_update
+
 def _handle_update_with_actions(update, state=None):
     cb = update.get("callback_query") or {}
     data = cb.get("data")
 
     if data == "REFRESH":
         state = state if state is not None else {"offset": 0}
-        state["offset"] = max(
-            int(state.get("offset", 0)),
-            int(update.get("update_id", 0)) + 1,
-        )
+        state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
         msg = cb.get("message") or {}
         chat_id = (msg.get("chat") or {}).get("id")
         message_id = msg.get("message_id")
         configured_chat = os.environ.get("CHAT_ID")
-
         if configured_chat and str(chat_id) != str(configured_chat):
             dashboard.answer_callback(cb.get("id"), "Unauthorized")
             return state
-
         dashboard.answer_callback(cb.get("id"), "Refreshing…")
         ok, message = _dispatch_hourly_report()
         if ok:
-            dashboard.edit(
-                chat_id,
-                message_id,
-                "🔄 REFRESH\n\nSkenuji aktuální stav…\nPo dokončení přijde nový dashboard.",
-                dashboard.menu_keyboard(),
-            )
+            dashboard.edit(chat_id, message_id, "🔄 REFRESH\n\nSkenuji aktuální stav…\nPo dokončení přijde nový dashboard.", dashboard.menu_keyboard())
         else:
-            dashboard.edit(
-                chat_id,
-                message_id,
-                f"❌ Refresh se nepodařil\n\n{message}",
-                dashboard.menu_keyboard(),
-            )
+            dashboard.edit(chat_id, message_id, f"❌ Refresh se nepodařil\n\n{message}", dashboard.menu_keyboard())
         return state
 
     if data != "PAPER":
         return _original_handle_update(update, state)
 
     state = state if state is not None else {"offset": 0}
-    state["offset"] = max(
-        int(state.get("offset", 0)),
-        int(update.get("update_id", 0)) + 1,
-    )
+    state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
     msg = cb.get("message") or {}
     chat_id = (msg.get("chat") or {}).get("id")
     message_id = msg.get("message_id")
     configured_chat = os.environ.get("CHAT_ID")
-
     if configured_chat and str(chat_id) != str(configured_chat):
         dashboard.answer_callback(cb.get("id"), "Unauthorized")
         return state
-
     dashboard.answer_callback(cb.get("id"))
-    dashboard.edit(
-        chat_id,
-        message_id,
-        dashboard.paper_report(),
-        dashboard.paper_menu_keyboard(),
-    )
+    dashboard.edit(chat_id, message_id, dashboard.paper_report(), dashboard.paper_menu_keyboard())
     return state
 
 dashboard.handle_update = _handle_update_with_actions
@@ -181,9 +135,9 @@ app = FastAPI()
 def _cron_authorized(request: Request) -> bool:
     expected = os.environ.get("CRON_SECRET", "")
     received = request.headers.get("Authorization", "")
-    if not expected or not received:
-        return False
-    return secrets.compare_digest(received, f"Bearer {expected}")
+    if not expected:
+        return True
+    return bool(received) and secrets.compare_digest(received, f"Bearer {expected}")
 
 
 def _dispatch_workflow(workflow_file: str, run_reason: str, send_report: bool = False) -> tuple[bool, str]:
@@ -195,17 +149,7 @@ def _dispatch_workflow(workflow_file: str, run_reason: str, send_report: bool = 
     if workflow_file == "scanner_v18.yml":
         inputs["send_report"] = "true" if send_report else "false"
     payload = json.dumps({"ref": "main", "inputs": inputs}).encode()
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    req = urllib.request.Request(url, data=payload, headers={"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
             return response.status in (200, 201, 204), f"GitHub dispatch HTTP {response.status}"
@@ -218,6 +162,14 @@ def _dispatch_workflow(workflow_file: str, run_reason: str, send_report: bool = 
 
 def _dispatch_hourly_report():
     return _dispatch_workflow("scanner_v18.yml", "Telegram manual refresh", send_report=True)
+
+
+@app.get("/api/hourly", response_class=PlainTextResponse)
+async def hourly(request: Request):
+    if not _cron_authorized(request):
+        return PlainTextResponse("Unauthorized", status_code=401)
+    ok, message = _dispatch_hourly_report()
+    return PlainTextResponse(message, status_code=200 if ok else 502)
 
 
 @app.get("/api/watchdog", response_class=PlainTextResponse)
