@@ -57,9 +57,10 @@ def _caller_is_paper_main():
 def _predictive_score(addr, analysis, ws, engine):
     """Return the canonical predictive BUY score from main.py.
 
-    main.py still contains a legacy 65-point compatibility veto. The canonical
-    threshold is now 60, so only that obsolete threshold reason is removed here;
-    momentum/flow/cooldown/prediction/liquidity vetoes remain untouched.
+    60 is the normal hard threshold. A narrow 58-59 bridge is allowed only for
+    genuinely strong setups; it exists so a rounded/borderline candidate does
+    not get discarded solely because the composite score is one or two points
+    below the normal threshold.
     """
     try:
         import main as scanner
@@ -71,17 +72,52 @@ def _predictive_score(addr, analysis, ws, engine):
         buy_score = _num(out.get("buy_score"), out.get("confidence"))
         reason_text = str(out.get("paper_buy_block_reason") or "")
         reasons = [x.strip() for x in reason_text.split(";") if x.strip()]
+
+        # Remove only the obsolete legacy threshold veto. Other risk/predictive
+        # vetoes remain authoritative.
         cleaned = []
         for reason in reasons:
             if reason.startswith("BUY score ") and " < 65" in reason:
                 continue
+            if reason.startswith("BUY score ") and " < 60" in reason:
+                continue
             cleaned.append(reason)
-        if buy_score < threshold:
-            cleaned.append(f"BUY score {buy_score:.0f} < {threshold:.0f}")
-        blocked = bool(cleaned)
-        out["confidence"] = min(buy_score, threshold - 1.0) if blocked else buy_score
-        out["paper_buy_blocked"] = blocked
-        out["paper_buy_block_reason"] = "; ".join(cleaned)
+
+        # Borderline PAPER bridge: 58-59 can become a BUY only when the market
+        # setup is clearly strong and the empirical predictor confirms upside.
+        near_threshold = False
+        pred = out.get("paper_prediction") or {}
+        if 58.0 <= buy_score < threshold and isinstance(pred, dict) and pred.get("ready"):
+            p5 = _num(pred.get("p5"))
+            p10 = _num(pred.get("p10"))
+            mean_roi = _num(pred.get("mean_roi"))
+            m1 = _num(out.get("m1h"))
+            flow = _num(out.get("net_1h"))
+            m15 = _num(out.get("m15"))
+            trades = _num(out.get("trades_1h"))
+            tc = technical_confirmation(analysis)
+            near_threshold = (
+                p5 >= 0.62 and p10 >= 0.35 and mean_roi > 0
+                and m1 > 0 and flow > 0 and m15 >= -0.25 and trades >= 3
+                and tc["bull"] >= 2
+            )
+
+        if near_threshold:
+            # Treat the candidate as meeting the minimum entry threshold while
+            # retaining the actual composite score for diagnostics/display.
+            out["paper_near_threshold_buy"] = True
+            out["paper_near_threshold_reason"] = "58-59 bridge: strong prediction + momentum + flow + technical confirmation"
+            out["confidence"] = threshold
+            out["paper_buy_blocked"] = bool(cleaned)
+            out["paper_buy_block_reason"] = "; ".join(cleaned)
+        else:
+            if buy_score < threshold:
+                cleaned.append(f"BUY score {buy_score:.0f} < {threshold:.0f}")
+            blocked = bool(cleaned)
+            out["confidence"] = min(buy_score, threshold - 1.0) if blocked else buy_score
+            out["paper_buy_blocked"] = blocked
+            out["paper_buy_block_reason"] = "; ".join(cleaned)
+
         out["buy_threshold"] = threshold
         return out
     except Exception:
@@ -92,9 +128,6 @@ def patch_engine(engine):
     original_score = engine.score
 
     def score_v21(addr, analysis, ws):
-        # Both the actual paper BUY engine and TOP BUY CANDIDATES use the same
-        # predictive score. This prevents the dashboard from showing one score
-        # while paper trading uses a different legacy score.
         if _caller_is_top_buy() or _caller_is_paper_main():
             predictive = _predictive_score(addr, analysis, ws, engine)
             if predictive is not None:
@@ -102,7 +135,7 @@ def patch_engine(engine):
                 technical_available = bool(_tech(analysis))
                 threshold = _num(getattr(engine, "BUY_THRESHOLD", 60), 60)
                 score = _num(predictive.get("confidence"))
-                if technical_available and tc["bull"] < 2:
+                if technical_available and tc["bull"] < 2 and not predictive.get("paper_near_threshold_buy"):
                     score = min(score, threshold - 1.0)
                 out = dict(predictive)
                 out["confidence"] = int(round(score))
