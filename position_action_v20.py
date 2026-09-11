@@ -158,8 +158,6 @@ def patch_dashboard(dashboard):
             bearish = technical_sell_confirmed(analysis) if analysis else False
             exit_signal = evaluate_exit(pnl, score, m1h, flow1, bearish)
 
-            # Evidence flags make the recommendation less binary than the old
-            # score-only view. A missing market match is explicitly reported.
             data_missing = not bool(analysis)
             negative_evidence = sum((m1h < 0, flow1 < 0, bearish, score < 40))
             positive_evidence = sum((m1h > 0, flow1 > 0, score >= 70, not bearish))
@@ -204,8 +202,10 @@ def patch_dashboard(dashboard):
                 "flow_1h": flow1,
             })
 
-        order = {"EMERGENCY SELL": 0, "SELL / EXIT": 1, "PARTIAL SELL": 2, "HOLD / TRAIL": 3, "HOLD / WATCH": 4}
-        return sorted(rows, key=lambda x: (order.get(x.get("action"), 9), -dashboard.engine.num(x.get("score"))))
+        # Position Action is intentionally ordered by current absolute P/L,
+        # highest P/L first. Action severity remains visible in each row but
+        # does not change the ordering of the positions.
+        return sorted(rows, key=lambda x: (-dashboard.engine.num(x.get("pnl_sda")), str(x.get("symbol") or "").upper()))
 
     def real_trading_report():
         md = dashboard.load("market_data.json", {"tokens": {}})
