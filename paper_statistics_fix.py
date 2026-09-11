@@ -1,9 +1,41 @@
 """Canonical paper-trading statistics renderer.
 
-Keeps realized P/L strictly ledger-based and calculates open P/L on the same
-net-of-fee/slippage basis used by the paper close() execution.
+The Telegram UI can call either paper_report() or paper_statistics_report().
+Both are patched here so there is one source of truth.
 """
 import telegram_dashboard as dashboard
+
+
+def _resolve_analysis(tokens, position, meta, engine):
+    address = str(position.get("address") or "").strip().lower()
+    candidates = []
+    if address:
+        candidates.extend([address, address.lower(), address.upper()])
+    symbol = str(position.get("symbol") or "").strip().upper()
+    label = str(position.get("label") or "").strip().upper()
+    if symbol:
+        candidates.append(symbol)
+    if label:
+        candidates.extend([label, label.split("/", 1)[0]])
+
+    # Exact key first.
+    for key in candidates:
+        if key in tokens and isinstance(tokens[key], dict):
+            return dashboard._analysis(tokens[key] or {}), str(key)
+
+    wanted = symbol or label.split("/", 1)[0]
+    for key, td in tokens.items():
+        if not isinstance(td, dict):
+            continue
+        raw = dashboard._analysis(td)
+        td_symbol = str(raw.get("symbol") or td.get("symbol") or "").strip().upper()
+        try:
+            td_label = str(engine.lbl(key, meta) or "").strip().upper()
+        except Exception:
+            td_label = ""
+        if wanted and (td_symbol == wanted or td_label == label or td_label.split("/", 1)[0] == wanted):
+            return raw, str(key)
+    return {}, address
 
 
 def paper_statistics_report():
@@ -20,27 +52,35 @@ def paper_statistics_report():
     fee = float(getattr(engine, "FEE_RATE", 0.01))
     slippage = float(getattr(engine, "SLIPPAGE_RATE", 0.001))
 
-    # The ledger is the single source of truth for realized P/L. Never reuse a
-    # cached cumulative/realized field from an older state file.
+    # Realized P/L comes only from the closed-trade ledger.
     realized = sum(engine.num(x.get("closed_profit_sda")) for x in closed if isinstance(x, dict))
 
     open_pnl = 0.0
-    invested = 0.0
+    current_invested = 0.0
+    historical_deployed = 0.0
     open_rows = []
+
+    # Every closed fraction represents capital that was actually deployed.
+    for x in closed:
+        if not isinstance(x, dict):
+            continue
+        historical_deployed += engine.num(x.get("investment_sda")) * engine.num(x.get("closed_fraction", x.get("remaining_fraction", 1)))
+
     for x in positions.values():
         if not isinstance(x, dict):
             continue
         frac = engine.num(x.get("remaining_fraction", 1))
         inv = engine.num(x.get("investment_sda"))
         active_inv = inv * frac
-        invested += active_inv
-        entry = engine.num(x.get("entry_price"))
-        address = str(x.get("address", "")).lower()
-        an = dashboard._analysis(tokens.get(address, {}) or {})
-        cur = engine.num(an.get("price_in_sda"))
+        current_invested += active_inv
+        historical_deployed += active_inv
 
-        # Mirror engine_legacy.close(): sell at current*(1-slippage), then
-        # subtract the exit fee. Entry cost already includes the entry fee.
+        entry = engine.num(x.get("entry_price"))
+        analysis, resolved_key = _resolve_analysis(tokens, x, meta, engine)
+        cur = engine.num(analysis.get("price_in_sda"))
+
+        # Net mark-to-market, matching the paper execution economics:
+        # entry fee + exit slippage + exit fee are included.
         if entry > 0 and cur > 0 and active_inv > 0:
             qty = active_inv / entry
             exit_value = qty * cur * (1.0 - slippage) * (1.0 - fee)
@@ -48,12 +88,14 @@ def paper_statistics_report():
             pnl = exit_value - entry_cost
         else:
             pnl = 0.0
+
         open_pnl += pnl
-        label = x.get("label") or engine.lbl(address, meta)
-        open_rows.append((str(x.get("opened_at", "")), label, entry, cur, active_inv, pnl, engine.num(x.get("entry_confidence"))))
+        label = x.get("label") or engine.lbl(resolved_key, meta)
+        confidence = engine.num(x.get("entry_confidence"))
+        open_rows.append((str(x.get("opened_at", "")), label, entry, cur, active_inv, pnl, confidence))
 
     cumulative = realized + open_pnl
-    roi = cumulative / invested * 100.0 if invested else 0.0
+    roi = cumulative / historical_deployed * 100.0 if historical_deployed else 0.0
 
     def pnl_text(value, unit="SDA"):
         value = engine.num(value)
@@ -69,8 +111,9 @@ def paper_statistics_report():
         f"Realized P/L: {pnl_text(realized)}",
         f"Open P/L: {pnl_text(open_pnl)}",
         f"Cumulative P/L: {pnl_text(cumulative)}",
-        f"ROI on open capital: {pnl_text(roi, '%')}",
-        f"Open capital: {invested:.2f} SDA",
+        f"ROI: {pnl_text(roi, '%')}",
+        f"Current invested: {current_invested:.2f} SDA",
+        f"Total deployed: {historical_deployed:.2f} SDA",
         f"🧮 Check: {realized:+.2f} + {open_pnl:+.2f} = {cumulative:+.2f} SDA",
     ]
 
@@ -81,8 +124,9 @@ def paper_statistics_report():
         for _, label, entry, cur, inv, pnl, confidence in sorted(open_rows, reverse=True):
             icon = "🟢" if pnl > 0 else ("🔴" if pnl < 0 else "⚪")
             change = (cur / entry - 1) * 100 if entry > 0 and cur > 0 else 0.0
+            cur_txt = f"{cur:.6f}" if cur > 0 else "N/A"
             lines.append(f"{icon} {label}")
-            lines.append(f"   Entry {entry:.6f} → {cur:.6f} SDA")
+            lines.append(f"   Entry {entry:.6f} → {cur_txt} SDA")
             lines.append(f"   P/L {pnl:+.2f} SDA ({change:+.2f}%) • {inv:.0f} SDA • score {confidence:.0f}")
 
     lines += ["", "📜 HISTORY", "────────────────────────"]
@@ -102,7 +146,13 @@ def paper_statistics_report():
     return "\n".join(lines)
 
 
+# Compatibility: the existing Telegram callback historically called paper_report().
+def paper_report():
+    return paper_statistics_report()
+
+
 def patch_dashboard(dashboard_module=None):
     target = dashboard_module or dashboard
     target.paper_statistics_report = paper_statistics_report
+    target.paper_report = paper_report
     return target
