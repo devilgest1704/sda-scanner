@@ -91,6 +91,11 @@ position_action_v20.patch_dashboard(dashboard)
 real_bot_menu.patch_dashboard(dashboard)
 paper_statistics_fix.patch_dashboard(dashboard)
 
+# Make the canonical paper renderer explicit. This prevents a stale local
+# paper_report definition from ever being used by the webhook callback.
+dashboard.paper_statistics_report = paper_statistics_fix.paper_statistics_report
+dashboard.paper_report = paper_statistics_fix.paper_report
+
 # Add a manual hourly-report refresh button without changing the existing GUI.
 _original_menu_keyboard = dashboard.menu_keyboard
 
@@ -124,13 +129,13 @@ def _handle_update_with_actions(update, state=None):
             dashboard.answer_callback(cb.get("id"), "Unauthorized")
             return state
 
-        dashboard.answer_callback(cb.get("id"), "Hourly report spouštím…")
+        dashboard.answer_callback(cb.get("id"), "Refreshing…")
         ok, message = _dispatch_hourly_report()
         if ok:
             dashboard.edit(
                 chat_id,
                 message_id,
-                "🔄 HOURLY REPORT\n\nPožadavek byl odeslán.\nNový dashboard přijde za okamžik.",
+                "🔄 REFRESH\n\nSkenuji aktuální stav…\nPo dokončení přijde nový dashboard.",
                 dashboard.menu_keyboard(),
             )
         else:
@@ -181,12 +186,15 @@ def _cron_authorized(request: Request) -> bool:
     return secrets.compare_digest(received, f"Bearer {expected}")
 
 
-def _dispatch_workflow(workflow_file: str, run_reason: str) -> tuple[bool, str]:
+def _dispatch_workflow(workflow_file: str, run_reason: str, send_report: bool = False) -> tuple[bool, str]:
     token = os.environ.get("GITHUB_DISPATCH_TOKEN", "")
     if not token:
         return False, "missing GITHUB_DISPATCH_TOKEN"
     url = f"https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/{workflow_file}/dispatches"
-    payload = json.dumps({"ref": "main", "inputs": {"run_reason": run_reason}}).encode()
+    inputs = {"run_reason": run_reason}
+    if workflow_file == "scanner_v18.yml":
+        inputs["send_report"] = "true" if send_report else "false"
+    payload = json.dumps({"ref": "main", "inputs": inputs}).encode()
     req = urllib.request.Request(
         url,
         data=payload,
@@ -209,7 +217,7 @@ def _dispatch_workflow(workflow_file: str, run_reason: str) -> tuple[bool, str]:
 
 
 def _dispatch_hourly_report():
-    return _dispatch_workflow("scanner_v18.yml", "Telegram manual refresh")
+    return _dispatch_workflow("scanner_v18.yml", "Telegram manual refresh", send_report=True)
 
 
 @app.get("/api/watchdog", response_class=PlainTextResponse)
