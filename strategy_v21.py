@@ -1,6 +1,8 @@
 """V21 strategy overlay: shared technical confirmation and exit policy."""
 # Shared exit policy is consumed by both paper trading and Telegram Position Action.
 
+import inspect
+
 
 def _num(v, default=0.0):
     try:
@@ -41,16 +43,95 @@ def technical_confirmation(analysis):
     return {"bull": bull, "bear": bear, "evidence": evidence}
 
 
+def _caller_is_top_buy():
+    return any(frame.function == "_buy_gate_rows" for frame in inspect.stack())
+
+
+def _predictive_dashboard_score(addr, analysis, ws, engine):
+    """Use the same predictive BUY score as main.py for TOP BUY CANDIDATES.
+
+    The legacy predictive layer still contains the old 65-point compatibility
+    veto. This wrapper removes only that obsolete threshold veto; all other
+    predictive, momentum, flow, cooldown and liquidity vetoes remain active.
+    """
+    try:
+        import main as scanner
+        predictor = getattr(scanner, "_paper_score_predictive", None)
+        if predictor is None:
+            return None
+        base = predictor(addr, analysis, ws)
+        out = dict(base)
+        threshold = _num(getattr(engine, "BUY_THRESHOLD", 60), 60)
+        buy_score = _num(out.get("buy_score"), out.get("confidence"))
+        reason_text = str(out.get("paper_buy_block_reason") or "")
+        reasons = [x.strip() for x in reason_text.split(";") if x.strip()]
+        cleaned = []
+        for reason in reasons:
+            if reason.startswith("BUY score ") and " < 65" in reason:
+                continue
+            cleaned.append(reason)
+        blocked = bool(cleaned)
+        if buy_score < threshold:
+            blocked = True
+            cleaned.append(f"BUY score {buy_score:.0f} < {threshold:.0f}")
+        if blocked:
+            out["confidence"] = min(buy_score, threshold - 1.0)
+        else:
+            out["confidence"] = buy_score
+        out["paper_buy_blocked"] = blocked
+        out["paper_buy_block_reason"] = "; ".join(cleaned)
+        out["buy_threshold"] = threshold
+        return out
+    except Exception:
+        return None
+
+
 def patch_engine(engine):
     original_score = engine.score
+
     def score_v21(addr, analysis, ws):
-        base = original_score(addr, analysis, ws); tc = technical_confirmation(analysis); score = _num(base.get("confidence"))
-        adjustment = min(8, tc["bull"] * 1.5) - min(10, tc["bear"] * 1.8); score = max(0, min(100, score + adjustment)); technical_available = bool(_tech(analysis))
-        if technical_available and tc["bull"] < 2: score = min(score, 64)
-        out = dict(base); out["confidence"] = int(round(score)); out["base_confidence"] = int(round(_num(base.get("confidence")))); out["technical_bull"] = tc["bull"]
-        out["technical_bear"] = tc["bear"]; out["technical_evidence"] = tc["evidence"]; out["technical_buy_gate"] = (not technical_available) or tc["bull"] >= 2; out["technical_sell_confirmed"] = tc["bear"] >= 2
+        # TOP BUY CANDIDATES must use the exact predictive BUY score used by
+        # paper trading, not the older legacy score shown in the dashboard.
+        if _caller_is_top_buy():
+            predictive = _predictive_dashboard_score(addr, analysis, ws, engine)
+            if predictive is not None:
+                tc = technical_confirmation(analysis)
+                technical_available = bool(_tech(analysis))
+                threshold = _num(getattr(engine, "BUY_THRESHOLD", 60), 60)
+                score = _num(predictive.get("confidence"))
+                if technical_available and tc["bull"] < 2:
+                    score = min(score, threshold - 1.0)
+                out = dict(predictive)
+                out["confidence"] = int(round(score))
+                out["base_confidence"] = int(round(_num(predictive.get("buy_score", score))))
+                out["technical_bull"] = tc["bull"]
+                out["technical_bear"] = tc["bear"]
+                out["technical_evidence"] = tc["evidence"]
+                out["technical_buy_gate"] = (not technical_available) or tc["bull"] >= 2
+                out["technical_sell_confirmed"] = tc["bear"] >= 2
+                return out
+
+        base = original_score(addr, analysis, ws)
+        tc = technical_confirmation(analysis)
+        score = _num(base.get("confidence"))
+        adjustment = min(8, tc["bull"] * 1.5) - min(10, tc["bear"] * 1.8)
+        score = max(0, min(100, score + adjustment))
+        technical_available = bool(_tech(analysis))
+        threshold = _num(getattr(engine, "BUY_THRESHOLD", 60), 60)
+        if technical_available and tc["bull"] < 2:
+            score = min(score, threshold - 1.0)
+        out = dict(base)
+        out["confidence"] = int(round(score))
+        out["base_confidence"] = int(round(_num(base.get("confidence"))))
+        out["technical_bull"] = tc["bull"]
+        out["technical_bear"] = tc["bear"]
+        out["technical_evidence"] = tc["evidence"]
+        out["technical_buy_gate"] = (not technical_available) or tc["bull"] >= 2
+        out["technical_sell_confirmed"] = tc["bear"] >= 2
         return out
-    engine.score = score_v21; return engine
+
+    engine.score = score_v21
+    return engine
 
 
 def technical_sell_confirmed(analysis):
