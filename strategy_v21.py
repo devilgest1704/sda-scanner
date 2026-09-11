@@ -47,20 +47,26 @@ def _caller_is_top_buy():
     return any(frame.function == "_buy_gate_rows" for frame in inspect.stack())
 
 
-def _predictive_dashboard_score(addr, analysis, ws, engine):
-    """Use the same predictive BUY score as main.py for TOP BUY CANDIDATES.
+def _caller_is_paper_main():
+    return any(
+        frame.function == "main" and frame.frame.f_globals.get("__name__") == "engine_legacy"
+        for frame in inspect.stack()
+    )
 
-    The legacy predictive layer still contains the old 65-point compatibility
-    veto. This wrapper removes only that obsolete threshold veto; all other
-    predictive, momentum, flow, cooldown and liquidity vetoes remain active.
+
+def _predictive_score(addr, analysis, ws, engine):
+    """Return the canonical predictive BUY score from main.py.
+
+    main.py still contains a legacy 65-point compatibility veto. The canonical
+    threshold is now 60, so only that obsolete threshold reason is removed here;
+    momentum/flow/cooldown/prediction/liquidity vetoes remain untouched.
     """
     try:
         import main as scanner
         predictor = getattr(scanner, "_paper_score_predictive", None)
         if predictor is None:
             return None
-        base = predictor(addr, analysis, ws)
-        out = dict(base)
+        out = dict(predictor(addr, analysis, ws))
         threshold = _num(getattr(engine, "BUY_THRESHOLD", 60), 60)
         buy_score = _num(out.get("buy_score"), out.get("confidence"))
         reason_text = str(out.get("paper_buy_block_reason") or "")
@@ -70,14 +76,10 @@ def _predictive_dashboard_score(addr, analysis, ws, engine):
             if reason.startswith("BUY score ") and " < 65" in reason:
                 continue
             cleaned.append(reason)
-        blocked = bool(cleaned)
         if buy_score < threshold:
-            blocked = True
             cleaned.append(f"BUY score {buy_score:.0f} < {threshold:.0f}")
-        if blocked:
-            out["confidence"] = min(buy_score, threshold - 1.0)
-        else:
-            out["confidence"] = buy_score
+        blocked = bool(cleaned)
+        out["confidence"] = min(buy_score, threshold - 1.0) if blocked else buy_score
         out["paper_buy_blocked"] = blocked
         out["paper_buy_block_reason"] = "; ".join(cleaned)
         out["buy_threshold"] = threshold
@@ -90,10 +92,11 @@ def patch_engine(engine):
     original_score = engine.score
 
     def score_v21(addr, analysis, ws):
-        # TOP BUY CANDIDATES must use the exact predictive BUY score used by
-        # paper trading, not the older legacy score shown in the dashboard.
-        if _caller_is_top_buy():
-            predictive = _predictive_dashboard_score(addr, analysis, ws, engine)
+        # Both the actual paper BUY engine and TOP BUY CANDIDATES use the same
+        # predictive score. This prevents the dashboard from showing one score
+        # while paper trading uses a different legacy score.
+        if _caller_is_top_buy() or _caller_is_paper_main():
+            predictive = _predictive_score(addr, analysis, ws, engine)
             if predictive is not None:
                 tc = technical_confirmation(analysis)
                 technical_available = bool(_tech(analysis))
