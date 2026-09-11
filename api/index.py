@@ -103,15 +103,26 @@ def _handle_update_with_actions(update, state=None):
         if configured_chat and str(chat_id) != str(configured_chat):
             dashboard.answer_callback(cb.get("id"), "Unauthorized")
             return state
-        dashboard.answer_callback(cb.get("id"), "Refreshing…")
-        # REFRESH is deliberately local: rebuild the dashboard directly in the
-        # Vercel webhook. It must never dispatch any GitHub workflow.
-        dashboard.edit(
-            chat_id,
-            message_id,
-            dashboard.main_dashboard(),
-            dashboard.menu_keyboard(),
-        )
+
+        dashboard.answer_callback(cb.get("id"), "Scanner started…")
+        # REFRESH deliberately triggers the same manual scanner watchdog path
+        # used for a manual GitHub Actions run. It does NOT run the hourly
+        # Telegram report and does not dispatch Vercel.
+        ok, result = _dispatch_scanner(run_reason="Telegram Refresh")
+        if ok:
+            dashboard.edit(
+                chat_id,
+                message_id,
+                dashboard.main_dashboard() + "\n\n⏳ Scanner watchdog started manually…",
+                dashboard.menu_keyboard(),
+            )
+        else:
+            dashboard.edit(
+                chat_id,
+                message_id,
+                dashboard.main_dashboard() + f"\n\n❌ Scanner start failed: {result}",
+                dashboard.menu_keyboard(),
+            )
         return state
 
     if data != "PAPER":
@@ -143,14 +154,14 @@ def _cron_authorized(request: Request) -> bool:
     return bool(received) and secrets.compare_digest(received, f"Bearer {expected}")
 
 
-def _dispatch_scanner():
+def _dispatch_scanner(run_reason="Cron scanner"):
     token = os.environ.get("GITHUB_DISPATCH_TOKEN", "")
     if not token:
         return False, "missing GITHUB_DISPATCH_TOKEN"
     url = "https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/scanner_v18.yml/dispatches"
     payload = json.dumps({
         "ref": "main",
-        "inputs": {"run_reason": "Cron scanner"},
+        "inputs": {"run_reason": run_reason},
     }).encode()
     req = urllib.request.Request(
         url,
