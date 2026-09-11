@@ -8,6 +8,11 @@ on:
         required: false
         default: Manual test
         type: string
+      send_report:
+        description: After the scanner, dispatch SDA Telegram Hourly Report
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -26,6 +31,7 @@ jobs:
       REAL_TRADING_DRY_RUN: "true"
       REAL_TRADING_PRIVATE_KEY: ${{ secrets.REAL_TRADING_PRIVATE_KEY }}
       REAL_TRADING_WALLET_ADDRESS: ${{ secrets.REAL_TRADING_WALLET_ADDRESS }}
+      GITHUB_DISPATCH_TOKEN: ${{ secrets.GITHUB_DISPATCH_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,8 +101,6 @@ jobs:
           except Exception:
               backup = {}
 
-          # Explorer 429/5xx/timeout must never turn a known wallet into an
-          # empty wallet. Preserve the last valid holdings and mark them stale.
           failed = bool(current.get('error')) or not isinstance(current.get('holdings'), list)
           if failed and isinstance(backup, dict) and backup.get('holdings'):
               preserved = dict(backup)
@@ -125,7 +129,62 @@ jobs:
           git add main.py market_scanner.py liquidity_scanner.py state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json paper_buy_guard_state.json sync_real_wallet.py real_trading_config.py real_trader.py real_trader_dry_run.py real_trade_state.json
           if git diff --staged --quiet; then
             echo 'No scanner state changes to commit.'
-          else
-            git commit -m 'Update SDA scanner state'
-            git push origin main
+            exit 0
           fi
+          git commit -m 'Update SDA scanner state'
+
+          # Cron runs can overlap while the scanner is still working. Rebase the
+          # generated state commit onto the newest main and retry instead of
+          # failing simply because another scanner run pushed first.
+          for attempt in 1 2 3 4 5; do
+            if git push origin main; then
+              echo "State push succeeded on attempt $attempt."
+              break
+            fi
+            if [ "$attempt" = "5" ]; then
+              echo 'State push failed after 5 attempts.'
+              exit 1
+            fi
+            git fetch origin main
+            git rebase origin/main
+            sleep 2
+          done
+
+      - name: Dispatch SDA Telegram Hourly Report after requested refresh
+        if: ${{ inputs.send_report == true || inputs.send_report == 'true' }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          token = os.environ.get('GITHUB_DISPATCH_TOKEN', '')
+          if not token:
+              raise SystemExit('missing GITHUB_DISPATCH_TOKEN')
+
+          url = 'https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/telegram_hourly.yml/dispatches'
+          payload = json.dumps({
+              'ref': 'main',
+              'inputs': {'run_reason': 'Telegram Refresh'},
+          }).encode()
+          req = urllib.request.Request(
+              url,
+              data=payload,
+              headers={
+                  'Accept': 'application/vnd.github+json',
+                  'Authorization': f'Bearer {token}',
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'Content-Type': 'application/json',
+              },
+              method='POST',
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=20) as response:
+                  if response.status not in (200, 201, 204):
+                      raise SystemExit(f'GitHub dispatch HTTP {response.status}')
+                  print('SDA Telegram Hourly Report dispatched.')
+          except urllib.error.HTTPError as exc:
+              body = exc.read().decode('utf-8', errors='replace')
+              raise SystemExit(f'GitHub dispatch HTTP {exc.code}: {body[:500]}')
+          PY
