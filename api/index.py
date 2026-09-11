@@ -16,6 +16,7 @@ import telegram_dashboard_compact as compact
 import main as scanner
 import position_action_v20
 import real_bot_menu
+import paper_statistics_fix
 
 # market_data.json contains full transaction history and can become too large for
 # reliable remote dashboard reads. The scanner also publishes a compact snapshot
@@ -88,6 +89,7 @@ position_action_v20.patch_dashboard(dashboard)
 # Add the separate automated Real Trading Bot menu. The existing REAL menu is
 # deliberately preserved as the user's manual real-wallet dashboard.
 real_bot_menu.patch_dashboard(dashboard)
+paper_statistics_fix.patch_dashboard(dashboard)
 
 # Add a manual hourly-report refresh button without changing the existing GUI.
 _original_menu_keyboard = dashboard.menu_keyboard
