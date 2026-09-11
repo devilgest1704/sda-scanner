@@ -55,13 +55,7 @@ def _caller_is_paper_main():
 
 
 def _predictive_score(addr, analysis, ws, engine):
-    """Return the canonical predictive BUY score from main.py.
-
-    60 is the normal hard threshold. A narrow 58-59 bridge is allowed only for
-    genuinely strong setups; it exists so a rounded/borderline candidate does
-    not get discarded solely because the composite score is one or two points
-    below the normal threshold.
-    """
+    """Return the canonical predictive BUY score from main.py."""
     try:
         import main as scanner
         predictor = getattr(scanner, "_paper_score_predictive", None)
@@ -70,51 +64,20 @@ def _predictive_score(addr, analysis, ws, engine):
         out = dict(predictor(addr, analysis, ws))
         threshold = _num(getattr(engine, "BUY_THRESHOLD", 60), 60)
         buy_score = _num(out.get("buy_score"), out.get("confidence"))
-        reason_text = str(out.get("paper_buy_block_reason") or "")
-        reasons = [x.strip() for x in reason_text.split(";") if x.strip()]
+        tc = technical_confirmation(analysis)
+        bear = int(tc.get("bear") or 0)
 
-        # Remove legacy hard score vetoes. The canonical threshold is applied
-        # here so V21 and main.py cannot disagree about the entry threshold.
-        cleaned = []
-        for reason in reasons:
-            if reason.startswith("BUY score ") and (" < 65" in reason or " < 60" in reason):
-                continue
-            cleaned.append(reason)
-
-        # Borderline bridge: 58-59 can become a BUY only for an exceptionally
-        # strong momentum/flow setup with no bearish technical confirmation.
-        near_threshold = False
-        pred = out.get("paper_prediction") or {}
-        if 58.0 <= buy_score < threshold and isinstance(pred, dict) and pred.get("ready"):
-            p5 = _num(pred.get("p5"))
-            p10 = _num(pred.get("p10"))
-            mean_roi = _num(pred.get("mean_roi"))
-            m1 = _num(out.get("m1h"))
-            m4 = _num(out.get("m4h"))
-            flow = _num(out.get("net_1h"))
-            m15 = _num(out.get("m15"))
-            trades = _num(out.get("trades_1h"))
-            tc = technical_confirmation(analysis)
-            near_threshold = (
-                p5 >= 0.62 and p10 >= 0.35 and mean_roi > 0
-                and m1 >= 15.0 and m4 >= 10.0 and flow > 0
-                and m15 >= -0.25 and trades >= 3
-                and tc["bull"] >= 2 and tc["bear"] == 0
-            )
-
-        if near_threshold:
-            out["paper_near_threshold_buy"] = True
-            out["paper_near_threshold_reason"] = "58-59 bridge: exceptional momentum + flow + prediction + technical confirmation"
-            out["confidence"] = threshold
-            out["paper_buy_blocked"] = bool(cleaned)
-            out["paper_buy_block_reason"] = "; ".join(cleaned)
-        else:
-            if buy_score < threshold:
-                cleaned.append(f"BUY score {buy_score:.0f} < {threshold:.0f}")
-            blocked = bool(cleaned)
-            out["confidence"] = min(buy_score, threshold - 1.0) if blocked else buy_score
-            out["paper_buy_blocked"] = blocked
-            out["paper_buy_block_reason"] = "; ".join(cleaned)
+        # main.py is the canonical decision source.  Neutral technical data
+        # (0 bull / 0 bear) is not a veto; only actual bearish confirmation
+        # blocks a normal >=60 entry here.
+        if bear == 0 and buy_score >= threshold:
+            out["confidence"] = buy_score
+            out["paper_buy_blocked"] = False
+            out["paper_buy_block_reason"] = ""
+        elif bear > 0:
+            out["confidence"] = min(buy_score, threshold - 1.0)
+            out["paper_buy_blocked"] = True
+            out["paper_buy_block_reason"] = f"technical confirmation {tc['bull']} bull / {bear} bear"
 
         out["buy_threshold"] = threshold
         return out
@@ -130,18 +93,11 @@ def patch_engine(engine):
             predictive = _predictive_score(addr, analysis, ws, engine)
             if predictive is not None:
                 tc = technical_confirmation(analysis)
-                technical_available = bool(_tech(analysis))
-                threshold = _num(getattr(engine, "BUY_THRESHOLD", 60), 60)
-                score = _num(predictive.get("confidence"))
-                if technical_available and tc["bull"] < 2 and not predictive.get("paper_near_threshold_buy"):
-                    score = min(score, threshold - 1.0)
                 out = dict(predictive)
-                out["confidence"] = int(round(score))
-                out["base_confidence"] = int(round(_num(predictive.get("buy_score", score))))
                 out["technical_bull"] = tc["bull"]
                 out["technical_bear"] = tc["bear"]
                 out["technical_evidence"] = tc["evidence"]
-                out["technical_buy_gate"] = (not technical_available) or tc["bull"] >= 2
+                out["technical_buy_gate"] = tc["bear"] == 0
                 out["technical_sell_confirmed"] = tc["bear"] >= 2
                 return out
 
@@ -150,9 +106,8 @@ def patch_engine(engine):
         score = _num(base.get("confidence"))
         adjustment = min(8, tc["bull"] * 1.5) - min(10, tc["bear"] * 1.8)
         score = max(0, min(100, score + adjustment))
-        technical_available = bool(_tech(analysis))
         threshold = _num(getattr(engine, "BUY_THRESHOLD", 60), 60)
-        if technical_available and tc["bull"] < 2:
+        if tc["bear"] > 0:
             score = min(score, threshold - 1.0)
         out = dict(base)
         out["confidence"] = int(round(score))
@@ -160,7 +115,7 @@ def patch_engine(engine):
         out["technical_bull"] = tc["bull"]
         out["technical_bear"] = tc["bear"]
         out["technical_evidence"] = tc["evidence"]
-        out["technical_buy_gate"] = (not technical_available) or tc["bull"] >= 2
+        out["technical_buy_gate"] = tc["bear"] == 0
         out["technical_sell_confirmed"] = tc["bear"] >= 2
         return out
 
