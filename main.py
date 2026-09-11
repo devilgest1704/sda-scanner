@@ -12,9 +12,6 @@ _apply_buy_threshold(_legacy.engine)
 globals().update({k: v for k, v in _legacy.__dict__.items() if not k.startswith("__")})
 _apply_buy_threshold(engine)
 
-# ---------------------------------------------------------------------------
-# PAPER BUY QUALITY GUARD
-# ---------------------------------------------------------------------------
 PAPER_BUY_GUARD_FILE = "paper_buy_guard_state.json"
 PAPER_SL_COOLDOWN_SCANS = 4
 PAPER_MIN_1H_MOMENTUM = 0.0
@@ -129,12 +126,6 @@ def _paper_score_guarded(address, analysis, whale_state):
 
 _paper.score = _paper_score_guarded
 
-# ---------------------------------------------------------------------------
-# PREDICTIVE PAPER BUY + ADAPTIVE RISK
-# ---------------------------------------------------------------------------
-# This is intentionally an online empirical predictor, not a black-box model.
-# It learns only from completed paper trades and compares the current setup with
-# historical entry setups. It therefore improves as the paper ledger grows.
 PREDICTIVE_STATE_FILE = "paper_predictive_state.json"
 PREDICTIVE_MIN_SAMPLES = 8
 PREDICTIVE_K = 12
@@ -142,12 +133,10 @@ PREDICTIVE_MIN_P5 = 0.52
 PREDICTIVE_MIN_P10 = 0.28
 PREDICTIVE_MIN_EDGE = 0.10
 
-# Risk profiles. Wider stops are earned by stronger predicted upside, not applied
-# blindly to every trade.
 RISK_PROFILES = (
-    (0.60, 0.07, 0.08, 0.18, 0.90),  # strong pump candidate: SL 7%, TP1 8%, TP2 18%, trail 9%
-    (0.45, 0.06, 0.07, 0.14, 0.08),  # strong: SL 6%, TP1 7%, TP2 14%, trail 8%
-    (0.00, 0.05, 0.06, 0.11, 0.06),  # normal: SL 5%, TP1 6%, TP2 11%, trail 6%
+    (0.60, 0.07, 0.08, 0.18, 0.90),
+    (0.45, 0.06, 0.07, 0.14, 0.08),
+    (0.00, 0.05, 0.06, 0.11, 0.06),
 )
 
 
@@ -176,7 +165,6 @@ def _setup_vector(metrics):
 
 
 def _distance(a, b):
-    # Robust feature scales prevent SDA flow from dominating momentum.
     scales = [20.0, 10.0, 20.0, 20.0, 10.0, 10.0, 10.0, 10.0]
     return math.sqrt(sum(((x - y) / sc) ** 2 for x, y, sc in zip(a, b, scales)))
 
@@ -216,8 +204,6 @@ def _predict_setup(metrics):
 def _predictive_gate(s):
     pred = _predict_setup(s)
     if not pred["ready"]:
-        # Early in the experiment, retain the proven quality guard and don't
-        # pretend a tiny sample is predictive.
         return pred, True, "predictor warming up"
     p5 = pred["p5"]
     p10 = pred["p10"]
@@ -240,8 +226,6 @@ def _risk_profile(pred, score):
 
 
 def _adaptive_create(a, an, s, meta, liq, investment=None):
-    # Use the original engine's creation semantics first, then adapt only the
-    # paper risk envelope. Real wallet code never calls this function.
     z = _paper_original_create(a, an, s, meta, liq, investment) if '_paper_original_create' in globals() else _paper.create(a, an, s, meta, liq, investment)
     pred = s.get("paper_prediction") if isinstance(s, dict) else None
     profile = _risk_profile(pred or {}, float(s.get("confidence") or 0))
@@ -259,8 +243,6 @@ def _adaptive_create(a, an, s, meta, liq, investment=None):
         z["paper_prediction"] = pred or {}
     return z
 
-
-# Capture the original create before replacing it.
 _paper_original_create = _paper.create
 
 
@@ -282,21 +264,16 @@ def _metric_number(d, *keys):
 
 
 def _buy_score_v2(s, analysis, pred):
-    # 35% momentum/trend, 25% SDA/whale flow, 15% activity,
-    # 15% empirical prediction, 10% liquidity/price-impact risk.
     m15 = float(s.get("m15") or 0)
     m1 = float(s.get("m1h") or 0)
     m4 = float(s.get("m4h") or 0)
     momentum_score = _clamp100(50.0 + 3.0 * m1 + 1.5 * m4 + 1.5 * m15)
-
     flow = float(s.get("net_1h") or 0)
     whale = float(s.get("whale_net") or 0)
     whale15 = float(s.get("whale_15m_net") or 0)
     flow_score = _clamp100(50.0 + 35.0 * math.tanh(flow / 5000.0) + 15.0 * math.tanh((whale + 0.5 * whale15) / 5000.0))
-
     trades = float(s.get("trades_1h") or 0)
     activity_score = _clamp100(25.0 + 3.75 * min(trades, 20.0))
-
     if pred.get("ready"):
         p5 = float(pred.get("p5") or 0)
         p10 = float(pred.get("p10") or 0)
@@ -304,23 +281,14 @@ def _buy_score_v2(s, analysis, pred):
         prediction_score = _clamp100(100.0 * (0.55 * p5 + 0.45 * p10) + 2.0 * mean_roi)
     else:
         prediction_score = 50.0
-
     impact = _metric_number(analysis, "estimated_price_impact_pct", "price_impact_pct", "expected_impact_pct", "impact_pct")
     if impact <= 0:
         liq = _metric_number(analysis, "liquidity_sda", "liquidity", "liquidity_usd")
         liquidity_score = _clamp100(35.0 + min(65.0, math.log10(max(liq, 1.0)) * 18.0)) if liq > 0 else 55.0
     else:
         liquidity_score = _clamp100(100.0 - 12.5 * impact)
-
     final = (0.35 * momentum_score + 0.25 * flow_score + 0.15 * activity_score + 0.15 * prediction_score + 0.10 * liquidity_score)
-    return _clamp100(final), {
-        "momentum": round(momentum_score, 1),
-        "flow": round(flow_score, 1),
-        "activity": round(activity_score, 1),
-        "prediction": round(prediction_score, 1),
-        "liquidity": round(liquidity_score, 1),
-        "impact_pct": round(impact, 3) if impact > 0 else None,
-    }
+    return _clamp100(final), {"momentum": round(momentum_score, 1), "flow": round(flow_score, 1), "activity": round(activity_score, 1), "prediction": round(prediction_score, 1), "liquidity": round(liquidity_score, 1), "impact_pct": round(impact, 3) if impact > 0 else None}
 
 
 def _paper_score_predictive(address, analysis, whale_state):
@@ -335,7 +303,6 @@ def _paper_score_predictive(address, analysis, whale_state):
         s["paper_prediction"] = pred
         s["paper_prediction_text"] = text
         s["paper_prediction_blocked"] = not ok
-
         vetoes = []
         impact = components.get("impact_pct")
         if impact is not None and impact > 8.0:
@@ -348,19 +315,14 @@ def _paper_score_predictive(address, analysis, whale_state):
                 vetoes.append("prediction too weak")
             if 65.0 <= buy_score < 70.0 and not (p5 >= 0.62 and p10 >= 0.35 and mean_roi > 0):
                 vetoes.append("score 65-69 needs strong prediction")
-
-        if buy_score < 65.0:
-            vetoes.append(f"BUY score {buy_score:.0f} < 65")
+        # Canonical BUY threshold: 60. Scores below 60 are blocked unless the
+        # V21 strategy overlay explicitly promotes a 58-59 exceptional setup.
+        if buy_score < 60.0:
+            vetoes.append(f"BUY score {buy_score:.0f} < 60")
         if not ok:
             vetoes.append(text)
-
         s["buy_score"] = round(buy_score, 1)
-        s["buy_score_band"] = (
-            "OPATRNÝ BUY" if buy_score < 75 else
-            "BUY" if buy_score < 85 else
-            "STRONG BUY" if buy_score < 93 else
-            "PUMP BUY"
-        )
+        s["buy_score_band"] = ("OPATRNÝ BUY" if buy_score < 75 else "BUY" if buy_score < 85 else "STRONG BUY" if buy_score < 93 else "PUMP BUY")
         s["paper_buy_blocked"] = bool(vetoes)
         s["paper_buy_block_reason"] = "; ".join(vetoes)
         if vetoes:
@@ -376,7 +338,6 @@ engine.create = _adaptive_create
 
 
 def _adaptive_prepare_positions():
-    """Before each scan, ratchet stops upward after TP1 and enter trailing mode after TP2."""
     try:
         p = _paper.load(_paper.POSITIONS_FILE, {"positions": {}, "closed_trades": []})
         positions = p.get("positions", {}) if isinstance(p, dict) else {}
@@ -398,12 +359,9 @@ def _adaptive_prepare_positions():
             tp2 = float(pos.get("tp2") or entry * 1.10)
             if current >= tp1 and not pos.get("tp1_hit"):
                 pos["tp1_hit"] = True
-                # Lock a small gain rather than allowing a winner to become a loss.
                 pos["sl"] = max(float(pos.get("sl") or 0), entry * 1.005)
                 changed = True
             if current >= tp2:
-                # Do not hard-kill a pump at TP2. Move TP2 far away and let the
-                # ratcheting trailing stop perform the exit on a later scan.
                 trail = max(0.05, min(0.12, profile["trail"]))
                 new_sl = current * (1.0 - trail)
                 pos["sl"] = max(float(pos.get("sl") or 0), new_sl)
@@ -437,7 +395,6 @@ def _paper_main_guarded():
 _paper.main = _paper_main_guarded
 engine.main = _paper_main_guarded
 
-# Real-wallet statistics must keep the wallet-authoritative OPEN snapshot after rebuilding FIFO.
 _legacy_rebuild_fifo = _legacy._rebuild_fifo
 
 
