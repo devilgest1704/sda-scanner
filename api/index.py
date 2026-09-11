@@ -105,7 +105,7 @@ def _handle_update_with_actions(update, state=None):
             return state
         dashboard.answer_callback(cb.get("id"), "Refreshing…")
         # REFRESH is deliberately local: rebuild the dashboard directly in the
-        # Vercel webhook. It must never dispatch the GitHub scanner/hourly workflow.
+        # Vercel webhook. It must never dispatch any GitHub workflow.
         dashboard.edit(
             chat_id,
             message_id,
@@ -143,16 +143,26 @@ def _cron_authorized(request: Request) -> bool:
     return bool(received) and secrets.compare_digest(received, f"Bearer {expected}")
 
 
-def _dispatch_workflow(workflow_file: str, run_reason: str, send_report: bool = False) -> tuple[bool, str]:
+def _dispatch_scanner():
     token = os.environ.get("GITHUB_DISPATCH_TOKEN", "")
     if not token:
         return False, "missing GITHUB_DISPATCH_TOKEN"
-    url = f"https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/{workflow_file}/dispatches"
-    inputs = {"run_reason": run_reason}
-    if workflow_file == "scanner_v18.yml":
-        inputs["send_report"] = "true" if send_report else "false"
-    payload = json.dumps({"ref": "main", "inputs": inputs}).encode()
-    req = urllib.request.Request(url, data=payload, headers={"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json"}, method="POST")
+    url = "https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/scanner_v18.yml/dispatches"
+    payload = json.dumps({
+        "ref": "main",
+        "inputs": {"run_reason": "Cron scanner"},
+    }).encode()
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
             return response.status in (200, 201, 204), f"GitHub dispatch HTTP {response.status}"
@@ -163,19 +173,10 @@ def _dispatch_workflow(workflow_file: str, run_reason: str, send_report: bool = 
         return False, str(exc)
 
 
-def _dispatch_scanner():
-    return _dispatch_workflow("scanner_v18.yml", "Cron scanner", send_report=False)
-
-
-def _dispatch_hourly_report():
-    return _dispatch_workflow("scanner_v18.yml", "Telegram hourly report", send_report=True)
-
-
 @app.get("/api/hourly", response_class=PlainTextResponse)
 async def hourly(request: Request):
-    # Cronjob.org SDA-60 calls this endpoint every minute. It must NEVER send
-    # Telegram on every scan; reporting is handled once per hour by the hourly
-    # workflow. The endpoint only dispatches the scanner.
+    # Cronjob.org SDA-60 calls this endpoint every minute. It dispatches only
+    # the scanner. It never sends the Telegram hourly report.
     if not _cron_authorized(request):
         return PlainTextResponse("Unauthorized", status_code=401)
     ok, message = _dispatch_scanner()
