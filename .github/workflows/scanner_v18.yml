@@ -8,6 +8,11 @@ on:
         required: false
         default: Manual test
         type: string
+      send_report:
+        description: Send the fresh Telegram dashboard after the scan
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -88,6 +93,10 @@ jobs:
 
       - name: Read-only real wallet dry-run check
         run: python real_trader_dry_run.py
+
+      - name: Send fresh Telegram report after requested refresh
+        if: ${{ inputs.send_report == true }}
+        run: python send_telegram_hourly.py
 
       - name: Commit scanner state
         run: |
