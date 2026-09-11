@@ -1,4 +1,4 @@
-BUY_THRESHOLD = 65
+BUY_THRESHOLD = 60
 
 
 def apply(engine):
