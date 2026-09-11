@@ -48,10 +48,7 @@ def _caller_is_top_buy():
 
 
 def _caller_is_paper_main():
-    return any(
-        frame.function == "main" and frame.frame.f_globals.get("__name__") == "engine_legacy"
-        for frame in inspect.stack()
-    )
+    return any(frame.function == "main" and frame.frame.f_globals.get("__name__") == "engine_legacy" for frame in inspect.stack())
 
 
 def _predictive_score(addr, analysis, ws, engine):
@@ -66,18 +63,22 @@ def _predictive_score(addr, analysis, ws, engine):
         buy_score = _num(out.get("buy_score"), out.get("confidence"))
         tc = technical_confirmation(analysis)
         bear = int(tc.get("bear") or 0)
+        bull = int(tc.get("bull") or 0)
 
-        # main.py is the canonical decision source.  Neutral technical data
-        # (0 bull / 0 bear) is not a veto; only actual bearish confirmation
-        # blocks a normal >=60 entry here.
-        if bear == 0 and buy_score >= threshold:
-            out["confidence"] = buy_score
-            out["paper_buy_blocked"] = False
-            out["paper_buy_block_reason"] = ""
+        # Neutral technical data is not a veto and must not lose the technical
+        # adjustment twice.  main.py retains the original market confidence,
+        # which is the correct score to use when bull=0 and bear=0.
+        if bear == 0 and bull == 0:
+            raw = _num(out.get("paper_raw_confidence"), buy_score)
+            buy_score = max(buy_score, raw)
+            out["buy_score"] = buy_score
+            out["confidence"] = buy_score if buy_score >= threshold else min(buy_score, threshold - 1.0)
+            out["paper_buy_blocked"] = buy_score < threshold
+            out["paper_buy_block_reason"] = f"BUY score {buy_score:.0f} < {threshold:.0f}" if buy_score < threshold else ""
         elif bear > 0:
             out["confidence"] = min(buy_score, threshold - 1.0)
             out["paper_buy_blocked"] = True
-            out["paper_buy_block_reason"] = f"technical confirmation {tc['bull']} bull / {bear} bear"
+            out["paper_buy_block_reason"] = f"technical confirmation {bull} bull / {bear} bear"
 
         out["buy_threshold"] = threshold
         return out
