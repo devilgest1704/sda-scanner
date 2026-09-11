@@ -1,9 +1,10 @@
 name: SDA Telegram Hourly Report
 
 on:
-  schedule:
-    # Telegram report once per hour. Scanner itself runs independently every minute.
-    - cron: '7 * * * *'
+  # Intentionally no schedule here.
+  # The hourly report is triggered only by the external cronjob.org timer.
+  # Telegram REFRESH is handled directly by the Vercel webhook and does not
+  # dispatch this workflow.
   workflow_dispatch:
     inputs:
       run_reason:
