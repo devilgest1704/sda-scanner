@@ -146,9 +146,50 @@ def _buy_gate_rows(md, ws, meta, limit=5):
     return rows[:limit]
 
 
-def top_buy(md, ws, meta):
-    rows = _buy_gate_rows(md, ws, meta, 5)
+def _snapshot_id(md, ws, meta):
+    """Stable identifier for the exact market/whale/metadata snapshot."""
+    payload = {
+        "market_data": md,
+        "whale_data": ws,
+        "token_metadata": meta,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    import hashlib
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:10]
+
+
+def _snapshot_time(md, ws):
+    for data in (md, ws):
+        if isinstance(data, dict):
+            for key in ("updated_at", "timestamp", "generated_at", "fetched_at"):
+                value = data.get(key)
+                if value:
+                    return str(value)
+    return "N/A"
+
+
+def _load_dashboard_snapshot(limit=5):
+    """Load market state once and score each candidate once."""
+    md = load("market_data.json", {"tokens": {}})
+    ws = load("whale_data.json", {})
+    meta = load("token_metadata.json", {})
+    rows = _buy_gate_rows(md, ws, meta, limit)
+    return {
+        "md": md,
+        "ws": ws,
+        "meta": meta,
+        "rows": rows,
+        "id": _snapshot_id(md, ws, meta),
+        "time": _snapshot_time(md, ws),
+    }
+
+
+def top_buy(md, ws, meta, rows=None, snapshot=None):
+    rows = rows if rows is not None else _buy_gate_rows(md, ws, meta, 5)
     lines = ["🔥 TOP BUY CANDIDATES", ""]
+    if snapshot:
+        lines.append(f"Snapshot: {snapshot['id']} • {snapshot['time']}")
+        lines.append("")
     if not rows:
         lines.append("⚪ No active candidates (1H volume ≥ 250 SDA)")
         return "\n".join(lines)
@@ -176,7 +217,7 @@ def market_momentum_report():
 
 
 def _score_breakdown(addr, analysis, ws):
-    """Reproduce engine.score() exactly and expose every score component."""
+    """Legacy BASE diagnostic only; FINAL must always come from engine.score()."""
     m = analysis.get("momentum", {}) or {}
     f1 = engine.flow(analysis, "1h")
     f15 = engine.flow(analysis, "15m")
@@ -215,32 +256,95 @@ def _score_breakdown(addr, analysis, ws):
     return {"components": components, "final": final, "raw_sum": raw_sum, "m15": m15, "m1": m1, "m4": m4, "bv": bv, "sv": sv, "bc": bc, "sc": sc, "tv": tv, "tt": tt, "strength": strength, "tratio": tratio, "wn": wn, "wbc": wbc, "wsc": wsc, "wn15": wn15, "wn4": wn4, "n15": n15, "va": va_n, "wb": wb, "wsell": wsell, "avail": avail, "cap_applied": cap_applied}
 
 
-def market_debug_report():
-    md = load("market_data.json", {"tokens": {}}); ws = load("whale_data.json", {}); meta = load("token_metadata.json", {}); tokens = md.get("tokens", {}) or {}
-    loaded = len(tokens); active = 0; analyzed = 0; total_volume = 0.0; total_trades = 0
+def market_debug_report(snapshot=None):
+    if snapshot is None:
+        snapshot = _load_dashboard_snapshot(5)
+
+    md = snapshot["md"]
+    ws = snapshot["ws"]
+    meta = snapshot["meta"]
+    rows = snapshot["rows"]
+    tokens = md.get("tokens", {}) or {}
+
+    loaded = len(tokens)
+    active = 0
+    analyzed = 0
+    total_volume = 0.0
+    total_trades = 0
     for token_data in tokens.values():
         analysis = _analysis(token_data)
-        if analysis: analyzed += 1
-        flow = analysis.get("flow", {}).get("1h", {}) if isinstance(analysis, dict) else {}; vol = engine.num((flow or {}).get("total_volume")); trades = engine.num((flow or {}).get("buy_count")) + engine.num((flow or {}).get("sell_count")); total_volume += vol; total_trades += trades
-        if vol >= 250: active += 1
-    lines = ["🐞 MARKET DEBUG", "", f"Loaded tokens: {loaded}", f"Analyzed tokens: {analyzed}", f"Active tokens: {active}", f"1H volume total: {total_volume:.0f} SDA", f"1H trades total: {total_trades:.0f}", f"Whale data entries: {len(ws) if isinstance(ws, dict) else 0}", "", "Active rule: 1H volume ≥ 250 SDA", "Trades do not control activity filtering", "", "🎯 TOP BUY CANDIDATE DIAGNOSTICS", f"BUY threshold: {engine.BUY_THRESHOLD}/100", f"Min trades: {engine.MIN_TRADES_1H}", "────────────────────────"]
-    rows = _buy_gate_rows(md, ws, meta, 5)
-    if not rows: lines.append("⚪ No active TOP BUY candidates")
+        if analysis:
+            analyzed += 1
+        flow = analysis.get("flow", {}).get("1h", {}) if isinstance(analysis, dict) else {}
+        vol = engine.num((flow or {}).get("total_volume"))
+        trades = engine.num((flow or {}).get("buy_count")) + engine.num((flow or {}).get("sell_count"))
+        total_volume += vol
+        total_trades += trades
+        if vol >= 250:
+            active += 1
+
+    lines = [
+        "🐞 MARKET DEBUG",
+        "",
+        f"Snapshot: {snapshot['id']}",
+        f"State time: {snapshot['time']}",
+        f"Loaded tokens: {loaded}",
+        f"Analyzed tokens: {analyzed}",
+        f"Active tokens: {active}",
+        f"1H volume total: {total_volume:.0f} SDA",
+        f"1H trades total: {total_trades:.0f}",
+        f"Whale data entries: {len(ws) if isinstance(ws, dict) else 0}",
+        "",
+        "Active rule: 1H volume ≥ 250 SDA",
+        "Trades do not control activity filtering",
+        "",
+        "🎯 TOP BUY CANDIDATE DIAGNOSTICS",
+        f"BUY threshold: {engine.BUY_THRESHOLD}/100",
+        f"Min trades: {engine.MIN_TRADES_1H}",
+        "────────────────────────",
+    ]
+
+    if not rows:
+        lines.append("⚪ No active TOP BUY candidates")
     else:
         for i, row in enumerate(rows, 1):
-            bd = _score_breakdown(row["address"], row["analysis"], ws); tc = technical_confirmation(row["analysis"]); tech_available = bool(row["analysis"].get("technical")); bull = tc["bull"]; bear = tc["bear"]; adj = min(8, bull * 1.5) - min(10, bear * 1.8); v21_score = engine.num(row["score"]); gate = "PASS" if (not tech_available or bull >= 2) else "BLOCK"; blocked = [x for x in row["reasons"] if x != "ALL BUY GATES PASS"]; status = "🔴 BLOCKED" if blocked else "🟢 BUY READY"
+            bd = _score_breakdown(row["address"], row["analysis"], ws)
+            tc = technical_confirmation(row["analysis"])
+            tech_available = bool(row["analysis"].get("technical"))
+            bull = tc["bull"]
+            bear = tc["bear"]
+            adj = min(8, bull * 1.5) - min(10, bear * 1.8)
+            v21_score = engine.num(row["score"])
+            blocked = [x for x in row["reasons"] if x != "ALL BUY GATES PASS"]
+            status = "🔴 BLOCKED" if blocked else "🟢 BUY READY"
+
             lines.append(f"{i}. {status} {row['label']} — {v21_score:.0f}/100")
-            lines.append(f"   BASE: {bd['final']:.0f}/100 (raw {bd['raw_sum']:+.1f})")
+            lines.append(f"   BASE diagnostic: {bd['final']:.0f}/100 (raw {bd['raw_sum']:+.1f})")
             for name, value in bd["components"]:
                 lines.append(f"      {name}: {value:+.2f}")
-            lines.append(f"   INPUT: 1H {bd['m1']:+.2f}% | 4H {bd['m4']:+.2f}% | 15M {bd['m15']:+.2f}% | volume {bd['tv']:.0f} | trades {bd['tt']:.0f}")
-            lines.append(f"   B/S: volume {bd['bv']:.0f}/{bd['sv']:.0f} ({bd['strength']:.2f}x) | trades {bd['bc']:.0f}/{bd['sc']:.0f} ({bd['tratio']:.2f}x)")
-            lines.append(f"   WHALE: 1H {bd['wn']:+.0f} | buys {bd['wbc']:.0f} | sells {bd['wsc']:.0f} | 15M {bd['wn15']:+.0f} | 4H {bd['wn4']:+.0f}")
-            va_text = "N/A" if bd["va"] is None else f"{bd['va']:+.1f}%"; lines.append(f"   FLOW: 15M {bd['n15']:+.0f} | volume accel {va_text}")
-            lines.append(f"   V21: bull {bull} | bear {bear} | adjustment {adj:+.1f} | BUY gate {gate}")
-            if tc["evidence"]: lines.append(f"      Evidence: {', '.join(tc['evidence'])}")
-            lines.append(f"   FINAL: {v21_score:.0f}/100")
+            lines.append(
+                f"   INPUT: 1H {bd['m1']:+.2f}% | 4H {bd['m4']:+.2f}% | "
+                f"15M {bd['m15']:+.2f}% | volume {bd['tv']:.0f} | trades {bd['tt']:.0f}"
+            )
+            lines.append(
+                f"   B/S: volume {bd['bv']:.0f}/{bd['sv']:.0f} ({bd['strength']:.2f}x) | "
+                f"trades {bd['bc']:.0f}/{bd['sc']:.0f} ({bd['tratio']:.2f}x)"
+            )
+            lines.append(
+                f"   WHALE: 1H {bd['wn']:+.0f} | buys {bd['wbc']:.0f} | "
+                f"sells {bd['wsc']:.0f} | 15M {bd['wn15']:+.0f} | 4H {bd['wn4']:+.0f}"
+            )
+            va_text = "N/A" if bd["va"] is None else f"{bd['va']:+.1f}%"
+            lines.append(f"   FLOW: 15M {bd['n15']:+.0f} | volume accel {va_text}")
+            lines.append(
+                f"   V21 technical diagnostic: bull {bull} | bear {bear} | "
+                f"adjustment {adj:+.1f} | technical data {'YES' if tech_available else 'N/A'}"
+            )
+            if tc["evidence"]:
+                lines.append(f"      Evidence: {', '.join(tc['evidence'])}")
+            lines.append(f"   FINAL: {v21_score:.0f}/100  ← canonical engine.score()")
             lines.append(f"   Reason: {'; '.join(row['reasons'])}")
+
     return "\n".join(lines)
 
 
@@ -314,10 +418,13 @@ def _merge_wallet_portfolio(wallet, portfolio, md, ws, meta):
 
 
 def main_dashboard():
-    md = load("market_data.json", {"tokens": {}}); ws = load("whale_data.json", {}); meta = load("token_metadata.json", {}); wallet = load("wallet_data.json", {}); portfolio = load("portfolio_data.json", {}); recommendations = _position_recommendations(md, ws, meta, portfolio); position_lines = []
+    snapshot = _load_dashboard_snapshot(5)
+    md = snapshot["md"]; ws = snapshot["ws"]; meta = snapshot["meta"]
+    wallet = load("wallet_data.json", {}); portfolio = load("portfolio_data.json", {})
+    recommendations = _position_recommendations(md, ws, meta, portfolio); position_lines = []
     for x in recommendations:
         icon = "🔴" if x["action"] == "SELL / EXIT" else "🟠" if x["action"] == "PARTIAL SELL" else "🟡"; pnl = "UNKNOWN" if x["pnl_sda"] is None else f"{engine.num(x['pnl_sda']):+.2f} SDA"; score_txt = "N/A" if x["score"] is None else f"{x['score']:.0f}/100"; position_lines.append(f"{icon} {x['symbol']}: {x['action']}  •  P/L {pnl}  •  score {score_txt}")
-    position_action = "\n".join(position_lines) if position_lines else "⚪ No portfolio positions"; return "📈 SDA MARKET SCANNER\n\n" + top_buy(md, ws, meta) + "\n\n" + _merge_wallet_portfolio(wallet, portfolio, md, ws, meta) + "\n\n🧭 POSITION ACTION\n" + position_action + "\n\n────────────────────────\n📂 DETAIL MENU"
+    position_action = "\n".join(position_lines) if position_lines else "⚪ No portfolio positions"; return "📈 SDA MARKET SCANNER\n\n" + top_buy(md, ws, meta, rows=snapshot["rows"], snapshot=snapshot) + "\n\n" + _merge_wallet_portfolio(wallet, portfolio, md, ws, meta) + "\n\n🧭 POSITION ACTION\n" + position_action + "\n\n────────────────────────\n📂 DETAIL MENU"
 
 
 def technical_report():
