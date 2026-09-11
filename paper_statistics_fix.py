@@ -38,37 +38,33 @@ def _resolve_analysis(tokens, position, meta, engine):
 
 
 def _closed_profit(x, engine):
-    """Canonical realized P/L for one closed fraction.
+    """Return the executed realized P/L recorded by the paper engine.
 
-    Recalculate from the executed closed value and allocated entry capital when
-    possible. This prevents an old/stale `closed_profit_sda` field from keeping
-    the Telegram statistics wrong after the ledger format changes.
+    `closed_profit_sda` is the canonical execution result. Do not reconstruct
+    it from `closed_value_sda`: the latter is an output value and rebuilding
+    the result here can apply entry fees a second time or otherwise diverge
+    from the engine's actual close() accounting.
     """
     if not isinstance(x, dict):
         return 0.0
-    value = x.get("closed_value_sda")
-    investment = x.get("investment_sda")
-    fraction = x.get("closed_fraction", x.get("remaining_fraction", 1))
-    if value is not None and investment is not None:
-        try:
-            allocated = engine.num(investment) * engine.num(fraction, 1.0)
-            fee = float(getattr(engine, "FEE_RATE", 0.01))
-            return engine.num(value) - allocated * (1.0 + fee)
-        except Exception:
-            pass
-    return engine.num(x.get("closed_profit_sda"))
+    if x.get("closed_profit_sda") is not None:
+        return engine.num(x.get("closed_profit_sda"))
+    return 0.0
 
 
 def _closed_roi(x, engine):
+    """Return the ROI recorded by the paper engine for the closed fraction."""
     if not isinstance(x, dict):
         return 0.0
+    if x.get("closed_roi_pct") is not None:
+        return engine.num(x.get("closed_roi_pct"))
+
+    # Legacy fallback only for records without the canonical ROI field.
     profit = _closed_profit(x, engine)
     investment = engine.num(x.get("investment_sda"))
     fraction = engine.num(x.get("closed_fraction", x.get("remaining_fraction", 1)), 1.0)
     allocated = investment * fraction
-    fee = float(getattr(engine, "FEE_RATE", 0.01))
-    cost = allocated * (1.0 + fee)
-    return profit / cost * 100.0 if cost else 0.0
+    return profit / allocated * 100.0 if allocated else 0.0
 
 
 def paper_statistics_report():
@@ -85,8 +81,7 @@ def paper_statistics_report():
     fee = float(getattr(engine, "FEE_RATE", 0.01))
     slippage = float(getattr(engine, "SLIPPAGE_RATE", 0.001))
 
-    # Realized P/L is recalculated from each executed closed value rather than
-    # trusting potentially stale legacy closed_profit_sda fields.
+    # Canonical realized P/L: exactly what the paper engine recorded at close.
     realized = sum(_closed_profit(x, engine) for x in closed)
 
     open_pnl = 0.0
@@ -94,6 +89,7 @@ def paper_statistics_report():
     historical_deployed = 0.0
     open_rows = []
 
+    # Each closed fraction represents capital that was actually deployed.
     for x in closed:
         if not isinstance(x, dict):
             continue
@@ -112,6 +108,7 @@ def paper_statistics_report():
         analysis, resolved_key = _resolve_analysis(tokens, x, meta, engine)
         cur = engine.num(analysis.get("price_in_sda"))
 
+        # Mark-to-market using the same net exit economics as paper execution.
         if entry > 0 and cur > 0 and active_inv > 0:
             qty = active_inv / entry
             exit_value = qty * cur * (1.0 - slippage) * (1.0 - fee)
