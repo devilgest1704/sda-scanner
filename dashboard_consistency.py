@@ -140,16 +140,47 @@ def patch_dashboard(dashboard):
         return "\n".join(lines)
 
     def _main_dashboard_without_wallet(*args, **kwargs):
-        """Main dashboard stays focused; full token list belongs in Real Wallet."""
+        """Keep dashboard focused, but retain the wallet valuation/P&L summary."""
         text = original_main_dashboard(*args, **kwargs)
-        if not isinstance(text, str) or "👛 REAL WALLET" not in text: return text
-        lines = text.splitlines(); out = []; skipping = False
+        if not isinstance(text, str) or "👛 REAL WALLET" not in text:
+            return text
+        lines = text.splitlines()
+        out = []
+        skipping = False
+        wallet_summary = []
         for line in lines:
             if line.startswith("👛 REAL WALLET"):
-                skipping = True; continue
+                skipping = True
+                continue
+            if skipping and line.startswith("📊 Known token value:"):
+                wallet_summary = ["────────────────────────", line]
+                continue
+            if skipping and line.startswith("💼 TOTAL WALLET VALUE:"):
+                wallet_summary.append(line)
+                continue
+            if skipping and line.startswith("Source:"):
+                wallet_summary.append(line)
+                continue
+            if skipping and line.startswith("💹 P/L SUMMARY"):
+                wallet_summary.append(line)
+                continue
+            if skipping and (line.startswith("🟢 Current open P/L") or line.startswith("🔴 Current open P/L") or line.startswith("⚪ Current open P/L")):
+                wallet_summary.append(line)
+                continue
+            if skipping and (line.startswith("🟢 Historical realized P/L") or line.startswith("🔴 Historical realized P/L") or line.startswith("⚪ Historical realized P/L")):
+                wallet_summary.append(line)
+                continue
+            if skipping and (line.startswith("🟢 Total P/L") or line.startswith("🔴 Total P/L") or line.startswith("⚪ Total P/L")):
+                wallet_summary.append(line)
+                continue
             if skipping and line.startswith("🧭 POSITION ACTION"):
-                skipping = False; out.append(line); continue
-            if not skipping: out.append(line)
+                skipping = False
+                if wallet_summary:
+                    out.extend(["", *wallet_summary])
+                out.append(line)
+                continue
+            if not skipping:
+                out.append(line)
         return "\n".join(out)
 
     dashboard._position_recommendations = _canonical_recommendations
