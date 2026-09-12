@@ -76,17 +76,23 @@ paper_statistics_fix.patch_dashboard(dashboard)
 dashboard.paper_statistics_report = paper_statistics_fix.paper_statistics_report
 dashboard.paper_report = paper_statistics_fix.paper_report
 
-# Final consistency layer: the main dashboard, Real Wallet and Position Action
-# must all use the same wallet-synced positions and the same P/L ordering.
 dashboard_consistency.patch_dashboard(dashboard)
 
 _original_menu_keyboard = dashboard.menu_keyboard
 
 def _menu_keyboard_with_refresh():
     keyboard = _original_menu_keyboard()
-    rows = keyboard.get("inline_keyboard", [])
+    rows = []
+    for row in keyboard.get("inline_keyboard", []):
+        if not row:
+            continue
+        callback = row[0].get("callback_data")
+        if callback in ("TECH", "MOMENTUM"):
+            continue
+        rows.append(row)
     if not any(row and row[0].get("callback_data") == "REFRESH" for row in rows):
         rows.append([{"text": "🔄 Refresh", "callback_data": "REFRESH"}])
+    keyboard["inline_keyboard"] = rows
     return keyboard
 
 dashboard.menu_keyboard = _menu_keyboard_with_refresh
@@ -107,7 +113,6 @@ def _handle_update_with_actions(update, state=None):
         if configured_chat and str(chat_id) != str(configured_chat):
             dashboard.answer_callback(cb.get("id"), "Unauthorized")
             return state
-
         dashboard.answer_callback(cb.get("id"), "Report started…")
         ok, result = _dispatch_hourly_report(run_reason="Telegram Refresh")
         if ok:
@@ -126,9 +131,15 @@ def _handle_update_with_actions(update, state=None):
         if configured_chat and str(chat_id) != str(configured_chat):
             dashboard.answer_callback(cb.get("id"), "Unauthorized")
             return state
-        dashboard.answer_callback(cb.get("id"))
-        snapshot = dashboard._load_dashboard_snapshot(5)
-        dashboard.edit(chat_id, message_id, dashboard.market_debug_report(snapshot), dashboard.back_keyboard())
+        dashboard.answer_callback(cb.get("id"), "Loading Market Debug…")
+        try:
+            snapshot = dashboard._load_dashboard_snapshot(5)
+            text = dashboard.market_debug_report(snapshot)
+        except Exception as exc:
+            text = f"🐞 MARKET DEBUG\n\n❌ Debug generation failed: {type(exc).__name__}: {exc}"
+        if len(text) > 3900:
+            text = text[:3900].rstrip() + "\n\n… output truncated"
+        dashboard.edit(chat_id, message_id, text, dashboard.back_keyboard())
         return state
 
     if data != "PAPER":
