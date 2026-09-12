@@ -4,6 +4,7 @@ import main as scanner
 import position_action_v20
 import real_bot_menu
 import paper_statistics_fix
+import dashboard_consistency
 
 
 _original_dashboard_load = dashboard.load
@@ -54,6 +55,7 @@ def main():
     position_action_v20.patch_dashboard(dashboard)
     real_bot_menu.patch_dashboard(dashboard)
     paper_statistics_fix.patch_dashboard(dashboard)
+    dashboard_consistency.patch_dashboard(dashboard)
 
     # Keep the already-patched menu (including REAL and REAL_BOT) and add Refresh.
     _patched_menu_keyboard = dashboard.menu_keyboard
@@ -106,5 +108,4 @@ def main():
     dashboard.send(dashboard.main_dashboard(), dashboard.menu_keyboard())
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
