@@ -15,6 +15,7 @@ import main as scanner
 import position_action_v20
 import real_bot_menu
 import paper_statistics_fix
+import dashboard_consistency
 
 _original_dashboard_load = dashboard.load
 
@@ -65,7 +66,7 @@ def _position_recommendations_v19(md, ws, meta, portfolio):
         if pf.get("cost_sda") is not None and pf.get("unrealized_pnl_pct") is not None:
             if pnl <= -15 and score < 35 and m1h < 0 and flow1 < 0:
                 row["action"] = "EMERGENCY SELL"
-    return sorted(rows, key=lambda x: ({"EMERGENCY SELL": -1, "SELL / EXIT": 0, "PARTIAL SELL": 1, "HOLD / TRAIL": 2, "HOLD / WATCH": 3, "HOLD / NO COST BASIS": 4}.get(x.get("action"), 9), -dashboard.engine.num(x.get("score"))))
+    return sorted(rows, key=lambda x: (x.get("pnl_sda") is None, -dashboard.engine.num(x.get("pnl_sda")), str(x.get("symbol") or "").upper()))
 
 dashboard._position_recommendations = _position_recommendations_v19
 
@@ -74,6 +75,10 @@ real_bot_menu.patch_dashboard(dashboard)
 paper_statistics_fix.patch_dashboard(dashboard)
 dashboard.paper_statistics_report = paper_statistics_fix.paper_statistics_report
 dashboard.paper_report = paper_statistics_fix.paper_report
+
+# Final consistency layer: the main dashboard, Real Wallet and Position Action
+# must all use the same wallet-synced positions and the same P/L ordering.
+dashboard_consistency.patch_dashboard(dashboard)
 
 _original_menu_keyboard = dashboard.menu_keyboard
 
@@ -111,9 +116,6 @@ def _handle_update_with_actions(update, state=None):
             dashboard.edit(chat_id, message_id, dashboard.main_dashboard() + f"\n\n❌ Hourly Report start failed: {result}", dashboard.menu_keyboard())
         return state
 
-    # Always build DEBUG from one fresh remote snapshot. This prevents the
-    # DEBUG screen from showing an older scanner state than TOP BUY after a
-    # refresh/report run.
     if data == "DEBUG":
         state = state if state is not None else {"offset": 0}
         state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
