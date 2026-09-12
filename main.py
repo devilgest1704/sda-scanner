@@ -6,19 +6,13 @@ exposes one canonical Paper decision helper for dashboard diagnostics.
 """
 
 import main_core as _core
-
 for _name, _value in _core.__dict__.items():
     if not _name.startswith("__"):
         globals()[_name] = _value
 
 
 def _strong_flow_bridge(s, analysis, pred=None):
-    """Allow only exceptional borderline setups while predictor is warming up.
-
-    A ready predictor is authoritative. This prevents the old bridge from
-    promoting a 58-59 setup after the predictive layer had already produced a
-    negative expectation.
-    """
+    """Allow only exceptional borderline setups while predictor is warming up."""
     try:
         if isinstance(pred, dict) and pred.get("ready"):
             return False
@@ -56,7 +50,11 @@ def _strong_flow_bridge(s, analysis, pred=None):
 
 
 def _v21_buy_decision(buy_score, s, analysis, pred):
-    """Single BUY decision shared by the paper engine and V21 diagnostics."""
+    """Single BUY decision: final score + technical confirmation.
+
+    Predictor quality is already represented by the prediction component of
+    the V2 score. It is intentionally NOT a second hard veto here.
+    """
     threshold = float(getattr(_paper, "BUY_THRESHOLD", 60) or 60)
     score = float(buy_score or 0)
     try:
@@ -95,22 +93,58 @@ _original_paper_score_predictive = _core._paper_score_predictive
 
 
 def _paper_score_predictive(address, analysis, whale_state):
+    """Canonical Paper scorer.
+
+    The V2 score already contains a 15% prediction component. A weak predictor
+    therefore lowers the score but must not create a separate hard BUY veto.
+    Other safety/technical gates remain authoritative.
+    """
     s = _original_paper_score_predictive(address, analysis, whale_state)
     if not isinstance(s, dict):
         return s
+
+    s = dict(s)
     pred = s.get("paper_prediction") if isinstance(s.get("paper_prediction"), dict) else None
-    if _strong_flow_bridge(s, analysis, pred):
-        threshold = float(getattr(_paper, "BUY_THRESHOLD", 60) or 60)
-        s = dict(s)
-        promoted = max(float(s.get("buy_score") or s.get("market_score") or 0), threshold + 1.0)
-        s["buy_score"] = round(promoted, 1)
-        s["market_score"] = round(promoted, 1)
-        s["confidence"] = promoted
-        s["paper_buy_blocked"] = False
-        s["paper_buy_block_reason"] = "V21 exceptional 58-59 flow bridge (predictor warming up)"
-        s["paper_prediction_blocked"] = False
-        s["paper_near_threshold_buy"] = True
-        s["paper_near_threshold_reason"] = "V21 exceptional 58-59 flow bridge (predictor warming up)"
+
+    # The legacy predictive layer adds an additional hard veto on top of the
+    # V2 prediction score. Remove ONLY predictor-only veto text here. This
+    # keeps prediction visible as a component while making the final BUY
+    # decision depend on the final score and the remaining safety gates.
+    if s.get("paper_prediction_blocked"):
+        reason = str(s.get("paper_buy_block_reason") or "")
+        parts = [p.strip() for p in reason.split(";") if p.strip()]
+        predictor_only = []
+        remaining = []
+        for part in parts:
+            low = part.lower()
+            if (
+                "prediction too weak" in low
+                or "p(+5)" in low
+                or "score 65-69 needs strong prediction" in low
+            ):
+                predictor_only.append(part)
+            else:
+                remaining.append(part)
+
+        if predictor_only:
+            s["paper_prediction_veto_reason"] = "; ".join(predictor_only)
+            s["paper_buy_block_reason_before_predictor"] = reason
+            s["paper_buy_block_reason"] = "; ".join(remaining)
+            s["paper_buy_blocked"] = bool(remaining)
+            if not remaining:
+                final_score = float(s.get("buy_score") or s.get("market_score") or s.get("confidence") or 0)
+                s["confidence"] = final_score
+                s["paper_buy_block_reason"] = ""
+
+    # Preserve the factual predictor status for Market Debug without using it
+    # as a second BUY gate.
+    if pred is not None:
+        p5 = float(pred.get("p5") or 0)
+        p10 = float(pred.get("p10") or 0)
+        mean_roi = float(pred.get("mean_roi") or 0)
+        s["paper_prediction_role"] = "score_component"
+        s["paper_prediction_summary"] = f"P(+5) {p5:.0%} • P(+10) {p10:.0%} • mean {mean_roi:+.1f}%"
+
     return s
 
 
@@ -120,12 +154,7 @@ _paper_score_predictive = _paper_score_predictive
 
 
 def paper_decision(address, analysis, whale_state):
-    """Return the exact canonical Paper BUY decision used by the scanner.
-
-    Dashboard/debug code should call this helper instead of engine.score().
-    It intentionally returns the complete scorer dictionary so prediction,
-    vetoes, technical confirmation and the final score remain visible.
-    """
+    """Return the exact canonical Paper BUY decision used by the scanner."""
     s = _paper_score_predictive(address, analysis, whale_state)
     if not isinstance(s, dict):
         return {"score": None, "blocked": True, "reason": "paper scorer returned no data"}
@@ -135,6 +164,8 @@ def paper_decision(address, analysis, whale_state):
         "reason": str(s.get("paper_buy_block_reason") or ""),
         "prediction": s.get("paper_prediction") or {},
         "prediction_blocked": bool(s.get("paper_prediction_blocked")),
+        "prediction_role": str(s.get("paper_prediction_role") or "score_component"),
+        "prediction_veto_reason": str(s.get("paper_prediction_veto_reason") or ""),
         "prediction_text": str(s.get("paper_prediction_text") or ""),
         "technical_bull": int(s.get("technical_bull") or 0),
         "technical_bear": int(s.get("technical_bear") or 0),
