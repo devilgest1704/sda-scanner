@@ -88,6 +88,81 @@ def _v21_buy_decision(buy_score, s, analysis, pred):
     }
 
 
+# Calibrate the predictor before the core predictive scorer is captured.
+# The old formula mapped probabilities such as P(+5)=8%, P(+10)=8% and
+# mean ROI=-3.3% to roughly 1-2/100, effectively turning a 15% score
+# component into a near-total BUY suppression. Keep the predictor meaningful,
+# but center it around a neutral 50 and let the final score decide.
+def _buy_score_v2_calibrated(s, analysis, pred):
+    m15 = float(s.get("m15") or 0)
+    m1 = float(s.get("m1h") or 0)
+    m4 = float(s.get("m4h") or 0)
+    momentum_score = _clamp100(50.0 + 3.0 * m1 + 1.5 * m4 + 1.5 * m15)
+
+    flow = float(s.get("net_1h") or 0)
+    whale = float(s.get("whale_net") or 0)
+    whale15 = float(s.get("whale_15m_net") or 0)
+    flow_score = _clamp100(
+        50.0
+        + 35.0 * math.tanh(flow / 5000.0)
+        + 15.0 * math.tanh((whale + 0.5 * whale15) / 5000.0)
+    )
+
+    trades = float(s.get("trades_1h") or 0)
+    activity_score = _clamp100(25.0 + 3.75 * min(trades, 20.0))
+
+    if isinstance(pred, dict) and pred.get("ready"):
+        p5 = float(pred.get("p5") or 0)
+        p10 = float(pred.get("p10") or 0)
+        mean_roi = float(pred.get("mean_roi") or 0)
+        # Neutral predictor = 50. Poor historical results reduce the score,
+        # but never collapse the 15% component to ~0 solely because the
+        # predictor is currently weak.
+        prediction_score = _clamp100(
+            50.0
+            + 45.0 * (p5 - 0.50)
+            + 30.0 * (p10 - 0.20)
+            + 1.5 * mean_roi
+        )
+    else:
+        prediction_score = 50.0
+
+    impact = _metric_number(
+        analysis,
+        "estimated_price_impact_pct",
+        "price_impact_pct",
+        "expected_impact_pct",
+        "impact_pct",
+    )
+    if impact <= 0:
+        liq = _metric_number(analysis, "liquidity_sda", "liquidity", "liquidity_usd")
+        liquidity_score = (
+            _clamp100(35.0 + min(65.0, math.log10(max(liq, 1.0)) * 18.0))
+            if liq > 0 else 55.0
+        )
+    else:
+        liquidity_score = _clamp100(100.0 - 12.5 * impact)
+
+    final = (
+        0.35 * momentum_score
+        + 0.25 * flow_score
+        + 0.15 * activity_score
+        + 0.15 * prediction_score
+        + 0.10 * liquidity_score
+    )
+    return _clamp100(final), {
+        "momentum": round(momentum_score, 1),
+        "flow": round(flow_score, 1),
+        "activity": round(activity_score, 1),
+        "prediction": round(prediction_score, 1),
+        "liquidity": round(liquidity_score, 1),
+        "impact_pct": round(impact, 3) if impact > 0 else None,
+    }
+
+
+_core._buy_score_v2 = _buy_score_v2_calibrated
+
+
 _core._v21_buy_decision = _v21_buy_decision
 _original_paper_score_predictive = _core._paper_score_predictive
 
