@@ -124,17 +124,12 @@ def patch_dashboard(dashboard):
                 or str(pf.get("address") or key).strip().lower() in allowed_addresses
             )
         }
+        result["open_cost_sda"] = sum(dashboard.engine.num(pf.get("cost_sda")) for pf in result["current"].values())
+        result["open_pnl_sda"] = sum(dashboard.engine.num(pf.get("unrealized_pnl_sda")) for pf in result["current"].values())
+        result["open_unrealized_pnl_sda"] = result["open_pnl_sda"]
         return result
 
     def position_recommendations_v21(md, ws, meta, portfolio):
-        """Return a graded read-only action for every wallet position.
-
-        This deliberately does not persist confirmation counters: the report is
-        rendered in read-only environments (including Vercel), so a local counter
-        could never reliably represent consecutive scans. Instead, the action uses
-        current P/L plus trend/flow/technical evidence and escalates immediately
-        only when the evidence is strong enough.
-        """
         tokens = md.get("tokens", {}) if isinstance(md, dict) else {}
         current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
         rows = []
@@ -145,7 +140,6 @@ def patch_dashboard(dashboard):
             cost = pf.get("cost_sda")
             if cost is None or pnl_raw is None:
                 continue
-
             market_key, analysis = _resolve_token_data(tokens, token, pf, meta)
             try:
                 signal = dashboard.engine.score(market_key or token, analysis, ws) if analysis else {}
@@ -157,54 +151,28 @@ def patch_dashboard(dashboard):
             pnl = dashboard.engine.num(pnl_raw)
             bearish = technical_sell_confirmed(analysis) if analysis else False
             exit_signal = evaluate_exit(pnl, score, m1h, flow1, bearish)
-
             data_missing = not bool(analysis)
             negative_evidence = sum((m1h < 0, flow1 < 0, bearish, score < 40))
             positive_evidence = sum((m1h > 0, flow1 > 0, score >= 70, not bearish))
-
             if exit_signal.get("emergency"):
-                action = "EMERGENCY SELL"
-                reason = "ROI ≤ -15% with weak score, momentum and SDA flow"
+                action = "EMERGENCY SELL"; reason = "ROI ≤ -15% with weak score, momentum and SDA flow"
             elif pnl <= -8 and score < 35 and m1h < 0 and flow1 < 0:
-                action = "SELL / EXIT"
-                reason = "loss > 8% + weak score + negative momentum + SDA flow"
+                action = "SELL / EXIT"; reason = "loss > 8% + weak score + negative momentum + SDA flow"
             elif pnl <= -4 and negative_evidence >= 3:
-                action = "SELL / EXIT"
-                reason = "loss > 4% with 3+ bearish signals"
+                action = "SELL / EXIT"; reason = "loss > 4% with 3+ bearish signals"
             elif pnl > 5 and score < 40 and (m1h < 0 or flow1 < 0) and bearish:
-                action = "PARTIAL SELL"
-                reason = "profit > 5% but trend/flow is weakening"
+                action = "PARTIAL SELL"; reason = "profit > 5% but trend/flow is weakening"
             elif pnl > 10 and score < 45 and negative_evidence >= 2:
-                action = "PARTIAL SELL"
-                reason = "profit > 10% with weakening market evidence"
+                action = "PARTIAL SELL"; reason = "profit > 10% with weakening market evidence"
             elif pnl > 0 and positive_evidence >= 3 and score >= 55:
-                action = "HOLD / TRAIL"
-                reason = "position profitable with supportive trend/flow"
+                action = "HOLD / TRAIL"; reason = "position profitable with supportive trend/flow"
             elif pnl < 0 and negative_evidence >= 2:
-                action = "HOLD / WATCH"
-                reason = "loss with mixed-to-bearish evidence; monitor next scan"
+                action = "HOLD / WATCH"; reason = "loss with mixed-to-bearish evidence; monitor next scan"
             elif data_missing:
-                action = "HOLD / WATCH"
-                reason = "market data not resolved for this wallet token"
+                action = "HOLD / WATCH"; reason = "market data not resolved for this wallet token"
             else:
-                action = "HOLD / WATCH"
-                reason = "no confirmed exit condition"
-
-            rows.append({
-                "token": token,
-                "symbol": pf.get("symbol") or dashboard.engine.lbl(token, meta),
-                "action": action,
-                "reason": reason,
-                "pnl_pct": pnl_raw,
-                "pnl_sda": pf.get("unrealized_pnl_sda"),
-                "score": score,
-                "m1h": m1h,
-                "flow_1h": flow1,
-            })
-
-        # Position Action is intentionally ordered by current absolute P/L,
-        # highest P/L first. Action severity remains visible in each row but
-        # does not change the ordering of the positions.
+                action = "HOLD / WATCH"; reason = "no confirmed exit condition"
+            rows.append({"token": token, "symbol": pf.get("symbol") or dashboard.engine.lbl(token, meta), "action": action, "reason": reason, "pnl_pct": pnl_raw, "pnl_sda": pf.get("unrealized_pnl_sda"), "score": score, "m1h": m1h, "flow_1h": flow1})
         return sorted(rows, key=lambda x: (-dashboard.engine.num(x.get("pnl_sda")), str(x.get("symbol") or "").upper()))
 
     def real_trading_report():
@@ -231,15 +199,20 @@ def patch_dashboard(dashboard):
 
     def real_statistics_report():
         wallet = dashboard.load("wallet_data.json", {})
-        portfolio = _sync_current_to_wallet(wallet, dashboard.load("portfolio_data.json", {}))
+        # FIFO must run on the ledger first. Wallet synchronization is the final
+        # authority for current amounts and unrealized P/L. Running FIFO after
+        # wallet sync can overwrite the correctly synchronized open aggregates
+        # with stale/market-value fields (the source of the old +892 SDA "P/L").
+        portfolio = deepcopy(dashboard.load("portfolio_data.json", {}))
         meta = dashboard.load("token_metadata.json", {})
         import main as scanner
         fifo = getattr(scanner, "_rebuild_fifo", None)
         if callable(fifo):
             try:
-                portfolio = fifo(deepcopy(portfolio), meta)
+                portfolio = fifo(portfolio, meta)
             except Exception as exc:
                 print(f"Real statistics FIFO rebuild error: {exc}")
+        portfolio = _sync_current_to_wallet(wallet, portfolio)
         trades = portfolio.get("trades", []) if isinstance(portfolio, dict) else []
         current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
         trades = trades if isinstance(trades, list) else []
@@ -249,8 +222,8 @@ def patch_dashboard(dashboard):
         profits = [dashboard.engine.num(x.get("matched_proceeds_sda")) - dashboard.engine.num(x.get("cost_basis_sda")) for x in sells]
         realized = dashboard.engine.num(portfolio.get("realized_pnl_sda"))
         wins = [x for x in profits if x > 0]; losses = [x for x in profits if x < 0]
-        open_pnl = dashboard.engine.num(portfolio.get("open_pnl_sda"))
-        open_cost = dashboard.engine.num(portfolio.get("open_cost_sda"))
+        open_pnl = sum(dashboard.engine.num(x.get("unrealized_pnl_sda")) for x in current.values() if isinstance(x, dict))
+        open_cost = sum(dashboard.engine.num(x.get("cost_sda")) for x in current.values() if isinstance(x, dict))
         total = realized + open_pnl
         win_rate = len(wins) / len(profits) * 100 if profits else 0.0
         profit_factor = sum(wins) / abs(sum(losses)) if losses else (float("inf") if wins else 0.0)
@@ -269,46 +242,30 @@ def patch_dashboard(dashboard):
                 label = tr.get("symbol") or str(tr.get("token", "UNKNOWN"))[:10]
                 ts = str(tr.get("timestamp", ""))[:16].replace("T", " ")
                 lines.append(f"{icon} {label} • {profit:+.2f} SDA • {ts}")
-        lines += ["", "────────────────────────", "👁 READ-ONLY • Real wallet ledger"]
         return "\n".join(lines)
 
     def main_dashboard_v21(*args, **kwargs):
-        text = original_main_dashboard(*args, **kwargs)
-        return "\n".join("🚨 " + line[2:] if line.startswith("🟡 ") and ": EMERGENCY SELL" in line else line for line in text.splitlines())
+        dashboard.main_dashboard = original_main_dashboard
+        try:
+            return original_main_dashboard(*args, **kwargs)
+        finally:
+            dashboard.main_dashboard = main_dashboard_v21
 
-    def menu_keyboard_v21():
-        keyboard = original_menu_keyboard()
-        rows = keyboard.get("inline_keyboard", [])
-        if not any(row and row[0].get("callback_data") == "REAL" for row in rows):
-            rows.insert(2, [{"text": "💰 Real Trading", "callback_data": "REAL"}])
-        return keyboard
+    def handle_update_v21(update):
+        data = update if isinstance(update, dict) else {}
+        callback = data.get("callback_query") or {}
+        if callback:
+            cb_data = str(callback.get("data") or "")
+            callback_id = callback.get("id")
+            msg = callback.get("message") or {}
+            chat = msg.get("chat") or {}
+            chat_id = chat.get("id")
+            message_id = msg.get("message_id")
+            if cb_data == "REAL_STATS":
+                dashboard.answer_callback(callback_id)
+                dashboard.edit(chat_id, message_id, real_statistics_report(), dashboard.back_keyboard())
+                return
+        return original_handle_update(update)
 
-    def handle_update_v21(update, state=None):
-        cb = update.get("callback_query") or {}
-        data = cb.get("data")
-        if data not in ("REAL", "REAL_STATS"):
-            return original_handle_update(update, state)
-        state = state if state is not None else {"offset": 0}
-        state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
-        msg = cb.get("message") or {}
-        chat_id = (msg.get("chat") or {}).get("id")
-        message_id = msg.get("message_id")
-        configured_chat = __import__("os").environ.get("CHAT_ID")
-        if configured_chat and str(chat_id) != str(configured_chat):
-            dashboard.answer_callback(cb.get("id"), "Unauthorized")
-            return state
-        dashboard.answer_callback(cb.get("id"))
-        if data == "REAL":
-            keyboard = {"inline_keyboard": [[{"text": "📈 Statistics", "callback_data": "REAL_STATS"}], [{"text": "⬅️ Main dashboard", "callback_data": "MAIN"}]]}
-            dashboard.edit(chat_id, message_id, real_trading_report(), keyboard)
-        else:
-            dashboard.edit(chat_id, message_id, real_statistics_report(), dashboard.back_keyboard())
-        return state
-
-    dashboard._position_recommendations = position_recommendations_v21
     dashboard.main_dashboard = main_dashboard_v21
-    dashboard.real_trading_report = real_trading_report
-    dashboard.real_statistics_report = real_statistics_report
-    dashboard.menu_keyboard = menu_keyboard_v21
     dashboard.handle_update = handle_update_v21
-    return dashboard
