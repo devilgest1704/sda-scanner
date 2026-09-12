@@ -434,7 +434,7 @@ def main_dashboard():
             "HOLD / MARKET DATA N/A": "🟡",
         }.get(action, "🟡")
         pnl = "UNKNOWN" if x["pnl_sda"] is None else f"{engine.num(x['pnl_sda']):+.2f} SDA"; score_txt = "N/A" if x["score"] is None else f"{x['score']:.0f}/100"; position_lines.append(f"{icon} {x['symbol']}: {x['action']}  •  P/L {pnl}  •  score {score_txt}")
-    position_action = "\n".join(position_lines) if position_lines else "⚪ No portfolio positions"; return "📈 SDA MARKET SCANNER\n\n" + top_buy(md, ws, meta, rows=snapshot["rows"], snapshot=snapshot) + "\n\n" + _merge_wallet_portfolio(wallet, portfolio, md, ws, meta) + "\n\n🧭 POSITION ACTION\n" + position_action + "\n\n────────────────────────\n📂 DETAIL MENU"
+    position_action = "\n".join(position_lines) if position_lines else "⚪ No portfolio positions"; return "📈 SDA MARKET SCANNER\n\n" + top_buy(md, ws, meta, rows=snapshot["rows"], snapshot=snapshot) + "\n\n" + "\n\n🧭 POSITION ACTION\n" + position_action + "\n\n────────────────────────\n📂 DETAIL MENU"
 
 
 def technical_report():
