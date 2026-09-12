@@ -16,6 +16,7 @@ import position_action_v20
 import real_bot_menu
 import paper_statistics_fix
 import dashboard_consistency
+import dashboard_wallet_summary
 
 _original_dashboard_load = dashboard.load
 
@@ -77,6 +78,7 @@ dashboard.paper_statistics_report = paper_statistics_fix.paper_statistics_report
 dashboard.paper_report = paper_statistics_fix.paper_report
 
 dashboard_consistency.patch_dashboard(dashboard)
+dashboard_wallet_summary.patch_dashboard(dashboard)
 
 _original_menu_keyboard = dashboard.menu_keyboard
 
