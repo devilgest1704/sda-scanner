@@ -5,6 +5,7 @@ import position_action_v20
 import real_bot_menu
 import paper_statistics_fix
 import dashboard_consistency
+import dashboard_wallet_summary
 
 
 _original_dashboard_load = dashboard.load
@@ -70,6 +71,7 @@ def main():
     real_bot_menu.patch_dashboard(dashboard)
     paper_statistics_fix.patch_dashboard(dashboard)
     dashboard_consistency.patch_dashboard(dashboard)
+    dashboard_wallet_summary.patch_dashboard(dashboard)
 
     _patched_menu_keyboard = dashboard.menu_keyboard
 
