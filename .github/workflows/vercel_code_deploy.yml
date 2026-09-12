@@ -1,0 +1,54 @@
+name: Vercel Code Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vercel-code-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    # Scanner state commits must never create a Vercel deployment.
+    if: ${{ github.event.head_commit.message != 'Update SDA scanner state' }}
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: team_Ni66yEoQsvqh6CTUt6YjXqlv
+      VERCEL_PROJECT_ID: prj_nolTVKgPkLHUv9vOYvNE9xd1VRv6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify Vercel credentials
+        run: |
+          test -n "$VERCEL_TOKEN" || { echo 'Missing GitHub secret VERCEL_TOKEN'; exit 1; }
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Link existing Vercel project
+        run: |
+          vercel link \
+            --yes \
+            --project=sda-scanner \
+            --scope="$VERCEL_ORG_ID" \
+            --token="$VERCEL_TOKEN"
+
+      - name: Deploy to Vercel Production
+        run: |
+          vercel deploy \
+            --prod \
+            --yes \
+            --scope="$VERCEL_ORG_ID" \
+            --token="$VERCEL_TOKEN"
