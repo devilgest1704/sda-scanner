@@ -1,0 +1,47 @@
+name: SDA Backtest Optimizer
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Replay window in days'
+        required: false
+        default: '14'
+      top:
+        description: 'Number of best parameter sets to report'
+        required: false
+        default: '20'
+      max_combinations:
+        description: 'Maximum parameter combinations'
+        required: false
+        default: '60000'
+
+permissions:
+  contents: read
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run optimizer
+        run: |
+          python backtest_optimizer.py \
+            --days "${{ inputs.days }}" \
+            --top "${{ inputs.top }}" \
+            --max-combinations "${{ inputs.max_combinations }}"
+
+      - name: Upload optimization report
+        uses: actions/upload-artifact@v4
+        with:
+          name: sda-backtest-optimization
+          path: backtest_optimization.json
+          if-no-files-found: error
