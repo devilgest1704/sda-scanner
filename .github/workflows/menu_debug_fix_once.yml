@@ -1,3 +1,4 @@
+# one-time dashboard menu/debug patch
 name: Fix dashboard menu and Market Debug
 
 on:
@@ -15,7 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Patch dashboard menu
         run: |
           python - <<'PY'
@@ -40,7 +40,6 @@ jobs:
               raise SystemExit('Expected menu_keyboard block not found')
           p.write_text(s.replace(old, new, 1), encoding='utf-8')
           PY
-
       - name: Make Market Debug robust in Vercel webhook
         run: |
           python - <<'PY'
@@ -58,7 +57,6 @@ jobs:
               text = dashboard.market_debug_report(snapshot)
           except Exception as exc:
               text = f"🐞 MARKET DEBUG\\n\\n❌ Debug generation failed: {type(exc).__name__}: {exc}"
-          # Telegram editMessageText is limited to 4096 characters.
           if len(text) > 3900:
               text = text[:3900].rstrip() + "\\n\\n… output truncated"
           dashboard.edit(chat_id, message_id, text, dashboard.back_keyboard())
@@ -68,7 +66,6 @@ jobs:
               raise SystemExit('Expected DEBUG handler block not found')
           p.write_text(s.replace(old, new, 1), encoding='utf-8')
           PY
-
       - name: Commit patch and remove one-time workflow
         run: |
           git config user.name 'github-actions[bot]'
