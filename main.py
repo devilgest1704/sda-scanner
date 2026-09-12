@@ -6,22 +6,21 @@ entrypoint name `main.py` and applies the V21 borderline BUY flow bridge.
 
 import main_core as _core
 
-# Preserve the historical public names from main.py.
 for _name, _value in _core.__dict__.items():
     if not _name.startswith("__"):
         globals()[_name] = _value
 
 
-def _strong_flow_bridge(s, analysis):
-    """Deterministic safety bridge for strong 58-59 market setups.
+def _strong_flow_bridge(s, analysis, pred=None):
+    """Allow only exceptional borderline setups while predictor is warming up.
 
-    The predictive layer may be warming up or may clamp confidence below the
-    BUY threshold. Do not miss an objectively strong setup solely because of
-    that secondary layer. Keep the bridge narrow: positive flow, sufficient
-    activity, positive 1h/4h momentum, no bearish technical veto and healthy
-    buy/sell pressure are still required.
+    A ready predictor is authoritative. This prevents the old bridge from
+    promoting a 58-59 setup after the predictive layer had already produced a
+    negative expectation.
     """
     try:
+        if isinstance(pred, dict) and pred.get("ready"):
+            return False
         raw = float(s.get("paper_raw_confidence", s.get("confidence", 0)) or 0)
         if not 58.0 <= raw < float(getattr(_paper, "BUY_THRESHOLD", 60) or 60):
             return False
@@ -30,7 +29,6 @@ def _strong_flow_bridge(s, analysis):
         bull = int(tc.get("bull") or 0)
         bear = int(tc.get("bear") or 0)
         evidence = list(tc.get("evidence") or [])
-
         m1 = float(s.get("m1h") or 0)
         m4 = float(s.get("m4h") or 0)
         m15 = float(s.get("m15") or 0)
@@ -43,14 +41,9 @@ def _strong_flow_bridge(s, analysis):
         sc = _metric_number(f1, "sell_count")
         volume_ratio = bv / max(sv, 1.0)
         trade_ratio = bc / max(sc, 1.0)
-
         return (
-            m1 >= 5.0
-            and m4 >= 5.0
-            and m15 >= -0.50
-            and flow > 0
-            and trades >= 10
-            and float(f1.get("total_volume") or 0) >= 1000.0
+            m1 >= 5.0 and m4 >= 5.0 and m15 >= -0.50 and flow > 0
+            and trades >= 10 and float(f1.get("total_volume") or 0) >= 1000.0
             and (volume_ratio >= 1.25 or trade_ratio >= 1.50)
             and bear == 0
             and not any("MACD bearish" in x for x in evidence)
@@ -65,56 +58,38 @@ def _v21_buy_decision(buy_score, s, analysis, pred):
     """Single BUY decision shared by the paper engine and V21 diagnostics."""
     threshold = float(getattr(_paper, "BUY_THRESHOLD", 60) or 60)
     score = float(buy_score or 0)
-    tc = {}
     try:
         from strategy_v21 import technical_confirmation
         tc = technical_confirmation(analysis)
     except Exception:
         tc = {"bull": 0, "bear": 0, "evidence": []}
-
     bull = int(tc.get("bull") or 0)
     bear = int(tc.get("bear") or 0)
     evidence = list(tc.get("evidence") or [])
     adjustment = min(8.0, bull * 1.5) - min(10.0, bear * 1.8)
     adjusted = _clamp100(score + adjustment)
-
-    bridge = False
-    if 58.0 <= score < threshold:
-        bridge = _strong_flow_bridge(s, analysis)
-
+    bridge = _strong_flow_bridge(s, analysis, pred)
     technical_ok = (not bool(analysis.get("technical"))) or bull >= 2
     allowed = adjusted >= threshold and technical_ok
     if bridge:
         allowed = True
         adjusted = max(adjusted, threshold + 1.0)
-
     reasons = []
     if not technical_ok and not bridge:
         reasons.append(f"technical confirmation {bull} bull / {bear} bear")
     if adjusted < threshold and not bridge:
         reasons.append(f"BUY score {adjusted:.0f} < {threshold:.0f}")
     if bridge:
-        reasons.append("V21 exceptional 58-59 flow bridge")
-
+        reasons.append("V21 exceptional 58-59 flow bridge (predictor warming up)")
     return {
-        "allowed": allowed,
-        "score": adjusted,
-        "raw_score": score,
-        "adjustment": adjustment,
-        "technical_bull": bull,
-        "technical_bear": bear,
-        "technical_evidence": evidence,
-        "bridge": bridge,
-        "flow_bridge": bridge,
-        "reason": "; ".join(reasons),
+        "allowed": allowed, "score": adjusted, "raw_score": score,
+        "adjustment": adjustment, "technical_bull": bull,
+        "technical_bear": bear, "technical_evidence": evidence,
+        "bridge": bridge, "flow_bridge": bridge, "reason": "; ".join(reasons),
     }
 
 
 _core._v21_buy_decision = _v21_buy_decision
-
-# Preserve the original predictor and add the final bridge promotion. The
-# original predictor may clamp confidence below the threshold; once the narrow
-# market bridge has passed, that secondary clamp must not undo the entry.
 _original_paper_score_predictive = _core._paper_score_predictive
 
 
@@ -122,8 +97,8 @@ def _paper_score_predictive(address, analysis, whale_state):
     s = _original_paper_score_predictive(address, analysis, whale_state)
     if not isinstance(s, dict):
         return s
-
-    if _strong_flow_bridge(s, analysis):
+    pred = s.get("paper_prediction") if isinstance(s.get("paper_prediction"), dict) else None
+    if _strong_flow_bridge(s, analysis, pred):
         threshold = float(getattr(_paper, "BUY_THRESHOLD", 60) or 60)
         s = dict(s)
         promoted = max(float(s.get("buy_score") or s.get("market_score") or 0), threshold + 1.0)
@@ -131,10 +106,10 @@ def _paper_score_predictive(address, analysis, whale_state):
         s["market_score"] = round(promoted, 1)
         s["confidence"] = promoted
         s["paper_buy_blocked"] = False
-        s["paper_buy_block_reason"] = "V21 exceptional 58-59 flow bridge"
+        s["paper_buy_block_reason"] = "V21 exceptional 58-59 flow bridge (predictor warming up)"
         s["paper_prediction_blocked"] = False
         s["paper_near_threshold_buy"] = True
-        s["paper_near_threshold_reason"] = "V21 exceptional 58-59 flow bridge"
+        s["paper_near_threshold_reason"] = "V21 exceptional 58-59 flow bridge (predictor warming up)"
     return s
 
 
