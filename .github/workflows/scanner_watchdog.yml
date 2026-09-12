@@ -35,22 +35,18 @@ jobs:
 
           if [ "$MESSAGE" = "Update SDA scanner state" ]; then
             echo 'State-only commit detected; Vercel deploy skipped.'
-            exit 0
+          elif [ -z "$VERCEL_TOKEN" ]; then
+            echo 'WARNING: GitHub Actions secret VERCEL_TOKEN is missing; Vercel deploy skipped.'
+          else
+            npm install --global vercel@latest
+            vercel link --yes \
+              --project="$VERCEL_PROJECT_ID" \
+              --scope="$VERCEL_ORG_ID" \
+              --token="$VERCEL_TOKEN"
+            vercel deploy --prod --yes \
+              --scope="$VERCEL_ORG_ID" \
+              --token="$VERCEL_TOKEN"
           fi
-
-          if [ -z "$VERCEL_TOKEN" ]; then
-            echo 'ERROR: GitHub Actions secret VERCEL_TOKEN is missing.'
-            exit 1
-          fi
-
-          npm install --global vercel@latest
-          vercel link --yes \
-            --project="$VERCEL_PROJECT_ID" \
-            --scope="$VERCEL_ORG_ID" \
-            --token="$VERCEL_TOKEN"
-          vercel deploy --prod --yes \
-            --scope="$VERCEL_ORG_ID" \
-            --token="$VERCEL_TOKEN"
 
       - name: Dispatch scanner with retry
         env:
