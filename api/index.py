@@ -38,7 +38,6 @@ def _dashboard_load_synced(path, default):
 
 dashboard.load = _dashboard_load_synced
 
-
 def _compact_wallet_portfolio(wallet, portfolio, md, ws, meta):
     return compact.merge_wallet_portfolio(wallet, portfolio, scanner)
 
@@ -105,23 +104,29 @@ def _handle_update_with_actions(update, state=None):
             return state
 
         dashboard.answer_callback(cb.get("id"), "Report started…")
-        # REFRESH runs the dedicated SDA Telegram Hourly Report workflow.
-        # It deliberately does NOT run the scanner workflow.
         ok, result = _dispatch_hourly_report(run_reason="Telegram Refresh")
         if ok:
-            dashboard.edit(
-                chat_id,
-                message_id,
-                dashboard.main_dashboard() + "\n\n⏳ Telegram Hourly Report started manually…",
-                dashboard.menu_keyboard(),
-            )
+            dashboard.edit(chat_id, message_id, dashboard.main_dashboard() + "\n\n⏳ Telegram Hourly Report started manually…", dashboard.menu_keyboard())
         else:
-            dashboard.edit(
-                chat_id,
-                message_id,
-                dashboard.main_dashboard() + f"\n\n❌ Hourly Report start failed: {result}",
-                dashboard.menu_keyboard(),
-            )
+            dashboard.edit(chat_id, message_id, dashboard.main_dashboard() + f"\n\n❌ Hourly Report start failed: {result}", dashboard.menu_keyboard())
+        return state
+
+    # Always build DEBUG from one fresh remote snapshot. This prevents the
+    # DEBUG screen from showing an older scanner state than TOP BUY after a
+    # refresh/report run.
+    if data == "DEBUG":
+        state = state if state is not None else {"offset": 0}
+        state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
+        msg = cb.get("message") or {}
+        chat_id = (msg.get("chat") or {}).get("id")
+        message_id = msg.get("message_id")
+        configured_chat = os.environ.get("CHAT_ID")
+        if configured_chat and str(chat_id) != str(configured_chat):
+            dashboard.answer_callback(cb.get("id"), "Unauthorized")
+            return state
+        dashboard.answer_callback(cb.get("id"))
+        snapshot = dashboard._load_dashboard_snapshot(5)
+        dashboard.edit(chat_id, message_id, dashboard.market_debug_report(snapshot), dashboard.back_keyboard())
         return state
 
     if data != "PAPER":
@@ -144,7 +149,6 @@ dashboard.handle_update = _handle_update_with_actions
 
 app = FastAPI()
 
-
 def _cron_authorized(request: Request) -> bool:
     expected = os.environ.get("CRON_SECRET", "")
     received = request.headers.get("Authorization", "")
@@ -152,27 +156,13 @@ def _cron_authorized(request: Request) -> bool:
         return True
     return bool(received) and secrets.compare_digest(received, f"Bearer {expected}")
 
-
 def _dispatch_workflow(workflow_file, run_reason):
     token = os.environ.get("GITHUB_DISPATCH_TOKEN", "")
     if not token:
         return False, "missing GITHUB_DISPATCH_TOKEN"
     url = f"https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/{workflow_file}/dispatches"
-    payload = json.dumps({
-        "ref": "main",
-        "inputs": {"run_reason": run_reason},
-    }).encode()
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    payload = json.dumps({"ref": "main", "inputs": {"run_reason": run_reason}}).encode()
+    req = urllib.request.Request(url, data=payload, headers={"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=20) as response:
             return response.status in (200, 201, 204), f"GitHub dispatch HTTP {response.status}"
@@ -182,32 +172,23 @@ def _dispatch_workflow(workflow_file, run_reason):
     except Exception as exc:
         return False, str(exc)
 
-
 def _dispatch_scanner(run_reason="Cron scanner"):
     return _dispatch_workflow("scanner_v18.yml", run_reason)
-
 
 def _dispatch_hourly_report(run_reason="Telegram hourly report"):
     return _dispatch_workflow("telegram_hourly.yml", run_reason)
 
-
 @app.get("/api/hourly", response_class=PlainTextResponse)
 async def hourly(request: Request):
-    # Cronjob.org SDA-60 calls this endpoint every minute. It dispatches only
-    # the scanner. It never sends the Telegram hourly report.
-    if not _cron_authorized(request):
-        return PlainTextResponse("Unauthorized", status_code=401)
+    if not _cron_authorized(request): return PlainTextResponse("Unauthorized", status_code=401)
     ok, message = _dispatch_scanner()
     return PlainTextResponse(message, status_code=200 if ok else 502)
 
-
 @app.get("/api/watchdog", response_class=PlainTextResponse)
 async def watchdog(request: Request):
-    if not _cron_authorized(request):
-        return PlainTextResponse("Unauthorized", status_code=401)
+    if not _cron_authorized(request): return PlainTextResponse("Unauthorized", status_code=401)
     ok, message = _dispatch_scanner("Watchdog")
     return PlainTextResponse(message, status_code=200 if ok else 502)
-
 
 @app.post("/api/telegram", response_class=PlainTextResponse)
 async def telegram(request: Request):
