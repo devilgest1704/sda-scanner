@@ -2,8 +2,8 @@ name: Vercel Code Deploy
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,15 +12,15 @@ concurrency:
   group: vercel-code-deploy
   cancel-in-progress: true
 
+env:
+  VERCEL_ORG_ID: team_Ni66yEoQsvqh6CTUt6YjXqlv
+  VERCEL_PROJECT_ID: prj_nolTVKgPkLHUv9vOYvNE9xd1VRv6
+
 jobs:
   deploy:
-    # Scanner state commits must never create a Vercel deployment.
-    if: ${{ github.event.head_commit.message != 'Update SDA scanner state' }}
+    # State-only commits must never create a Vercel deployment.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.head_commit.message != 'Update SDA scanner state' }}
     runs-on: ubuntu-latest
-    env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: team_Ni66yEoQsvqh6CTUt6YjXqlv
-      VERCEL_PROJECT_ID: prj_nolTVKgPkLHUv9vOYvNE9xd1VRv6
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,26 +29,34 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
 
       - name: Verify Vercel credentials
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          test -n "$VERCEL_TOKEN" || { echo 'Missing GitHub secret VERCEL_TOKEN'; exit 1; }
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "ERROR: GitHub Actions secret VERCEL_TOKEN is missing."
+            echo "Add a Vercel token as the repository secret named VERCEL_TOKEN."
+            exit 1
+          fi
 
       - name: Install Vercel CLI
         run: npm install --global vercel@latest
 
-      - name: Link existing Vercel project
+      - name: Link Vercel project
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          vercel link \
-            --yes \
-            --project=sda-scanner \
+          vercel link --yes \
+            --project="$VERCEL_PROJECT_ID" \
             --scope="$VERCEL_ORG_ID" \
             --token="$VERCEL_TOKEN"
 
       - name: Deploy to Vercel Production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          vercel deploy \
-            --prod \
-            --yes \
+          vercel deploy --prod --yes \
             --scope="$VERCEL_ORG_ID" \
             --token="$VERCEL_TOKEN"
