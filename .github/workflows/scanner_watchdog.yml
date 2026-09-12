@@ -18,6 +18,40 @@ jobs:
   dispatch-scanner:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Deploy code changes to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_Ni66yEoQsvqh6CTUt6YjXqlv
+          VERCEL_PROJECT_ID: prj_nolTVKgPkLHUv9vOYvNE9xd1VRv6
+        run: |
+          set -euo pipefail
+          MESSAGE="$(git log -1 --pretty=%s)"
+          echo "HEAD message: $MESSAGE"
+
+          if [ "$MESSAGE" = "Update SDA scanner state" ]; then
+            echo 'State-only commit detected; Vercel deploy skipped.'
+            exit 0
+          fi
+
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo 'ERROR: GitHub Actions secret VERCEL_TOKEN is missing.'
+            exit 1
+          fi
+
+          npm install --global vercel@latest
+          vercel link --yes \
+            --project="$VERCEL_PROJECT_ID" \
+            --scope="$VERCEL_ORG_ID" \
+            --token="$VERCEL_TOKEN"
+          vercel deploy --prod --yes \
+            --scope="$VERCEL_ORG_ID" \
+            --token="$VERCEL_TOKEN"
+
       - name: Dispatch scanner with retry
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
