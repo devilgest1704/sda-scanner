@@ -16,8 +16,10 @@ def _v21_buy_decision(buy_score, s, analysis, pred):
     """Single BUY decision shared by the paper engine and V21 diagnostics.
 
     Normal entry: score >= 60 and technical confirmation is acceptable.
-    Borderline 58-59 entry: only for an unusually strong momentum/order-flow
-    setup. A neutral 15m/1h flow is allowed; negative flow is not.
+    Borderline 58-59 entry: allow a strong, confirmed positive-flow setup.
+    The bridge is deliberately narrow: positive momentum/flow, sufficient
+    activity, strong buy-side pressure, predictive support, and no bearish
+    technical confirmation.
     """
     threshold = float(getattr(_paper, "BUY_THRESHOLD", 60) or 60)
     score = float(buy_score or 0)
@@ -36,7 +38,7 @@ def _v21_buy_decision(buy_score, s, analysis, pred):
 
     bridge = False
     flow_bridge = False
-    if 58.0 <= adjusted < threshold and isinstance(pred, dict) and pred.get("ready"):
+    if 58.0 <= score < threshold and isinstance(pred, dict) and pred.get("ready"):
         p5 = float(pred.get("p5") or 0)
         p10 = float(pred.get("p10") or 0)
         mean_roi = float(pred.get("mean_roi") or 0)
@@ -52,27 +54,29 @@ def _v21_buy_decision(buy_score, s, analysis, pred):
         sc = _metric_number(f1, "sell_count")
         volume_ratio = bv / max(sv, 1.0)
         trade_ratio = bc / max(sc, 1.0)
+
+        # Primary bridge: 58-59 is accepted when predictive edge and market
+        # flow agree. This is intentionally less dependent on extreme 1h/4h
+        # momentum so good early entries are not systematically missed.
         bridge = (
-            p5 >= 0.62 and p10 >= 0.35 and mean_roi > 0
-            and m1 >= 15.0 and m4 >= 10.0
-            and flow >= 0.0 and m15 >= -0.25
+            p5 >= 0.55 and p10 >= 0.30 and mean_roi > 0
+            and m1 >= 3.0 and m4 >= 3.0
+            and flow > 0 and m15 >= -0.25
             and trades >= 10
-            and (volume_ratio >= 10.0 or trade_ratio >= 5.0)
-            and bear == 0
+            and (volume_ratio >= 1.5 or trade_ratio >= 1.5)
+            and bull >= 2 and bear == 0
             and not any("MACD bearish" in x for x in evidence)
+            and not any("near resistance" in x for x in evidence)
         )
+
+        # Extra flow confirmation for setups with especially strong whale flow.
         flow_bridge = (
-            58.0 <= adjusted < threshold
-            and isinstance(pred, dict) and pred.get("ready")
-            and float(pred.get("p5") or 0) >= 0.62
-            and float(pred.get("p10") or 0) >= 0.35
-            and float(pred.get("mean_roi") or 0) > 0
-            and m15 >= -0.25
-            and flow > 0
-            and trades >= 10
-            and (volume_ratio >= 5.0 or trade_ratio >= 5.0)
+            p5 >= 0.55 and p10 >= 0.30 and mean_roi > 0
+            and m1 >= 2.0 and m4 >= 2.0
+            and m15 >= -0.50 and flow > 0 and trades >= 10
+            and (volume_ratio >= 2.0 or trade_ratio >= 2.0)
             and (float(s.get("whale_net") or 0) > 0 or float(s.get("whale_15m_net") or 0) > 0)
-            and bear == 0
+            and bull >= 2 and bear == 0
             and not any("MACD bearish" in x for x in evidence)
             and not any("near resistance" in x for x in evidence)
         )
@@ -88,9 +92,9 @@ def _v21_buy_decision(buy_score, s, analysis, pred):
     if adjusted < threshold and not (bridge or flow_bridge):
         reasons.append(f"BUY score {adjusted:.0f} < {threshold:.0f}")
     if bridge:
-        reasons.append("V21 exceptional 58-59 momentum bridge")
-    elif flow_bridge:
         reasons.append("V21 exceptional 58-59 flow bridge")
+    elif flow_bridge:
+        reasons.append("V21 exceptional 58-59 whale-flow bridge")
 
     return {
         "allowed": allowed,
@@ -106,12 +110,48 @@ def _v21_buy_decision(buy_score, s, analysis, pred):
     }
 
 
-# main_core._paper_score_predictive resolves _v21_buy_decision in its own
-# module globals, so patch that reference directly.
 _core._v21_buy_decision = _v21_buy_decision
 
+# main_core._paper_score_predictive resolves _v21_buy_decision in its own
+# module globals, so the function above is used there. Preserve the original
+# predictor and add one final bridge override: once the V21 bridge is confirmed,
+# predictive warming/secondary vetoes must not turn the confirmed entry back into
+# a WATCH at 59/100.
+_original_paper_score_predictive = _core._paper_score_predictive
+
+
+def _paper_score_predictive(address, analysis, whale_state):
+    s = _original_paper_score_predictive(address, analysis, whale_state)
+    if not isinstance(s, dict):
+        return s
+    if not s.get("paper_near_threshold_buy"):
+        return s
+
+    score = float(s.get("buy_score") or s.get("market_score") or 0)
+    threshold = float(getattr(_paper, "BUY_THRESHOLD", 60) or 60)
+    if score < 58.0 or score >= threshold:
+        return s
+
+    # The bridge has already passed the strict technical/flow/prediction checks.
+    # Promote the score above the normal threshold and clear only the generic
+    # predictive vetoes that would otherwise undo the bridge.
+    s = dict(s)
+    promoted = max(score, threshold + 1.0)
+    s["buy_score"] = round(promoted, 1)
+    s["market_score"] = round(promoted, 1)
+    s["confidence"] = promoted
+    s["paper_buy_blocked"] = False
+    s["paper_buy_block_reason"] = "V21 exceptional 58-59 flow bridge"
+    s["paper_prediction_blocked"] = False
+    s["paper_near_threshold_reason"] = "V21 exceptional 58-59 flow bridge"
+    return s
+
+
+_core._paper_score_predictive = _paper_score_predictive
+_paper.score = _paper_score_predictive
+
 # Keep the helper visible to strategy_v21, which imports `main`.
-_paper_score_predictive = _core._paper_score_predictive
+_paper_score_predictive = _paper_score_predictive
 
 if __name__ == "__main__":
     _core.engine.main()
