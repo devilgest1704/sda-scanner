@@ -46,6 +46,20 @@ def _install_dashboard_compat():
         dashboard.handle_update = handle_update
 
 
+def _menu_without_unused_items():
+    keyboard = dashboard.menu_keyboard()
+    rows = []
+    for row in keyboard.get("inline_keyboard", []):
+        if not row:
+            continue
+        callback = row[0].get("callback_data")
+        if callback in ("TECH", "MOMENTUM"):
+            continue
+        rows.append(row)
+    keyboard["inline_keyboard"] = rows
+    return keyboard
+
+
 def main():
     _install_dashboard_compat()
     dashboard.load = _dashboard_load_synced
@@ -57,20 +71,25 @@ def main():
     paper_statistics_fix.patch_dashboard(dashboard)
     dashboard_consistency.patch_dashboard(dashboard)
 
-    # Keep the already-patched menu (including REAL and REAL_BOT) and add Refresh.
     _patched_menu_keyboard = dashboard.menu_keyboard
 
     def _menu_keyboard_with_refresh():
         keyboard = _patched_menu_keyboard()
-        rows = keyboard.get("inline_keyboard", [])
+        rows = []
+        for row in keyboard.get("inline_keyboard", []):
+            if not row:
+                continue
+            callback = row[0].get("callback_data")
+            if callback in ("TECH", "MOMENTUM"):
+                continue
+            rows.append(row)
         if not any(row and row[0].get("callback_data") == "REFRESH" for row in rows):
             rows.append([{"text": "🔄 Refresh", "callback_data": "REFRESH"}])
+        keyboard["inline_keyboard"] = rows
         return keyboard
 
     dashboard.menu_keyboard = _menu_keyboard_with_refresh
 
-    # Refresh is handled by the Vercel webhook in production. Keep the local
-    # callback wrapper because the dashboard patch modules expect this API.
     _original_handle_update = dashboard.handle_update
 
     def _handle_update_with_refresh(update, state=None):
@@ -103,8 +122,6 @@ def main():
 
     dashboard.handle_update = _handle_update_with_refresh
 
-    # Hourly workflow is a one-shot report job. Do not enter a long-polling
-    # Telegram loop here; the Vercel webhook owns interactive callbacks.
     dashboard.send(dashboard.main_dashboard(), dashboard.menu_keyboard())
 
 
