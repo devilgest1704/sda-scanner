@@ -1,0 +1,79 @@
+name: Fix dashboard menu and Market Debug
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/menu_debug_fix_once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.event.head_commit.message != 'Fix dashboard menu and Market Debug' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch dashboard menu
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('telegram_dashboard.py')
+          s = p.read_text(encoding='utf-8')
+          old = '''def menu_keyboard():
+              return {"inline_keyboard": [
+                  [{"text": "📐 Technical Analysis", "callback_data": "TECH"}],
+                  [{"text": "🤖 Paper Trading", "callback_data": "PAPER"}],
+                  [{"text": "📊 Market Momentum", "callback_data": "MOMENTUM"}],
+                  [{"text": "🐞 Market Debug", "callback_data": "DEBUG"}],
+              ]}
+          '''
+          new = '''def menu_keyboard():
+              return {"inline_keyboard": [
+                  [{"text": "🤖 Paper Trading", "callback_data": "PAPER"}],
+                  [{"text": "🐞 Market Debug", "callback_data": "DEBUG"}],
+              ]}
+          '''
+          if old not in s:
+              raise SystemExit('Expected menu_keyboard block not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Make Market Debug robust in Vercel webhook
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('api/index.py')
+          s = p.read_text(encoding='utf-8')
+          old = '''        dashboard.answer_callback(cb.get("id"))
+          snapshot = dashboard._load_dashboard_snapshot(5)
+          dashboard.edit(chat_id, message_id, dashboard.market_debug_report(snapshot), dashboard.back_keyboard())
+          return state
+          '''
+          new = '''        dashboard.answer_callback(cb.get("id"), "Loading Market Debug…")
+          try:
+              snapshot = dashboard._load_dashboard_snapshot(5)
+              text = dashboard.market_debug_report(snapshot)
+          except Exception as exc:
+              text = f"🐞 MARKET DEBUG\\n\\n❌ Debug generation failed: {type(exc).__name__}: {exc}"
+          # Telegram editMessageText is limited to 4096 characters.
+          if len(text) > 3900:
+              text = text[:3900].rstrip() + "\\n\\n… output truncated"
+          dashboard.edit(chat_id, message_id, text, dashboard.back_keyboard())
+          return state
+          '''
+          if old not in s:
+              raise SystemExit('Expected DEBUG handler block not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Commit patch and remove one-time workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/menu_debug_fix_once.yml
+          git add telegram_dashboard.py api/index.py
+          git commit -m 'Fix dashboard menu and Market Debug'
+          git push
