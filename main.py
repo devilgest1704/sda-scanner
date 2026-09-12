@@ -1,7 +1,8 @@
 """Compatibility wrapper for the SDA scanner.
 
-The implementation lives in main_core.py; this module keeps the public
-entrypoint name `main.py` and applies the V21 borderline BUY flow bridge.
+The implementation lives in main_core.py. This module keeps the public
+entrypoint name `main.py`, applies the V21 borderline BUY flow bridge, and
+exposes one canonical Paper decision helper for dashboard diagnostics.
 """
 
 import main_core as _core
@@ -116,6 +117,36 @@ def _paper_score_predictive(address, analysis, whale_state):
 _core._paper_score_predictive = _paper_score_predictive
 _paper.score = _paper_score_predictive
 _paper_score_predictive = _paper_score_predictive
+
+
+def paper_decision(address, analysis, whale_state):
+    """Return the exact canonical Paper BUY decision used by the scanner.
+
+    Dashboard/debug code should call this helper instead of engine.score().
+    It intentionally returns the complete scorer dictionary so prediction,
+    vetoes, technical confirmation and the final score remain visible.
+    """
+    s = _paper_score_predictive(address, analysis, whale_state)
+    if not isinstance(s, dict):
+        return {"score": None, "blocked": True, "reason": "paper scorer returned no data"}
+    return {
+        "score": s.get("buy_score", s.get("confidence")),
+        "blocked": bool(s.get("paper_buy_blocked")),
+        "reason": str(s.get("paper_buy_block_reason") or ""),
+        "prediction": s.get("paper_prediction") or {},
+        "prediction_blocked": bool(s.get("paper_prediction_blocked")),
+        "prediction_text": str(s.get("paper_prediction_text") or ""),
+        "technical_bull": int(s.get("technical_bull") or 0),
+        "technical_bear": int(s.get("technical_bear") or 0),
+        "technical_evidence": list(s.get("technical_evidence") or []),
+        "components": s.get("buy_score_components") or {},
+        "raw_confidence": s.get("paper_raw_confidence"),
+        "near_threshold": bool(s.get("paper_near_threshold_buy")),
+        "near_threshold_reason": str(s.get("paper_near_threshold_reason") or ""),
+        "score_band": str(s.get("buy_score_band") or ""),
+        "data": s,
+    }
+
 
 if __name__ == "__main__":
     _core.engine.main()
