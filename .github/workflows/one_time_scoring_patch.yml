@@ -1,4 +1,4 @@
-name: Apply requested BUY score investment bands
+name: Apply dashboard menu and Market Debug patch
 
 on:
   push:
@@ -11,29 +11,65 @@ permissions:
 
 jobs:
   patch:
-    if: ${{ github.event.head_commit.message != 'Apply requested BUY score investment bands' }}
+    if: ${{ github.event.head_commit.message != 'Fix dashboard menu and Market Debug' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch main.py
+      - name: Patch dashboard menu
         run: |
           python - <<'PY'
           from pathlib import Path
-          p = Path('main.py')
+          p = Path('telegram_dashboard.py')
           s = p.read_text(encoding='utf-8')
-          marker = '\n_paper.score = _paper_score_predictive\n_paper.create = _adaptive_create\n'
-          insert = '''\n_paper.score = _paper_score_predictive\n\n# Requested BUY exposure bands: 65-74 cautious, 75-84 standard, 85-92 strong, 93+ pump.\ndef _investment_for_score_v2(confidence):\n    c = float(confidence or 0)\n    if c >= 85.0:\n        return 100.0\n    if c >= 75.0:\n        return 75.0\n    return 50.0\n\n_paper._investment_for_score = _investment_for_score_v2\nengine._investment_for_score = _investment_for_score_v2\n_paper.create = _adaptive_create\n'''
-          if marker not in s:
-              raise SystemExit('Expected scoring marker not found')
-          if '_investment_for_score_v2' in s:
-              raise SystemExit('Patch already present')
-          p.write_text(s.replace(marker, insert, 1), encoding='utf-8')
+          start = s.index('def menu_keyboard():')
+          end = s.index('\n\ndef paper_menu_keyboard():', start)
+          new = '''def menu_keyboard():
+              return {"inline_keyboard": [
+                  [{"text": "🤖 Paper Trading", "callback_data": "PAPER"}],
+                  [{"text": "🐞 Market Debug", "callback_data": "DEBUG"}],
+              ]}'''
+          p.write_text(s[:start] + new + s[end:], encoding='utf-8')
           PY
-      - name: Commit patch and remove one-time workflow
+      - name: Patch Market Debug handler
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('api/index.py')
+          s = p.read_text(encoding='utf-8')
+          pattern = r'    if data == "DEBUG":.*?    if data != "PAPER":'
+          replacement = '''    if data == "DEBUG":
+              state = state if state is not None else {"offset": 0}
+              state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
+              msg = cb.get("message") or {}
+              chat_id = (msg.get("chat") or {}).get("id")
+              message_id = msg.get("message_id")
+              configured_chat = os.environ.get("CHAT_ID")
+              if configured_chat and str(chat_id) != str(configured_chat):
+                  dashboard.answer_callback(cb.get("id"), "Unauthorized")
+                  return state
+              dashboard.answer_callback(cb.get("id"), "Loading Market Debug…")
+              try:
+                  snapshot = dashboard._load_dashboard_snapshot(5)
+                  text = dashboard.market_debug_report(snapshot)
+              except Exception as exc:
+                  text = f"🐞 MARKET DEBUG\\n\\n❌ Debug generation failed: {type(exc).__name__}: {exc}"
+              if len(text) > 3900:
+                  text = text[:3900].rstrip() + "\\n\\n… output truncated"
+              dashboard.edit(chat_id, message_id, text, dashboard.back_keyboard())
+              return state
+
+    if data != "PAPER":'''
+          patched, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit('DEBUG handler pattern not found')
+          p.write_text(patched, encoding='utf-8')
+          PY
+      - name: Commit patch and remove temporary workflows
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .github/workflows/one_time_scoring_patch.yml
-          git add main.py
-          git commit -m 'Apply requested BUY score investment bands'
+          git rm .github/workflows/one_time_scoring_patch.yml .github/workflows/menu_debug_fix_once.yml
+          git add telegram_dashboard.py api/index.py
+          git commit -m 'Fix dashboard menu and Market Debug'
           git push
