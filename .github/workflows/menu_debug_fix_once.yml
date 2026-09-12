@@ -22,49 +22,49 @@ jobs:
           from pathlib import Path
           p = Path('telegram_dashboard.py')
           s = p.read_text(encoding='utf-8')
-          old = '''def menu_keyboard():
-              return {"inline_keyboard": [
-                  [{"text": "📐 Technical Analysis", "callback_data": "TECH"}],
-                  [{"text": "🤖 Paper Trading", "callback_data": "PAPER"}],
-                  [{"text": "📊 Market Momentum", "callback_data": "MOMENTUM"}],
-                  [{"text": "🐞 Market Debug", "callback_data": "DEBUG"}],
-              ]}
-          '''
+          start = s.index('def menu_keyboard():')
+          end = s.index('\n\ndef paper_menu_keyboard():', start)
           new = '''def menu_keyboard():
               return {"inline_keyboard": [
                   [{"text": "🤖 Paper Trading", "callback_data": "PAPER"}],
                   [{"text": "🐞 Market Debug", "callback_data": "DEBUG"}],
-              ]}
-          '''
-          if old not in s:
-              raise SystemExit('Expected menu_keyboard block not found')
-          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+              ]}'''
+          p.write_text(s[:start] + new + s[end:], encoding='utf-8')
           PY
       - name: Make Market Debug robust in Vercel webhook
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
           p = Path('api/index.py')
           s = p.read_text(encoding='utf-8')
-          old = '''        dashboard.answer_callback(cb.get("id"))
-          snapshot = dashboard._load_dashboard_snapshot(5)
-          dashboard.edit(chat_id, message_id, dashboard.market_debug_report(snapshot), dashboard.back_keyboard())
-          return state
-          '''
-          new = '''        dashboard.answer_callback(cb.get("id"), "Loading Market Debug…")
-          try:
-              snapshot = dashboard._load_dashboard_snapshot(5)
-              text = dashboard.market_debug_report(snapshot)
-          except Exception as exc:
-              text = f"🐞 MARKET DEBUG\\n\\n❌ Debug generation failed: {type(exc).__name__}: {exc}"
-          if len(text) > 3900:
-              text = text[:3900].rstrip() + "\\n\\n… output truncated"
-          dashboard.edit(chat_id, message_id, text, dashboard.back_keyboard())
-          return state
-          '''
-          if old not in s:
-              raise SystemExit('Expected DEBUG handler block not found')
-          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          pattern = r'    if data == "DEBUG":.*?    if data != "PAPER":'
+          replacement = '''    if data == "DEBUG":
+              state = state if state is not None else {"offset": 0}
+              state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
+              msg = cb.get("message") or {}
+              chat_id = (msg.get("chat") or {}).get("id")
+              message_id = msg.get("message_id")
+              configured_chat = os.environ.get("CHAT_ID")
+              if configured_chat and str(chat_id) != str(configured_chat):
+                  dashboard.answer_callback(cb.get("id"), "Unauthorized")
+                  return state
+              dashboard.answer_callback(cb.get("id"), "Loading Market Debug…")
+              try:
+                  snapshot = dashboard._load_dashboard_snapshot(5)
+                  text = dashboard.market_debug_report(snapshot)
+              except Exception as exc:
+                  text = f"🐞 MARKET DEBUG\\n\\n❌ Debug generation failed: {type(exc).__name__}: {exc}"
+              if len(text) > 3900:
+                  text = text[:3900].rstrip() + "\\n\\n… output truncated"
+              dashboard.edit(chat_id, message_id, text, dashboard.back_keyboard())
+              return state
+
+    if data != "PAPER":'''
+          patched, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit('DEBUG handler pattern not found')
+          p.write_text(patched, encoding='utf-8')
           PY
       - name: Commit patch and remove one-time workflow
         run: |
