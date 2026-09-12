@@ -66,7 +66,6 @@ def patch_dashboard(dashboard):
         current = result.get("current", {})
         if not isinstance(current, dict) or not isinstance(wallet, dict):
             return result
-
         by_symbol = {}
         by_address = {}
         for holding in wallet.get("holdings", []) or []:
@@ -79,7 +78,6 @@ def patch_dashboard(dashboard):
                 by_symbol[symbol] = amount
             if address:
                 by_address[address] = amount
-
         total_open_pnl = 0.0
         total_open_cost = 0.0
         for key, pf in current.items():
@@ -104,7 +102,6 @@ def patch_dashboard(dashboard):
                     pf["unrealized_pnl_pct"] = pnl / cost * 100
             total_open_cost += dashboard.engine.num(pf.get("cost_sda"))
             total_open_pnl += dashboard.engine.num(pf.get("unrealized_pnl_sda"))
-
         result["open_pnl_sda"] = total_open_pnl
         result["open_unrealized_pnl_sda"] = total_open_pnl
         result["open_cost_sda"] = total_open_cost
@@ -199,10 +196,6 @@ def patch_dashboard(dashboard):
 
     def real_statistics_report():
         wallet = dashboard.load("wallet_data.json", {})
-        # FIFO must run on the ledger first. Wallet synchronization is the final
-        # authority for current amounts and unrealized P/L. Running FIFO after
-        # wallet sync can overwrite the correctly synchronized open aggregates
-        # with stale/market-value fields (the source of the old +892 SDA "P/L").
         portfolio = deepcopy(dashboard.load("portfolio_data.json", {}))
         meta = dashboard.load("token_metadata.json", {})
         import main as scanner
@@ -251,7 +244,14 @@ def patch_dashboard(dashboard):
         finally:
             dashboard.main_dashboard = main_dashboard_v21
 
-    def handle_update_v21(update):
+    def menu_keyboard_v21():
+        keyboard = original_menu_keyboard()
+        rows = keyboard.get("inline_keyboard", [])
+        if not any(row and row[0].get("callback_data") == "REAL" for row in rows):
+            rows.insert(2, [{"text": "👛 Real Wallet & Positions", "callback_data": "REAL"}])
+        return keyboard
+
+    def handle_update_v21(update, state=None):
         data = update if isinstance(update, dict) else {}
         callback = data.get("callback_query") or {}
         if callback:
@@ -261,11 +261,23 @@ def patch_dashboard(dashboard):
             chat = msg.get("chat") or {}
             chat_id = chat.get("id")
             message_id = msg.get("message_id")
+            if cb_data == "REAL":
+                dashboard.answer_callback(callback_id)
+                keyboard = {"inline_keyboard": [
+                    [{"text": "📈 Real Statistics", "callback_data": "REAL_STATS"}],
+                    [{"text": "⬅️ Main dashboard", "callback_data": "MAIN"}],
+                ]}
+                dashboard.edit(chat_id, message_id, real_trading_report(), keyboard)
+                return state if state is not None else {"offset": 0}
             if cb_data == "REAL_STATS":
                 dashboard.answer_callback(callback_id)
                 dashboard.edit(chat_id, message_id, real_statistics_report(), dashboard.back_keyboard())
-                return
-        return original_handle_update(update)
+                return state if state is not None else {"offset": 0}
+        return original_handle_update(update, state)
 
     dashboard.main_dashboard = main_dashboard_v21
+    dashboard.menu_keyboard = menu_keyboard_v21
     dashboard.handle_update = handle_update_v21
+    dashboard.real_trading_report = real_trading_report
+    dashboard.real_statistics_report = real_statistics_report
+    return dashboard
