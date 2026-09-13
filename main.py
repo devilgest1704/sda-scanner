@@ -125,7 +125,7 @@ def _paper_score_predictive(address, analysis, whale_state):
     s["paper_buy_block_reason"] = decision["reason"]
     s["confidence"] = score if decision["allowed"] else min(score, MAX_WIN_BUY_THRESHOLD - 1.0)
 
-    # V23 is now a canonical diagnostic layer.  It does not alter the BUY gate
+    # V23 is now a canonical diagnostic layer. It does not alter the BUY gate
     # until enough clean trade-level samples prove the new signal out-of-sample.
     try:
         import v23_predictor
@@ -162,6 +162,11 @@ def _adaptive_create(a, an, s, meta, liq, investment=None):
         z["risk_profile"] = profile["name"]; z["sl"] = e * (1.0 - profile["sl"]); z["initial_sl"] = z["sl"]
         z["tp1"] = e * (1.0 + profile["tp1"]); z["tp2"] = e * (1.0 + profile["tp2"])
         z["paper_prediction"] = pred or {}; z["max_win_profile"] = True
+        try:
+            import v24_tracking
+            v24_tracking.initialize(z)
+        except Exception:
+            pass
     return z
 
 
@@ -190,5 +195,28 @@ def paper_decision(address, analysis, whale_state):
     }
 
 
+def _run_v24_tracking():
+    """Record the latest market price path before this scan evaluates exits."""
+    try:
+        import v24_tracking
+        return v24_tracking.update_open_positions(_paper)
+    except Exception:
+        return False
+
+
+# The tracking hook runs at the start of every scanner invocation. It is
+# instrumentation only and cannot change the strategy or stop the scan.
+_original_engine_main = engine.main
+
+
+def _engine_main_with_v24_tracking(*args, **kwargs):
+    _run_v24_tracking()
+    return _original_engine_main(*args, **kwargs)
+
+
+engine.main = _engine_main_with_v24_tracking
+_core.engine.main = _engine_main_with_v24_tracking
+
+
 if __name__ == "__main__":
-    _core.engine.main()
+    engine.main()
