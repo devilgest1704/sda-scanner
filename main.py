@@ -1,8 +1,14 @@
 """Compatibility wrapper for the SDA scanner.
 
-The implementation lives in main_core.py. This module keeps the public
-entrypoint name `main.py`, applies the V21 borderline BUY flow bridge, and
-exposes one canonical Paper decision helper for dashboard diagnostics.
+MAX-WIN Paper Trading profile:
+- only high-quality setups are allowed to open
+- predictor must agree with the setup
+- max 6 concurrent paper positions
+- max 1 new BUY per scan
+- longer SL re-entry cooldown
+- tighter risk profile for higher hit-rate
+
+The implementation lives in main_core.py.
 """
 
 import main_core as _core
@@ -10,226 +16,204 @@ for _name, _value in _core.__dict__.items():
     if not _name.startswith("__"):
         globals()[_name] = _value
 
+# ---------------------------------------------------------------------------
+# MAX-WIN PAPER PROFILE
+# ---------------------------------------------------------------------------
+MAX_WIN_BUY_THRESHOLD = 78.0
+MAX_WIN_MAX_OPEN_POSITIONS = 6
+MAX_WIN_MAX_NEW_BUYS_PER_RUN = 1
+MAX_WIN_SL_COOLDOWN_SCANS = 12
+
+_paper.BUY_THRESHOLD = MAX_WIN_BUY_THRESHOLD
+_paper.MAX_OPEN_POSITIONS = MAX_WIN_MAX_OPEN_POSITIONS
+_paper.MAX_NEW_BUYS_PER_RUN = MAX_WIN_MAX_NEW_BUYS_PER_RUN
+_core.PAPER_SL_COOLDOWN_SCANS = MAX_WIN_SL_COOLDOWN_SCANS
+
 
 def _strong_flow_bridge(s, analysis, pred=None):
-    """Allow only exceptional borderline setups while predictor is warming up."""
-    try:
-        if isinstance(pred, dict) and pred.get("ready"):
-            return False
-        raw = float(s.get("paper_raw_confidence", s.get("confidence", 0)) or 0)
-        if not 58.0 <= raw < float(getattr(_paper, "BUY_THRESHOLD", 60) or 60):
-            return False
-        from strategy_v21 import technical_confirmation
-        tc = technical_confirmation(analysis)
-        bull = int(tc.get("bull") or 0)
-        bear = int(tc.get("bear") or 0)
-        evidence = list(tc.get("evidence") or [])
-        m1 = float(s.get("m1h") or 0)
-        m4 = float(s.get("m4h") or 0)
-        m15 = float(s.get("m15") or 0)
-        flow = float(s.get("net_1h") or 0)
-        trades = float(s.get("trades_1h") or 0)
-        f1 = analysis.get("flow", {}).get("1h", {}) if isinstance(analysis, dict) else {}
-        bv = _metric_number(f1, "buy_volume")
-        sv = _metric_number(f1, "sell_volume")
-        bc = _metric_number(f1, "buy_count")
-        sc = _metric_number(f1, "sell_count")
-        volume_ratio = bv / max(sv, 1.0)
-        trade_ratio = bc / max(sc, 1.0)
-        return (
-            m1 >= 5.0 and m4 >= 5.0 and m15 >= -0.50 and flow > 0
-            and trades >= 10 and float(f1.get("total_volume") or 0) >= 1000.0
-            and (volume_ratio >= 1.25 or trade_ratio >= 1.50)
-            and bear == 0
-            and not any("MACD bearish" in x for x in evidence)
-            and not any("near resistance" in x for x in evidence)
-            and (bull >= 1 or m1 >= 10.0)
-        )
-    except Exception:
-        return False
+    """No low-score bridge in MAX-WIN mode.
+
+    The old bridge intentionally admitted borderline setups. That is the wrong
+    trade-off for a hit-rate-first paper profile, so borderline BUYs are gone.
+    """
+    return False
 
 
 def _v21_buy_decision(buy_score, s, analysis, pred):
-    """Single BUY decision: final score + technical confirmation.
+    """Strict MAX-WIN BUY gate.
 
-    Predictor quality is already represented by the prediction component of
-    the V2 score. It is intentionally NOT a second hard veto here.
+    A BUY needs agreement from score, momentum, flow, activity, prediction and
+    technical confirmation. One weak pillar is enough to reject the entry.
     """
-    threshold = float(getattr(_paper, "BUY_THRESHOLD", 60) or 60)
     score = float(buy_score or 0)
+    threshold = MAX_WIN_BUY_THRESHOLD
+
     try:
         from strategy_v21 import technical_confirmation
         tc = technical_confirmation(analysis)
     except Exception:
         tc = {"bull": 0, "bear": 0, "evidence": []}
+
     bull = int(tc.get("bull") or 0)
     bear = int(tc.get("bear") or 0)
     evidence = list(tc.get("evidence") or [])
-    adjustment = min(8.0, bull * 1.5) - min(10.0, bear * 1.8)
-    adjusted = _clamp100(score + adjustment)
-    bridge = _strong_flow_bridge(s, analysis, pred)
-    technical_ok = (not bool(analysis.get("technical"))) or bull >= 2
-    allowed = adjusted >= threshold and technical_ok
-    if bridge:
-        allowed = True
-        adjusted = max(adjusted, threshold + 1.0)
-    reasons = []
-    if not technical_ok and not bridge:
-        reasons.append(f"technical confirmation {bull} bull / {bear} bear")
-    if adjusted < threshold and not bridge:
-        reasons.append(f"BUY score {adjusted:.0f} < {threshold:.0f}")
-    if bridge:
-        reasons.append("V21 exceptional 58-59 flow bridge (predictor warming up)")
-    return {
-        "allowed": allowed, "score": adjusted, "raw_score": score,
-        "adjustment": adjustment, "technical_bull": bull,
-        "technical_bear": bear, "technical_evidence": evidence,
-        "bridge": bridge, "flow_bridge": bridge, "reason": "; ".join(reasons),
-    }
 
+    # Do not reward technical confirmation in the strict gate; it is a
+    # requirement, not a way to turn a weak setup into a BUY.
+    technical_ok = ((not bool(analysis.get("technical"))) or bull >= 2) and bear == 0
 
-# Calibrate the predictor before the core predictive scorer is captured.
-# The old formula mapped probabilities such as P(+5)=8%, P(+10)=8% and
-# mean ROI=-3.3% to roughly 1-2/100, effectively turning a 15% score
-# component into a near-total BUY suppression. Keep the predictor meaningful,
-# but center it around a neutral 50 and let the final score decide.
-def _buy_score_v2_calibrated(s, analysis, pred):
-    m15 = float(s.get("m15") or 0)
     m1 = float(s.get("m1h") or 0)
+    m15 = float(s.get("m15") or 0)
     m4 = float(s.get("m4h") or 0)
-    momentum_score = _clamp100(50.0 + 3.0 * m1 + 1.5 * m4 + 1.5 * m15)
-
     flow = float(s.get("net_1h") or 0)
-    whale = float(s.get("whale_net") or 0)
-    whale15 = float(s.get("whale_15m_net") or 0)
-    flow_score = _clamp100(
-        50.0
-        + 35.0 * math.tanh(flow / 5000.0)
-        + 15.0 * math.tanh((whale + 0.5 * whale15) / 5000.0)
-    )
-
     trades = float(s.get("trades_1h") or 0)
-    activity_score = _clamp100(25.0 + 3.75 * min(trades, 20.0))
 
+    prediction_ok = False
+    p5 = p10 = mean_roi = 0.0
     if isinstance(pred, dict) and pred.get("ready"):
         p5 = float(pred.get("p5") or 0)
         p10 = float(pred.get("p10") or 0)
         mean_roi = float(pred.get("mean_roi") or 0)
-        # Neutral predictor = 50. Poor historical results reduce the score,
-        # but never collapse the 15% component to ~0 solely because the
-        # predictor is currently weak.
-        prediction_score = _clamp100(
-            50.0
-            + 45.0 * (p5 - 0.50)
-            + 30.0 * (p10 - 0.20)
-            + 1.5 * mean_roi
-        )
-    else:
-        prediction_score = 50.0
+        prediction_ok = p5 >= 0.55 and p10 >= 0.25 and mean_roi > 0.0
 
-    impact = _metric_number(
-        analysis,
-        "estimated_price_impact_pct",
-        "price_impact_pct",
-        "expected_impact_pct",
-        "impact_pct",
-    )
-    if impact <= 0:
-        liq = _metric_number(analysis, "liquidity_sda", "liquidity", "liquidity_usd")
-        liquidity_score = (
-            _clamp100(35.0 + min(65.0, math.log10(max(liq, 1.0)) * 18.0))
-            if liq > 0 else 55.0
-        )
-    else:
-        liquidity_score = _clamp100(100.0 - 12.5 * impact)
+    # Require positive short-term trend and positive SDA flow. This directly
+    # attacks the current failure mode where 60-70 score tokens are opened
+    # despite negative/weak predictive expectancy.
+    momentum_ok = m1 >= 3.0 and m15 >= 0.0 and m4 >= 0.0
+    flow_ok = flow > 0.0
+    activity_ok = trades >= 5.0
 
-    final = (
-        0.35 * momentum_score
-        + 0.25 * flow_score
-        + 0.15 * activity_score
-        + 0.15 * prediction_score
-        + 0.10 * liquidity_score
+    allowed = (
+        score >= threshold
+        and technical_ok
+        and prediction_ok
+        and momentum_ok
+        and flow_ok
+        and activity_ok
     )
-    return _clamp100(final), {
-        "momentum": round(momentum_score, 1),
-        "flow": round(flow_score, 1),
-        "activity": round(activity_score, 1),
-        "prediction": round(prediction_score, 1),
-        "liquidity": round(liquidity_score, 1),
-        "impact_pct": round(impact, 3) if impact > 0 else None,
+
+    reasons = []
+    if score < threshold:
+        reasons.append(f"BUY score {score:.0f} < {threshold:.0f}")
+    if not technical_ok:
+        reasons.append(f"technical {bull} bull / {bear} bear")
+    if not prediction_ok:
+        reasons.append(f"prediction weak P5={p5:.0%} P10={p10:.0%} mean={mean_roi:+.1f}%")
+    if not momentum_ok:
+        reasons.append(f"momentum {m15:+.1f}/{m1:+.1f}/{m4:+.1f}%")
+    if not flow_ok:
+        reasons.append("1h SDA flow <= 0")
+    if not activity_ok:
+        reasons.append(f"only {trades:.0f} trades/1h")
+
+    return {
+        "allowed": allowed,
+        "score": score,
+        "raw_score": score,
+        "adjustment": 0.0,
+        "technical_bull": bull,
+        "technical_bear": bear,
+        "technical_evidence": evidence,
+        "bridge": False,
+        "flow_bridge": False,
+        "reason": "; ".join(reasons),
     }
 
 
-_core._buy_score_v2 = _buy_score_v2_calibrated
-
-
 _core._v21_buy_decision = _v21_buy_decision
+_paper._v21_buy_decision = _v21_buy_decision
+
+# ---------------------------------------------------------------------------
+# Re-use the calibrated predictor wrapper from the previous main.py, but add
+# the strict MAX-WIN gate after all legacy predictor vetoes have been removed.
+# ---------------------------------------------------------------------------
 _original_paper_score_predictive = _core._paper_score_predictive
 
 
 def _paper_score_predictive(address, analysis, whale_state):
-    """Canonical Paper scorer.
-
-    The V2 score already contains a 15% prediction component. A weak predictor
-    therefore lowers the score but must not create a separate hard BUY veto.
-    Other safety/technical gates remain authoritative.
-    """
     s = _original_paper_score_predictive(address, analysis, whale_state)
     if not isinstance(s, dict):
         return s
 
     s = dict(s)
     pred = s.get("paper_prediction") if isinstance(s.get("paper_prediction"), dict) else None
+    score = float(s.get("buy_score", s.get("confidence") or 0) or 0)
 
-    # The legacy predictive layer adds an additional hard veto on top of the
-    # V2 prediction score. Remove ONLY predictor-only veto text here. This
-    # keeps prediction visible as a component while making the final BUY
-    # decision depend on the final score and the remaining safety gates.
-    if s.get("paper_prediction_blocked"):
-        reason = str(s.get("paper_buy_block_reason") or "")
-        parts = [p.strip() for p in reason.split(";") if p.strip()]
-        predictor_only = []
-        remaining = []
-        for part in parts:
-            low = part.lower()
-            if (
-                "prediction too weak" in low
-                or "p(+5)" in low
-                or "score 65-69 needs strong prediction" in low
-            ):
-                predictor_only.append(part)
-            else:
-                remaining.append(part)
+    decision = _v21_buy_decision(score, s, analysis, pred)
+    s["buy_score"] = round(score, 1)
+    s["market_score"] = round(score, 1)
+    s["v21_adjustment"] = 0.0
+    s["technical_bull"] = decision["technical_bull"]
+    s["technical_bear"] = decision["technical_bear"]
+    s["technical_evidence"] = decision["technical_evidence"]
+    s["paper_near_threshold_buy"] = False
+    s["paper_near_threshold_reason"] = ""
+    s["max_win_profile"] = True
+    s["max_win_threshold"] = MAX_WIN_BUY_THRESHOLD
 
-        if predictor_only:
-            s["paper_prediction_veto_reason"] = "; ".join(predictor_only)
-            s["paper_buy_block_reason_before_predictor"] = reason
-            s["paper_buy_block_reason"] = "; ".join(remaining)
-            s["paper_buy_blocked"] = bool(remaining)
-            if not remaining:
-                final_score = float(s.get("buy_score") or s.get("market_score") or s.get("confidence") or 0)
-                s["confidence"] = final_score
-                s["paper_buy_block_reason"] = ""
-
-    # Preserve the factual predictor status for Market Debug without using it
-    # as a second BUY gate.
+    # Keep predictor information visible, but make it a genuine entry
+    # requirement rather than a second inconsistent veto.
     if pred is not None:
         p5 = float(pred.get("p5") or 0)
         p10 = float(pred.get("p10") or 0)
         mean_roi = float(pred.get("mean_roi") or 0)
-        s["paper_prediction_role"] = "score_component"
+        s["paper_prediction_role"] = "hard_entry_filter"
         s["paper_prediction_summary"] = f"P(+5) {p5:.0%} • P(+10) {p10:.0%} • mean {mean_roi:+.1f}%"
 
+    s["paper_buy_blocked"] = not decision["allowed"]
+    s["paper_buy_block_reason"] = decision["reason"]
+    s["confidence"] = score if decision["allowed"] else min(score, MAX_WIN_BUY_THRESHOLD - 1.0)
     return s
 
 
 _core._paper_score_predictive = _paper_score_predictive
 _paper.score = _paper_score_predictive
-_paper_score_predictive = _paper_score_predictive
+
+# ---------------------------------------------------------------------------
+# MAX-WIN adaptive risk profile.
+# Lower TP1 is intentional: with 1% fee + 0.1% slippage, we want profitable
+# positions to realize sooner instead of repeatedly giving winners back.
+# ---------------------------------------------------------------------------
+def _max_win_risk_profile(pred, score):
+    p10 = float((pred or {}).get("p10") or 0)
+    p5 = float((pred or {}).get("p5") or 0)
+    if p10 >= 0.60 and p5 >= 0.70:
+        return {"sl": 0.065, "tp1": 0.060, "tp2": 0.150, "trail": 0.070, "name": "PUMP-MW"}
+    if p10 >= 0.40 and p5 >= 0.62:
+        return {"sl": 0.050, "tp1": 0.050, "tp2": 0.110, "trail": 0.055, "name": "STRONG-MW"}
+    return {"sl": 0.040, "tp1": 0.045, "tp2": 0.090, "trail": 0.050, "name": "NORMAL-MW"}
+
+
+_core._risk_profile = _max_win_risk_profile
+
+
+def _adaptive_create(a, an, s, meta, liq, investment=None):
+    z = _core._paper_original_create(a, an, s, meta, liq, investment)
+    pred = s.get("paper_prediction") if isinstance(s, dict) else None
+    profile = _max_win_risk_profile(pred or {}, float(s.get("confidence") or 0))
+    e = float(z.get("entry_price") or 0)
+    if e > 0:
+        z["sl_pct"] = profile["sl"]
+        z["tp1_pct"] = profile["tp1"]
+        z["tp2_pct"] = profile["tp2"]
+        z["trail_pct"] = profile["trail"]
+        z["risk_profile"] = profile["name"]
+        z["sl"] = e * (1.0 - profile["sl"])
+        z["initial_sl"] = z["sl"]
+        z["tp1"] = e * (1.0 + profile["tp1"])
+        z["tp2"] = e * (1.0 + profile["tp2"])
+        z["paper_prediction"] = pred or {}
+        z["max_win_profile"] = True
+    return z
+
+
+_core._adaptive_create = _adaptive_create
+_paper.create = _adaptive_create
+engine.create = _adaptive_create
 
 
 def paper_decision(address, analysis, whale_state):
-    """Return the exact canonical Paper BUY decision used by the scanner."""
+    """Return the exact canonical MAX-WIN Paper BUY decision."""
     s = _paper_score_predictive(address, analysis, whale_state)
     if not isinstance(s, dict):
         return {"score": None, "blocked": True, "reason": "paper scorer returned no data"}
@@ -239,7 +223,7 @@ def paper_decision(address, analysis, whale_state):
         "reason": str(s.get("paper_buy_block_reason") or ""),
         "prediction": s.get("paper_prediction") or {},
         "prediction_blocked": bool(s.get("paper_prediction_blocked")),
-        "prediction_role": str(s.get("paper_prediction_role") or "score_component"),
+        "prediction_role": str(s.get("paper_prediction_role") or "hard_entry_filter"),
         "prediction_veto_reason": str(s.get("paper_prediction_veto_reason") or ""),
         "prediction_text": str(s.get("paper_prediction_text") or ""),
         "technical_bull": int(s.get("technical_bull") or 0),
@@ -247,9 +231,9 @@ def paper_decision(address, analysis, whale_state):
         "technical_evidence": list(s.get("technical_evidence") or []),
         "components": s.get("buy_score_components") or {},
         "raw_confidence": s.get("paper_raw_confidence"),
-        "near_threshold": bool(s.get("paper_near_threshold_buy")),
-        "near_threshold_reason": str(s.get("paper_near_threshold_reason") or ""),
-        "score_band": str(s.get("buy_score_band") or ""),
+        "near_threshold": False,
+        "near_threshold_reason": "",
+        "score_band": str(s.get("buy_score_band") or "MAX-WIN"),
         "data": s,
     }
 
