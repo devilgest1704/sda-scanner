@@ -52,35 +52,18 @@ def _caller_is_paper_main():
 
 
 def _predictive_score(addr, analysis, ws, engine):
-    """Return the canonical predictive BUY score from main.py."""
+    """Return the canonical predictive BUY score from main.py without weakening its gate."""
     try:
         import main as scanner
         predictor = getattr(scanner, "_paper_score_predictive", None)
         if predictor is None:
             return None
+        # IMPORTANT V22: main.py is the authoritative MAX-WIN gate. Do not
+        # reconstruct the decision from engine.BUY_THRESHOLD here: doing so
+        # previously allowed a score >=60 setup to bypass the 78-point gate.
         out = dict(predictor(addr, analysis, ws))
-        threshold = _num(getattr(engine, "BUY_THRESHOLD", 60), 60)
-        buy_score = _num(out.get("buy_score"), out.get("confidence"))
-        tc = technical_confirmation(analysis)
-        bear = int(tc.get("bear") or 0)
-        bull = int(tc.get("bull") or 0)
-
-        # main.py is the single source of truth for the predictive BUY score.
-        # Neutral technical data (0 bull / 0 bear) must neither add nor subtract.
-        # Bearish evidence remains a hard technical veto.
-        if bear == 0 and bull == 0:
-            raw = _num(out.get("paper_raw_confidence"), buy_score)
-            buy_score = max(buy_score, raw)
-            out["buy_score"] = buy_score
-            out["confidence"] = buy_score if buy_score >= threshold else min(buy_score, threshold - 1.0)
-            out["paper_buy_blocked"] = buy_score < threshold
-            out["paper_buy_block_reason"] = f"BUY score {buy_score:.0f} < {threshold:.0f}" if buy_score < threshold else ""
-        elif bear > 0:
-            out["confidence"] = min(buy_score, threshold - 1.0)
-            out["paper_buy_blocked"] = True
-            out["paper_buy_block_reason"] = f"technical confirmation {bull} bull / {bear} bear"
-
-        out["buy_threshold"] = threshold
+        out["canonical_buy_gate"] = True
+        out["canonical_buy_threshold"] = _num(getattr(scanner, "MAX_WIN_BUY_THRESHOLD", getattr(engine, "BUY_THRESHOLD", 60)), 60)
         return out
     except Exception:
         return None
@@ -106,8 +89,6 @@ def patch_engine(engine):
         tc = technical_confirmation(analysis)
         score = _num(base.get("confidence"))
         adjustment = min(8, tc["bull"] * 1.5) - min(10, tc["bear"] * 1.8)
-        # Technical confirmation is additive only when it is actually present.
-        # 0 bull / 0 bear is neutral and leaves the base score unchanged.
         score = max(0, min(100, score + adjustment))
         threshold = _num(getattr(engine, "BUY_THRESHOLD", 60), 60)
         if tc["bear"] > 0:
