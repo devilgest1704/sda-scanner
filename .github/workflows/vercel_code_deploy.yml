@@ -1,0 +1,62 @@
+name: Vercel Code Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '*.py'
+      - '*.txt'
+      - '*.md'
+      - 'api/**'
+      - '!wallet_data.json'
+      - '!portfolio_data.json'
+      - '!state.json'
+      - '!market_data.json'
+      - '!token_metadata.json'
+      - '!liquidity_data.json'
+      - '!whale_data.json'
+      - '!whale_state.json'
+      - '!whale_history.json'
+      - '!paper_stats.json'
+      - '!positions.json'
+      - '!decision_state_v15.json'
+      - '!paper_auto_state.json'
+      - '!paper_buy_guard_state.json'
+      - '!real_trade_state.json'
+      - '!sidra_swap_discovery.json'
+      - '!pending_signals.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vercel-code-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy code to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_Ni66yEoQsvqh6CTUt6YjXqlv
+          VERCEL_PROJECT_ID: prj_nolTVKgPkLHUv9vOYvNE9xd1VRv6
+        run: |
+          set -euo pipefail
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo 'VERCEL_TOKEN is missing.'
+            exit 1
+          fi
+          npm install --global vercel@latest
+          vercel link --yes \
+            --project="$VERCEL_PROJECT_ID" \
+            --scope="$VERCEL_ORG_ID" \
+            --token="$VERCEL_TOKEN"
+          vercel deploy --prod --yes \
+            --scope="$VERCEL_ORG_ID" \
+            --token="$VERCEL_TOKEN"
