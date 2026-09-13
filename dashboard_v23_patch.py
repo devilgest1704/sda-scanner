@@ -1,8 +1,8 @@
-"""Render V23 diagnostics on top of the canonical MAX-WIN dashboard.
+"""Render the canonical V23 diagnostics in Market Debug.
 
-V23 is diagnostic/shadow only. This module never creates a second BUY policy;
-it uses the same main.paper_decision() path and only replaces the stale
-legacy predictor line with V23 diagnostics.
+V23 is diagnostic/shadow only. The dashboard must show the exact V23
+prediction returned by the same main.paper_decision() path used by the
+canonical MAX-WIN policy. No second BUY policy is created here.
 """
 import re
 
@@ -12,6 +12,21 @@ def _safe_num(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _prediction(decision):
+    if not isinstance(decision, dict):
+        return {}
+    v = decision.get("v23")
+    if isinstance(v, dict):
+        return v
+    data = decision.get("data")
+    if isinstance(data, dict):
+        v = data.get("v23_prediction")
+        if isinstance(v, dict):
+            return v
+    v = decision.get("v23_prediction")
+    return v if isinstance(v, dict) else {}
 
 
 def patch_dashboard(dashboard):
@@ -43,9 +58,7 @@ def patch_dashboard(dashboard):
                     sym = str(raw or "").split("/", 1)[0].strip().upper()
                 if sym != target:
                     continue
-                decision = scanner.paper_decision(address, analysis, ws)
-                v = decision.get("v23") or (decision.get("data") or {}).get("v23_prediction") or {}
-                return v if isinstance(v, dict) else {}
+                return _prediction(scanner.paper_decision(address, analysis, ws))
         except Exception:
             return {}
         return {}
@@ -75,9 +88,9 @@ def patch_dashboard(dashboard):
                 current_label = m.group(1).strip()
                 out.append(line)
                 continue
+            # Replace every legacy predictor line with the exact V23 result.
             if current_label and line.strip().startswith("PREDICTOR:"):
-                v = _v23_for_label(current_label)
-                out.append(_v23_line(v))
+                out.append(_v23_line(_v23_for_label(current_label)))
                 current_label = None
                 continue
             out.append(line)
