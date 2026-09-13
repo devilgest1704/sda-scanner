@@ -1,10 +1,17 @@
 """Render V23 diagnostics on top of the canonical MAX-WIN dashboard.
 
 V23 is diagnostic/shadow only. This module never creates a second BUY policy;
-it calls the same main.paper_decision() used by dashboard_consistency.py and
-only replaces the stale legacy predictor line with the V23 diagnostics.
+it uses the same main.paper_decision() path and only replaces the stale
+legacy predictor line with V23 diagnostics.
 """
 import re
+
+
+def _safe_num(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def patch_dashboard(dashboard):
@@ -45,16 +52,16 @@ def patch_dashboard(dashboard):
 
     def _v23_line(v):
         if not v:
-            return ""
+            return "   V23 PUMP: N/A"
         mode = "READY" if v.get("ready") else "WARMING"
         return (
-            f"   V23 PUMP: {mode} | P(+5) {float(v.get('p5', 0)):.0%}"
-            f" | P(+10) {float(v.get('p10', 0)):.0%}"
-            f" | P(+20) {float(v.get('p20', 0)):.0%}"
-            f" | P(+30) {float(v.get('p30', 0)):.0%}"
-            f" | mean {float(v.get('mean_roi', 0)):+.1f}%"
-            f" | pump {float(v.get('pump_score', 0)):.0f}/100"
-            f" | samples {int(v.get('samples', 0) or 0)}"
+            f"   V23 PUMP: {mode} | P(+5) {_safe_num(v.get('p5')):.0%}"
+            f" | P(+10) {_safe_num(v.get('p10')):.0%}"
+            f" | P(+20) {_safe_num(v.get('p20')):.0%}"
+            f" | P(+30) {_safe_num(v.get('p30')):.0%}"
+            f" | mean {_safe_num(v.get('mean_roi')):+.1f}%"
+            f" | pump {_safe_num(v.get('pump_score')):.0f}/100"
+            f" | samples {int(_safe_num(v.get('samples')))}"
         )
 
     def market_debug_report_canonical(snapshot=None):
@@ -67,20 +74,16 @@ def patch_dashboard(dashboard):
             if m:
                 current_label = m.group(1).strip()
                 out.append(line)
-                # Remove the stale legacy PREDICTOR line below and replace it
-                # with one canonical V23 diagnostic line.
                 continue
             if current_label and line.strip().startswith("PREDICTOR:"):
                 v = _v23_for_label(current_label)
-                if v:
-                    out.append(_v23_line(v))
-                else:
-                    out.append(line)
+                out.append(_v23_line(v))
                 current_label = None
                 continue
             out.append(line)
         return "\n".join(out)
 
     dashboard.market_debug_report_canonical = market_debug_report_canonical
+    dashboard.market_debug_report = market_debug_report_canonical
     dashboard._sda_v23_dashboard_patched = True
     return dashboard
