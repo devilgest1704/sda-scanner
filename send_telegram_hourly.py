@@ -5,6 +5,7 @@ import position_action_v20
 import real_bot_menu
 import paper_statistics_fix
 import dashboard_consistency
+import dashboard_v23_patch
 import dashboard_wallet_summary
 
 
@@ -71,6 +72,9 @@ def main():
     real_bot_menu.patch_dashboard(dashboard)
     paper_statistics_fix.patch_dashboard(dashboard)
     dashboard_consistency.patch_dashboard(dashboard)
+    # Must run after dashboard_consistency: it replaces only the stale V23
+    # display line while retaining the canonical paper_decision path.
+    dashboard_v23_patch.patch_dashboard(dashboard)
     dashboard_wallet_summary.patch_dashboard(dashboard)
 
     _patched_menu_keyboard = dashboard.menu_keyboard
@@ -85,46 +89,12 @@ def main():
             if callback in ("TECH", "MOMENTUM"):
                 continue
             rows.append(row)
-        if not any(row and row[0].get("callback_data") == "REFRESH" for row in rows):
-            rows.append([{"text": "🔄 Refresh", "callback_data": "REFRESH"}])
         keyboard["inline_keyboard"] = rows
         return keyboard
 
     dashboard.menu_keyboard = _menu_keyboard_with_refresh
-
-    _original_handle_update = dashboard.handle_update
-
-    def _handle_update_with_refresh(update, state=None):
-        cb = update.get("callback_query") or {}
-        if cb.get("data") != "REFRESH":
-            return _original_handle_update(update, state)
-
-        state = state if state is not None else {"offset": 0}
-        state["offset"] = max(
-            int(state.get("offset", 0)),
-            int(update.get("update_id", 0)) + 1,
-        )
-        msg = cb.get("message") or {}
-        chat_id = (msg.get("chat") or {}).get("id")
-        message_id = msg.get("message_id")
-        configured_chat = dashboard.os.environ.get("CHAT_ID")
-
-        if configured_chat and str(chat_id) != str(configured_chat):
-            dashboard.answer_callback(cb.get("id"), "Unauthorized")
-            return state
-
-        dashboard.answer_callback(cb.get("id"), "Refreshing…")
-        dashboard.edit(
-            chat_id,
-            message_id,
-            dashboard.main_dashboard(),
-            dashboard.menu_keyboard(),
-        )
-        return state
-
-    dashboard.handle_update = _handle_update_with_refresh
-
-    dashboard.send(dashboard.main_dashboard(), dashboard.menu_keyboard())
+    dashboard.send(dashboard.main_dashboard(), dashboard.menu_keyboard(), dashboard.os.environ.get("CHAT_ID"))
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()
