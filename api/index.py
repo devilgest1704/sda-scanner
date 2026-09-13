@@ -151,7 +151,7 @@ def _handle_update_with_actions(update, state=None):
     state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
     msg = cb.get("message") or {}
     chat_id = (msg.get("chat") or {}).get("id")
-    message_id = msg.get("message_id")
+    message_id = (msg.get("message_id"))
     configured_chat = os.environ.get("CHAT_ID")
     if configured_chat and str(chat_id) != str(configured_chat):
         dashboard.answer_callback(cb.get("id"), "Unauthorized")
@@ -161,6 +161,13 @@ def _handle_update_with_actions(update, state=None):
     return state
 
 dashboard.handle_update = _handle_update_with_actions
+
+# Install the final router AFTER all compatibility wrappers above.  This is
+# critical: api/index.py assigns handle_update after real_bot_menu.patch_dashboard,
+# which otherwise replaces the router and swallows MAIN/REAL/REAL_STATS.
+import telegram_callback_router
+dashboard._sda_callback_router_patched = False
+telegram_callback_router.patch_dashboard(dashboard)
 
 app = FastAPI()
 
