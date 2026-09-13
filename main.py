@@ -31,20 +31,12 @@ _core.PAPER_SL_COOLDOWN_SCANS = MAX_WIN_SL_COOLDOWN_SCANS
 
 
 def _strong_flow_bridge(s, analysis, pred=None):
-    """No low-score bridge in MAX-WIN mode.
-
-    The old bridge intentionally admitted borderline setups. That is the wrong
-    trade-off for a hit-rate-first paper profile, so borderline BUYs are gone.
-    """
+    """No low-score bridge in MAX-WIN mode."""
     return False
 
 
 def _v21_buy_decision(buy_score, s, analysis, pred):
-    """Strict MAX-WIN BUY gate.
-
-    A BUY needs agreement from score, momentum, flow, activity, prediction and
-    technical confirmation. One weak pillar is enough to reject the entry.
-    """
+    """Strict MAX-WIN BUY gate."""
     score = float(buy_score or 0)
     threshold = MAX_WIN_BUY_THRESHOLD
 
@@ -95,7 +87,6 @@ def _v21_buy_decision(buy_score, s, analysis, pred):
 
 _core._v21_buy_decision = _v21_buy_decision
 _paper._v21_buy_decision = _v21_buy_decision
-
 _original_paper_score_predictive = _core._paper_score_predictive
 
 
@@ -125,8 +116,6 @@ def _paper_score_predictive(address, analysis, whale_state):
     s["paper_buy_block_reason"] = decision["reason"]
     s["confidence"] = score if decision["allowed"] else min(score, MAX_WIN_BUY_THRESHOLD - 1.0)
 
-    # V23 is now a canonical diagnostic layer. It does not alter the BUY gate
-    # until enough clean trade-level samples prove the new signal out-of-sample.
     try:
         import v23_predictor
         s = v23_predictor.enrich(s, analysis)
@@ -135,6 +124,23 @@ def _paper_score_predictive(address, analysis, whale_state):
         s["v23_p5"] = s["v23_p10"] = s["v23_p20"] = s["v23_p30"] = 0.0
         s["v23_mean_roi"] = 0.0
         s["v23_pump_score"] = 0.0
+
+    # V24 is shadow-only. It learns the post-entry price path and is not a BUY gate.
+    try:
+        import v24_predictor
+        state = _paper.load(_paper.POSITIONS_FILE, {"positions": {}, "closed_trades": []})
+        closed = state.get("closed_trades", []) if isinstance(state, dict) else []
+        s = v24_predictor.enrich(s, s, closed)
+        v = s.get("v24") or {}
+        s["v24_p5_mfe"] = v.get("p5_mfe", 0.0)
+        s["v24_p10_mfe"] = v.get("p10_mfe", 0.0)
+        s["v24_p20_mfe"] = v.get("p20_mfe", 0.0)
+        s["v24_p30_mfe"] = v.get("p30_mfe", 0.0)
+        s["v24_expected_mfe"] = v.get("expected_mfe", 0.0)
+        s["v24_expected_mae"] = v.get("expected_mae", 0.0)
+        s["v24_pump_quality"] = v.get("pump_quality", 0.0)
+    except Exception as exc:
+        s["v24"] = {"version": "V24", "ready": False, "error": str(exc)}
     return s
 
 
@@ -191,7 +197,7 @@ def paper_decision(address, analysis, whale_state):
         "score_band": str(s.get("buy_score_band") or "MAX-WIN"), "data": s,
         "v23": s.get("v23_prediction") or {}, "v23_p5": s.get("v23_p5", 0.0), "v23_p10": s.get("v23_p10", 0.0),
         "v23_p20": s.get("v23_p20", 0.0), "v23_p30": s.get("v23_p30", 0.0), "v23_mean_roi": s.get("v23_mean_roi", 0.0),
-        "v23_pump_score": s.get("v23_pump_score", 0.0),
+        "v23_pump_score": s.get("v23_pump_score", 0.0), "v24": s.get("v24") or {},
     }
 
 
@@ -204,8 +210,6 @@ def _run_v24_tracking():
         return False
 
 
-# The tracking hook runs at the start of every scanner invocation. It is
-# instrumentation only and cannot change the strategy or stop the scan.
 _original_engine_main = engine.main
 
 
