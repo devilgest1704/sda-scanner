@@ -16,6 +16,7 @@ import position_action_v20
 import real_bot_menu
 import paper_statistics_fix
 import dashboard_consistency
+import dashboard_v23_patch
 import dashboard_wallet_summary
 
 _original_dashboard_load = dashboard.load
@@ -78,6 +79,7 @@ dashboard.paper_statistics_report = paper_statistics_fix.paper_statistics_report
 dashboard.paper_report = paper_statistics_fix.paper_report
 
 dashboard_consistency.patch_dashboard(dashboard)
+dashboard_v23_patch.patch_dashboard(dashboard)
 dashboard_wallet_summary.patch_dashboard(dashboard)
 
 _original_menu_keyboard = dashboard.menu_keyboard
@@ -128,7 +130,7 @@ def _handle_update_with_actions(update, state=None):
         state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
         msg = cb.get("message") or {}
         chat_id = (msg.get("chat") or {}).get("id")
-        message_id = msg.get("message_id")
+        message_id = (msg.get("message_id") or 0)
         configured_chat = os.environ.get("CHAT_ID")
         if configured_chat and str(chat_id) != str(configured_chat):
             dashboard.answer_callback(cb.get("id"), "Unauthorized")
