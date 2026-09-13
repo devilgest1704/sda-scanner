@@ -33,7 +33,11 @@ def patch_dashboard(dashboard):
     if getattr(dashboard, "_sda_v23_dashboard_patched", False):
         return dashboard
 
-    original_debug = getattr(dashboard, "market_debug_report_canonical", None)
+    # dashboard_consistency installs the authoritative renderer as
+    # dashboard.market_debug_report. It intentionally does not expose a
+    # separate market_debug_report_canonical attribute, so hook the actual
+    # public callable instead of looking for a private/nonexistent alias.
+    original_debug = getattr(dashboard, "market_debug_report", None)
     if not original_debug:
         return dashboard
 
@@ -77,7 +81,7 @@ def patch_dashboard(dashboard):
             f" | samples {int(_safe_num(v.get('samples')))}"
         )
 
-    def market_debug_report_canonical(snapshot=None):
+    def market_debug_report_v23(snapshot=None):
         text = original_debug(snapshot)
         lines = text.splitlines()
         out = []
@@ -88,7 +92,6 @@ def patch_dashboard(dashboard):
                 current_label = m.group(1).strip()
                 out.append(line)
                 continue
-            # Replace every legacy predictor line with the exact V23 result.
             if current_label and line.strip().startswith("PREDICTOR:"):
                 out.append(_v23_line(_v23_for_label(current_label)))
                 current_label = None
@@ -96,7 +99,6 @@ def patch_dashboard(dashboard):
             out.append(line)
         return "\n".join(out)
 
-    dashboard.market_debug_report_canonical = market_debug_report_canonical
-    dashboard.market_debug_report = market_debug_report_canonical
+    dashboard.market_debug_report = market_debug_report_v23
     dashboard._sda_v23_dashboard_patched = True
     return dashboard
