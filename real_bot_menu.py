@@ -8,9 +8,6 @@ import os
 
 import real_trading_config as cfg
 
-# Public address of the dedicated bot wallet used by the dry-run setup.
-# Environment variable still has priority, so the address can be changed without
-# changing source code. Never put the private key here.
 BOT_WALLET_FALLBACK = "0x9e3643f2ac15c91ee83aa2814015f15b18d573f2"
 
 
@@ -25,8 +22,6 @@ def _wallet_address():
     value = os.environ.get(cfg.WALLET_ADDRESS_ENV, "").strip()
     if value:
         return value
-    # Vercel may not have the GitHub Actions environment variable. Use the
-    # already verified public bot address as a read-only fallback.
     return BOT_WALLET_FALLBACK
 
 
@@ -44,7 +39,6 @@ def _status():
 
 
 def _wallet_balance_sda():
-    """Read-only native SDA balance and return (balance, error)."""
     address = _wallet_address()
     if not address:
         return None, "wallet address missing"
@@ -52,17 +46,9 @@ def _wallet_balance_sda():
         import requests
         response = requests.post(
             cfg.RPC_URL,
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "eth_getBalance",
-                "params": [address, "latest"],
-            },
+            json={"jsonrpc": "2.0", "id": 1, "method": "eth_getBalance", "params": [address, "latest"]},
             timeout=10,
-            headers={
-                "Content-Type": "application/json",
-                "User-Agent": "sda-real-bot-gui/1.1",
-            },
+            headers={"Content-Type": "application/json", "User-Agent": "sda-real-bot-gui/1.1"},
         )
         response.raise_for_status()
         data = response.json()
@@ -88,21 +74,15 @@ def bot_report(dashboard):
     wallet = _wallet_address()
     balance, balance_error = _wallet_balance_sda()
     daily = _num(state.get("daily_realized_pnl_sda"))
-
     balance_text = f"{balance:.3f} SDA" if balance is not None else f"RPC ERROR: {balance_error}"
     lines = [
-        "🤖 REAL TRADING BOT",
-        "",
-        f"Status: {_status()}",
-        f"👛 Bot wallet: {_wallet_short(wallet)}",
-        f"💰 SDA balance: {balance_text}",
+        "🤖 REAL TRADING BOT", "", f"Status: {_status()}",
+        f"👛 Bot wallet: {_wallet_short(wallet)}", f"💰 SDA balance: {balance_text}",
         f"🎯 Position size: {cfg.POSITION_MIN_SDA:.0f}–{cfg.POSITION_MAX_SDA:.0f} SDA",
         f"📦 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.0f} SDA",
         f"📊 Open positions: {len(positions)}/{cfg.MAX_OPEN_POSITIONS}",
-        f"📉 Daily realized P/L: {daily:+.2f} SDA",
-        "────────────────────────",
+        f"📉 Daily realized P/L: {daily:+.2f} SDA", "────────────────────────",
     ]
-
     if not positions:
         lines.append("⚪ No open bot positions")
     else:
@@ -113,7 +93,6 @@ def bot_report(dashboard):
             symbol = pos.get("symbol") or token[:10]
             amount = _num(pos.get("amount_sda"))
             lines.append(f"• {symbol} • {amount:.2f} SDA")
-
     lines += ["", "Bot wallet is separate from the existing manual REAL wallet."]
     return "\n".join(lines)
 
@@ -132,22 +111,13 @@ def statistics_report(dashboard):
     updated = state.get("updated_at")
     updated = str(updated)[:16].replace("T", " ") if updated else "—"
     balance_text = f"{balance:.3f}" if balance is not None else f"RPC ERROR: {balance_error}"
-
     lines = [
-        "📈 REAL TRADING BOT • STATISTICS",
-        "",
-        f"🟢 Open positions: {len(positions)} / {cfg.MAX_OPEN_POSITIONS}",
-        f"📥 Bot BUYs: {len(buys)}",
-        f"📤 Bot SELLs: {len(sells)}",
-        "────────────────────────",
-        f"💰 Wallet SDA: {balance_text}",
-        f"📊 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.2f} SDA",
+        "📈 REAL TRADING BOT • STATISTICS", "", f"🟢 Open positions: {len(positions)} / {cfg.MAX_OPEN_POSITIONS}",
+        f"📥 Bot BUYs: {len(buys)}", f"📤 Bot SELLs: {len(sells)}", "────────────────────────",
+        f"💰 Wallet SDA: {balance_text}", f"📊 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.2f} SDA",
         f"🎯 Position range: {cfg.POSITION_MIN_SDA:.0f}–{cfg.POSITION_MAX_SDA:.0f} SDA",
-        f"📉 Daily realized P/L: {daily:+.2f} SDA",
-        f"🕒 State updated: {updated}",
-        "",
-        "📜 RECENT BOT TRADES",
-        "────────────────────────",
+        f"📉 Daily realized P/L: {daily:+.2f} SDA", f"🕒 State updated: {updated}",
+        "", "📜 RECENT BOT TRADES", "────────────────────────",
     ]
     if not trades:
         lines.append("⚪ No bot trades yet")
@@ -168,6 +138,9 @@ def statistics_report(dashboard):
 
 
 def patch_dashboard(dashboard):
+    if getattr(dashboard, "_sda_real_bot_menu_patched", False):
+        return dashboard
+
     original_menu = dashboard.menu_keyboard
     original_handle = dashboard.handle_update
 
@@ -188,7 +161,6 @@ def patch_dashboard(dashboard):
         data = cb.get("data")
         if data not in ("REAL_BOT", "REAL_BOT_STATS"):
             return original_handle(update, state)
-
         state = state if state is not None else {"offset": 0}
         state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
         msg = cb.get("message") or {}
@@ -198,7 +170,6 @@ def patch_dashboard(dashboard):
         if configured_chat and str(chat_id) != str(configured_chat):
             dashboard.answer_callback(cb.get("id"), "Unauthorized")
             return state
-
         dashboard.answer_callback(cb.get("id"))
         if data == "REAL_BOT":
             keyboard = {"inline_keyboard": [
@@ -216,4 +187,11 @@ def patch_dashboard(dashboard):
 
     dashboard.menu_keyboard = menu_keyboard
     dashboard.handle_update = handle_update
+    dashboard._sda_real_bot_menu_patched = True
+
+    # This is deliberately the last callback wrapper. It restores reliable
+    # routing for MAIN and the manual Real Wallet & Positions button after all
+    # legacy compatibility patches have been installed by api/index.py.
+    import telegram_callback_router
+    telegram_callback_router.patch_dashboard(dashboard)
     return dashboard
