@@ -16,6 +16,12 @@ def patch_dashboard(dashboard):
         configured = os.environ.get("CHAT_ID")
         return not configured or str(chat_id) == str(configured)
 
+    def _safe_text(value, limit=3900):
+        text = str(value or "")
+        if len(text) <= limit:
+            return text
+        return text[:limit].rstrip() + "\n\n… output truncated"
+
     def handle_update(update, state=None):
         cb = (update or {}).get("callback_query") or {}
         data = str(cb.get("data") or "")
@@ -35,17 +41,21 @@ def patch_dashboard(dashboard):
         dashboard.answer_callback(cb.get("id"))
 
         if data == "MAIN":
-            dashboard.edit(
-                chat_id,
-                message_id,
-                dashboard.main_dashboard(),
-                dashboard.menu_keyboard(),
-            )
+            try:
+                text = dashboard.main_dashboard()
+                keyboard = dashboard.menu_keyboard()
+                dashboard.edit(chat_id, message_id, _safe_text(text), keyboard)
+            except Exception as exc:
+                dashboard.edit(chat_id, message_id, f"⚠️ Main dashboard error: {type(exc).__name__}: {exc}", dashboard.menu_keyboard())
             return state
 
         if data == "REAL":
-            report_fn = getattr(dashboard, "real_trading_report", None)
-            text = report_fn() if callable(report_fn) else "⚠️ Real Wallet report unavailable"
+            try:
+                report_fn = getattr(dashboard, "real_trading_report", None)
+                text = report_fn() if callable(report_fn) else "⚠️ Real Wallet report unavailable"
+                text = _safe_text(text)
+            except Exception as exc:
+                text = f"⚠️ Real Wallet error: {type(exc).__name__}: {exc}"
             dashboard.edit(
                 chat_id,
                 message_id,
@@ -58,11 +68,12 @@ def patch_dashboard(dashboard):
             return state
 
         # REAL_STATS is owned by position_action_v20 and exposed on dashboard.
-        report_fn = getattr(dashboard, "real_statistics_report", None)
-        if callable(report_fn):
-            text = report_fn()
-        else:
-            text = "⚠️ Real Statistics unavailable"
+        try:
+            report_fn = getattr(dashboard, "real_statistics_report", None)
+            text = report_fn() if callable(report_fn) else "⚠️ Real Statistics unavailable"
+            text = _safe_text(text)
+        except Exception as exc:
+            text = f"⚠️ Real Statistics error: {type(exc).__name__}: {exc}"
         dashboard.edit(chat_id, message_id, text, dashboard.back_keyboard())
         return state
 
