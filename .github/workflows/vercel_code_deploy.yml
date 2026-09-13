@@ -9,23 +9,7 @@ on:
       - '*.txt'
       - '*.md'
       - 'api/**'
-      - '!wallet_data.json'
-      - '!portfolio_data.json'
-      - '!state.json'
-      - '!market_data.json'
-      - '!token_metadata.json'
-      - '!liquidity_data.json'
-      - '!whale_data.json'
-      - '!whale_state.json'
-      - '!whale_history.json'
-      - '!paper_stats.json'
-      - '!positions.json'
-      - '!decision_state_v15.json'
-      - '!paper_auto_state.json'
-      - '!paper_buy_guard_state.json'
-      - '!real_trade_state.json'
-      - '!sidra_swap_discovery.json'
-      - '!pending_signals.json'
+      - 'requirements.txt'
 
 permissions:
   contents: read
@@ -36,6 +20,9 @@ concurrency:
 
 jobs:
   deploy:
+    # The scanner may touch Python files while committing its generated state.
+    # Its commits must never create a Vercel deployment.
+    if: ${{ github.event.head_commit.message != 'Update SDA scanner state' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
