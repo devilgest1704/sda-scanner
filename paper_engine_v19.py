@@ -1,4 +1,4 @@
-"""Stable V19/V21 paper-trading entry point.
+"""Stable V19/V21/V22 paper-trading entry point.
 
 Keeps scanner source untouched at runtime. BUY logic remains in main.py, with a
 V21 technical-confirmation overlay applied to the shared engine score. Paper
@@ -9,8 +9,11 @@ import main as scanner_main
 from strategy_v21 import patch_engine, technical_sell_confirmed, evaluate_exit
 
 engine.TELEGRAM_TOKEN = ""
+# V22: keep the same hard threshold as the canonical MAX-WIN gate in main.py.
+# The previous 60-point override could reopen trades that main.py had rejected
+# (the rejected score was still >=60 after a non-score veto).
 engine.SL_PCT = 0.05
-engine.BUY_THRESHOLD = 60
+engine.BUY_THRESHOLD = float(getattr(scanner_main, "MAX_WIN_BUY_THRESHOLD", 78.0))
 patch_engine(engine)
 scanner_main.engine.score = engine.score
 
@@ -53,7 +56,7 @@ def auto_exit_v21(p, tokens, ws):
         elif negative_count >= 3:
             result = engine.close(p, address, current, "AUTO SELL / EXIT")
             if result:
-                events.append(f"🔴 AUTO SELL / EXIT {result['label']} | Price: {engine.price(current)} SDA | Profit: {result['closed_profit_sda']:+.2f} SDA | Score: {score:.0f}/100")
+                events.append(f"🔴 AUTO SELL / EXIT {result['label']} | Price: {engine.price(current)} SDA | Profit: {result['closed_profit_sda']:+.2f} SDA | Score: {score:.0f}/100 | Mode: PAPER AUTO")
 
     engine._save_auto(state)
     return events
@@ -62,7 +65,7 @@ def auto_exit_v21(p, tokens, ws):
 engine._auto_exit = auto_exit_v21
 scanner_main.engine._auto_exit = auto_exit_v21
 scanner_main.engine.SL_PCT = 0.05
-scanner_main.engine.BUY_THRESHOLD = 60
+scanner_main.engine.BUY_THRESHOLD = engine.BUY_THRESHOLD
 
 if __name__ == "__main__":
     engine.main()
