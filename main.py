@@ -57,9 +57,6 @@ def _v21_buy_decision(buy_score, s, analysis, pred):
     bull = int(tc.get("bull") or 0)
     bear = int(tc.get("bear") or 0)
     evidence = list(tc.get("evidence") or [])
-
-    # Do not reward technical confirmation in the strict gate; it is a
-    # requirement, not a way to turn a weak setup into a BUY.
     technical_ok = ((not bool(analysis.get("technical"))) or bull >= 2) and bear == 0
 
     m1 = float(s.get("m1h") or 0)
@@ -76,57 +73,29 @@ def _v21_buy_decision(buy_score, s, analysis, pred):
         mean_roi = float(pred.get("mean_roi") or 0)
         prediction_ok = p5 >= 0.55 and p10 >= 0.25 and mean_roi > 0.0
 
-    # Require positive short-term trend and positive SDA flow. This directly
-    # attacks the current failure mode where 60-70 score tokens are opened
-    # despite negative/weak predictive expectancy.
     momentum_ok = m1 >= 3.0 and m15 >= 0.0 and m4 >= 0.0
     flow_ok = flow > 0.0
     activity_ok = trades >= 5.0
-
-    allowed = (
-        score >= threshold
-        and technical_ok
-        and prediction_ok
-        and momentum_ok
-        and flow_ok
-        and activity_ok
-    )
+    allowed = score >= threshold and technical_ok and prediction_ok and momentum_ok and flow_ok and activity_ok
 
     reasons = []
-    if score < threshold:
-        reasons.append(f"BUY score {score:.0f} < {threshold:.0f}")
-    if not technical_ok:
-        reasons.append(f"technical {bull} bull / {bear} bear")
-    if not prediction_ok:
-        reasons.append(f"prediction weak P5={p5:.0%} P10={p10:.0%} mean={mean_roi:+.1f}%")
-    if not momentum_ok:
-        reasons.append(f"momentum {m15:+.1f}/{m1:+.1f}/{m4:+.1f}%")
-    if not flow_ok:
-        reasons.append("1h SDA flow <= 0")
-    if not activity_ok:
-        reasons.append(f"only {trades:.0f} trades/1h")
+    if score < threshold: reasons.append(f"BUY score {score:.0f} < {threshold:.0f}")
+    if not technical_ok: reasons.append(f"technical {bull} bull / {bear} bear")
+    if not prediction_ok: reasons.append(f"prediction weak P5={p5:.0%} P10={p10:.0%} mean={mean_roi:+.1f}%")
+    if not momentum_ok: reasons.append(f"momentum {m15:+.1f}/{m1:+.1f}/{m4:+.1f}%")
+    if not flow_ok: reasons.append("1h SDA flow <= 0")
+    if not activity_ok: reasons.append(f"only {trades:.0f} trades/1h")
 
     return {
-        "allowed": allowed,
-        "score": score,
-        "raw_score": score,
-        "adjustment": 0.0,
-        "technical_bull": bull,
-        "technical_bear": bear,
-        "technical_evidence": evidence,
-        "bridge": False,
-        "flow_bridge": False,
-        "reason": "; ".join(reasons),
+        "allowed": allowed, "score": score, "raw_score": score, "adjustment": 0.0,
+        "technical_bull": bull, "technical_bear": bear, "technical_evidence": evidence,
+        "bridge": False, "flow_bridge": False, "reason": "; ".join(reasons),
     }
 
 
 _core._v21_buy_decision = _v21_buy_decision
 _paper._v21_buy_decision = _v21_buy_decision
 
-# ---------------------------------------------------------------------------
-# Re-use the calibrated predictor wrapper from the previous main.py, but add
-# the strict MAX-WIN gate after all legacy predictor vetoes have been removed.
-# ---------------------------------------------------------------------------
 _original_paper_score_predictive = _core._paper_score_predictive
 
 
@@ -134,11 +103,9 @@ def _paper_score_predictive(address, analysis, whale_state):
     s = _original_paper_score_predictive(address, analysis, whale_state)
     if not isinstance(s, dict):
         return s
-
     s = dict(s)
     pred = s.get("paper_prediction") if isinstance(s.get("paper_prediction"), dict) else None
     score = float(s.get("buy_score", s.get("confidence") or 0) or 0)
-
     decision = _v21_buy_decision(score, s, analysis, pred)
     s["buy_score"] = round(score, 1)
     s["market_score"] = round(score, 1)
@@ -150,37 +117,35 @@ def _paper_score_predictive(address, analysis, whale_state):
     s["paper_near_threshold_reason"] = ""
     s["max_win_profile"] = True
     s["max_win_threshold"] = MAX_WIN_BUY_THRESHOLD
-
-    # Keep predictor information visible, but make it a genuine entry
-    # requirement rather than a second inconsistent veto.
     if pred is not None:
-        p5 = float(pred.get("p5") or 0)
-        p10 = float(pred.get("p10") or 0)
-        mean_roi = float(pred.get("mean_roi") or 0)
+        p5 = float(pred.get("p5") or 0); p10 = float(pred.get("p10") or 0); mean_roi = float(pred.get("mean_roi") or 0)
         s["paper_prediction_role"] = "hard_entry_filter"
         s["paper_prediction_summary"] = f"P(+5) {p5:.0%} • P(+10) {p10:.0%} • mean {mean_roi:+.1f}%"
-
     s["paper_buy_blocked"] = not decision["allowed"]
     s["paper_buy_block_reason"] = decision["reason"]
     s["confidence"] = score if decision["allowed"] else min(score, MAX_WIN_BUY_THRESHOLD - 1.0)
+
+    # V23 is now a canonical diagnostic layer.  It does not alter the BUY gate
+    # until enough clean trade-level samples prove the new signal out-of-sample.
+    try:
+        import v23_predictor
+        s = v23_predictor.enrich(s, analysis)
+    except Exception as exc:
+        s["v23_prediction"] = {"ready": False, "error": str(exc)}
+        s["v23_p5"] = s["v23_p10"] = s["v23_p20"] = s["v23_p30"] = 0.0
+        s["v23_mean_roi"] = 0.0
+        s["v23_pump_score"] = 0.0
     return s
 
 
 _core._paper_score_predictive = _paper_score_predictive
 _paper.score = _paper_score_predictive
 
-# ---------------------------------------------------------------------------
-# MAX-WIN adaptive risk profile.
-# Lower TP1 is intentional: with 1% fee + 0.1% slippage, we want profitable
-# positions to realize sooner instead of repeatedly giving winners back.
-# ---------------------------------------------------------------------------
+
 def _max_win_risk_profile(pred, score):
-    p10 = float((pred or {}).get("p10") or 0)
-    p5 = float((pred or {}).get("p5") or 0)
-    if p10 >= 0.60 and p5 >= 0.70:
-        return {"sl": 0.065, "tp1": 0.060, "tp2": 0.150, "trail": 0.070, "name": "PUMP-MW"}
-    if p10 >= 0.40 and p5 >= 0.62:
-        return {"sl": 0.050, "tp1": 0.050, "tp2": 0.110, "trail": 0.055, "name": "STRONG-MW"}
+    p10 = float((pred or {}).get("p10") or 0); p5 = float((pred or {}).get("p5") or 0)
+    if p10 >= 0.60 and p5 >= 0.70: return {"sl": 0.065, "tp1": 0.060, "tp2": 0.150, "trail": 0.070, "name": "PUMP-MW"}
+    if p10 >= 0.40 and p5 >= 0.62: return {"sl": 0.050, "tp1": 0.050, "tp2": 0.110, "trail": 0.055, "name": "STRONG-MW"}
     return {"sl": 0.040, "tp1": 0.045, "tp2": 0.090, "trail": 0.050, "name": "NORMAL-MW"}
 
 
@@ -193,17 +158,10 @@ def _adaptive_create(a, an, s, meta, liq, investment=None):
     profile = _max_win_risk_profile(pred or {}, float(s.get("confidence") or 0))
     e = float(z.get("entry_price") or 0)
     if e > 0:
-        z["sl_pct"] = profile["sl"]
-        z["tp1_pct"] = profile["tp1"]
-        z["tp2_pct"] = profile["tp2"]
-        z["trail_pct"] = profile["trail"]
-        z["risk_profile"] = profile["name"]
-        z["sl"] = e * (1.0 - profile["sl"])
-        z["initial_sl"] = z["sl"]
-        z["tp1"] = e * (1.0 + profile["tp1"])
-        z["tp2"] = e * (1.0 + profile["tp2"])
-        z["paper_prediction"] = pred or {}
-        z["max_win_profile"] = True
+        z["sl_pct"] = profile["sl"]; z["tp1_pct"] = profile["tp1"]; z["tp2_pct"] = profile["tp2"]; z["trail_pct"] = profile["trail"]
+        z["risk_profile"] = profile["name"]; z["sl"] = e * (1.0 - profile["sl"]); z["initial_sl"] = z["sl"]
+        z["tp1"] = e * (1.0 + profile["tp1"]); z["tp2"] = e * (1.0 + profile["tp2"])
+        z["paper_prediction"] = pred or {}; z["max_win_profile"] = True
     return z
 
 
@@ -213,28 +171,22 @@ engine.create = _adaptive_create
 
 
 def paper_decision(address, analysis, whale_state):
-    """Return the exact canonical MAX-WIN Paper BUY decision."""
+    """Exact canonical MAX-WIN decision used by paper engine and dashboard."""
     s = _paper_score_predictive(address, analysis, whale_state)
     if not isinstance(s, dict):
         return {"score": None, "blocked": True, "reason": "paper scorer returned no data"}
     return {
-        "score": s.get("buy_score", s.get("confidence")),
-        "blocked": bool(s.get("paper_buy_blocked")),
-        "reason": str(s.get("paper_buy_block_reason") or ""),
-        "prediction": s.get("paper_prediction") or {},
-        "prediction_blocked": bool(s.get("paper_prediction_blocked")),
-        "prediction_role": str(s.get("paper_prediction_role") or "hard_entry_filter"),
-        "prediction_veto_reason": str(s.get("paper_prediction_veto_reason") or ""),
-        "prediction_text": str(s.get("paper_prediction_text") or ""),
-        "technical_bull": int(s.get("technical_bull") or 0),
-        "technical_bear": int(s.get("technical_bear") or 0),
-        "technical_evidence": list(s.get("technical_evidence") or []),
-        "components": s.get("buy_score_components") or {},
-        "raw_confidence": s.get("paper_raw_confidence"),
-        "near_threshold": False,
-        "near_threshold_reason": "",
-        "score_band": str(s.get("buy_score_band") or "MAX-WIN"),
-        "data": s,
+        "score": s.get("buy_score", s.get("confidence")), "blocked": bool(s.get("paper_buy_blocked")),
+        "reason": str(s.get("paper_buy_block_reason") or ""), "prediction": s.get("paper_prediction") or {},
+        "prediction_blocked": bool(s.get("paper_prediction_blocked")), "prediction_role": str(s.get("paper_prediction_role") or "hard_entry_filter"),
+        "prediction_veto_reason": str(s.get("paper_prediction_veto_reason") or ""), "prediction_text": str(s.get("paper_prediction_text") or ""),
+        "technical_bull": int(s.get("technical_bull") or 0), "technical_bear": int(s.get("technical_bear") or 0),
+        "technical_evidence": list(s.get("technical_evidence") or []), "components": s.get("buy_score_components") or {},
+        "raw_confidence": s.get("paper_raw_confidence"), "near_threshold": False, "near_threshold_reason": "",
+        "score_band": str(s.get("buy_score_band") or "MAX-WIN"), "data": s,
+        "v23": s.get("v23_prediction") or {}, "v23_p5": s.get("v23_p5", 0.0), "v23_p10": s.get("v23_p10", 0.0),
+        "v23_p20": s.get("v23_p20", 0.0), "v23_p30": s.get("v23_p30", 0.0), "v23_mean_roi": s.get("v23_mean_roi", 0.0),
+        "v23_pump_score": s.get("v23_pump_score", 0.0),
     }
 
 
