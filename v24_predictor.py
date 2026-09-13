@@ -1,15 +1,13 @@
 """V24 pump-path predictor (shadow/diagnostic only).
 
-V23 predicts realized close ROI. V24 instead learns whether a setup reaches
-meaningful upside after entry (MFE). Historical MFE is used only when the
-position record contains a peak price captured after entry. Trades without a
-recorded peak are deliberately excluded rather than being given a fabricated
-label. MAE/time-to-threshold remain unavailable until the scanner records the
-full post-entry path on every scan.
+V24 learns what happens after entry: maximum favorable excursion (MFE),
+maximum adverse excursion (MAE), and time to meaningful upside. It never
+changes the BUY/SL/TP decision.
 """
 from __future__ import annotations
 
 import math
+from datetime import datetime
 from typing import Any, Dict, Iterable, List, Tuple
 
 MIN_SAMPLES = 12
@@ -42,6 +40,16 @@ def _distance(a: List[float], b: List[float]) -> float:
     return math.sqrt(sum(((x - y) / scale) ** 2 for x, y, scale in zip(a, b, SCALES)))
 
 
+def _parse_time(value: Any):
+    if not value:
+        return None
+    try:
+        text = str(value).replace("Z", "+00:00")
+        return datetime.fromisoformat(text)
+    except Exception:
+        return None
+
+
 def _group_complete_trades(closed_trades: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     groups: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for tr in closed_trades:
@@ -59,48 +67,61 @@ def _group_complete_trades(closed_trades: Iterable[Dict[str, Any]]) -> List[Dict
             "entry_price": _num(tr.get("entry_price")),
             "entry_metrics": tr.get("entry_metrics") if isinstance(tr.get("entry_metrics"), dict) else {},
             "closed_fraction": 0.0,
-            "peak_price": 0.0,
-            "has_peak": False,
+            "mfe_pct": None,
+            "mae_pct": None,
+            "threshold_times": {},
         })
-        g["closed_fraction"] += _num(tr.get("closed_fraction"), _num(tr.get("remaining_fraction"), 0.0))
-        peak = _num(tr.get("trailing_peak_price"))
-        if peak > 0:
-            g["peak_price"] = max(g["peak_price"], peak)
-            g["has_peak"] = True
+        g["closed_fraction"] += _num(tr.get("closed_fraction"), 0.0)
+        if tr.get("v24_mfe_pct") is not None:
+            value = _num(tr.get("v24_mfe_pct"), 0.0)
+            g["mfe_pct"] = value if g["mfe_pct"] is None else max(g["mfe_pct"], value)
+        if tr.get("v24_mae_pct") is not None:
+            value = _num(tr.get("v24_mae_pct"), 0.0)
+            g["mae_pct"] = value if g["mae_pct"] is None else min(g["mae_pct"], value)
+        hits = tr.get("v24_threshold_times")
+        if isinstance(hits, dict):
+            for key2, value in hits.items():
+                if value and key2 not in g["threshold_times"]:
+                    g["threshold_times"][str(key2)] = value
     return [g for g in groups.values() if g["closed_fraction"] >= 0.999]
 
 
 def historical_samples(closed_trades: Iterable[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     groups = _group_complete_trades(closed_trades)
     samples: List[Dict[str, Any]] = []
-    missing_peak = 0
+    missing_path = 0
     for tr in groups:
         entry = _num(tr.get("entry_price"))
-        peak = _num(tr.get("peak_price"))
-        metrics = tr.get("entry_metrics")
-        if entry <= 0 or peak <= 0 or not isinstance(metrics, dict):
-            missing_peak += 1
+        mfe = tr.get("mfe_pct")
+        if entry <= 0 or mfe is None:
+            missing_path += 1
             continue
-        mfe = (peak / entry - 1.0) * 100.0
-        samples.append({"metrics": metrics, "mfe_pct": mfe, "entry_price": entry, "peak_price": peak})
-    return samples, {"complete_trades": len(groups), "with_mfe": len(samples), "missing_mfe": missing_peak}
+        mae = _num(tr.get("mae_pct"), 0.0)
+        opened = _parse_time(tr.get("opened_at"))
+        times = {}
+        for target in TARGETS:
+            hit = tr["threshold_times"].get(str(int(target)))
+            ht = _parse_time(hit)
+            if opened and ht:
+                seconds = max(0.0, (ht - opened).total_seconds())
+                times[str(int(target))] = seconds
+        samples.append({
+            "metrics": tr.get("entry_metrics") or {},
+            "mfe_pct": _num(mfe),
+            "mae_pct": mae,
+            "times": times,
+        })
+    return samples, {"complete_trades": len(groups), "with_path": len(samples), "missing_path": missing_path}
 
 
 def predict(metrics: Dict[str, Any], closed_trades: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     samples, coverage = historical_samples(closed_trades)
     if len(samples) < MIN_SAMPLES:
         return {
-            "version": "V24",
-            "ready": False,
-            "samples": len(samples),
-            "coverage": coverage,
-            "p5_mfe": 0.5,
-            "p10_mfe": 0.2,
-            "p20_mfe": 0.0,
-            "p30_mfe": 0.0,
-            "expected_mfe": 0.0,
-            "mae_available": False,
-            "time_to_pump_available": False,
+            "version": "V24", "ready": False, "samples": len(samples),
+            "coverage": coverage, "p5_mfe": 0.5, "p10_mfe": 0.2,
+            "p20_mfe": 0.0, "p30_mfe": 0.0, "expected_mfe": 0.0,
+            "expected_mae": 0.0, "time_to_p10_min": None, "time_to_p20_min": None,
         }
 
     current = _vector(metrics or {})
@@ -112,22 +133,26 @@ def predict(metrics: Dict[str, Any], closed_trades: Iterable[Dict[str, Any]]) ->
     def probability(target: float) -> float:
         return sum(w for w, (_, s) in zip(weights, nearest) if s["mfe_pct"] >= target) / total
 
-    expected = sum(w * s["mfe_pct"] for w, (_, s) in zip(weights, nearest)) / total
-    quality = max(0.0, min(100.0, 100.0 * (0.30 * probability(10.0) + 0.30 * probability(20.0) + 0.20 * probability(30.0) + 0.20 * min(expected, 30.0) / 30.0)))
+    expected_mfe = sum(w * s["mfe_pct"] for w, (_, s) in zip(weights, nearest)) / total
+    expected_mae = sum(w * s["mae_pct"] for w, (_, s) in zip(weights, nearest)) / total
+
+    def weighted_time(target: str):
+        pairs = [(w, s["times"].get(target)) for w, (_, s) in zip(weights, nearest) if s["times"].get(target) is not None]
+        if not pairs:
+            return None
+        denom = sum(w for w, _ in pairs)
+        return sum(w * seconds for w, seconds in pairs) / denom / 60.0
+
+    p5, p10, p20, p30 = (probability(x) for x in TARGETS)
+    quality = max(0.0, min(100.0, 100.0 * (
+        0.20 * p5 + 0.30 * p10 + 0.30 * p20 + 0.20 * p30
+    )))
     return {
-        "version": "V24",
-        "ready": True,
-        "samples": len(samples),
-        "neighbors": len(nearest),
-        "coverage": coverage,
-        "p5_mfe": probability(5.0),
-        "p10_mfe": probability(10.0),
-        "p20_mfe": probability(20.0),
-        "p30_mfe": probability(30.0),
-        "expected_mfe": expected,
+        "version": "V24", "ready": True, "samples": len(samples), "neighbors": len(nearest),
+        "coverage": coverage, "p5_mfe": p5, "p10_mfe": p10, "p20_mfe": p20, "p30_mfe": p30,
+        "expected_mfe": expected_mfe, "expected_mae": expected_mae,
+        "time_to_p10_min": weighted_time("10"), "time_to_p20_min": weighted_time("20"),
         "pump_quality": quality,
-        "mae_available": False,
-        "time_to_pump_available": False,
     }
 
 
