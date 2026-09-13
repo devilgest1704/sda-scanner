@@ -75,4 +75,14 @@ def patch_dashboard(dashboard):
 
     dashboard.main_dashboard = wrapped
     dashboard._sda_wallet_summary_patched = True
+
+    # dashboard_wallet_summary is applied after dashboard_consistency in both
+    # the hourly Telegram worker and the Vercel API. Wire V23 here as well so
+    # the canonical V23 rendering is active in both environments.
+    try:
+        import dashboard_v23_patch
+        dashboard_v23_patch.patch_dashboard(dashboard)
+    except Exception as exc:
+        print(f"V23 dashboard patch error: {exc}")
+
     return dashboard
