@@ -33,7 +33,7 @@ def _candidate_samples():
   entry=_num(row.get("entry_price"));final=_num(row.get("final_price"),_num(row.get("last_price"),entry))
   if entry<=0 or final<=0:continue
   proceeds=INVESTMENT_SDA*(final/entry)*(1-SLIPPAGE_RATE)*(1-FEE_RATE);cost=INVESTMENT_SDA*(1+FEE_RATE);profit=proceeds-cost
-  out.append({"metrics":dict(row.get("entry_metrics") or {}),"profit_sda":profit,"mfe":_num(row.get("mfe_pct")),"mae":_num(row.get("mae_pct")),"times":dict(row.get("threshold_times") or {}),"candidate":True,"buy_allowed":bool(row.get("buy_allowed"))})
+  out.append({"metrics":dict(row.get("entry_metrics") or {}),"profit_sda":profit,"mfe":_num(row.get("mfe_pct")),"mae":_num(row.get("mae_pct")),"times":dict(row.get("threshold_times") or {}),"candidate":True,"buy_allowed":bool(row.get("buy_allowed")),"source":"missed_candidate"})
  return out
 def _complete(closed:Iterable[Dict[str,Any]]):
  groups={}
@@ -41,19 +41,28 @@ def _complete(closed:Iterable[Dict[str,Any]]):
   if not isinstance(tr,dict):continue
   key=(str(tr.get("address") or "").lower(),str(tr.get("opened_at") or ""))
   if not key[0] or not key[1]:continue
-  g=groups.setdefault(key,{"entry_metrics":tr.get("entry_metrics") or {},"profit":0.,"fraction":0.,"mfe":None,"mae":None,"times":{}});g["profit"]+=_num(tr.get("closed_profit_sda"));g["fraction"]+=_num(tr.get("closed_fraction"))
-  if tr.get("v24_mfe_pct") is not None:
-   x=_num(tr.get("v24_mfe_pct"));g["mfe"]=x if g["mfe"] is None else max(g["mfe"],x)
-  if tr.get("v24_mae_pct") is not None:
-   x=_num(tr.get("v24_mae_pct"));g["mae"]=x if g["mae"] is None else min(g["mae"],x)
-  hits=tr.get("v24_threshold_times")
+  g=groups.setdefault(key,{"entry_metrics":tr.get("entry_metrics") or {},"profit":0.,"fraction":0.,"mfe":None,"mae":None,"times":{},"source":tr.get("source") or "paper_trade"})
+  g["profit"]+=_num(tr.get("closed_profit_sda"));g["fraction"]+=_num(tr.get("closed_fraction"))
+  # V25 PUMP-HUNTER stores its own path metrics as mfe_pct/mae_pct.
+  # Older V24-instrumented paper trades use v24_* fields. Accept both so
+  # hunter outcomes are real learner samples instead of silently discarded.
+  mfe_value=tr.get("mfe_pct")
+  if mfe_value is None:mfe_value=tr.get("v24_mfe_pct")
+  if mfe_value is not None:
+   x=_num(mfe_value);g["mfe"]=x if g["mfe"] is None else max(g["mfe"],x)
+  mae_value=tr.get("mae_pct")
+  if mae_value is None:mae_value=tr.get("v24_mae_pct")
+  if mae_value is not None:
+   x=_num(mae_value);g["mae"]=x if g["mae"] is None else min(g["mae"],x)
+  hits=tr.get("threshold_times")
+  if not isinstance(hits,dict):hits=tr.get("v24_threshold_times")
   if isinstance(hits,dict):
    for k,v in hits.items():
     if v and k not in g["times"]:g["times"][k]=v
  return [g for g in groups.values() if g["fraction"]>=.999 and g["mfe"] is not None]
 def _build_samples(closed):
  out=[]
- for tr in _complete(closed):out.append({"metrics":dict(tr.get("entry_metrics") or {}),"profit_sda":tr["profit"],"mfe":_num(tr["mfe"]),"mae":_num(tr["mae"]),"times":tr["times"],"candidate":False})
+ for tr in _complete(closed):out.append({"metrics":dict(tr.get("entry_metrics") or {}),"profit_sda":tr["profit"],"mfe":_num(tr["mfe"]),"mae":_num(tr["mae"]),"times":tr["times"],"candidate":False,"source":tr.get("source","paper_trade")})
  out.extend(_candidate_samples());return out
 def predict(metrics,closed_trades):
  samples=_build_samples(closed_trades);coverage=len(samples);candidate_count=len(_candidate_samples())
