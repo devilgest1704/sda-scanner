@@ -18,6 +18,7 @@ import paper_statistics_fix
 import dashboard_consistency
 import dashboard_v23_patch
 import dashboard_wallet_summary
+import dashboard_pump_patch
 
 _original_dashboard_load = dashboard.load
 
@@ -81,6 +82,7 @@ dashboard.paper_report = paper_statistics_fix.paper_report
 dashboard_consistency.patch_dashboard(dashboard)
 dashboard_v23_patch.patch_dashboard(dashboard)
 dashboard_wallet_summary.patch_dashboard(dashboard)
+dashboard_pump_patch.patch_dashboard(dashboard)
 
 _original_menu_keyboard = dashboard.menu_keyboard
 
