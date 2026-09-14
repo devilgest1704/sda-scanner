@@ -21,6 +21,46 @@ def _state(dashboard):
         return {}
 
 
+def _lane(c):
+    """Explain which V25 opportunity lane a candidate is closest to.
+
+    This is diagnostic only; the actual BUY decision remains hunter._gate().
+    """
+    score = _num(c.get("pump_score"))
+    volume = _num(c.get("volume"))
+    trades = _num(c.get("trades"))
+    m1h = _num(c.get("m1h"))
+    m15 = _num(c.get("m15"))
+    accel = _num(c.get("accel"))
+    bear = _num(c.get("bear"))
+    mae = _num(c.get("expected_mae"))
+    mfe = _num(c.get("expected_mfe"))
+    ev = _num(c.get("expected_ev"))
+    p10 = _num(c.get("p10"))
+    flow = _num(c.get("flow"))
+
+    if (volume >= 250 and m1h >= 8 and m15 >= 1 and accel >= 5 and bear < 2
+            and mae >= -3 and mfe >= 3 and ev >= -0.35 and score >= 40 and p10 >= 0.05):
+        return "EARLY-PUMP"
+    if (volume >= 250 and trades >= 4 and score >= 40 and bear < 2
+            and mae >= -4 and mfe >= 3 and ev >= 0 and p10 >= 0.08
+            and (m1h >= 0 or flow > 0 or accel >= 2)):
+        return "QUALITY-PUMP"
+    if score >= 55:
+        return "STANDARD"
+    return "WATCH"
+
+
+def _why_not_buy(c, reasons, allowed):
+    if allowed:
+        return "BUY GATES PASS"
+    if reasons:
+        # Keep the full first failure rather than hiding the reason behind a
+        # generic WATCH label. This makes strong pumps such as sUSDT auditable.
+        return "; ".join(str(x) for x in reasons[:3])
+    return "V25 gate blocked"
+
+
 def _pump_candidates(dashboard, limit=5):
     """Score current market tokens with the same PUMP-HUNTER logic, read-only."""
     try:
@@ -46,7 +86,7 @@ def _pump_candidates(dashboard, limit=5):
             if c["pump_score"] < 40 and not allowed:
                 continue
             rank = c["pump_score"] + min(12.0, max(0.0, c["expected_mfe"])) * 0.5 + min(8.0, max(0.0, c["p10"]) * 10.0) + min(5.0, max(0.0, c["accel"])) * 0.25
-            rows.append({"rank": rank, "address": key, "label": scanner.lbl(key, meta), "c": c, "allowed": allowed, "reasons": reasons})
+            rows.append({"rank": rank, "address": key, "label": scanner.lbl(key, meta), "c": c, "allowed": allowed, "reasons": reasons, "lane": _lane(c)})
         rows.sort(key=lambda x: (x["rank"], x["c"]["pump_score"]), reverse=True)
         return rows[:limit], learned
     except Exception:
@@ -102,8 +142,8 @@ def _pump_section_top_buy(dashboard, text):
             c = r["c"]
             status = "🟢 PUMP BUY" if r["allowed"] else "🟡 WATCH"
             pred = f"P10 {c['p10']:.0%} • MFE {c['expected_mfe']:+.1f}%"
-            gate = "ALL PUMP GATES PASS" if r["allowed"] else "; ".join(r["reasons"][:2])
-            lines += [f"{i}. {status} {r['label']} • pump {c['pump_score']:.0f}/100", f"   M15/M1H/M4H {c['m15']:+.1f}/{c['m1h']:+.1f}/{c['m4h']:+.1f}% • flow {c['flow']:+.0f} • accel {c['accel']:+.1f}", f"   {pred} • trades {c['trades']:.0f} • vol {c['volume']:.0f}", f"   {gate}"]
+            gate = _why_not_buy(c, r["reasons"], r["allowed"])
+            lines += [f"{i}. {status} {r['label']} • {r['lane']} • pump {c['pump_score']:.0f}/100", f"   M15/M1H/M4H {c['m15']:+.1f}/{c['m1h']:+.1f}/{c['m4h']:+.1f}% • flow {c['flow']:+.0f} • accel {c['accel']:+.1f}", f"   {pred} • trades {c['trades']:.0f} • vol {c['volume']:.0f}", f"   {'WHY NOT BUY: ' if not r['allowed'] else ''}{gate}"]
     return "\n".join(lines)
 
 
@@ -115,8 +155,12 @@ def _pump_section_debug(dashboard, text):
         lines.append("")
         lines.append("Top pump signals:")
         for i, r in enumerate(rows, 1):
-            c = r["c"]; status = "BUY" if r["allowed"] else "WATCH"
-            lines.append(f"{i}. {status} {r['label']} • pump {c['pump_score']:.0f} • M1H {c['m1h']:+.1f}% • flow {c['flow']:+.0f} • P10 {c['p10']:.0%} • MFE {c['expected_mfe']:+.1f}%")
+            c = r["c"]
+            status = "BUY" if r["allowed"] else "WATCH"
+            why = _why_not_buy(c, r["reasons"], r["allowed"])
+            lines.append(f"{i}. {status} {r['label']} • {r['lane']} • pump {c['pump_score']:.0f} • M1H {c['m1h']:+.1f}% • flow {c['flow']:+.0f} • P10 {c['p10']:.0%} • MFE {c['expected_mfe']:+.1f}%")
+            if not r["allowed"]:
+                lines.append(f"   WHY NOT BUY: {why}")
     return "\n".join(lines)
 
 
