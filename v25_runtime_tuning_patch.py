@@ -1,8 +1,9 @@
 """Runtime compatibility/tuning layer for V25 PUMP-HUNTER.
 
-MAX-WIN is untouched. V25 remains isolated and paper-only.  Warm-up now has
-an EARLY-PUMP lane so explosive moves can be captured before flow/trade counts
-fully confirm, while keeping strict downside and technical safeguards.
+MAX-WIN is untouched. V25 remains isolated and paper-only. Warm-up and
+learned mode both have an EARLY-PUMP lane so explosive moves can be captured
+before slower flow/trade confirmation, while keeping strict downside and
+technical safeguards.
 """
 
 def patch():
@@ -12,30 +13,17 @@ def patch():
     original_gate = getattr(hunter, "_gate", None)
     if original_gate and not getattr(hunter, "_sda_warmup_gate_patched", False):
         def warmup_gate(c, learned):
-            if learned:
-                return original_gate(c, learned)
-
-            # Standard warm-up confirmation lane.
-            reasons = []
-            if c["pump_score"] < 45: reasons.append(f"pump score {c['pump_score']:.0f}<45")
-            if c["volume"] < 250: reasons.append(f"volume {c['volume']:.0f}<250")
-            if c["trades"] < 5: reasons.append(f"trades {c['trades']:.0f}<5")
-            if c["m1h"] < 2: reasons.append(f"M1H {c['m1h']:+.1f}%<+2.0%")
-            if c["m15"] < 0: reasons.append(f"M15 {c['m15']:+.1f}%<0")
-            if c["m4h"] < 0: reasons.append(f"M4H {c['m4h']:+.1f}%<0")
-            if c["flow"] <= 0: reasons.append(f"flow {c['flow']:+.0f}<=0")
-            if c["bear"] >= 2: reasons.append(f"technical bear {c['bear']}>=2")
-            if c["expected_mae"] < -3: reasons.append(f"expected MAE {c['expected_mae']:+.1f}%<-3.0%")
-            if c["expected_mfe"] < 4: reasons.append(f"expected MFE {c['expected_mfe']:+.1f}%<+4.0%")
-            if c["ev"] < -0.15: reasons.append(f"learner EV {c['ev']:+.2f}<-0.15")
-            if not reasons:
+            # First evaluate the normal V25 gate. This remains the preferred
+            # path because it has stronger confirmation.
+            allowed, reasons = original_gate(c, learned)
+            if allowed:
                 return True, []
 
-            # EARLY-PUMP lane: prioritize acceleration and explosive momentum.
-            # It deliberately tolerates neutral/slightly negative flow because
-            # flow often confirms after the price impulse. It still requires
-            # liquidity, clean technicals, controlled downside and evidence of
-            # a real short-term impulse. This is paper-only during warm-up.
+            # EARLY-PUMP lane is intentionally available even after learning
+            # becomes ready. The live samples showed that price acceleration
+            # can precede flow/trade-count confirmation, while the bad pump
+            # examples were characterized by materially worse MAE/EV. Keep
+            # those downside/quality filters hard.
             early = (
                 c["volume"] >= 250 and
                 c["m1h"] >= 8.0 and
