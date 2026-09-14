@@ -19,6 +19,7 @@ import dashboard_consistency
 import dashboard_v23_patch
 import dashboard_wallet_summary
 import dashboard_pump_patch
+import v25_runtime_tuning_patch
 
 _original_dashboard_load = dashboard.load
 
@@ -83,6 +84,7 @@ dashboard_consistency.patch_dashboard(dashboard)
 dashboard_v23_patch.patch_dashboard(dashboard)
 dashboard_wallet_summary.patch_dashboard(dashboard)
 dashboard_pump_patch.patch_dashboard(dashboard)
+v25_runtime_tuning_patch.patch()
 
 _original_menu_keyboard = dashboard.menu_keyboard
 
