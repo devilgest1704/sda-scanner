@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json,os
 from datetime import datetime,timezone,timedelta
-STATE_FILE="v25_learner_state.json";STATE_KEY="paper_hunter";INVESTMENT_SDA=50.;FEE_RATE=.01;SLIPPAGE_RATE=.001;MAX_OPEN=3;MAX_NEW_PER_SCAN=1;HORIZON_HOURS=6;MIN_SCORE=45.;MIN_VOLUME=250.;MIN_TRADES=5.;MIN_M1H=3.;MIN_EV_SDA=0.
+STATE_FILE="v25_learner_state.json";STATE_KEY="paper_hunter";INVESTMENT_SDA=50.;FEE_RATE=.01;SLIPPAGE_RATE=.001;MAX_OPEN=3;MAX_NEW_PER_SCAN=1;HORIZON_HOURS=6;MIN_SCORE=45.;MIN_VOLUME=250.;MIN_TRADES=5.;MIN_M1H=2.;MIN_EV_SDA=0.
 def _num(v,d=0.):
  try:return d if v is None else float(v)
  except(TypeError,ValueError):return d
