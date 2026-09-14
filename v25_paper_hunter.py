@@ -24,15 +24,24 @@ def _save(s):
  os.replace(tmp,STATE_FILE)
 def _analysis(td):return td.get("analysis",td) if isinstance(td,dict) and isinstance(td.get("analysis",td),dict) else {}
 def volume_1h_sda(an,data=None):
- f=an.get("flow",{}).get("1h",{}) if isinstance(an,dict) else {}
- if isinstance(f,dict) and f.get("total_volume") is not None:return _num(f.get("total_volume"))
- if isinstance(f,dict):
-  bv=f.get("buy_volume");sv=f.get("sell_volume")
-  if bv is not None or sv is not None:return _num(bv)+_num(sv)
- for src in (data,an):
-  if isinstance(src,dict):
+ """Return the scanner's canonical 1H traded SDA volume.
+
+ The engine's flow model defines 1H volume as buy_volume + sell_volume.
+ Accept either the analysis object itself or a wrapper containing analysis;
+ never silently replace a present zero with an unrelated heuristic field.
+ """
+ for src in (an,data):
+  if not isinstance(src,dict):continue
+  aa=_analysis(src)
+  f=aa.get("flow",{}).get("1h",{}) if isinstance(aa,dict) else {}
+  if isinstance(f,dict):
+   bv=f.get("buy_volume");sv=f.get("sell_volume")
+   if bv is not None or sv is not None:return _num(bv)+_num(sv)
+  if aa is not src:
    for key in ("volume_1h","volume1h","volume_1h_sda","one_hour_volume_sda"):
-    if src.get(key) is not None:return _num(src.get(key))
+    if aa.get(key) is not None:return _num(aa.get(key))
+  for key in ("volume_1h","volume1h","volume_1h_sda","one_hour_volume_sda"):
+   if src.get(key) is not None:return _num(src.get(key))
  return 0.
 def _gate_reasons(score,volume,trades,m1,m15,m4,flow,bear):
  r=[]
