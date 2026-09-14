@@ -114,4 +114,12 @@ def patch():
             dashboard._sda_v25_combined_stats_patched = True
     except Exception:
         pass
+
+    # Install the observational learner only after the established V25 patching.
+    # It wraps V25 update() and is fail-safe: learning can never affect trading.
+    try:
+        import v25_shadow_learning_bridge as shadow_bridge
+        shadow_bridge.patch(hunter)
+    except Exception as exc:
+        print(f"V25 shadow learning bridge error: {exc}")
     return hunter
