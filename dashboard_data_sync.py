@@ -12,10 +12,10 @@ def patch_dashboard(dashboard):
         return dashboard
 
     engine = dashboard.engine
-    original_merge = dashboard._merge_wallet_portfolio
-    original_position = dashboard._position_recommendations
-    original_real = dashboard.real_trading_report
-    original_main = dashboard.main_dashboard
+    original_merge = getattr(dashboard, "_merge_wallet_portfolio", None)
+    original_position = getattr(dashboard, "_position_recommendations", None)
+    original_real = getattr(dashboard, "real_trading_report", None)
+    original_main = getattr(dashboard, "main_dashboard", None)
 
     def _rebuild(portfolio, meta):
         result = deepcopy(portfolio) if isinstance(portfolio, dict) else {}
@@ -94,12 +94,17 @@ def patch_dashboard(dashboard):
         return result
 
     def merge_sync(wallet, portfolio, md, ws, meta):
-        return original_merge(wallet, _sync(wallet, portfolio), md, ws, meta)
+        synced = _sync(wallet, portfolio)
+        if callable(original_merge):
+            return original_merge(wallet, synced, md, ws, meta)
+        return synced
 
     def positions_sync(md, ws, meta, portfolio):
         wallet = dashboard.load("wallet_data.json", {})
         synced = _sync(wallet, portfolio)
-        return original_position(md, ws, meta, synced)
+        if callable(original_position):
+            return original_position(md, ws, meta, synced)
+        return []
 
     def real_sync(*args, **kwargs):
         md = dashboard.load("market_data.json", {"tokens": {}})
@@ -124,6 +129,8 @@ def patch_dashboard(dashboard):
         return "\n".join(lines)
 
     def main_sync(*args, **kwargs):
+        if not callable(original_main):
+            return ""
         text = original_main(*args, **kwargs)
         wallet = dashboard.load("wallet_data.json", {})
         portfolio = _sync(wallet, dashboard.load("portfolio_data.json", {}))
@@ -135,9 +142,15 @@ def patch_dashboard(dashboard):
         return text
 
     dashboard._wallet_synced_portfolio = _sync
-    dashboard._merge_wallet_portfolio = merge_sync
-    dashboard._position_recommendations = positions_sync
-    dashboard.real_trading_report = real_sync
-    dashboard.main_dashboard = main_sync
+    if callable(original_merge):
+        dashboard._merge_wallet_portfolio = merge_sync
+    if callable(original_position):
+        dashboard._position_recommendations = positions_sync
+    # Older dashboard builds do not expose real_trading_report. Do not treat
+    # that as an error: the sync layer only wraps it when it actually exists.
+    if callable(original_real):
+        dashboard.real_trading_report = real_sync
+    if callable(original_main):
+        dashboard.main_dashboard = main_sync
     dashboard._sda_data_sync_patched = True
     return dashboard
