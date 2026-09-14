@@ -1,19 +1,19 @@
 """V25 candidate tracker.
 
-Tracks relevant NO-BUY candidates as well as BUY candidates. It records one
-entry snapshot per candidate and updates only peak/trough/path outcomes on
-later scans. This gives V25 unbiased missed-pump examples without storing a
-full copy of every scan.
+Tracks relevant NO-BUY candidates as well as BUY candidates. Each observation
+has a six-hour horizon. Completed observations are kept out of the pending
+set until a cooldown expires, so the same token cannot immediately reset its
+sample and prevent learning.
 """
 from __future__ import annotations
 
 import json
 import os
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict
 
 STATE_FILE = "v25_candidate_state.json"
 HORIZON_HOURS = 6
+REENTRY_COOLDOWN_HOURS = 6
 MAX_PENDING = 600
 MAX_COMPLETED = 2000
 MIN_VOLUME_1H = 250.0
@@ -33,6 +33,13 @@ def _now():
 
 def _iso(dt):
     return dt.astimezone(timezone.utc).isoformat()
+
+
+def _parse_dt(value):
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
 def _load():
@@ -72,11 +79,13 @@ def _update_path(row, price, now):
     entry = _num(row.get("entry_price"))
     if entry <= 0 or price <= 0:
         return False
-    peak = max(_num(row.get("peak_price"), entry), price)
-    trough = min(_num(row.get("trough_price"), entry), price)
+    old_peak = _num(row.get("peak_price"), entry)
+    old_trough = _num(row.get("trough_price"), entry)
+    peak = max(old_peak, price)
+    trough = min(old_trough, price)
     mfe = (peak / entry - 1.0) * 100.0
     mae = (trough / entry - 1.0) * 100.0
-    changed = peak != _num(row.get("peak_price"), entry) or trough != _num(row.get("trough_price"), entry)
+    changed = peak != old_peak or trough != old_trough
     row["peak_price"] = peak
     row["trough_price"] = trough
     row["mfe_pct"] = round(mfe, 6)
@@ -91,12 +100,18 @@ def _update_path(row, price, now):
     return changed
 
 
-def update(paper_engine, scorer):
-    """Track relevant candidates from the latest market snapshot.
+def _recently_completed(address, completed, now):
+    cutoff = now - timedelta(hours=REENTRY_COOLDOWN_HOURS)
+    for row in reversed(completed):
+        if str(row.get("address", "")).lower() != address:
+            continue
+        completed_at = _parse_dt(row.get("completed_at")) or _parse_dt(row.get("last_seen_at"))
+        return bool(completed_at and completed_at >= cutoff)
+    return False
 
-    scorer is the canonical paper scoring callable. Errors are swallowed so
-    candidate tracking can never stop the scanner.
-    """
+
+def update(paper_engine, scorer):
+    """Track relevant candidates from the latest market snapshot."""
     try:
         md = paper_engine.load(paper_engine.MARKET_FILE, {"tokens": {}})
         tokens = md.get("tokens", {}) if isinstance(md, dict) else {}
@@ -107,26 +122,26 @@ def update(paper_engine, scorer):
         now = _now()
         changed = False
 
-        # First update existing observations. They survive independently of
-        # today's score, so a candidate that falls out of the filter still has
-        # its pump path measured.
+        # Finalize existing observations before discovering new ones.
         for address, row in list(pending.items()):
             token = tokens.get(str(address).lower(), {})
             analysis = token.get("analysis") if isinstance(token, dict) else None
             price = _price(analysis)
             if price > 0 and _update_path(row, price, now):
                 changed = True
-            started = None
-            try: started = datetime.fromisoformat(str(row.get("entry_at")).replace("Z", "+00:00"))
-            except Exception: pass
+            started = _parse_dt(row.get("entry_at"))
             if started and now - started >= timedelta(hours=HORIZON_HOURS):
-                row["outcome"] = {"mfe_pct": row.get("mfe_pct", 0.0), "mae_pct": row.get("mae_pct", 0.0), "threshold_times": row.get("threshold_times", {})}
+                row["completed_at"] = _iso(now)
+                row["outcome"] = {
+                    "mfe_pct": row.get("mfe_pct", 0.0),
+                    "mae_pct": row.get("mae_pct", 0.0),
+                    "threshold_times": row.get("threshold_times", {}),
+                    "final_price": row.get("last_price", row.get("entry_price", 0.0)),
+                }
                 completed.append(row)
                 del pending[address]
                 changed = True
 
-        # Add the current relevant universe. We intentionally track NO-BUY
-        # candidates; BUY status is metadata, never a prerequisite.
         candidates = []
         for address, token in tokens.items():
             if not isinstance(token, dict):
@@ -134,11 +149,12 @@ def update(paper_engine, scorer):
             analysis = token.get("analysis")
             if not isinstance(analysis, dict):
                 continue
+            address = str(address).lower()
             price = _price(analysis)
             if price <= 0:
                 continue
             try:
-                score = scorer(str(address).lower(), analysis, whale)
+                score = scorer(address, analysis, whale)
             except Exception:
                 continue
             if not isinstance(score, dict):
@@ -148,11 +164,11 @@ def update(paper_engine, scorer):
             trades = _num(score.get("trades_1h", analysis.get("trades_1h")))
             if volume < MIN_VOLUME_1H and buy_score < MIN_SCORE and trades < 5:
                 continue
-            candidates.append((buy_score, str(address).lower(), analysis, score, price))
+            candidates.append((buy_score, address, score, price))
 
         candidates.sort(key=lambda x: x[0], reverse=True)
-        for buy_score, address, analysis, score, price in candidates[:MAX_PENDING]:
-            if address in pending:
+        for buy_score, address, score, price in candidates[:MAX_PENDING]:
+            if address in pending or _recently_completed(address, completed, now):
                 continue
             pending[address] = {
                 "version": "V25",
@@ -171,7 +187,6 @@ def update(paper_engine, scorer):
             }
             changed = True
 
-        # Bound persistent history. Keep the newest completed observations.
         if len(completed) > MAX_COMPLETED:
             completed = completed[-MAX_COMPLETED:]
         state = {"version": "V25", "updated_at": _iso(now), "pending": pending, "completed": completed}
