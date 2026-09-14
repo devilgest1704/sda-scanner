@@ -26,22 +26,27 @@ def _analysis(td):return td.get("analysis",td) if isinstance(td,dict) and isinst
 def volume_1h_sda(an,data=None):
  """Return the scanner's canonical 1H traded SDA volume.
 
- The engine's flow model defines 1H volume as buy_volume + sell_volume.
- Accept either the analysis object itself or a wrapper containing analysis;
- never silently replace a present zero with an unrelated heuristic field.
+ The dashboard/scanner canonical source is flow.1h.total_volume.
+ Prefer the explicit paper-decision volume when present, then canonical
+ analysis.flow.1h.total_volume, and only then legacy buy/sell volume fields.
  """
- for src in (an,data):
+ for src in (data,an):
   if not isinstance(src,dict):continue
+  for key in ("volume_1h","volume1h","volume_1h_sda","one_hour_volume_sda"):
+   if src.get(key) is not None:
+    v=_num(src.get(key))
+    if v>0:return v
   aa=_analysis(src)
+  for key in ("volume_1h","volume1h","volume_1h_sda","one_hour_volume_sda"):
+   if aa.get(key) is not None:
+    v=_num(aa.get(key))
+    if v>0:return v
   f=aa.get("flow",{}).get("1h",{}) if isinstance(aa,dict) else {}
+  if isinstance(f,dict) and f.get("total_volume") is not None:
+   return _num(f.get("total_volume"))
   if isinstance(f,dict):
    bv=f.get("buy_volume");sv=f.get("sell_volume")
    if bv is not None or sv is not None:return _num(bv)+_num(sv)
-  if aa is not src:
-   for key in ("volume_1h","volume1h","volume_1h_sda","one_hour_volume_sda"):
-    if aa.get(key) is not None:return _num(aa.get(key))
-  for key in ("volume_1h","volume1h","volume_1h_sda","one_hour_volume_sda"):
-   if src.get(key) is not None:return _num(src.get(key))
  return 0.
 def _gate_reasons(score,volume,trades,m1,m15,m4,flow,bear):
  r=[]
@@ -57,7 +62,7 @@ def _gate_reasons(score,volume,trades,m1,m15,m4,flow,bear):
 def _candidate(scanner,a,an,whale):
  try:d=scanner.paper_decision(a,an,whale)
  except Exception:return None
- data=d.get("data") or {};v=d.get("v25") or data.get("v25") or {};f=an.get("flow",{}).get("1h",{}) if isinstance(an,dict) else {};score=_num(d.get("score",data.get("buy_score",data.get("confidence"))));volume=volume_1h_sda(an,data);trades=_num(data.get("trades_1h")) or _num(f.get("buy_count"))+_num(f.get("sell_count"));bear=int(d.get("technical_bear",data.get("technical_bear")) or 0);m1=_num(data.get("m1h"));m15=_num(data.get("m15"));m4=_num(data.get("m4h"));flow=_num(data.get("net_1h"));ev=_num(v.get("expected_pl_sda"));mfe=_num(v.get("expected_mfe"));mae=_num(v.get("expected_mae"));gate_reasons=_gate_reasons(score,volume,trades,m1,m15,m4,flow,bear);eligible=not gate_reasons
+ data=d.get("data") or {};v=d.get("v25") or data.get("v25") or {};f=an.get("flow",{}).get("1h",{}) if isinstance(an,dict) else {};score=_num(d.get("score",data.get("buy_score",data.get("confidence"))));volume=volume_1h_sda(data,an);trades=_num(data.get("trades_1h")) or _num(f.get("buy_count"))+_num(f.get("sell_count"));bear=int(d.get("technical_bear",data.get("technical_bear")) or 0);m1=_num(data.get("m1h"));m15=_num(data.get("m15"));m4=_num(data.get("m4h"));flow=_num(data.get("net_1h"));ev=_num(v.get("expected_pl_sda"));mfe=_num(v.get("expected_mfe"));mae=_num(v.get("expected_mae"));gate_reasons=_gate_reasons(score,volume,trades,m1,m15,m4,flow,bear);eligible=not gate_reasons
  return {"decision":d,"score":score,"v25":v,"volume":volume,"trades":trades,"bear":bear,"m1h":m1,"m15":m15,"m4h":m4,"flow":flow,"ev":ev,"mfe":mfe,"mae":mae,"gate_reasons":gate_reasons,"eligible":eligible,"core_blocked":bool(d.get("blocked"))}
 def _close(row,p,reason,now):
  e=_num(row.get("entry_price"));inv=_num(row.get("investment_sda"),INVESTMENT_SDA);profit=inv*(p/e)*(1-SLIPPAGE_RATE)*(1-FEE_RATE)-inv*(1+FEE_RATE) if e>0 else 0
