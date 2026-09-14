@@ -8,7 +8,7 @@ force. The dashboard is patched to use the exact same gate and horizon text.
 
 def patch():
     import v25_paper_hunter as hunter
-    import dashboard
+    import telegram_dashboard as dashboard
 
     original_gate = getattr(hunter, "_gate", None)
     if not original_gate or getattr(hunter, "_sda_warmup_gate_patched", False):
