@@ -32,10 +32,11 @@ def patch():
     try:
         import dashboard_v23_patch as v23
 
-        # rows_v25() calls _decision(address, ...), but the returned decision
-        # object does not necessarily carry that address. The hunter needs the
-        # token identity because paper_decision is token-specific. Preserve it
-        # explicitly so dashboard and execution cannot diverge.
+        # Preserve token identity AND the original market analysis. The latter
+        # is important: paper_decision() may normalize missing momentum/flow
+        # fields to zero, while the hunter's execution path reads those values
+        # from the canonical market snapshot. Dashboard must use that same
+        # source, otherwise every candidate can appear as M1H=0 / flow=0.
         if not getattr(v23, "_sda_decision_identity_patched", False):
             original_decision = v23._decision
             def decision_with_identity(address, analysis, ws):
@@ -43,16 +44,20 @@ def patch():
                 if isinstance(d, dict):
                     d = dict(d)
                     d["address"] = str(address or "").lower()
+                    d["_market_analysis"] = analysis if isinstance(analysis, dict) else {}
                 return d
             v23._decision = decision_with_identity
             v23._sda_decision_identity_patched = True
 
         def dashboard_gate(d, canonical_volume=None):
-            data = (d or {}).get("data") or {}
-            an = data.get("analysis") if isinstance(data.get("analysis"), dict) else data
-            address = str((d or {}).get("address") or "").lower()
+            d = d or {}
+            market_an = d.get("_market_analysis")
+            if not isinstance(market_an, dict) or not market_an:
+                data = d.get("data") or {}
+                market_an = data.get("analysis") if isinstance(data.get("analysis"), dict) else data
+            address = str(d.get("address") or "").lower()
             ws = dashboard.load("whale_data.json", {})
-            c = hunter._features(__import__("main"), address, an, ws)
+            c = hunter._features(__import__("main"), address, market_an, ws)
             if canonical_volume is not None and canonical_volume > 0:
                 c["volume"] = canonical_volume
             learned = hunter._learned_ready(v23._v25_state())
@@ -61,8 +66,6 @@ def patch():
         v23._v25_gate = dashboard_gate
         v23._gate_reasons = lambda d, canonical_volume=None: list(dashboard_gate(d, canonical_volume)[1])
 
-        # Keep the public report wording synchronized with the actual 24h
-        # safety exit in v25_paper_hunter.py.
         old_debug = getattr(dashboard, "market_debug_report", None)
         if old_debug and not getattr(dashboard, "_sda_v25_horizon_patched", False):
             def debug_synced(snapshot=None):
