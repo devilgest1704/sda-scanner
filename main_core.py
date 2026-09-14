@@ -463,9 +463,19 @@ def _adaptive_prepare_positions():
         pass
 
 
+def _run_v25_paper_hunter():
+    """Run the separate V25 pump-hunter shadow portfolio once per scanner run."""
+    try:
+        import v25_paper_hunter
+        return v25_paper_hunter.update()
+    except Exception:
+        return False
+
+
 def _paper_main_guarded():
     _paper_guard_prepare()
     _adaptive_prepare_positions()
+    _run_v25_paper_hunter()
     try:
         return _paper_original_main()
     finally:
