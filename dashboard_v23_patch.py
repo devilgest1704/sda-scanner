@@ -17,13 +17,23 @@ def _decision(address,analysis,ws):
         import main as scanner;return scanner.paper_decision(address,analysis,ws)
     except Exception:return {}
 def _volume_1h(an,data=None):
+    """Use the same canonical scanner flow as V25: 1H buy_volume + sell_volume.
+
+    Accept either an analysis object or a paper_decision/data wrapper. This avoids
+    the previous bug where the dashboard passed data['analysis'] through the wrong
+    level and consequently displayed VOL 1H as zero.
+    """
     try:
         import v25_paper_hunter
         return v25_paper_hunter.volume_1h_sda(an,data)
     except Exception:
-        flow=an.get("flow",{}).get("1h",{}) if isinstance(an,dict) else {}
-        if isinstance(flow,dict) and flow.get("total_volume") is not None:return _num(flow.get("total_volume"))
-        if isinstance(flow,dict):return _num(flow.get("buy_volume"))+_num(flow.get("sell_volume"))
+        for src in (an,data):
+            if not isinstance(src,dict):continue
+            aa=src.get("analysis") if isinstance(src.get("analysis"),dict) else src
+            f=aa.get("flow",{}).get("1h",{}) if isinstance(aa,dict) else {}
+            if isinstance(f,dict):
+                bv=f.get("buy_volume");sv=f.get("sell_volume")
+                if bv is not None or sv is not None:return _num(bv)+_num(sv)
         return 0.
 def _v25_gate(d):
     """Mirror the V25 hunter's entry eligibility using the canonical market 1h volume."""
@@ -53,7 +63,7 @@ def patch_dashboard(dashboard):
         base=original_buy(md,ws,meta,max(limit,10));out=[]
         for r in base:
             d=_decision(r.get("address"),r.get("analysis") or {},ws);data=d.get("data") or {};v=_v25(d);ev=_num(v.get("expected_pl_sda"));mfe=_num(v.get("expected_mfe"));mae=_num(v.get("expected_mae"));score=_num(d.get("score",r.get("score")));status,eligible=_v25_status(d);reasons=_gate_reasons(d)
-            x=dict(r);x.update({"decision":d,"v25":v,"v23":_v23(d),"score":score,"v25_eligible":eligible,"v25_status":status,"v25_gate_reasons":reasons,"v25_volume_1h":_volume_1h(d.get("data") or {},data),"v25_expected_pl":ev,"v25_expected_mfe":mfe,"v25_expected_mae":mae,"v25_p10":_num(v.get("p10")),"v25_p20":_num(v.get("p20")),"v25_p30":_num(v.get("p30")),"v25_rank":(1 if status=="HUNT" else 0 if status=="WATCH" else -1)*1000+score+min(15,max(0,mfe))*.5+max(-10,min(10,ev))});out.append(x)
+            x=dict(r);x.update({"decision":d,"v25":v,"v23":_v23(d),"score":score,"v25_eligible":eligible,"v25_status":status,"v25_gate_reasons":reasons,"v25_volume_1h":_volume_1h(r.get("analysis") or data,data),"v25_expected_pl":ev,"v25_expected_mfe":mfe,"v25_expected_mae":mae,"v25_p10":_num(v.get("p10")),"v25_p20":_num(v.get("p20")),"v25_p30":_num(v.get("p30")),"v25_rank":(1 if status=="HUNT" else 0 if status=="WATCH" else -1)*1000+score+min(15,max(0,mfe))*.5+max(-10,min(10,ev))});out.append(x)
         out.sort(key=lambda x:(1 if x["v25_status"]=="HUNT" else 0 if x["v25_status"]=="WATCH" else -1,x["v25_rank"],x["score"]),reverse=True);return out[:limit]
     def _watch_addresses():
         st=_v25_state();watch=st.get("watch") or {};return {str(a).lower() for a in watch} if isinstance(watch,dict) else set()
