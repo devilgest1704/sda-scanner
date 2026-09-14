@@ -17,42 +17,44 @@ def _decision(address,analysis,ws):
         import main as scanner;return scanner.paper_decision(address,analysis,ws)
     except Exception:return {}
 def _volume_1h(an,data=None):
-    """Use the same canonical scanner flow as V25: 1H buy_volume + sell_volume.
+    """Use the scanner's canonical 1H volume: flow.1h.total_volume.
 
-    Accept either an analysis object or a paper_decision/data wrapper. This avoids
-    the previous bug where the dashboard passed data['analysis'] through the wrong
-    level and consequently displayed VOL 1H as zero.
+    The BUY-row builder already computes this exact value. Prefer explicit
+    volume fields only when positive; never let a stale zero in paper_decision
+    mask the canonical market analysis volume.
     """
     try:
         import v25_paper_hunter
-        return v25_paper_hunter.volume_1h_sda(an,data)
-    except Exception:
-        for src in (an,data):
-            if not isinstance(src,dict):continue
-            aa=src.get("analysis") if isinstance(src.get("analysis"),dict) else src
-            f=aa.get("flow",{}).get("1h",{}) if isinstance(aa,dict) else {}
-            if isinstance(f,dict):
-                bv=f.get("buy_volume");sv=f.get("sell_volume")
-                if bv is not None or sv is not None:return _num(bv)+_num(sv)
-        return 0.
-def _v25_gate(d):
-    """Mirror the V25 hunter's entry eligibility using the canonical market 1h volume."""
+        v=v25_paper_hunter.volume_1h_sda(an,data)
+        if v>0:return v
+    except Exception:pass
+    for src in (an,data):
+        if not isinstance(src,dict):continue
+        aa=src.get("analysis") if isinstance(src.get("analysis"),dict) else src
+        f=aa.get("flow",{}).get("1h",{}) if isinstance(aa,dict) else {}
+        if isinstance(f,dict) and f.get("total_volume") is not None:
+            return _num(f.get("total_volume"))
+    return 0.
+def _v25_gate(d,canonical_volume=None):
+    """Mirror the V25 hunter's entry eligibility using canonical market volume."""
     data=(d or {}).get("data") or {};an=data.get("analysis") if isinstance(data.get("analysis"),dict) else data
     flow=an.get("flow",{}).get("1h",{}) if isinstance(an,dict) else {}
     score=_num((d or {}).get("score",data.get("buy_score",data.get("confidence"))))
-    volume=_volume_1h(an,data)
+    volume=_num(canonical_volume) if canonical_volume is not None else _volume_1h(an,data)
     trades=_num(data.get("trades_1h")) or _num(flow.get("buy_count"))+_num(flow.get("sell_count"))
     bear=int((d or {}).get("technical_bear",data.get("technical_bear")) or 0)
     m1=_num(data.get("m1h"));m15=_num(data.get("m15"));m4=_num(data.get("m4h"));net=_num(data.get("net_1h"))
     return score>=45 and volume>=250 and trades>=5 and m1>=3 and m15>=-.75 and m4>=0 and net>0 and bear==0
-def _v25_status(d):
+def _v25_status(d,canonical_volume=None):
     v=_v25(d);ev=_num(v.get("expected_pl_sda"));
-    if _v25_gate(d):return ("HUNT",True) if ev>0 else ("WATCH",True)
+    if _v25_gate(d,canonical_volume):return ("HUNT",True) if ev>0 else ("WATCH",True)
     return "REJECT",False
-def _gate_reasons(d):
+def _gate_reasons(d,canonical_volume=None):
     try:
         import v25_paper_hunter
-        data=(d or {}).get("data") or {};an=data.get("analysis") if isinstance(data.get("analysis"),dict) else data;flow=an.get("flow",{}).get("1h",{}) if isinstance(an,dict) else {};score=_num((d or {}).get("score",data.get("buy_score",data.get("confidence"))));volume=v25_paper_hunter.volume_1h_sda(an,data);trades=_num(data.get("trades_1h")) or _num(flow.get("buy_count"))+_num(flow.get("sell_count"));bear=int((d or {}).get("technical_bear",data.get("technical_bear")) or 0)
+        data=(d or {}).get("data") or {};an=data.get("analysis") if isinstance(data.get("analysis"),dict) else data;flow=an.get("flow",{}).get("1h",{}) if isinstance(an,dict) else {};score=_num((d or {}).get("score",data.get("buy_score",data.get("confidence"))))
+        volume=_num(canonical_volume) if canonical_volume is not None else v25_paper_hunter.volume_1h_sda(an,data)
+        trades=_num(data.get("trades_1h")) or _num(flow.get("buy_count"))+_num(flow.get("sell_count"));bear=int((d or {}).get("technical_bear",data.get("technical_bear")) or 0)
         return v25_paper_hunter._gate_reasons(score,volume,trades,_num(data.get("m1h")),_num(data.get("m15")),_num(data.get("m4h")),_num(data.get("net_1h")),bear)
     except Exception:return []
 def patch_dashboard(dashboard):
@@ -62,8 +64,15 @@ def patch_dashboard(dashboard):
     def rows_v25(md,ws,meta,limit=5):
         base=original_buy(md,ws,meta,max(limit,10));out=[]
         for r in base:
-            d=_decision(r.get("address"),r.get("analysis") or {},ws);data=d.get("data") or {};v=_v25(d);ev=_num(v.get("expected_pl_sda"));mfe=_num(v.get("expected_mfe"));mae=_num(v.get("expected_mae"));score=_num(d.get("score",r.get("score")));status,eligible=_v25_status(d);reasons=_gate_reasons(d)
-            x=dict(r);x.update({"decision":d,"v25":v,"v23":_v23(d),"score":score,"v25_eligible":eligible,"v25_status":status,"v25_gate_reasons":reasons,"v25_volume_1h":_volume_1h(r.get("analysis") or data,data),"v25_expected_pl":ev,"v25_expected_mfe":mfe,"v25_expected_mae":mae,"v25_p10":_num(v.get("p10")),"v25_p20":_num(v.get("p20")),"v25_p30":_num(v.get("p30")),"v25_rank":(1 if status=="HUNT" else 0 if status=="WATCH" else -1)*1000+score+min(15,max(0,mfe))*.5+max(-10,min(10,ev))});out.append(x)
+            # _buy_gate_rows is the authoritative source for the current market
+            # 1H volume. Carry that value into the V25 decision so a stale
+            # paper_decision data field cannot turn 1748 SDA into volume=0.
+            canonical_volume=_num(r.get("volume_1h"))
+            d=_decision(r.get("address"),r.get("analysis") or {},ws);data=d.get("data") or {}
+            if canonical_volume>0:
+                data=dict(data);data["volume_1h"]=canonical_volume;d=dict(d);d["data"]=data
+            v=_v25(d);ev=_num(v.get("expected_pl_sda"));mfe=_num(v.get("expected_mfe"));mae=_num(v.get("expected_mae"));score=_num(d.get("score",r.get("score")));status,eligible=_v25_status(d,canonical_volume);reasons=_gate_reasons(d,canonical_volume)
+            x=dict(r);x.update({"decision":d,"v25":v,"v23":_v23(d),"score":score,"v25_eligible":eligible,"v25_status":status,"v25_gate_reasons":reasons,"v25_volume_1h":canonical_volume if canonical_volume>0 else _volume_1h(r.get("analysis") or data,data),"v25_expected_pl":ev,"v25_expected_mfe":mfe,"v25_expected_mae":mae,"v25_p10":_num(v.get("p10")),"v25_p20":_num(v.get("p20")),"v25_p30":_num(v.get("p30")),"v25_rank":(1 if status=="HUNT" else 0 if status=="WATCH" else -1)*1000+score+min(15,max(0,mfe))*.5+max(-10,min(10,ev))});out.append(x)
         out.sort(key=lambda x:(1 if x["v25_status"]=="HUNT" else 0 if x["v25_status"]=="WATCH" else -1,x["v25_rank"],x["score"]),reverse=True);return out[:limit]
     def _watch_addresses():
         st=_v25_state();watch=st.get("watch") or {};return {str(a).lower() for a in watch} if isinstance(watch,dict) else set()
