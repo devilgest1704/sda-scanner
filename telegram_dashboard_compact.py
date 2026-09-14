@@ -52,11 +52,12 @@ def _rebuild_summary_portfolio(portfolio, scanner, meta):
 
 
 def _sync_current_to_wallet(wallet, portfolio):
-    """Make live wallet holdings authoritative for current/open P/L.
+    """Reconcile live wallet values with FIFO-derived open positions.
 
-    portfolio_data can lag a real wallet sale. Scale the remaining FIFO cost
-    to the wallet amount, then recompute P/L from the live wallet value. Do not
-    scale an old P/L number because that double-counts the current market value.
+    Wallet amount/value is authoritative for what is currently held and what it
+    is worth. FIFO cost basis is authoritative for how much the remaining
+    holding cost. Never scale FIFO cost from wallet amount: a sell followed by a
+    new buy can increase the wallet amount and would otherwise inflate P/L.
     """
     result = copy.deepcopy(portfolio) if isinstance(portfolio, dict) else {}
     current = result.get("current", {})
@@ -85,14 +86,12 @@ def _sync_current_to_wallet(wallet, portfolio):
         holding = by_address.get(address) or by_symbol.get(symbol)
         if not holding:
             continue
+
         wallet_amount = engine.num(holding.get("amount"))
-        portfolio_amount = engine.num(pf.get("amount"))
-        if portfolio_amount > 0 and wallet_amount < portfolio_amount:
-            ratio = max(0.0, min(1.0, wallet_amount / portfolio_amount))
-            pf["cost_sda"] = engine.num(pf.get("cost_sda")) * ratio
-            pf["amount"] = wallet_amount
-        elif portfolio_amount <= 0:
-            pf["amount"] = wallet_amount
+        # Do not mutate the FIFO cost basis. A live wallet amount can be larger
+        # after a new BUY, or smaller after a SELL; both cases require the
+        # ledger/FIFO rebuild rather than proportional scaling of old cost.
+        pf["wallet_amount"] = wallet_amount
 
         cost = engine.num(pf.get("cost_sda"))
         value = engine.num(holding.get("value_sda"))
@@ -125,6 +124,9 @@ def merge_wallet_portfolio(wallet, portfolio, scanner):
         if name and current_name.upper() == symbol:
             lines[i] = f"🪙 {symbol} — {name}"
 
+    # Rebuild FIFO after the latest buy/sell ledger has been loaded. This makes
+    # the current cost basis reflect sells AND subsequent new buys.
+    portfolio = _rebuild_summary_portfolio(portfolio, scanner, meta)
     portfolio = _sync_current_to_wallet(wallet, portfolio)
     current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
     by_key = {str(k).lower(): v for k, v in current.items() if isinstance(v, dict)}
