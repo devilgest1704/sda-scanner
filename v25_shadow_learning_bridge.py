@@ -22,6 +22,23 @@ def _diagnostic_save(learner, data, **updates):
         pass
 
 
+def _near_pass(c):
+    """Identify useful threshold-adjacent rejects without changing the gate."""
+    if c.get("bear", 0) >= 2:
+        return False, 99
+    checks = (
+        c.get("pump_score", 0) >= 48.0,
+        c.get("volume", 0) >= 200.0,
+        c.get("trades", 0) >= 6.0,
+        c.get("m1h", 0) >= 2.0,
+        c.get("m15", 0) >= 0.0,
+        c.get("m4h", 0) >= -1.0,
+        c.get("flow", 0) >= -150.0,
+    )
+    misses = sum(not x for x in checks)
+    return misses <= 2, misses
+
+
 def patch(hunter):
     if getattr(hunter, "_sda_shadow_learning_v2_patched", False):
         return
@@ -54,6 +71,7 @@ def patch(hunter):
             data["last_tokens"] = len(tokens)
             data["last_candidates"] = 0
             data["last_recorded"] = 0
+            data["last_near_pass"] = 0
             data["last_horizon_prices"] = 0
             learner._save(data)
 
@@ -65,6 +83,7 @@ def patch(hunter):
 
             candidates = 0
             recorded = 0
+            near_pass_count = 0
             for raw, td in tokens.items():
                 address = str(raw).lower()
                 if address in core_positions or address in v25_positions:
@@ -89,6 +108,7 @@ def patch(hunter):
 
                 candidates += 1
                 allowed, reasons = hunter._gate(c, learned)
+                is_near, near_misses = _near_pass(c) if not allowed else (False, 0)
                 try:
                     symbol = scanner.lbl(address, meta) if hasattr(scanner, "lbl") else address
                 except Exception:
@@ -96,23 +116,34 @@ def patch(hunter):
                 candidate = dict(c)
                 candidate["address"] = address
                 candidate["symbol"] = symbol
+                candidate["near_pass"] = bool(is_near)
+                candidate["near_pass_misses"] = int(near_misses)
                 learner.record_observation(
                     candidate,
-                    lane="V25_PASS" if allowed else "V25_REJECT",
+                    lane=("V25_PASS" if allowed else "V25_NEAR_PASS" if is_near else "V25_REJECT"),
                     allowed=allowed,
                     reasons=reasons,
                     scan=scan,
                     price=price,
                 )
                 recorded += 1
+                if is_near:
+                    near_pass_count += 1
                 if recorded % 25 == 0:
-                    _diagnostic_save(learner, data, last_candidates=candidates, last_recorded=recorded)
+                    _diagnostic_save(
+                        learner,
+                        data,
+                        last_candidates=candidates,
+                        last_recorded=recorded,
+                        last_near_pass=near_pass_count,
+                    )
 
             _diagnostic_save(
                 learner,
                 data,
                 last_candidates=candidates,
                 last_recorded=recorded,
+                last_near_pass=near_pass_count,
             )
 
             prices = {}
@@ -142,8 +173,6 @@ def patch(hunter):
                 last_completed_at=time.time(),
             )
         except Exception as exc:
-            # Learning is strictly observational and must never break V25 trading.
-            # Unlike the previous silent pass, persist the exact failure for diagnosis.
             try:
                 data = learner._load()
                 data["last_error"] = f"{type(exc).__name__}: {exc}"
