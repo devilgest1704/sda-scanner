@@ -125,11 +125,14 @@ jobs:
       - name: Build V25 shadow learning summary
         run: python v25_shadow_learning_summary.py
 
+      - name: Build V25 false-negative drill-down report
+        run: python v25_shadow_learning_false_negative_report.py
+
       - name: Commit scanner state
         run: |
           git config user.name 'sda-scanner-bot'
           git config user.email 'scanner@github.local'
-          git add main.py market_scanner.py liquidity_scanner.py state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json paper_buy_guard_state.json sync_real_wallet.py real_trading_config.py real_trader.py real_trader_dry_run.py real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json
+          git add main.py market_scanner.py liquidity_scanner.py state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json paper_buy_guard_state.json sync_real_wallet.py real_trading_config.py real_trader.py real_trader_dry_run.py real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json
           if git diff --staged --quiet; then
             echo 'No scanner state changes to commit.'
             exit 0
@@ -149,7 +152,7 @@ jobs:
             git reset --soft origin/main
             git commit -C HEAD --no-edit || true
             if git diff --cached --quiet; then
-              git add main.py market_scanner.py liquidity_scanner.py state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json paper_buy_guard_state.json sync_real_wallet.py real_trading_config.py real_trader.py real_trader_dry_run.py real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json
+              git add main.py market_scanner.py liquidity_scanner.py state.json whale_state.json whale_data.json market_data.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json paper_buy_guard_state.json sync_real_wallet.py real_trading_config.py real_trader.py real_trader_dry_run.py real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json
               git commit -m 'Update SDA scanner state'
             fi
             sleep 2
