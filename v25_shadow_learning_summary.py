@@ -33,6 +33,32 @@ def _pct(values):
     return round(sum(values) / len(values), 2)
 
 
+def _lane_stats(rows):
+    """Return horizon outcomes split by observational lane."""
+    result = {}
+    lanes = sorted({str(r.get("lane") or "UNKNOWN") for r in rows})
+    for lane in lanes:
+        lane_rows = [r for r in rows if str(r.get("lane") or "UNKNOWN") == lane]
+        result[lane] = {}
+        for h in HORIZONS:
+            vals = []
+            for r in lane_rows:
+                out = (r.get("outcomes") or {}).get(str(h))
+                value = out.get("net_return_pct") if isinstance(out, dict) else None
+                if isinstance(value, (int, float)):
+                    vals.append(float(value))
+            if vals:
+                wins = sum(v > 0 for v in vals)
+                result[lane][str(h)] = {
+                    "completed": len(vals),
+                    "wins": wins,
+                    "win_rate_pct": round(wins / len(vals) * 100, 1),
+                    "avg_net_return_pct": _pct(vals),
+                    "median_net_return_pct": round(statistics.median(vals), 2),
+                }
+    return result
+
+
 def build_summary(data: Dict[str, Any]) -> Dict[str, Any]:
     rows = [r for r in data.get("observations", []) if isinstance(r, dict)]
     result: Dict[str, Any] = {
@@ -40,10 +66,14 @@ def build_summary(data: Dict[str, Any]) -> Dict[str, Any]:
         "scan_counter": int(data.get("scan_counter") or 0),
         "observations": len(rows),
         "lanes": dict(Counter(str(r.get("lane") or "UNKNOWN") for r in rows)),
+        "lane_horizons": {},
+        "last_near_pass": int(data.get("last_near_pass") or 0),
         "horizons": {},
         "rejection_reasons": {},
         "rule_impact": {},
     }
+
+    result["lane_horizons"] = _lane_stats(rows)
 
     for h in HORIZONS:
         vals = []
