@@ -128,6 +128,11 @@ def patch(hunter):
                     prices[str(raw).lower()] = p
 
             learner.update_horizons(prices, scan)
+            try:
+                import v25_shadow_learning_summary as summary_scanner
+                summary_scanner.write_summary()
+            except Exception as summary_exc:
+                print(f"V25 shadow summary error: {type(summary_exc).__name__}: {summary_exc}")
             _diagnostic_save(
                 learner,
                 data,
