@@ -1,7 +1,7 @@
-"""V25 Shadow Learning v2: append-only observation log and horizon outcomes.
+"""V25 Shadow Learning v2: high-capacity shadow observations and horizons.
 
-Isolated from MAX-WIN. Records WATCH candidates so V25 can learn from missed
-entries without changing the live BUY gate.
+Isolated from MAX-WIN. Records V25-relevant market decisions every scanner pass
+so gate quality can be learned from missed entries without changing live BUYs.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 
 STATE_FILE = "v25_shadow_learning_v2.json"
 HORIZONS = (5, 10, 20, 30)
-MAX_RECORDS = 2000
+MAX_RECORDS = 10000
 
 
 def _load() -> Dict[str, Any]:
@@ -33,14 +33,14 @@ def _save(data: Dict[str, Any]) -> None:
 
 def record_observation(candidate: Dict[str, Any], *, lane: str, allowed: bool,
                        reasons: List[str], scan: int, price: float) -> None:
-    """Append one WATCH/decision observation; duplicates for same scan are ignored."""
+    """Record one V25 decision snapshot; one snapshot per token per scan."""
     address = str(candidate.get("address") or candidate.get("token") or "").lower()
     if not address or price <= 0:
         return
     data = _load()
     observations = data.setdefault("observations", [])
     key = f"{address}:{scan}"
-    if any(str(x.get("key")) == key for x in observations[-100:]):
+    if any(str(x.get("key")) == key for x in observations[-500:]):
         return
     observations.append({
         "key": key, "timestamp": time.time(), "scan": scan,
@@ -58,7 +58,7 @@ def record_observation(candidate: Dict[str, Any], *, lane: str, allowed: bool,
 
 
 def update_horizons(price_by_address: Dict[str, float], scan: int) -> None:
-    """Close observation horizons and store gross/hypothetical post-cost returns."""
+    """Evaluate observations at exact +5/+10/+20/+30 scanner passes."""
     data = _load()
     changed = False
     for row in data.get("observations", []):
@@ -74,7 +74,6 @@ def update_horizons(price_by_address: Dict[str, float], scan: int) -> None:
         if current <= 0 or entry <= 0:
             continue
         ret = (current / entry - 1.0) * 100.0
-        # Conservative paper estimate: 1% fee + 0.1% slippage each side.
         net = (current * 0.999 * 0.99) / (entry * 1.01) - 1.0
         out = row.setdefault("outcomes", {})
         if str(delta) not in out:
