@@ -5,6 +5,7 @@ Telegram Real Wallet menu to the V26 read-only reports.
 """
 from copy import deepcopy
 import v26_dashboard_patch
+import real_wallet_market_fix
 
 
 def _real_statistics_report(dashboard):
@@ -69,5 +70,8 @@ def patch_dashboard(dashboard):
     dashboard.menu_keyboard = menu_keyboard_v26
     dashboard.handle_update = handle_update_v26
     dashboard.real_statistics_report = lambda: _real_statistics_report(dashboard)
+    # Must be the final Real Wallet renderer so later legacy/consistency patches
+    # cannot replace the market-data resolver with a candidate-only lookup.
+    real_wallet_market_fix.patch_dashboard(dashboard)
     dashboard._sda_position_action_ui_patched = True
     return dashboard
