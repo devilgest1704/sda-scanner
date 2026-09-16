@@ -8,6 +8,24 @@ import dashboard_consistency
 import dashboard_v23_patch
 import dashboard_wallet_summary
 import real_wallet_market_fix
+import v26_dashboard_patch
+
+
+# V26 main-dashboard rendering calls this helper directly. The previous
+# canonical helper only searched market_data.json and missed wallet tokens
+# that are present in market_analysis.json. Use the same full resolver as
+# the dedicated Real Wallet view.
+def _fixed_position_action_section(dashboard, md, ws, meta):
+    report = real_wallet_market_fix.real_trading_report(dashboard)
+    lines = report.splitlines()
+    try:
+        start = lines.index("🧭 POSITION ACTION • REAL WALLET")
+        return lines[start:]
+    except ValueError:
+        return ["", "🧭 POSITION ACTION • REAL WALLET", "────────────────────────", "⚠️ Real Wallet renderer unavailable"]
+
+
+v26_dashboard_patch._position_action_section = _fixed_position_action_section
 
 
 _original_dashboard_load = dashboard.load
