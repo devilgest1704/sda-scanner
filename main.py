@@ -26,6 +26,21 @@ _paper.MAX_OPEN_POSITIONS = MAX_WIN_MAX_OPEN_POSITIONS
 _paper.MAX_NEW_BUYS_PER_RUN = MAX_WIN_MAX_NEW_BUYS_PER_RUN
 _core.PAPER_SL_COOLDOWN_SCANS = MAX_WIN_SL_COOLDOWN_SCANS
 
+# Controlled reversal entry.  This is deliberately narrower than the normal
+# MAX-WIN path and is based on the V25 shadow event pattern: strong short-term
+# reversal/activity can precede a move while M15/M4H are still negative.
+REVERSAL_BUY_THRESHOLD = 68.0
+REVERSAL_MIN_M1H = 8.0
+REVERSAL_MIN_FLOW = 0.0
+REVERSAL_MIN_TRADES = 20.0
+REVERSAL_MIN_P5 = 0.40
+REVERSAL_MIN_P10 = 0.20
+REVERSAL_MIN_MEAN_ROI = 0.0
+REVERSAL_MAX_M15 = 0.0
+REVERSAL_MIN_M15 = -8.0
+REVERSAL_MIN_M4H = -40.0
+REVERSAL_MAX_BEAR = 1
+
 
 def _strong_flow_bridge(s, analysis, pred=None):
     return False
@@ -46,17 +61,61 @@ def _v21_buy_decision(buy_score, s, analysis, pred):
     if isinstance(pred, dict) and pred.get("ready"):
         p5 = float(pred.get("p5") or 0); p10 = float(pred.get("p10") or 0); mean_roi = float(pred.get("mean_roi") or 0)
         prediction_ok = p5 >= 0.55 and p10 >= 0.25 and mean_roi > 0.0
+
     momentum_ok = m1 >= 3.0 and m15 >= 0.0 and m4 >= 0.0
     flow_ok = flow > 0.0; activity_ok = trades >= 5.0
-    allowed = score >= threshold and technical_ok and prediction_ok and momentum_ok and flow_ok and activity_ok
+    normal_allowed = score >= threshold and technical_ok and prediction_ok and momentum_ok and flow_ok and activity_ok
+
+    # Reversal path: do not simply lower the global BUY threshold.  Require
+    # simultaneous short-term strength, real activity and a positive predictor,
+    # while allowing the lagging M15/M4H trend to remain negative within bounds.
+    reversal_prediction_ok = (
+        isinstance(pred, dict) and pred.get("ready") and
+        p5 >= REVERSAL_MIN_P5 and p10 >= REVERSAL_MIN_P10 and mean_roi > REVERSAL_MIN_MEAN_ROI
+    )
+    reversal_shape_ok = (
+        score >= REVERSAL_BUY_THRESHOLD and
+        m1 >= REVERSAL_MIN_M1H and
+        flow > REVERSAL_MIN_FLOW and
+        trades >= REVERSAL_MIN_TRADES and
+        REVERSAL_MIN_M15 <= m15 < REVERSAL_MAX_M15 and
+        m4 >= REVERSAL_MIN_M4H and
+        bear <= REVERSAL_MAX_BEAR and
+        reversal_prediction_ok
+    )
+    reversal_allowed = reversal_shape_ok and not normal_allowed
+    allowed = normal_allowed or reversal_allowed
+
     reasons = []
-    if score < threshold: reasons.append(f"BUY score {score:.0f} < {threshold:.0f}")
-    if not technical_ok: reasons.append(f"technical {bull} bull / {bear} bear")
-    if not prediction_ok: reasons.append(f"prediction weak P5={p5:.0%} P10={p10:.0%} mean={mean_roi:+.1f}%")
-    if not momentum_ok: reasons.append(f"momentum {m15:+.1f}/{m1:+.1f}/{m4:+.1f}%")
-    if not flow_ok: reasons.append("1h SDA flow <= 0")
-    if not activity_ok: reasons.append(f"only {trades:.0f} trades/1h")
-    return {"allowed": allowed, "score": score, "raw_score": score, "adjustment": 0.0, "technical_bull": bull, "technical_bear": bear, "technical_evidence": evidence, "bridge": False, "flow_bridge": False, "reason": "; ".join(reasons)}
+    if not allowed:
+        if normal_allowed:
+            reasons.append("normal MAX-WIN")
+        else:
+            reasons.append(f"BUY score {score:.0f} < {threshold:.0f}")
+            if not technical_ok: reasons.append(f"technical {bull} bull / {bear} bear")
+            if not prediction_ok: reasons.append(f"prediction weak P5={p5:.0%} P10={p10:.0%} mean={mean_roi:+.1f}%")
+            if not momentum_ok: reasons.append(f"momentum {m15:+.1f}/{m1:+.1f}/{m4:+.1f}%")
+            if not flow_ok: reasons.append("1h SDA flow <= 0")
+            if not activity_ok: reasons.append(f"only {trades:.0f} trades/1h")
+            if not reversal_shape_ok:
+                reasons.append("reversal profile not confirmed")
+    else:
+        reasons.append("reversal BUY" if reversal_allowed else "normal MAX-WIN BUY")
+
+    return {
+        "allowed": allowed,
+        "score": score,
+        "raw_score": score,
+        "adjustment": 0.0,
+        "technical_bull": bull,
+        "technical_bear": bear,
+        "technical_evidence": evidence,
+        "bridge": False,
+        "flow_bridge": False,
+        "reversal_buy": reversal_allowed,
+        "reversal_profile": "M1H+FLOW+ACTIVITY" if reversal_allowed else "",
+        "reason": "; ".join(reasons),
+    }
 
 
 _core._v21_buy_decision = _v21_buy_decision
@@ -74,9 +133,11 @@ def _paper_score_predictive(address, analysis, whale_state):
     s["buy_score"] = round(score, 1); s["market_score"] = round(score, 1); s["v21_adjustment"] = 0.0
     s["technical_bull"] = decision["technical_bull"]; s["technical_bear"] = decision["technical_bear"]; s["technical_evidence"] = decision["technical_evidence"]
     s["paper_near_threshold_buy"] = False; s["paper_near_threshold_reason"] = ""; s["max_win_profile"] = True; s["max_win_threshold"] = MAX_WIN_BUY_THRESHOLD
+    s["reversal_buy"] = bool(decision.get("reversal_buy")); s["reversal_profile"] = decision.get("reversal_profile", "")
     if pred is not None:
         p5 = float(pred.get("p5") or 0); p10 = float(pred.get("p10") or 0); mean_roi = float(pred.get("mean_roi") or 0)
-        s["paper_prediction_role"] = "hard_entry_filter"; s["paper_prediction_summary"] = f"P(+5) {p5:.0%} • P(+10) {p10:.0%} • mean {mean_roi:+.1f}%"
+        s["paper_prediction_role"] = "hard_entry_filter" if not decision.get("reversal_buy") else "reversal_entry_filter"
+        s["paper_prediction_summary"] = f"P(+5) {p5:.0%} • P(+10) {p10:.0%} • mean {mean_roi:+.1f}%"
     s["paper_buy_blocked"] = not decision["allowed"]; s["paper_buy_block_reason"] = decision["reason"]
     s["confidence"] = score if decision["allowed"] else min(score, MAX_WIN_BUY_THRESHOLD - 1.0)
     try:
@@ -135,7 +196,7 @@ _core._adaptive_create = _adaptive_create; _paper.create = _adaptive_create; eng
 def paper_decision(address, analysis, whale_state):
     s = _paper_score_predictive(address, analysis, whale_state)
     if not isinstance(s, dict): return {"score": None, "blocked": True, "reason": "paper scorer returned no data"}
-    return {"score": s.get("buy_score", s.get("confidence")), "blocked": bool(s.get("paper_buy_blocked")), "reason": str(s.get("paper_buy_block_reason") or ""), "prediction": s.get("paper_prediction") or {}, "prediction_blocked": bool(s.get("paper_prediction_blocked")), "prediction_role": str(s.get("paper_prediction_role") or "hard_entry_filter"), "prediction_veto_reason": str(s.get("paper_prediction_veto_reason") or ""), "prediction_text": str(s.get("paper_prediction_text") or ""), "technical_bull": int(s.get("technical_bull") or 0), "technical_bear": int(s.get("technical_bear") or 0), "technical_evidence": list(s.get("technical_evidence") or []), "components": s.get("buy_score_components") or {}, "raw_confidence": s.get("paper_raw_confidence"), "near_threshold": False, "near_threshold_reason": "", "score_band": str(s.get("buy_score_band") or "MAX-WIN"), "data": s, "v23": s.get("v23_prediction") or {}, "v23_p5": s.get("v23_p5", 0.0), "v23_p10": s.get("v23_p10", 0.0), "v23_p20": s.get("v23_p20", 0.0), "v23_p30": s.get("v23_p30", 0.0), "v23_mean_roi": s.get("v23_mean_roi", 0.0), "v23_pump_score": s.get("v23_pump_score", 0.0), "v24": s.get("v24") or {}, "v25": s.get("v25") or {}}
+    return {"score": s.get("buy_score", s.get("confidence")), "blocked": bool(s.get("paper_buy_blocked")), "reason": str(s.get("paper_buy_block_reason") or ""), "prediction": s.get("paper_prediction") or {}, "prediction_blocked": bool(s.get("paper_prediction_blocked")), "prediction_role": str(s.get("paper_prediction_role") or "hard_entry_filter"), "prediction_veto_reason": str(s.get("paper_prediction_veto_reason") or ""), "prediction_text": str(s.get("paper_prediction_text") or ""), "technical_bull": int(s.get("technical_bull") or 0), "technical_bear": int(s.get("technical_bear") or 0), "technical_evidence": list(s.get("technical_evidence") or []), "components": s.get("buy_score_components") or {}, "raw_confidence": s.get("paper_raw_confidence"), "near_threshold": False, "near_threshold_reason": "", "score_band": str(s.get("buy_score_band") or "MAX-WIN"), "data": s, "v23": s.get("v23_prediction") or {}, "v23_p5": s.get("v23_p5", 0.0), "v23_p10": s.get("v23_p10", 0.0), "v23_p20": s.get("v23_p20", 0.0), "v23_p30": s.get("v23_p30", 0.0), "v23_mean_roi": s.get("v23_mean_roi", 0.0), "v23_pump_score": s.get("v23_pump_score", 0.0), "v24": s.get("v24") or {}, "v25": s.get("v25") or {}, "reversal_buy": bool(s.get("reversal_buy")), "reversal_profile": str(s.get("reversal_profile") or "")}
 
 
 def _run_v24_tracking():
