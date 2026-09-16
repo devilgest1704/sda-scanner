@@ -8,6 +8,7 @@ REPORT_FILE="v25_shadow_learning_event_report.json"
 HORIZONS=(5,10,20)
 THRESHOLDS=(0.0,3.0,5.0,10.0)
 MAX_SCAN_GAP=2
+FEATURE_KEYS=("pump_score","score","volume","trades","m1h","m15","m4h","flow","accel","volume_ratio","trade_ratio","p5","p10","p20","p30")
 
 def _load(path:str)->Dict[str,Any]:
     try:
@@ -47,8 +48,8 @@ def _reason_group(reason:str)->str:
 def _groups(r:Dict[str,Any])->List[str]: return sorted({_reason_group(x) for x in (r.get("rejection_reasons") or [])})
 
 def _features(r:Dict[str,Any])->Dict[str,float]:
-    f=r.get("features") or {}; keys=("pump_score","score","volume","trades","m1h","m15","m4h","flow","accel","volume_ratio","trade_ratio","p5","p10","p20","p30")
-    return {k:round(v,3) for k in keys if (v:=_num(f.get(k))) is not None}
+    f=r.get("features") or {}
+    return {k:round(v,3) for k in FEATURE_KEYS if (v:=_num(f.get(k))) is not None}
 
 def _make_events(rows:List[Dict[str,Any]])->List[List[Dict[str,Any]]]:
     buckets:Dict[str,List[Dict[str,Any]]]=defaultdict(list)
@@ -90,10 +91,33 @@ def _group_stats(events):
         out[n]={"events":len(matched),"completed_10h":len(vals),"wins_gt_0_pct":len(wins),"win_rate_pct":round(100*len(wins)/len(vals),2) if vals else None,"avg_best_10h_net_return_pct":round(statistics.mean(vals),3) if vals else None}
     return out
 
+def _feature_means(records:List[Dict[str,Any]])->Dict[str,float]:
+    out={}
+    for k in FEATURE_KEYS:
+        vals=[r["first_features"][k] for r in records if k in r.get("first_features",{})]
+        if vals: out[k]=round(statistics.mean(vals),3)
+    return out
+
+def _positive_analysis(records:List[Dict[str,Any]])->Dict[str,Any]:
+    positive=[r for r in records if r.get("best_net_return_pct",{}).get("10",-10**9)>0]
+    completed=[r for r in records if "10" in r.get("best_net_return_pct",{})]
+    negative=[r for r in completed if r["best_net_return_pct"]["10"]<=0]
+    positive.sort(key=lambda r:r["best_net_return_pct"]["10"],reverse=True)
+    groups=sorted({g for r in positive for g in r.get("event_rejection_groups",[])})
+    group_hits={g:sum(1 for r in positive if g in r.get("event_rejection_groups",[])) for g in groups}
+    return {
+        "positive_event_count":len(positive),
+        "positive_group_hit_rate_pct":{g:round(100*n/len(positive),1) for g,n in group_hits.items()} if positive else {},
+        "positive_avg_first_features":_feature_means(positive),
+        "negative_avg_first_features":_feature_means(negative),
+        "completed_event_avg_first_features":_feature_means(completed),
+        "top_positive_events":positive[:10],
+    }
+
 def build_report(data):
     events=_make_events(data.get("observations",[])); records=[_record(e) for e in events]
     top=[r for r in records if r.get("best_net_return_pct",{}).get("10",-10**9)>10]; top.sort(key=lambda r:r["best_net_return_pct"]["10"],reverse=True)
-    return {"generated_at":time.time(),"source_observations":len(data.get("observations",[])),"deduplication":{"key":"address/token/symbol/name","max_scan_gap":MAX_SCAN_GAP},"stats":_stats(events),"rejection_group_stats":_group_stats(events),"top_unique_events_gt_10_pct":top[:10],"note":"Observational only. Event deduplication does not alter V25 gate decisions or MAX-WIN."}
+    return {"generated_at":time.time(),"source_observations":len(data.get("observations",[])),"deduplication":{"key":"address/token/symbol/name","max_scan_gap":MAX_SCAN_GAP},"stats":_stats(events),"rejection_group_stats":_group_stats(events),"positive_event_analysis":_positive_analysis(records),"top_unique_events_gt_10_pct":top[:10],"note":"Observational only. Event deduplication does not alter V25 gate decisions or MAX-WIN."}
 
 def write_report():
     report=build_report(_load(STATE_FILE)); tmp=REPORT_FILE+".tmp"
