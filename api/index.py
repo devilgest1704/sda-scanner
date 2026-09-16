@@ -25,9 +25,28 @@ _original_dashboard_load = dashboard.load
 
 def _dashboard_load(path, default):
     if path == "market_data.json" and os.environ.get("SDA_REMOTE_STATE") == "1":
+        # market_analysis.json is a compact scanner view and may intentionally
+        # contain only the current candidate set.  Never replace the full
+        # market snapshot with it: REAL wallet positions can legitimately be
+        # outside the candidate set.  Merge the compact/latest records over
+        # the full snapshot so both candidate data and held-token data remain
+        # available to Position Action.
+        full_market = _original_dashboard_load("market_data.json", default)
         compact_market = _original_dashboard_load("market_analysis.json", {"tokens": {}})
-        if isinstance(compact_market, dict) and compact_market.get("tokens"):
-            return compact_market
+        if isinstance(full_market, dict) and isinstance(compact_market, dict):
+            full_tokens = full_market.get("tokens")
+            compact_tokens = compact_market.get("tokens")
+            if isinstance(full_tokens, dict) and isinstance(compact_tokens, dict):
+                merged = dict(full_market)
+                merged_tokens = dict(full_tokens)
+                merged_tokens.update(compact_tokens)
+                merged["tokens"] = merged_tokens
+                for key, value in compact_market.items():
+                    if key != "tokens":
+                        merged[key] = value
+                return merged
+            if isinstance(compact_tokens, dict) and compact_tokens:
+                return compact_market
     return _original_dashboard_load(path, default)
 
 dashboard.load = _dashboard_load
