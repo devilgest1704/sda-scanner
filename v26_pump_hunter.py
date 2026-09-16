@@ -31,6 +31,8 @@ def _metrics(a):
 def _delta(c,p,k):return _num(c.get(k))-_num(p.get(k)) if p else 0.
 def _score(address,analysis):
     state=_load();hist=state.setdefault("history",{});key=str(address).lower();cur=_metrics(analysis);prev=hist.get(key,{}).get("last",{})
+    if prev and all(abs(_num(cur.get(k))- _num(prev.get(k)))<1e-12 for k in cur):
+        return cur,_num(hist[key].get("last_score")),_num(hist[key].get("last_change")),str(hist[key].get("phase") or "NO")
     accel=max(0,_delta(cur,prev,"m1"))*2+max(0,_delta(cur,prev,"m15"))*1.5;flow_imp=max(0,_delta(cur,prev,"flow"))/max(50,abs(_num(prev.get("flow")))+50)*100;vm=cur["vol"]/max(100,_num(prev.get("vol"),100));tm=cur["trades"]/max(3,_num(prev.get("trades"),3))
     pressure=min(30,max(0,cur["m1"]*1.5+max(0,cur["m15"])*.7))+min(22,max(0,(cur["buy_ratio"]-.9)*22))+min(18,max(0,cur["flow"]/500*6))+min(15,max(0,math.log(max(1,vm))*10+math.log(max(1,tm))*5))+min(8,max(0,cur["vol_accel"]/10))+min(7,max(0,cur["flow15"]/300*7))
     change=min(20,max(0,accel+flow_imp*.5+max(0,vm-1)*5+max(0,tm-1)*3));score=max(0,min(100,pressure+change))
@@ -67,6 +69,9 @@ def patch(main_module,engine_module):
                 if r:events.append(f"🟠 V26 PUMP EXIT {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | score {score:.0f}")
         return events
     main_module.paper_decision=paper_decision
-    for target in targets:target.score=score;target.create=create;target.BUY_THRESHOLD=ENTRY_SCORE;target.MAX_OPEN_POSITIONS=MAX_OPEN;target.MAX_NEW_BUYS_PER_RUN=MAX_BUYS_PER_RUN;target.SL_PCT=SL_PCT;target._auto_exit=auto_exit
-    if hasattr(main_module,"engine"):main_module.engine.score=score;main_module.engine.create=create;main_module.engine.BUY_THRESHOLD=ENTRY_SCORE;main_module.engine.MAX_OPEN_POSITIONS=MAX_OPEN;main_module.engine.MAX_NEW_BUYS_PER_RUN=MAX_BUYS_PER_RUN;main_module.engine.SL_PCT=SL_PCT;main_module.engine._auto_exit=auto_exit
+    for target in targets:
+        if getattr(target,"_v26_engine_patched",False):continue
+        target.score=score;target.create=create;target.BUY_THRESHOLD=ENTRY_SCORE;target.MAX_OPEN_POSITIONS=MAX_OPEN;target.MAX_NEW_BUYS_PER_RUN=MAX_BUYS_PER_RUN;target.SL_PCT=SL_PCT;target._auto_exit=auto_exit;target._v26_engine_patched=True
+    if hasattr(main_module,"engine") and not getattr(main_module.engine,"_v26_engine_patched",False):
+        main_module.engine.score=score;main_module.engine.create=create;main_module.engine.BUY_THRESHOLD=ENTRY_SCORE;main_module.engine.MAX_OPEN_POSITIONS=MAX_OPEN;main_module.engine.MAX_NEW_BUYS_PER_RUN=MAX_BUYS_PER_RUN;main_module.engine.SL_PCT=SL_PCT;main_module.engine._auto_exit=auto_exit;main_module.engine._v26_engine_patched=True
     main_module._v26_patched=True
