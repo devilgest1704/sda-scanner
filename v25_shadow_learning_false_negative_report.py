@@ -1,21 +1,19 @@
-"""False-negative drill-down report for V25 shadow learning.
-
-Observational only: reads the compact shadow summary and the full shadow dataset
-when available. It never changes V25 trading decisions or MAX-WIN.
-"""
+"""False-negative drill-down report for V25 shadow learning."""
 from __future__ import annotations
 
 import json
 import os
 import statistics
 import time
+from collections import defaultdict
 from typing import Any, Dict
 
 STATE_FILE = "v25_shadow_learning_v2.json"
 REPORT_FILE = "v25_shadow_learning_false_negative_report.json"
 HORIZON = 10
 THRESHOLD = 10.0
-REVERSAL_SCORE_THRESHOLDS = (40.0, 45.0, 48.0, 50.0, 55.0, 60.0, 68.0)
+REVERSAL_SCORE_THRESHOLDS = (30.0, 35.0, 40.0, 45.0, 48.0, 50.0, 55.0, 60.0, 68.0)
+MAX_SCAN_GAP = 2
 
 
 def _load(path: str) -> Dict[str, Any]:
@@ -27,8 +25,8 @@ def _load(path: str) -> Dict[str, Any]:
         return {}
 
 
-def _outcome(row: Dict[str, Any]) -> float | None:
-    out = (row.get("outcomes") or {}).get(str(HORIZON))
+def _outcome(row: Dict[str, Any], horizon: int = HORIZON) -> float | None:
+    out = (row.get("outcomes") or {}).get(str(horizon))
     if not isinstance(out, dict):
         return None
     value = out.get("net_return_pct")
@@ -45,20 +43,19 @@ def _pick(row: Dict[str, Any]) -> Dict[str, Any]:
         "pump_score", "score", "volume", "trades", "m1h", "m15", "m4h",
         "flow", "accel", "volume_ratio", "trade_ratio", "p5", "p10", "p20", "p30",
     )
-    result = {}
-    for key in wanted:
-        value = _num(features.get(key))
-        if value is not None:
-            result[key] = round(value, 3)
-    return result
+    return {
+        key: round(value, 3)
+        for key in wanted
+        if (value := _num(features.get(key))) is not None
+    }
+
+
+def _identity_key(row: Dict[str, Any]) -> str:
+    return str(row.get("address") or row.get("token") or row.get("symbol") or row.get("name") or "UNKNOWN")
 
 
 def _identity(row: Dict[str, Any]) -> Dict[str, Any]:
-    result = {}
-    for key in ("address", "symbol", "token", "name", "scan", "lane", "allowed"):
-        if key in row:
-            result[key] = row.get(key)
-    return result
+    return {key: row.get(key) for key in ("address", "symbol", "token", "name", "scan", "lane", "allowed") if key in row}
 
 
 def _reversal_shape(row: Dict[str, Any]) -> bool:
@@ -77,48 +74,72 @@ def _reversal_shape(row: Dict[str, Any]) -> bool:
     )
 
 
-def _reversal_analysis(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Empirically test the current reversal shape against score thresholds.
+def _make_events(rows: list[Dict[str, Any]]) -> list[list[Dict[str, Any]]]:
+    buckets: Dict[str, list[Dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        if isinstance(row, dict) and not row.get("allowed"):
+            buckets[_identity_key(row)].append(row)
+    events = []
+    for rs in buckets.values():
+        rs.sort(key=lambda r: (_num(r.get("scan")) if _num(r.get("scan")) is not None else 10**12))
+        current: list[Dict[str, Any]] = []
+        last = None
+        for row in rs:
+            scan = _num(row.get("scan"))
+            if current and (scan is None or last is None or scan - last > MAX_SCAN_GAP):
+                events.append(current)
+                current = []
+            current.append(row)
+            last = scan
+        if current:
+            events.append(current)
+    return events
 
-    One first observation per identity is used, matching the event-level
-    'first_features' convention and avoiding repeated snapshots biasing counts.
-    """
-    first_by_identity: Dict[str, Dict[str, Any]] = {}
-    for row in data.get("observations", []):
-        if not isinstance(row, dict) or row.get("allowed"):
-            continue
-        key = str(row.get("address") or row.get("token") or row.get("symbol") or row.get("name") or "UNKNOWN")
-        if key not in first_by_identity:
-            first_by_identity[key] = row
-    shape_rows = [r for r in first_by_identity.values() if _reversal_shape(r)]
-    shape_rows.sort(key=lambda r: (_outcome(r) if _outcome(r) is not None else -10**9), reverse=True)
+
+def _event_best(event: list[Dict[str, Any]], horizon: int = HORIZON) -> float | None:
+    values = [v for row in event if (v := _outcome(row, horizon)) is not None]
+    return max(values) if values else None
+
+
+def _reversal_analysis(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Evaluate score thresholds when ANY snapshot in an event matches the reversal shape."""
+    events = _make_events(data.get("observations", []))
+    shape_events = []
+    for event in events:
+        matches = [row for row in event if _reversal_shape(row)]
+        if matches:
+            # Use the earliest matching snapshot as the hypothetical entry point.
+            entry = min(matches, key=lambda r: (_num(r.get("scan")) if _num(r.get("scan")) is not None else 10**12))
+            best = _event_best(event)
+            if best is not None:
+                shape_events.append((entry, best, event))
 
     threshold_stats = {}
     for threshold in REVERSAL_SCORE_THRESHOLDS:
         selected = []
-        for row in shape_rows:
-            score = _num((row.get("features") or {}).get("score"))
-            outcome = _outcome(row)
-            if score is not None and score >= threshold and outcome is not None:
-                selected.append(outcome)
+        for entry, best, _ in shape_events:
+            score = _num((entry.get("features") or {}).get("score"))
+            if score is not None and score >= threshold:
+                selected.append(best)
         threshold_stats[str(int(threshold))] = {
             "count": len(selected),
             "wins_gt_0": sum(1 for x in selected if x > 0),
             "win_rate_pct": round(100 * sum(1 for x in selected if x > 0) / len(selected), 2) if selected else None,
-            "avg_best_10h_net_return_pct": round(statistics.mean(selected), 3) if selected else None,
-            "median_best_10h_net_return_pct": round(statistics.median(selected), 3) if selected else None,
-            "best_10h_net_return_pct": round(max(selected), 3) if selected else None,
-            "worst_10h_net_return_pct": round(min(selected), 3) if selected else None,
+            "avg_event_best_10h_net_return_pct": round(statistics.mean(selected), 3) if selected else None,
+            "median_event_best_10h_net_return_pct": round(statistics.median(selected), 3) if selected else None,
+            "best_event_10h_net_return_pct": round(max(selected), 3) if selected else None,
+            "worst_event_10h_net_return_pct": round(min(selected), 3) if selected else None,
         }
 
     top = []
-    for rank, row in enumerate(shape_rows[:10], 1):
+    for rank, (entry, best, event) in enumerate(sorted(shape_events, key=lambda x: x[1], reverse=True)[:10], 1):
         top.append({
             "rank": rank,
-            "net_return_10_pct": round(_outcome(row), 3) if _outcome(row) is not None else None,
-            "identity": _identity(row),
-            "features": _pick(row),
-            "rejection_reasons": list(row.get("rejection_reasons") or []),
+            "event_best_10h_net_return_pct": round(best, 3),
+            "entry_identity": _identity(entry),
+            "entry_features": _pick(entry),
+            "entry_rejection_reasons": list(entry.get("rejection_reasons") or []),
+            "event_snapshot_count": len(event),
         })
 
     return {
@@ -132,11 +153,10 @@ def _reversal_analysis(data: Dict[str, Any]) -> Dict[str, Any]:
             "p5_min": 0.40,
             "p10_min": 0.20,
         },
-        "first_observation_identities": len(first_by_identity),
-        "shape_count": len(shape_rows),
+        "shape_event_count": len(shape_events),
         "thresholds": threshold_stats,
         "top_shape_events": top,
-        "note": "Observational only. This analysis does not alter V25 gate decisions or MAX-WIN.",
+        "note": "Observational only. Each event counts once; outcome is the event's best available +10h net return.",
     }
 
 
@@ -150,15 +170,16 @@ def build_report(data: Dict[str, Any]) -> Dict[str, Any]:
             rows.append((value, row))
     rows.sort(key=lambda item: item[0], reverse=True)
 
-    candidates = []
-    for rank, (value, row) in enumerate(rows[:10], 1):
-        candidates.append({
+    candidates = [
+        {
             "rank": rank,
             "net_return_10_pct": round(value, 2),
             "identity": _identity(row),
             "features": _pick(row),
             "rejection_reasons": list(row.get("rejection_reasons") or []),
-        })
+        }
+        for rank, (value, row) in enumerate(rows[:10], 1)
+    ]
 
     feature_values: Dict[str, list[float]] = {}
     for _, row in rows[:10]:
@@ -172,11 +193,7 @@ def build_report(data: Dict[str, Any]) -> Dict[str, Any]:
         "threshold_net_return_pct": THRESHOLD,
         "count": len(rows),
         "top_10": candidates,
-        "top_10_avg_features": {
-            key: round(sum(values) / len(values), 3)
-            for key, values in sorted(feature_values.items())
-            if values
-        },
+        "top_10_avg_features": {key: round(sum(values) / len(values), 3) for key, values in sorted(feature_values.items()) if values},
         "reversal_shape_analysis": _reversal_analysis(data),
         "note": "Observational only. This report does not alter V25 gate decisions or MAX-WIN.",
     }
