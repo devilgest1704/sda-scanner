@@ -144,5 +144,12 @@ def patch_dashboard(dashboard):
     if getattr(dashboard, "_real_wallet_market_fix_patched", False):
         return dashboard
     dashboard.real_trading_report = lambda: real_trading_report(dashboard)
+
+    # Final dashboard patch: MARKET DEBUG must expose the same V26 decision
+    # engine as the scanner and paper BUY path. dashboard_consistency installs
+    # an older MAX-WIN/V25 diagnostic earlier in the patch chain, so this is
+    # deliberately applied here, after all legacy compatibility patches.
+    dashboard.market_debug_report = lambda snapshot=None: v26._market_debug(dashboard, snapshot)
+
     dashboard._real_wallet_market_fix_patched = True
     return dashboard
