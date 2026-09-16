@@ -8,6 +8,7 @@ import requests
 import engine
 import main as scanner
 from strategy_v21 import patch_engine
+import v26_dashboard_patch
 
 # Keep legacy engine compatibility, then let V26 own the dashboard presentation.
 patch_engine(engine)
@@ -209,8 +210,6 @@ def paper_statistics_report():
 
 
 def main_dashboard():
-    # V26 owns the actual main dashboard. This fallback is only used if the
-    # patch cannot be imported, so the Telegram bot remains usable.
     try:
         return v26_dashboard_patch._top_buy(
             sys.modules[__name__],
@@ -303,8 +302,7 @@ def run():
 
 
 # Activate V26 presentation hooks AFTER all base dashboard functions exist.
-import v26_dashboard_patch as _v26_dashboard_patch
-_v26_dashboard_patch.patch_dashboard(sys.modules[__name__])
+v26_dashboard_patch.patch_dashboard(sys.modules[__name__])
 
 # Preserve the existing read-only Real Wallet / Position Action integration.
 try:
