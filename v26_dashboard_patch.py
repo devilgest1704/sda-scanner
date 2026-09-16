@@ -1,9 +1,9 @@
-"""V26 dashboard policy: Position Action + Market Debug.
+"""V26 dashboard presentation layer.
 
-Read-only UI. Uses the exact same V26 scorer as Paper Trading, so the
-explanation cannot disagree with execution.
+Uses the exact same V26 decision function as paper execution. Real wallet stays
+read-only. Legacy V21/V25 labels are intentionally removed from the main view.
 """
-import main as scanner
+import v26_pump_hunter as v26
 
 
 def _n(v, d=0.0):
@@ -11,85 +11,94 @@ def _n(v, d=0.0):
     except Exception: return d
 
 
-def _action_for(pf, analysis, ws):
-    d = scanner.paper_decision(str(pf.get("address") or ""), analysis, ws)
-    score = _n(d.get("score")); phase = str(d.get("pump_phase") or "NO")
-    pnl = pf.get("unrealized_pnl_pct")
-    pnl = _n(pnl) if pnl is not None else None
-    pos = pf
-    weak = int(_n(pos.get("pump_weak_count")))
-    mfe = _n(pos.get("pump_mfe_pct"))
-    if pnl is not None and pnl <= -7:
-        return "EMERGENCY SELL", "V26 hard risk limit reached"
-    if pnl is not None and pnl > 0 and weak >= 3:
-        return "SELL / EXIT", "pump breakdown confirmed for 3 scans"
-    if pnl is not None and pnl > 0 and phase == "ENTRY":
-        return "HOLD / PUMP", f"pump active • score {score:.0f} • acceleration +{_n(d.get('pump_change')):.1f} • MFE {mfe:+.1f}%"
-    if pnl is not None and pnl > 0 and phase == "WATCH":
-        return "HOLD / WATCH", f"profit protected • pump cooling/watch • score {score:.0f}"
-    if pnl is not None and pnl < 0 and score >= 45:
-        return "HOLD / WATCH", f"setup not broken • score {score:.0f} • waiting for flow/acceleration confirmation"
-    return "HOLD / WATCH", f"no confirmed V26 exit • score {score:.0f} • phase {phase}"
+def _analysis(td):
+    if not isinstance(td, dict): return {}
+    x = td.get("analysis")
+    return x if isinstance(x, dict) else td
+
+
+def _decision(dashboard, address, analysis, ws):
+    try: return v26.decision(address, analysis, ws)
+    except Exception: return {"score":0,"pump_score":0,"pump_change":0,"pump_phase":"NO","m15":0,"m1h":0,"m4h":0,"net_1h":0,"volume_1h":0,"trades_1h":0,"buy_ratio":0,"paper_buy_block_reason":"V26 decision error"}
+
+
+def _label(dashboard, address, meta):
+    try: return dashboard.engine.lbl(address, meta)
+    except Exception: return str(address)[:12]
+
+
+def _top_buy(dashboard, md, ws, meta, rows=None, snapshot=None):
+    ranked=[]
+    for address,td in (md.get("tokens",{}) or {}).items():
+        an=_analysis(td)
+        if not an or _n(an.get("price_in_sda"))<=0: continue
+        d=_decision(dashboard,address,an,ws); ranked.append((d,str(address)))
+    ranked.sort(key=lambda x:(_n(x[0].get("pump_score")),_n(x[0].get("pump_change"))),reverse=True)
+    lines=["🔥 TOP BUY CANDIDATES • V26 PUMP-HUNTER","",f"ENTRY ≥ {v26.ENTRY_SCORE:.0f} • WATCH ≥ {v26.WATCH_SCORE:.0f} • previous-scan confirmation","────────────────────────"]
+    if not ranked: lines.append("⚪ No market candidates"); return "\n".join(lines)
+    for i,(d,address) in enumerate(ranked[:5],1):
+        score=_n(d.get("pump_score")); change=_n(d.get("pump_change")); phase=str(d.get("pump_phase") or "NO")
+        icon="🟢 ENTRY" if phase=="ENTRY" else ("🟡 WATCH" if phase=="WATCH" else "⚪ NO")
+        lines.append(f"{i}. {icon} • {_label(dashboard,address,meta)} • {score:.0f}/100")
+        lines.append(f"   Δ {change:+.1f} • 15M {_n(d.get('m15')):+.2f}% • 1H {_n(d.get('m1h')):+.2f}% • 4H {_n(d.get('m4h')):+.2f}%")
+        lines.append(f"   Flow {_n(d.get('net_1h')):+.0f} SDA • Vol {_n(d.get('volume_1h')):.0f} • Trades {_n(d.get('trades_1h')):.0f} • Buy ratio {_n(d.get('buy_ratio')):.2f}x")
+        if phase!="ENTRY": lines.append(f"   ⏳ {d.get('paper_buy_block_reason','waiting for confirmation')}")
+    return "\n".join(lines)
+
+
+def _market_debug(dashboard, snapshot=None):
+    md=dashboard.load("market_data.json",{"tokens":{}}); ws=dashboard.load("whale_data.json",{}); meta=dashboard.load("token_metadata.json",{})
+    ranked=[]
+    for address,td in (md.get("tokens",{}) or {}).items():
+        an=_analysis(td)
+        if not an or _n(an.get("price_in_sda"))<=0: continue
+        ranked.append((_decision(dashboard,address,an,ws),str(address)))
+    ranked.sort(key=lambda x:(_n(x[0].get("pump_score")),_n(x[0].get("pump_change"))),reverse=True)
+    entry=sum(1 for d,_ in ranked if d.get("pump_phase")=="ENTRY"); watch=sum(1 for d,_ in ranked if d.get("pump_phase")=="WATCH")
+    lines=["🐞 MARKET DEBUG • V26 PUMP-HUNTER","",f"Tokens analyzed: {len(ranked)}",f"🟢 ENTRY: {entry}",f"🟡 WATCH: {watch}",f"Entry threshold: {v26.ENTRY_SCORE:.0f}","Confirmation: previous scan required","────────────────────────"]
+    for i,(d,address) in enumerate(ranked[:10],1):
+        phase=str(d.get("pump_phase") or "NO"); status="🟢 ENTRY" if phase=="ENTRY" else ("🟡 WATCH" if phase=="WATCH" else "⚪ NO")
+        lines.append(f"{i}. {_label(dashboard,address,meta)} • {status} • score {_n(d.get('pump_score')):.0f} • Δ {_n(d.get('pump_change')):+.1f}")
+        lines.append(f"   M15/M1H/M4H {_n(d.get('m15')):+.2f}/{_n(d.get('m1h')):+.2f}/{_n(d.get('m4h')):+.2f}% | flow {_n(d.get('net_1h')):+.0f} | vol {_n(d.get('volume_1h')):.0f} | trades {_n(d.get('trades_1h')):.0f}")
+        lines.append(f"   buy ratio {_n(d.get('buy_ratio')):.2f}x | trade ratio {_n(d.get('trade_ratio')):.2f}x | {d.get('paper_buy_block_reason','ready')}")
+    return "\n".join(lines)
+
+
+def _position_recommendations(dashboard, md, ws, meta, portfolio):
+    tokens=md.get("tokens",{}) or {}; current=portfolio.get("current",{}) if isinstance(portfolio,dict) else {}; out=[]
+    for token,pf in current.items():
+        pf=pf if isinstance(pf,dict) else {}; address=str(pf.get("address") or pf.get("token_address") or token).lower(); td=tokens.get(address,{}) or {}; an=_analysis(td); d=_decision(dashboard,address,an,ws) if an else {}
+        score=_n(d.get("pump_score"),-1); phase=str(d.get("pump_phase") or "NO"); entry=_n(pf.get("entry_price")); cur=_n(an.get("price_in_sda")); pnl_sda=pf.get("unrealized_pnl_sda")
+        pnl_pct=_n(pf.get("unrealized_pnl_pct"), ((cur/entry-1)*100 if entry and cur else 0)); weak=int(_n(pf.get("pump_weak_count")))
+        if pnl_pct<=-7: action="EMERGENCY SELL"
+        elif pnl_pct>0 and weak>=3: action="SELL / EXIT"
+        elif phase=="ENTRY" and pnl_pct>=0: action="HOLD / PUMP"
+        elif phase=="WATCH": action="HOLD / WATCH"
+        elif score>=40: action="HOLD / MONITOR"
+        else: action="HOLD / WEAK"
+        out.append({"symbol":pf.get("symbol") or pf.get("label") or _label(dashboard,address,meta),"action":action,"pnl_sda":_n(pnl_sda,0),"score":score if score>=0 else None,"phase":phase,"pump_change":_n(d.get("pump_change"))})
+    return out
+
+
+def _real_trading_report(dashboard):
+    md=dashboard.load("market_data.json",{"tokens":{}}); ws=dashboard.load("whale_data.json",{}); meta=dashboard.load("token_metadata.json",{}); portfolio=dashboard.load("portfolio_data.json",{"current":{}}); current=portfolio.get("current",{}) if isinstance(portfolio,dict) else {}
+    lines=["🧭 POSITION ACTION • V26 PUMP-HUNTER","────────────────────────"]
+    for address,pf in current.items():
+        if not isinstance(pf,dict): continue
+        key=str(address).lower(); an=_analysis((md.get("tokens",{}) or {}).get(key,{})); d=_decision(dashboard,key,an,ws) if an else {}; score=_n(d.get("pump_score"),0); phase=str(d.get("pump_phase") or "NO"); pnl=_n(pf.get("unrealized_pnl_pct"),0); weak=int(_n(pf.get("pump_weak_count")))
+        action="🚨 EMERGENCY SELL" if pnl<=-7 else ("🔴 SELL / EXIT" if pnl>0 and weak>=3 else ("🟢 HOLD / PUMP" if phase=="ENTRY" else "🟡 HOLD / WATCH"))
+        lines.append(f"{action} • {pf.get('symbol') or pf.get('label') or key[:10]} • P/L {pnl:+.2f}% • score {score:.0f}")
+        lines.append(f"   phase {phase} • Δ {_n(d.get('pump_change')):+.1f} • M1H {_n(d.get('m1h')):+.2f}% • flow {_n(d.get('net_1h')):+.0f}")
+    if len(lines)==2: lines.append("⚪ No open positions")
+    lines += ["","👁 READ-ONLY • V26 paper policy; no real order is executed"]
+    return "\n".join(lines)
 
 
 def patch_dashboard(dashboard):
-    if getattr(dashboard, "_v26_dashboard_patched", False):
-        return dashboard
-    old_report = getattr(dashboard, "real_trading_report", None)
-    old_debug = getattr(dashboard, "market_debug_report", None)
-
-    def real_trading_report():
-        md = dashboard.load("market_data.json", {"tokens": {}})
-        ws = dashboard.load("whale_data.json", {})
-        meta = dashboard.load("token_metadata.json", {})
-        wallet = dashboard.load("wallet_data.json", {})
-        portfolio = dashboard.load("portfolio_data.json", {"current": {}})
-        current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
-        holdings = {str(h.get("address") or "").lower(): h for h in (wallet.get("holdings", []) or []) if isinstance(h, dict)}
-        lines = ["🧭 POSITION ACTION • V26 PUMP HUNTER", "────────────────────────"]
-        if not current:
-            lines.append("⚪ No open positions")
-        for address, pf in current.items():
-            if not isinstance(pf, dict): continue
-            key = str(address).lower()
-            td = (md.get("tokens", {}) or {}).get(key, {})
-            analysis = td.get("analysis", td) if isinstance(td, dict) else {}
-            if not analysis and key in holdings:
-                analysis = (md.get("tokens", {}) or {}).get(key, {}) or {}
-            d = scanner.paper_decision(key, analysis, ws) if analysis else {"score": None, "pump_phase":"NO"}
-            action, reason = _action_for(pf, analysis, ws) if analysis else ("HOLD / MARKET DATA N/A", "market data unavailable")
-            label = pf.get("symbol") or pf.get("label") or key[:10] + "..."
-            pnl = "N/A" if pf.get("unrealized_pnl_pct") is None else f"{_n(pf.get('unrealized_pnl_pct')):+.2f}%"
-            lines.append(f"{action} • {label} • P/L {pnl} • score {_n(d.get('score')):.0f}/100")
-            lines.append(f"   {reason}")
-        lines += ["", "🧠 Policy: V26 uses acceleration + flow + volume + activity; no fixed TP while a pump is alive.", "👁 READ-ONLY • no real order is executed"]
-        return "\n".join(lines)
-
-    def market_debug_report(snapshot=None):
-        md = dashboard.load("market_data.json", {"tokens": {}})
-        ws = dashboard.load("whale_data.json", {})
-        meta = dashboard.load("token_metadata.json", {})
-        rows = []
-        for address, td in (md.get("tokens", {}) or {}).items():
-            analysis = dashboard._analysis(td)
-            if not analysis or _n(analysis.get("price_in_sda")) <= 0: continue
-            d = scanner.paper_decision(address, analysis, ws)
-            rows.append((d, address, analysis))
-        rows.sort(key=lambda x: (_n(x[0].get("score")), _n(x[0].get("pump_change"))), reverse=True)
-        ready = sum(1 for d,_,_ in rows if not d.get("blocked"))
-        watch = sum(1 for d,_,_ in rows if d.get("pump_phase") == "WATCH")
-        lines = ["🐞 MARKET DEBUG • V26 PUMP HUNTER", "", f"Tokens analyzed: {len(rows)}", f"🟢 PUMP ENTRY: {ready}", f"🟡 WATCH: {watch}", "", "TOP PUMP SIGNALS", "────────────────────────"]
-        for i,(d,address,analysis) in enumerate(rows[:10],1):
-            m=d.get("v26",{}).get("metrics",{})
-            phase=d.get("pump_phase")
-            status="🟢 ENTRY" if phase=="ENTRY" else ("🟡 WATCH" if phase=="WATCH" else "⚪ NO")
-            lines += [f"{i}. {dashboard.engine.lbl(address,meta)} • {status} • score {_n(d.get('score')):.0f} • Δ +{_n(d.get('pump_change')):.1f}",
-                       f"   M15/M1H/M4H {_n(d.get('m15')):+.1f}/{_n(d.get('m1h')):+.1f}/{_n(d.get('m4h')):+.1f}% | flow {_n(d.get('net_1h')):+.0f} | vol {_n(d.get('volume_1h')):.0f} | trades {_n(d.get('trades_1h')):.0f}",
-                       f"   buy/sell vol {(_n(m.get('buy_ratio'))):.2f}x | trade ratio {(_n(m.get('trade_ratio'))):.2f}x | reason: {d.get('paper_buy_block_reason')}"]
-        lines += ["", "🔬 V26 does not veto a new pump because M4H is negative.", "🔬 Predictor V23/V24/V25 remains advisory/learning data; it is not a hard entry veto."]
-        return "\n".join(lines)
-
-    dashboard.real_trading_report = real_trading_report
-    dashboard.market_debug_report = market_debug_report
-    dashboard._v26_dashboard_patched = True
+    if getattr(dashboard,"_v26_dashboard_patched",False): return dashboard
+    dashboard.top_buy=lambda md,ws,meta,rows=None,snapshot=None:_top_buy(dashboard,md,ws,meta,rows,snapshot)
+    dashboard.market_debug_report=lambda snapshot=None:_market_debug(dashboard,snapshot)
+    dashboard._position_recommendations=lambda md,ws,meta,portfolio:_position_recommendations(dashboard,md,ws,meta,portfolio)
+    dashboard.real_trading_report=lambda:_real_trading_report(dashboard)
+    dashboard._v26_dashboard_patched=True
     return dashboard
