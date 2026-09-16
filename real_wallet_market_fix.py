@@ -1,7 +1,7 @@
 """Final Real Wallet market-data resolver.
 
 Wallet positions can be outside the current TOP candidate set. Resolve them
-from the full market snapshot plus market_analysis. Read-only only.
+from the full market snapshot, market_analysis, and token metadata. Read-only.
 """
 import v26_pump_hunter as v26
 
@@ -20,6 +20,14 @@ def _analysis(td):
     return x if isinstance(x, dict) else td
 
 
+def _norm_symbol(value):
+    s = str(value or "").strip().upper()
+    for sep in ("/", "-", "_"):
+        if sep in s:
+            s = s.split(sep, 1)[0].strip()
+    return s
+
+
 def _merge_market(dashboard):
     md = dashboard.load("market_data.json", {"tokens": {}})
     compact = dashboard.load("market_analysis.json", {"tokens": {}})
@@ -35,31 +43,45 @@ def _merge_market(dashboard):
     return merged
 
 
-def _resolve(tokens, token, pf):
+def _resolve(tokens, token, pf, metadata):
+    # 1) Address is authoritative whenever the portfolio already contains it.
     candidates = [token]
     if isinstance(pf, dict):
-        candidates += [pf.get("address"), pf.get("token_address")]
+        candidates += [pf.get("address"), pf.get("token_address"), pf.get("token")]
     for candidate in candidates:
         if not candidate:
             continue
         raw = str(candidate).strip()
+        low = raw.lower()
         if raw in tokens:
             return raw, _analysis(tokens[raw])
-        low = raw.lower()
         if low in tokens:
             return low, _analysis(tokens[low])
-    wanted = str((pf or {}).get("symbol") or token).strip().upper()
+
+    # 2) Portfolio keys are often symbols. token_metadata is the canonical
+    # symbol -> address bridge; market_analysis itself intentionally has no
+    # symbol field and therefore cannot be resolved by symbol alone.
+    wanted = _norm_symbol((pf or {}).get("symbol") or (pf or {}).get("label") or token)
+    if isinstance(metadata, dict) and wanted:
+        for address, meta in metadata.items():
+            if not isinstance(meta, dict):
+                continue
+            if _norm_symbol(meta.get("symbol")) == wanted:
+                raw = str(address).strip()
+                low = raw.lower()
+                if raw in tokens:
+                    return raw, _analysis(tokens[raw])
+                if low in tokens:
+                    return low, _analysis(tokens[low])
+
+    # 3) Last-resort symbol scan for market snapshots that carry symbol data.
     for address, value in tokens.items():
         if not isinstance(value, dict):
             continue
         a = _analysis(value)
         fields = [value.get("symbol"), value.get("token_symbol"), value.get("base_symbol"), value.get("pair"), value.get("label"), a.get("symbol"), a.get("pair")]
-        for field in fields:
-            if not field:
-                continue
-            s = str(field).strip().upper()
-            if s == wanted or s.split("/", 1)[0] == wanted or s.split("-", 1)[0] == wanted:
-                return str(address), a
+        if any(_norm_symbol(field) == wanted for field in fields if field):
+            return str(address), a
     return "", {}
 
 
@@ -89,6 +111,7 @@ def _action(pnl_pct, d, pf):
 def real_trading_report(dashboard):
     md = _merge_market(dashboard)
     ws = dashboard.load("whale_data.json", {})
+    metadata = dashboard.load("token_metadata.json", {})
     portfolio = dashboard.load("portfolio_data.json", {"current": {}})
     current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
     tokens = md.get("tokens", {}) or {}
@@ -98,7 +121,7 @@ def real_trading_report(dashboard):
     for token, pf in current.items():
         if not isinstance(pf, dict):
             continue
-        address, analysis = _resolve(tokens, token, pf)
+        address, analysis = _resolve(tokens, token, pf, metadata)
         d = _decision(address or str(token).lower(), analysis, ws)
         score = d.get("pump_score")
         phase = str(d.get("pump_phase") or "NO")
