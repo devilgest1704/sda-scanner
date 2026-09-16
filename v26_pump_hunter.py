@@ -30,16 +30,15 @@ def _metrics(a):
     return {"price":_num(a.get("price_in_sda")),"m1":_num(m.get("1h_pct")),"m15":_num(m.get("15m_pct")),"m4":_num(m.get("4h_pct")),"flow":_num(f1.get("net_flow")),"flow15":_num(f15.get("net_flow")),"vol":bv+sv,"trades":bc+sc,"buy_ratio":bv/max(sv,1.),"trade_ratio":bc/max(sc,1.),"vol_accel":_num(a.get("volume_acceleration_15m_pct"))}
 def _delta(c,p,k):return _num(c.get(k))-_num(p.get(k)) if p else 0.
 def _score(address,analysis):
-    state=_load();hist=state.setdefault("history",{});key=str(address).lower();cur=_metrics(analysis);prev=hist.get(key,{}).get("last",{})
-    if prev and all(abs(_num(cur.get(k))- _num(prev.get(k)))<1e-12 for k in cur):
-        return cur,_num(hist[key].get("last_score")),_num(hist[key].get("last_change")),str(hist[key].get("phase") or "NO")
+    state=_load();hist=state.setdefault("history",{});key=str(address).lower();cur=_metrics(analysis);prev=hist.get(key,{}).get("last",{});old=hist.get(key,{})
+    if prev and all(abs(_num(cur.get(k))-_num(prev.get(k)))<1e-12 for k in cur):return cur,_num(old.get("last_score")),_num(old.get("last_change")),str(old.get("phase") or "NO")
     accel=max(0,_delta(cur,prev,"m1"))*2+max(0,_delta(cur,prev,"m15"))*1.5;flow_imp=max(0,_delta(cur,prev,"flow"))/max(50,abs(_num(prev.get("flow")))+50)*100;vm=cur["vol"]/max(100,_num(prev.get("vol"),100));tm=cur["trades"]/max(3,_num(prev.get("trades"),3))
     pressure=min(30,max(0,cur["m1"]*1.5+max(0,cur["m15"])*.7))+min(22,max(0,(cur["buy_ratio"]-.9)*22))+min(18,max(0,cur["flow"]/500*6))+min(15,max(0,math.log(max(1,vm))*10+math.log(max(1,tm))*5))+min(8,max(0,cur["vol_accel"]/10))+min(7,max(0,cur["flow15"]/300*7))
     change=min(20,max(0,accel+flow_imp*.5+max(0,vm-1)*5+max(0,tm-1)*3));score=max(0,min(100,pressure+change))
     if cur["flow"]<0:score-=12
     if cur["buy_ratio"]<.8:score-=10
     if cur["m1"]<0 and cur["m15"]<0:score-=12
-    score=max(0,min(100,score));phase="ENTRY" if score>=ENTRY_SCORE and change>=7 and cur["flow"]>0 and cur["m1"]>0 else ("WATCH" if score>=WATCH_SCORE else "NO")
+    score=max(0,min(100,score));phase="ENTRY" if prev and score>=ENTRY_SCORE and change>=7 and cur["flow"]>0 and cur["m1"]>0 else ("WATCH" if score>=WATCH_SCORE else "NO")
     hist[key]={"last":cur,"last_score":round(score,2),"last_change":round(change,2),"phase":phase,"updated_at":_now()};state["updated_at"]=_now();_save(state);return cur,round(score,1),round(change,1),phase
 def decision(address,analysis,whale_state=None):
     cur,score,change,phase=_score(address,analysis)
