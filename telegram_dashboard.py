@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import hashlib
 import os
 import sys
 import time
@@ -32,6 +33,32 @@ def load(path, default):
         return value if isinstance(value, type(default)) else default
     except Exception:
         return default
+
+
+def _snapshot_id(md, ws=None, meta=None):
+    """Return a deterministic short ID for the market snapshot used by debug."""
+    payload = {
+        "market": md if isinstance(md, dict) else {},
+        "whale": ws if isinstance(ws, dict) else {},
+        "meta": meta if isinstance(meta, dict) else {},
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+
+
+def _snapshot_time(md, ws=None):
+    """Return the freshest useful timestamp available in the loaded snapshot."""
+    if isinstance(md, dict):
+        for key in ("updated_at", "generated_at", "timestamp", "last_updated", "time"):
+            value = md.get(key)
+            if value not in (None, ""):
+                return str(value)
+    if isinstance(ws, dict):
+        for key in ("updated_at", "generated_at", "timestamp", "last_updated", "time"):
+            value = ws.get(key)
+            if value not in (None, ""):
+                return str(value)
+    return "unknown"
 
 
 def api(method, payload):
