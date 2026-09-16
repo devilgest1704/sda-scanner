@@ -20,6 +20,7 @@ import dashboard_v23_patch
 import dashboard_wallet_summary
 import dashboard_pump_patch
 import v25_runtime_tuning_patch
+import real_wallet_market_fix
 
 _original_dashboard_load = dashboard.load
 
@@ -104,6 +105,12 @@ dashboard_v23_patch.patch_dashboard(dashboard)
 dashboard_wallet_summary.patch_dashboard(dashboard)
 dashboard_pump_patch.patch_dashboard(dashboard)
 v25_runtime_tuning_patch.patch()
+
+# Real Wallet must be the final renderer. Several compatibility patches above
+# install their own real_trading_report; reapply the address-aware V26 resolver
+# after all of them so symbol-keyed portfolio positions resolve through
+# token_metadata -> address -> market_analysis.
+real_wallet_market_fix.patch_dashboard(dashboard)
 
 _original_menu_keyboard = dashboard.menu_keyboard
 
