@@ -7,6 +7,7 @@ import paper_statistics_fix
 import dashboard_consistency
 import dashboard_v23_patch
 import dashboard_wallet_summary
+import real_wallet_market_fix
 
 
 _original_dashboard_load = dashboard.load
@@ -74,6 +75,12 @@ def main():
     dashboard_consistency.patch_dashboard(dashboard)
     dashboard_v23_patch.patch_dashboard(dashboard)
     dashboard_wallet_summary.patch_dashboard(dashboard)
+
+    # The GitHub Actions hourly report does not import api/index.py, so the
+    # final Real Wallet resolver must be installed explicitly here too.
+    # dashboard_consistency installs an older canonical renderer; this call
+    # intentionally comes AFTER all dashboard patches.
+    real_wallet_market_fix.patch_dashboard(dashboard)
 
     _patched_menu_keyboard = dashboard.menu_keyboard
 
