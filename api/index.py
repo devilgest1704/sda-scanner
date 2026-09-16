@@ -26,12 +26,6 @@ _original_dashboard_load = dashboard.load
 
 def _dashboard_load(path, default):
     if path == "market_data.json" and os.environ.get("SDA_REMOTE_STATE") == "1":
-        # market_analysis.json is a compact scanner view and may intentionally
-        # contain only the current candidate set.  Never replace the full
-        # market snapshot with it: REAL wallet positions can legitimately be
-        # outside the candidate set.  Merge the compact/latest records over
-        # the full snapshot so both candidate data and held-token data remain
-        # available to Position Action.
         full_market = _original_dashboard_load("market_data.json", default)
         compact_market = _original_dashboard_load("market_analysis.json", {"tokens": {}})
         if isinstance(full_market, dict) and isinstance(compact_market, dict):
@@ -105,11 +99,6 @@ dashboard_v23_patch.patch_dashboard(dashboard)
 dashboard_wallet_summary.patch_dashboard(dashboard)
 dashboard_pump_patch.patch_dashboard(dashboard)
 v25_runtime_tuning_patch.patch()
-
-# Real Wallet must be the final renderer. Several compatibility patches above
-# install their own real_trading_report; reapply the address-aware V26 resolver
-# after all of them so symbol-keyed portfolio positions resolve through
-# token_metadata -> address -> market_analysis.
 real_wallet_market_fix.patch_dashboard(dashboard)
 
 _original_menu_keyboard = dashboard.menu_keyboard
@@ -167,8 +156,11 @@ def _handle_update_with_actions(update, state=None):
             return state
         dashboard.answer_callback(cb.get("id"), "Loading Market Debug…")
         try:
-            snapshot = dashboard._load_dashboard_snapshot(5)
-            text = dashboard.market_debug_report(snapshot)
+            # dashboard_consistency.market_debug_report_canonical loads the
+            # complete current snapshot itself. The old code called a helper
+            # (_load_dashboard_snapshot) that no longer exists in the current
+            # telegram_dashboard API, causing the Telegram DEBUG crash.
+            text = dashboard.market_debug_report()
         except Exception as exc:
             text = f"🐞 MARKET DEBUG\n\n❌ Debug generation failed: {type(exc).__name__}: {exc}"
         if len(text) > 3900:
@@ -194,9 +186,6 @@ def _handle_update_with_actions(update, state=None):
 
 dashboard.handle_update = _handle_update_with_actions
 
-# Install the final router AFTER all compatibility wrappers above.  This is
-# critical: api/index.py assigns handle_update after real_bot_menu.patch_dashboard,
-# which otherwise replaces the router and swallows MAIN/REAL/REAL_STATS.
 import telegram_callback_router
 dashboard._sda_callback_router_patched = False
 telegram_callback_router.patch_dashboard(dashboard)
@@ -223,6 +212,8 @@ def _dispatch_workflow(workflow_file, run_reason):
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         return False, f"GitHub dispatch HTTP {exc.code}: {body[:300]}"
+    except Exception as exc:
+        return False, str(exc)
     except Exception as exc:
         return False, str(exc)
 
