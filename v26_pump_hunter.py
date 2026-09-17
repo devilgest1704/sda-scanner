@@ -82,9 +82,10 @@ def patch(main_module,engine_module):
             if roi>=30:pos["sl"]=max(_num(pos.get("sl")),peak*.915)
             if roi>=50:pos["sl"]=max(_num(pos.get("sl")),peak*.93)
             weak=(s.get("m1h",0)<=0 and s.get("net_1h",0)<=0) or score<40;pos["pump_weak_count"]=int(_num(pos.get("pump_weak_count"))+1 if weak else max(0,_num(pos.get("pump_weak_count"))-1));stop=_num(pos.get("sl"))
-            if current<=stop and roi<=-SL_PCT*100:
-                r=engine_module.close(p,address,current,"V26 HARD STOP")
-                if r:events.append(f"🔴 V26 STOP {r['label']} | ROI {roi:+.2f}% | score {score:.0f}")
+            if current<=stop:
+                reason="V26 HARD STOP" if roi<=-SL_PCT*100 else "V26 TRAILING STOP"
+                r=engine_module.close(p,address,current,reason)
+                if r:events.append(f"🔴 V26 STOP {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | score {score:.0f}")
             elif roi>0 and pos["pump_weak_count"]>=3:
                 r=engine_module.close(p,address,current,"V26 PUMP BREAKDOWN")
                 if r:events.append(f"🟠 V26 PUMP EXIT {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | score {score:.0f}")
