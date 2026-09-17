@@ -27,8 +27,37 @@ def _label(dashboard, address, meta):
     except Exception: return str(address)[:12]
 
 
+def _merged_market(dashboard, md):
+    """Use the same full+compact market merge on every dashboard render path.
+
+    The Refresh callback calls the main dashboard directly, while the Real
+    Wallet menu already used the merged snapshot. Without this merge, compact
+    market_analysis data (including the current analysis used for score/P&L)
+    could be missing only after Refresh.
+    """
+    if not isinstance(md, dict):
+        md = {"tokens": {}}
+    base = md.get("tokens") if isinstance(md.get("tokens"), dict) else {}
+    try:
+        compact = dashboard.load("market_analysis.json", {"tokens": {}})
+    except Exception:
+        compact = {}
+    extra = compact.get("tokens", {}) if isinstance(compact, dict) else {}
+    if not isinstance(extra, dict) or not extra:
+        return md
+    merged = dict(md)
+    tokens = dict(base)
+    tokens.update(extra)
+    merged["tokens"] = tokens
+    for key, value in compact.items():
+        if key != "tokens":
+            merged[key] = value
+    return merged
+
+
 def _wallet_position_rows(dashboard, md, ws, meta, portfolio):
     """Build real-wallet rows from live wallet holdings, not paper portfolio.current."""
+    md = _merged_market(dashboard, md)
     wallet = dashboard.load("wallet_data.json", {"holdings": []})
     holdings = wallet.get("holdings", []) if isinstance(wallet, dict) else []
     current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
@@ -59,6 +88,8 @@ def _wallet_position_rows(dashboard, md, ws, meta, portfolio):
 
         pf = current_by_address.get(address) or current_by_symbol.get(symbol) or {}
         td = tokens.get(address, {}) or {}
+        if not td:
+            td = tokens.get(str(holding.get("address") or ""), {}) or {}
         an = _analysis(td)
         d = _decision(dashboard, address, an, ws) if an else {}
         score = _n(d.get("pump_score"), -1)
@@ -133,6 +164,7 @@ def _position_action_section(dashboard, md, ws, meta):
 
 
 def _top_buy(dashboard, md, ws, meta, rows=None, snapshot=None):
+    md = _merged_market(dashboard, md)
     ranked=[]
     for address,td in (md.get("tokens",{}) or {}).items():
         an=_analysis(td)
@@ -155,7 +187,7 @@ def _top_buy(dashboard, md, ws, meta, rows=None, snapshot=None):
 
 
 def _market_debug(dashboard, snapshot=None):
-    md=dashboard.load("market_data.json",{"tokens":{}}); ws=dashboard.load("whale_data.json",{}); meta=dashboard.load("token_metadata.json",{})
+    md=_merged_market(dashboard, dashboard.load("market_data.json",{"tokens":{}})); ws=dashboard.load("whale_data.json",{}); meta=dashboard.load("token_metadata.json",{})
     ranked=[]
     for address,td in (md.get("tokens",{}) or {}).items():
         an=_analysis(td)
@@ -177,7 +209,7 @@ def _position_recommendations(dashboard, md, ws, meta, portfolio):
 
 
 def _real_trading_report(dashboard):
-    md=dashboard.load("market_data.json",{"tokens":{}}); ws=dashboard.load("whale_data.json",{}); meta=dashboard.load("token_metadata.json",{}); portfolio=dashboard.load("portfolio_data.json",{"current":{}})
+    md=_merged_market(dashboard, dashboard.load("market_data.json",{"tokens":{}})); ws=dashboard.load("whale_data.json",{}); meta=dashboard.load("token_metadata.json",{}); portfolio=dashboard.load("portfolio_data.json",{"current":{}})
     rows = _wallet_position_rows(dashboard, md, ws, meta, portfolio)
     lines=["🧭 POSITION ACTION • V26 PUMP-HUNTER","────────────────────────"]
     for row in rows:
