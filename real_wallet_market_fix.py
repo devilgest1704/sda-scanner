@@ -94,24 +94,17 @@ def _pnl(pf, pnl_pct, entry, current_price):
     for key in ("unrealized_pnl_sda", "pnl_sda", "unrealized_profit_sda", "profit_sda"):
         if pf.get(key) is not None:
             return _n(pf.get(key))
-
-    # Portfolio snapshots normally carry the current position value and/or
-    # cost basis. Prefer those over reconstructing from rounded percentages.
     current_value = next((_n(pf.get(k), None) for k in ("current_value_sda", "value_sda", "market_value_sda", "current_sda") if pf.get(k) is not None), None)
     cost_basis = next((_n(pf.get(k), None) for k in ("cost_basis_sda", "invested_sda", "cost_sda", "entry_value_sda", "position_value_sda") if pf.get(k) is not None), None)
     if current_value is not None and cost_basis is not None:
         return current_value - cost_basis
     if cost_basis is not None:
         return cost_basis * pnl_pct / 100.0
-
-    # Last fallback: reconstruct from token amount when available. The wallet
-    # stores ERC-20 amounts in base units, while prices are SDA/token.
     amount = next((_n(pf.get(k), None) for k in ("amount", "token_amount", "quantity", "balance") if pf.get(k) is not None), None)
     if amount is not None and entry and current_price:
         decimals = _n(pf.get("decimals"), 18)
         units = 10 ** int(decimals) if 0 <= decimals <= 36 else 1e18
         return (current_price - entry) * amount / units
-
     return None
 
 
@@ -136,9 +129,7 @@ def real_trading_report(dashboard):
     portfolio = dashboard.load("portfolio_data.json", {"current": {}})
     current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
     tokens = md.get("tokens", {}) or {}
-    lines = ["🧭 POSITION ACTION • REAL WALLET", "────────────────────────", f"Market snapshot: {len(tokens)} tokens (market_data + market_analysis)"]
-    if not current:
-        lines.append("⚪ No open real-wallet positions")
+    rows = []
     for token, pf in current.items():
         if not isinstance(pf, dict):
             continue
@@ -151,9 +142,27 @@ def real_trading_report(dashboard):
         pnl_pct = _n(pf.get("unrealized_pnl_pct"), ((current_price / entry - 1) * 100 if entry and current_price else 0.0))
         pnl_sda = _pnl(pf, pnl_pct, entry, current_price)
         action, reason = _action(pnl_pct, d, pf) if analysis else ("HOLD / MARKET DATA N/A", "market data not resolved")
+        rows.append({"token": token, "pf": pf, "analysis": analysis, "d": d, "score": score, "phase": phase, "pnl_pct": pnl_pct, "pnl_sda": pnl_sda, "action": action, "reason": reason})
+
+    # Best P/L first: profitable positions at the top, largest losses at the bottom.
+    rows.sort(key=lambda r: (r["pnl_sda"] is None, -(r["pnl_sda"] if r["pnl_sda"] is not None else r["pnl_pct"])))
+
+    lines = ["🧭 POSITION ACTION • REAL WALLET", "────────────────────────", f"Market snapshot: {len(tokens)} tokens (market_data + market_analysis)"]
+    if not rows:
+        lines.append("⚪ No open real-wallet positions")
+    for row in rows:
+        pf = row["pf"]
+        analysis = row["analysis"]
+        d = row["d"]
+        score = row["score"]
+        phase = row["phase"]
+        pnl_pct = row["pnl_pct"]
+        pnl_sda = row["pnl_sda"]
+        action = row["action"]
+        reason = row["reason"]
         icon = {"EMERGENCY SELL":"🚨", "SELL / EXIT":"🔴", "HOLD / PUMP":"🟢", "HOLD / WATCH":"🟡", "HOLD / MARKET DATA N/A":"🟡"}.get(action, "🟡")
         score_text = "N/A" if score is None else f"{_n(score):.0f}/100"
-        symbol = pf.get("symbol") or pf.get("label") or str(token)[:10]
+        symbol = pf.get("symbol") or pf.get("label") or str(row["token"])[:10]
         pnl_text = "N/A SDA" if pnl_sda is None else f"{pnl_sda:+.2f} SDA"
         lines.append(f"{icon} {symbol}: {action} • P/L {pnl_text} ({pnl_pct:+.2f}%) • score {score_text}")
         if analysis:
