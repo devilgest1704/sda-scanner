@@ -20,7 +20,10 @@ def _fixed_position_action_section(dashboard, md, ws, meta):
         full_md = real_wallet_market_fix._merge_market(dashboard)
         portfolio = dashboard.load("portfolio_data.json", {"current": {}})
         builder = v26_dashboard_patch._position_recommendations
-        rows = builder(full_md, ws, meta, portfolio) if callable(builder) else []
+        # _position_recommendations is a module-level helper whose first
+        # argument is the dashboard instance. The previous call omitted it,
+        # producing: missing 1 required positional argument: 'portfolio'.
+        rows = builder(dashboard, full_md, ws, meta, portfolio) if callable(builder) else []
     except Exception as exc:
         print(f"Hourly Position Action error: {exc}")
         rows = []
@@ -31,6 +34,8 @@ def _fixed_position_action_section(dashboard, md, ws, meta):
         return lines
 
     for row in rows:
+        if not isinstance(row, dict):
+            continue
         action = str(row.get("action") or "HOLD / WATCH")
         icon = {
             "EMERGENCY SELL": "🚨",
