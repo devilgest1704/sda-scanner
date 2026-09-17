@@ -4,6 +4,7 @@ import hashlib
 import os
 import sys
 import time
+import traceback
 import requests
 
 import engine
@@ -93,7 +94,9 @@ def main_dashboard():
                 old="\n🧭 POSITION ACTION • REAL WALLET\n────────────────────────\n⚪ No open real-wallet positions"
                 text=text.replace(old,"\n"+"\n".join(rw()))
         return text
-    except Exception as exc:return f"📈 SDA MARKET SCANNER\n\n⚠️ Dashboard error: {exc}"
+    except Exception as exc:
+        traceback.print_exc()
+        return f"📈 SDA MARKET SCANNER\n\n⚠️ Dashboard error: {exc}"
 
 def _real_statistics_report():
     report=getattr(sys.modules[__name__],"real_trading_report",None)
