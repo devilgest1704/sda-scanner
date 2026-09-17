@@ -27,17 +27,81 @@ def _label(dashboard, address, meta):
     except Exception: return str(address)[:12]
 
 
-def _position_action_section(dashboard, md, ws, meta):
-    """Render the current manual Real Wallet Position Action on the main view.
+def _wallet_position_rows(dashboard, md, ws, meta, portfolio):
+    """Build real-wallet rows from live wallet holdings, not paper portfolio.current."""
+    wallet = dashboard.load("wallet_data.json", {"holdings": []})
+    holdings = wallet.get("holdings", []) if isinstance(wallet, dict) else []
+    current = portfolio.get("current", {}) if isinstance(portfolio, dict) else {}
+    current_by_address = {}
+    current_by_symbol = {}
+    if isinstance(current, dict):
+        for key, pf in current.items():
+            if not isinstance(pf, dict):
+                continue
+            address = str(pf.get("address") or pf.get("token_address") or key).strip().lower()
+            symbol = str(pf.get("symbol") or pf.get("label") or "").split("/", 1)[0].strip().upper()
+            if address: current_by_address[address] = pf
+            if symbol: current_by_symbol[symbol] = pf
 
-    This intentionally delegates to dashboard._position_recommendations, which
-    is the canonical wallet/position policy installed by the later dashboard
-    consistency patch. The section is read-only and does not place orders.
-    """
+    rows = []
+    tokens = md.get("tokens", {}) if isinstance(md, dict) else {}
+    for holding in holdings:
+        if not isinstance(holding, dict):
+            continue
+        address = str(holding.get("address") or "").strip().lower()
+        symbol = str(holding.get("symbol") or "").strip().upper()
+        if not address or not symbol:
+            continue
+        value = _n(holding.get("value_sda"))
+        amount = _n(holding.get("amount"))
+        if value <= 0 and amount <= 0:
+            continue
+
+        pf = current_by_address.get(address) or current_by_symbol.get(symbol) or {}
+        td = tokens.get(address, {}) or {}
+        an = _analysis(td)
+        d = _decision(dashboard, address, an, ws) if an else {}
+        score = _n(d.get("pump_score"), -1)
+        phase = str(d.get("pump_phase") or "NO")
+        entry = _n(pf.get("entry_price"))
+        cur = _n(an.get("price_in_sda")) or _n(holding.get("price_sda"))
+        pnl_sda = pf.get("unrealized_pnl_sda")
+        cost = _n(pf.get("cost_sda"))
+        if pnl_sda is None and cost > 0 and value > 0:
+            pnl_sda = value - cost
+        pnl_pct = pf.get("unrealized_pnl_pct")
+        if pnl_pct is None and cost > 0 and pnl_sda is not None:
+            pnl_pct = _n(pnl_sda) / cost * 100
+        if pnl_pct is None and entry > 0 and cur > 0:
+            pnl_pct = (cur / entry - 1) * 100
+        if pnl_pct is None:
+            pnl_pct = 0.0
+
+        weak = int(_n(pf.get("pump_weak_count")))
+        if pnl_pct <= -7: action = "EMERGENCY SELL"
+        elif pnl_pct > 0 and weak >= 3: action = "SELL / EXIT"
+        elif phase == "ENTRY" and pnl_pct >= 0: action = "HOLD / PUMP"
+        elif phase == "WATCH": action = "HOLD / WATCH"
+        elif score >= 40: action = "HOLD / MONITOR"
+        else: action = "HOLD / WEAK"
+        rows.append({
+            "symbol": symbol,
+            "address": address,
+            "action": action,
+            "pnl_sda": None if pnl_sda is None else _n(pnl_sda),
+            "pnl_pct": _n(pnl_pct),
+            "score": score if score >= 0 else None,
+            "phase": phase,
+            "pump_change": _n(d.get("pump_change")),
+            "value_sda": value,
+        })
+    return rows
+
+
+def _position_action_section(dashboard, md, ws, meta):
     try:
         portfolio = dashboard.load("portfolio_data.json", {"current": {}})
-        builder = getattr(dashboard, "_position_recommendations", None)
-        rows = builder(md, ws, meta, portfolio) if callable(builder) else []
+        rows = _wallet_position_rows(dashboard, md, ws, meta, portfolio)
     except Exception:
         rows = []
 
@@ -55,17 +119,16 @@ def _position_action_section(dashboard, md, ws, meta):
             "HOLD / TRAIL": "🟢",
             "HOLD / PUMP": "🟢",
             "HOLD / WATCH": "🟡",
+            "HOLD / MONITOR": "🟡",
+            "HOLD / WEAK": "🟡",
             "HOLD / NO COST BASIS": "🟡",
             "HOLD / MARKET DATA N/A": "🟡",
         }.get(action, "🟡")
         pnl_sda = row.get("pnl_sda")
         pnl = "UNKNOWN" if pnl_sda is None else f"{_n(pnl_sda):+.2f} SDA"
         score = "N/A" if row.get("score") is None else f"{_n(row.get('score')):.0f}/100"
-        symbol = row.get("symbol") or row.get("token") or "UNKNOWN"
+        symbol = row.get("symbol") or "UNKNOWN"
         lines.append(f"{icon} {symbol}: {action} • P/L {pnl} • score {score}")
-        reason = str(row.get("reason") or "")
-        if reason:
-            lines.append(f"   {reason}")
     return lines
 
 
@@ -110,31 +173,21 @@ def _market_debug(dashboard, snapshot=None):
 
 
 def _position_recommendations(dashboard, md, ws, meta, portfolio):
-    tokens=md.get("tokens",{}) or {}; current=portfolio.get("current",{}) if isinstance(portfolio,dict) else {}; out=[]
-    for token,pf in current.items():
-        pf=pf if isinstance(pf,dict) else {}; address=str(pf.get("address") or pf.get("token_address") or token).lower(); td=tokens.get(address,{}) or {}; an=_analysis(td); d=_decision(dashboard,address,an,ws) if an else {}
-        score=_n(d.get("pump_score"),-1); phase=str(d.get("pump_phase") or "NO"); entry=_n(pf.get("entry_price")); cur=_n(an.get("price_in_sda")); pnl_sda=pf.get("unrealized_pnl_sda")
-        pnl_pct=_n(pf.get("unrealized_pnl_pct"), ((cur/entry-1)*100 if entry and cur else 0)); weak=int(_n(pf.get("pump_weak_count")))
-        if pnl_pct<=-7: action="EMERGENCY SELL"
-        elif pnl_pct>0 and weak>=3: action="SELL / EXIT"
-        elif phase=="ENTRY" and pnl_pct>=0: action="HOLD / PUMP"
-        elif phase=="WATCH": action="HOLD / WATCH"
-        elif score>=40: action="HOLD / MONITOR"
-        else: action="HOLD / WEAK"
-        out.append({"symbol":pf.get("symbol") or pf.get("label") or _label(dashboard,address,meta),"action":action,"pnl_sda":_n(pnl_sda,0),"score":score if score>=0 else None,"phase":phase,"pump_change":_n(d.get("pump_change"))})
-    return out
+    return _wallet_position_rows(dashboard, md, ws, meta, portfolio)
 
 
 def _real_trading_report(dashboard):
-    md=dashboard.load("market_data.json",{"tokens":{}}); ws=dashboard.load("whale_data.json",{}); meta=dashboard.load("token_metadata.json",{}); portfolio=dashboard.load("portfolio_data.json",{"current":{}}); current=portfolio.get("current",{}) if isinstance(portfolio,dict) else {}
+    md=dashboard.load("market_data.json",{"tokens":{}}); ws=dashboard.load("whale_data.json",{}); meta=dashboard.load("token_metadata.json",{}); portfolio=dashboard.load("portfolio_data.json",{"current":{}})
+    rows = _wallet_position_rows(dashboard, md, ws, meta, portfolio)
     lines=["🧭 POSITION ACTION • V26 PUMP-HUNTER","────────────────────────"]
-    for address,pf in current.items():
-        if not isinstance(pf,dict): continue
-        key=str(address).lower(); an=_analysis((md.get("tokens",{}) or {}).get(key,{})); d=_decision(dashboard,key,an,ws) if an else {}; score=_n(d.get("pump_score"),0); phase=str(d.get("pump_phase") or "NO"); pnl=_n(pf.get("unrealized_pnl_pct"),0); weak=int(_n(pf.get("pump_weak_count")))
-        action="🚨 EMERGENCY SELL" if pnl<=-7 else ("🔴 SELL / EXIT" if pnl>0 and weak>=3 else ("🟢 HOLD / PUMP" if phase=="ENTRY" else "🟡 HOLD / WATCH"))
-        lines.append(f"{action} • {pf.get('symbol') or pf.get('label') or key[:10]} • P/L {pnl:+.2f}% • score {score:.0f}")
-        lines.append(f"   phase {phase} • Δ {_n(d.get('pump_change')):+.1f} • M1H {_n(d.get('m1h')):+.2f}% • flow {_n(d.get('net_1h')):+.0f}")
-    if len(lines)==2: lines.append("⚪ No open positions")
+    for row in rows:
+        action = str(row.get("action") or "HOLD / WATCH")
+        icon = {"EMERGENCY SELL":"🚨","SELL / EXIT":"🔴","HOLD / PUMP":"🟢","HOLD / WATCH":"🟡","HOLD / MONITOR":"🟡","HOLD / WEAK":"🟡"}.get(action,"🟡")
+        pnl = "UNKNOWN" if row.get("pnl_sda") is None else f"{_n(row.get('pnl_sda')):+.2f} SDA"
+        score = "N/A" if row.get("score") is None else f"{_n(row.get('score')):.0f}"
+        lines.append(f"{icon} {row.get('symbol')} • {action} • P/L {pnl} • score {score}")
+        lines.append(f"   phase {row.get('phase','NO')} • Δ {_n(row.get('pump_change')):+.1f}")
+    if not rows: lines.append("⚪ No open positions")
     lines += ["","👁 READ-ONLY • V26 paper policy; no real order is executed"]
     return "\n".join(lines)
 
