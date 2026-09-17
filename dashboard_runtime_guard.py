@@ -57,22 +57,37 @@ def _normalize_market(md):
     return out
 
 
+def _normalize_loaded(path, value):
+    if path in ("market_data.json", "market_analysis.json"):
+        return _normalize_market(value)
+    if path in ("whale_data.json", "token_metadata.json"):
+        return _mapping(value)
+    return value
+
+
 def patch_dashboard(dashboard):
     if getattr(dashboard, "_sda_runtime_guard_patched", False):
         return dashboard
+
+    # Normalize at the load boundary as well as at top_buy. This is the key
+    # fix: V26 merges market_analysis.json inside _merged_market(), so a
+    # malformed list could previously be reintroduced after top_buy had
+    # already normalized market_data.json.
+    original_load = dashboard.load
+    def guarded_load(path, default):
+        value = original_load(path, default)
+        return _normalize_loaded(path, value)
+    dashboard.load = guarded_load
+
     original = dashboard.top_buy
 
     def guarded_top_buy(md, ws, meta, rows=None, snapshot=None):
-        # Normalize before the first render, not only after an exception.
-        # This is important because malformed lists can be reached through
-        # more than one nested field before the old retry handler gets a chance.
         safe_md = _normalize_market(md)
         safe_ws = _mapping(ws)
         safe_meta = _mapping(meta)
         try:
             return original(safe_md, safe_ws, safe_meta, rows, snapshot)
         except (AttributeError, TypeError):
-            # Keep a second defensive retry with freshly normalized objects.
             try:
                 return original(_normalize_market(safe_md), _mapping(safe_ws), _mapping(safe_meta), rows, snapshot)
             except Exception as retry_exc:
