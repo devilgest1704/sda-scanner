@@ -83,7 +83,15 @@ def paper_statistics_report(): return "📊 PAPER TRADING • STATISTICS\n\nRead
 def main_dashboard():
     try:
         md=load("market_data.json",{"tokens":{}}); ws=load("whale_data.json",{}); meta=load("token_metadata.json",{})
-        return v26_dashboard_patch._top_buy(sys.modules[__name__],md,ws,meta)
+        text=v26_dashboard_patch._top_buy(sys.modules[__name__],md,ws,meta)
+        # Hard guarantee: main dashboard Position Action is sourced from the
+        # live wallet holdings, never from paper portfolio.current.
+        if "⚪ No open real-wallet positions" in text:
+            rw=getattr(sys.modules[__name__],"real_wallet_position_action",None)
+            if callable(rw):
+                old="\n🧭 POSITION ACTION • REAL WALLET\n────────────────────────\n⚪ No open real-wallet positions"
+                text=text.replace(old,"\n"+"\n".join(rw()))
+        return text
     except Exception as exc: return f"📈 SDA MARKET SCANNER\n\n⚠️ Dashboard error: {exc}"
 
 def _real_statistics_report():
@@ -128,9 +136,6 @@ try:
     import position_action_v20 as _position_action_v20
     _position_action_v20.patch_dashboard(sys.modules[__name__])
 except Exception as exc: print(f"Position Action patch unavailable: {exc}")
-
-# FINAL OVERRIDE: the main dashboard must use the live wallet holdings renderer.
-# This is deliberately installed after all legacy/V25/V23 dashboard patches.
 try:
     import real_wallet_market_fix as _rw
     _rw.patch_dashboard(sys.modules[__name__])
