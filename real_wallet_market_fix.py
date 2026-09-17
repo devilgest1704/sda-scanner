@@ -44,7 +44,6 @@ def _merge_market(dashboard):
 
 
 def _resolve(tokens, token, pf, metadata):
-    # 1) Address is authoritative whenever the portfolio already contains it.
     candidates = [token]
     if isinstance(pf, dict):
         candidates += [pf.get("address"), pf.get("token_address"), pf.get("token")]
@@ -58,9 +57,6 @@ def _resolve(tokens, token, pf, metadata):
         if low in tokens:
             return low, _analysis(tokens[low])
 
-    # 2) Portfolio keys are often symbols. token_metadata is the canonical
-    # symbol -> address bridge; market_analysis itself intentionally has no
-    # symbol field and therefore cannot be resolved by symbol alone.
     wanted = _norm_symbol((pf or {}).get("symbol") or (pf or {}).get("label") or token)
     if isinstance(metadata, dict) and wanted:
         for address, meta in metadata.items():
@@ -74,7 +70,6 @@ def _resolve(tokens, token, pf, metadata):
                 if low in tokens:
                     return low, _analysis(tokens[low])
 
-    # 3) Last-resort symbol scan for market snapshots that carry symbol data.
     for address, value in tokens.items():
         if not isinstance(value, dict):
             continue
@@ -92,6 +87,32 @@ def _decision(address, analysis, ws):
         return v26.decision(address, analysis, ws)
     except Exception:
         return {}
+
+
+def _pnl(pf, pnl_pct, entry, current_price):
+    """Return P/L in SDA using the most reliable portfolio field available."""
+    for key in ("unrealized_pnl_sda", "pnl_sda", "unrealized_profit_sda", "profit_sda"):
+        if pf.get(key) is not None:
+            return _n(pf.get(key))
+
+    # Portfolio snapshots normally carry the current position value and/or
+    # cost basis. Prefer those over reconstructing from rounded percentages.
+    current_value = next((_n(pf.get(k), None) for k in ("current_value_sda", "value_sda", "market_value_sda", "current_sda") if pf.get(k) is not None), None)
+    cost_basis = next((_n(pf.get(k), None) for k in ("cost_basis_sda", "invested_sda", "cost_sda", "entry_value_sda", "position_value_sda") if pf.get(k) is not None), None)
+    if current_value is not None and cost_basis is not None:
+        return current_value - cost_basis
+    if cost_basis is not None:
+        return cost_basis * pnl_pct / 100.0
+
+    # Last fallback: reconstruct from token amount when available. The wallet
+    # stores ERC-20 amounts in base units, while prices are SDA/token.
+    amount = next((_n(pf.get(k), None) for k in ("amount", "token_amount", "quantity", "balance") if pf.get(k) is not None), None)
+    if amount is not None and entry and current_price:
+        decimals = _n(pf.get("decimals"), 18)
+        units = 10 ** int(decimals) if 0 <= decimals <= 36 else 1e18
+        return (current_price - entry) * amount / units
+
+    return None
 
 
 def _action(pnl_pct, d, pf):
@@ -128,11 +149,13 @@ def real_trading_report(dashboard):
         entry = _n(pf.get("entry_price"))
         current_price = _n(analysis.get("price_in_sda"))
         pnl_pct = _n(pf.get("unrealized_pnl_pct"), ((current_price / entry - 1) * 100 if entry and current_price else 0.0))
+        pnl_sda = _pnl(pf, pnl_pct, entry, current_price)
         action, reason = _action(pnl_pct, d, pf) if analysis else ("HOLD / MARKET DATA N/A", "market data not resolved")
         icon = {"EMERGENCY SELL":"🚨", "SELL / EXIT":"🔴", "HOLD / PUMP":"🟢", "HOLD / WATCH":"🟡", "HOLD / MARKET DATA N/A":"🟡"}.get(action, "🟡")
         score_text = "N/A" if score is None else f"{_n(score):.0f}/100"
         symbol = pf.get("symbol") or pf.get("label") or str(token)[:10]
-        lines.append(f"{icon} {symbol}: {action} • P/L {pnl_pct:+.2f}% • score {score_text}")
+        pnl_text = "N/A SDA" if pnl_sda is None else f"{pnl_sda:+.2f} SDA"
+        lines.append(f"{icon} {symbol}: {action} • P/L {pnl_text} ({pnl_pct:+.2f}%) • score {score_text}")
         if analysis:
             lines.append(f"   phase {phase} • Δ {_n(d.get('pump_change')):+.1f} • M1H {_n(d.get('m1h')):+.2f}% • flow {_n(d.get('net_1h')):+.0f} SDA")
         lines.append(f"   {reason}")
@@ -144,12 +167,6 @@ def patch_dashboard(dashboard):
     if getattr(dashboard, "_real_wallet_market_fix_patched", False):
         return dashboard
     dashboard.real_trading_report = lambda: real_trading_report(dashboard)
-
-    # Final dashboard patch: MARKET DEBUG must expose the same V26 decision
-    # engine as the scanner and paper BUY path. dashboard_consistency installs
-    # an older MAX-WIN/V25 diagnostic earlier in the patch chain, so this is
-    # deliberately applied here, after all legacy compatibility patches.
     dashboard.market_debug_report = lambda snapshot=None: v26._market_debug(dashboard, snapshot)
-
     dashboard._real_wallet_market_fix_patched = True
     return dashboard
