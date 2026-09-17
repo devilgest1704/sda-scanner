@@ -6,7 +6,7 @@ upside and exit on confirmed breakdown rather than fixed take-profit caps.
 """
 import json, os, math
 from datetime import datetime, timezone
-STATE_FILE="v26_pump_state.json"; SL_PCT=.07; MAX_OPEN=6; MAX_BUYS_PER_RUN=2; ENTRY_SCORE=62.; WATCH_SCORE=45.
+STATE_FILE="v26_pump_state.json"; SL_PCT=.05; MAX_OPEN=6; MAX_BUYS_PER_RUN=1; ENTRY_SCORE=70.; WATCH_SCORE=45.; ENTRY_CHANGE=10.; MIN_M15=0.; COOLDOWN_HOURS=4.
 def _num(v,d=0.):
     try:return d if v is None else float(v)
     except:return d
@@ -38,41 +38,28 @@ def _score(address,analysis):
     if cur["flow"]<0:score-=12
     if cur["buy_ratio"]<.8:score-=10
     if cur["m1"]<0 and cur["m15"]<0:score-=12
-    score=max(0,min(100,score));phase="ENTRY" if prev and score>=ENTRY_SCORE and change>=7 and cur["flow"]>0 and cur["m1"]>0 else ("WATCH" if score>=WATCH_SCORE else "NO")
+    score=max(0,min(100,score));phase="ENTRY" if prev and score>=ENTRY_SCORE and change>=ENTRY_CHANGE and cur["flow"]>0 and cur["m1"]>0 and cur["m15"]>MIN_M15 else ("WATCH" if score>=WATCH_SCORE else "NO")
     hist[key]={"last":cur,"last_score":round(score,2),"last_change":round(change,2),"phase":phase,"updated_at":_now()};state["updated_at"]=_now();_save(state);return cur,round(score,1),round(change,1),phase
 def decision(address,analysis,whale_state=None):
     cur,score,change,phase=_score(address,analysis)
-    return {"score":score,"confidence":score,"buy_score":score,"market_score":score,"m1h":cur["m1"],"m15":cur["m15"],"m4h":cur["m4"],"net_1h":cur["flow"],"whale_net":cur["flow"],"trades_1h":cur["trades"],"volume_1h":cur["vol"],"buy_ratio":cur["buy_ratio"],"trade_ratio":cur["trade_ratio"],"eligible_for_buy":cur["trades"]>0,"pump_score":score,"pump_change":change,"pump_phase":phase,"paper_buy_blocked":phase!="ENTRY","paper_buy_block_reason":"PUMP ENTRY: accelerating flow/volume/activity" if phase=="ENTRY" else f"pump phase {phase}; score {score:.0f}, acceleration +{change:.1f}","paper_prediction":{"ready":False,"role":"advisory"},"paper_prediction_role":"advisory","technical_bull":0,"technical_bear":0,"technical_evidence":[],"buy_score_components":{"momentum":round(min(100,max(0,cur["m1"]*5+50)),1),"flow":round(min(100,max(0,50+cur["flow"]/20)),1),"activity":round(min(100,max(0,40+cur["trades"]*2)),1),"prediction":0.,"liquidity":0.},"v23_prediction":{"ready":False},"v24":{"version":"V24","ready":False},"v25":{"version":"V25","ready":False,"learning_mode":"shadow"},"v26":{"version":"V26-PUMP-HUNTER","score":score,"change":change,"phase":phase,"metrics":cur}}
+    return {"score":score,"confidence":score,"buy_score":score,"market_score":score,"m1h":cur["m1"],"m15":cur["m15"],"m4h":cur["m4"],"net_1h":cur["flow"],"whale_net":cur["flow"],"trades_1h":cur["trades"],"volume_1h":cur["vol"],"buy_ratio":cur["buy_ratio"],"trade_ratio":cur["trade_ratio"],"eligible_for_buy":cur["trades"]>0,"pump_score":score,"pump_change":change,"pump_phase":phase,"paper_buy_blocked":phase!="ENTRY","paper_buy_block_reason":"PUMP ENTRY: score/change/M1H/M15/flow gates passed" if phase=="ENTRY" else f"pump phase {phase}; score {score:.0f}, acceleration +{change:.1f}","paper_prediction":{"ready":False,"role":"advisory"},"paper_prediction_role":"advisory","technical_bull":0,"technical_bear":0,"technical_evidence":[],"buy_score_components":{"momentum":round(min(100,max(0,cur["m1"]*5+50)),1),"flow":round(min(100,max(0,50+cur["flow"]/20)),1),"activity":round(min(100,max(0,40+cur["trades"]*2)),1),"prediction":0.,"liquidity":0.},"v23_prediction":{"ready":False},"v24":{"version":"V24","ready":False},"v25":{"version":"V25","ready":False,"learning_mode":"shadow"},"v26":{"version":"V26-PUMP-HUNTER","score":score,"change":change,"phase":phase,"metrics":cur}}
 
 def _market_debug(dashboard, snapshot=None):
-    """Canonical V26 diagnostic; never uses the legacy V25/MAX-WIN renderer."""
-    md=dashboard.load("market_data.json",{"tokens":{}}) if snapshot is None else snapshot.get("md",{})
-    ws=dashboard.load("whale_data.json",{}) if snapshot is None else snapshot.get("ws",{})
-    meta=dashboard.load("token_metadata.json",{}) if snapshot is None else snapshot.get("meta",{})
-    tokens=md.get("tokens",{}) if isinstance(md,dict) else {}
-    rows=[]
+    md=dashboard.load("market_data.json",{"tokens":{}}) if snapshot is None else snapshot.get("md",{});ws=dashboard.load("whale_data.json",{}) if snapshot is None else snapshot.get("ws",{});meta=dashboard.load("token_metadata.json",{}) if snapshot is None else snapshot.get("meta",{});tokens=md.get("tokens",{}) if isinstance(md,dict) else {};rows=[]
     for address,td in tokens.items():
         analysis=td.get("analysis",td) if isinstance(td,dict) else {}
         if not isinstance(analysis,dict) or _num(analysis.get("price_in_sda"))<=0:continue
         cur=_metrics(analysis)
         if cur["vol"]<250:continue
-        d=decision(address,analysis,ws)
-        rows.append({"address":address,"label":dashboard.engine.lbl(address,meta),"d":d,"m":cur})
-    rows.sort(key=lambda r:(_num(r["d"].get("pump_score")),r["m"]["vol"],r["m"]["trades"]),reverse=True)
-    rows=rows[:5]
-    snap_id=getattr(dashboard,"_snapshot_id",lambda *a:"unknown")(md,ws,meta)
-    snap_time=getattr(dashboard,"_snapshot_time",lambda *a:"unknown")(md,ws)
-    ready=sum(1 for r in rows if r["d"].get("pump_phase")=="ENTRY")
-    analyzed=sum(1 for td in tokens.values() if isinstance(td,dict) and isinstance(td.get("analysis",td),dict))
-    lines=["🐞 MARKET DEBUG • V26 PUMP-HUNTER","",f"Snapshot: {snap_id}",f"State time: {snap_time}",f"Loaded tokens: {len(tokens)}",f"Analyzed tokens: {analyzed}",f"Whale data entries: {len(ws) if isinstance(ws,dict) else 0}","","V26: scan-to-scan pump detection • paper-only","ENTRY: score ≥ 62 • change ≥ 7 • M1H > 0 • flow > 0","WATCH: score ≥ 45","Risk: max 6 open • max 2 BUY/scan • hard stop -7%","────────────────────────",f"🚀 V26 BUY READY in TOP {len(rows)}: {ready}","","🎯 TOP V26 CANDIDATES","────────────────────────"]
+        d=decision(address,analysis,ws);rows.append({"address":address,"label":dashboard.engine.lbl(address,meta),"d":d,"m":cur})
+    rows.sort(key=lambda r:(_num(r["d"].get("pump_score")),r["m"]["vol"],r["m"]["trades"]),reverse=True);rows=rows[:5];snap_id=getattr(dashboard,"_snapshot_id",lambda *a:"unknown")(md,ws,meta);snap_time=getattr(dashboard,"_snapshot_time",lambda *a:"unknown")(md,ws);ready=sum(1 for r in rows if r["d"].get("pump_phase")=="ENTRY");analyzed=sum(1 for td in tokens.values() if isinstance(td,dict) and isinstance(td.get("analysis",td),dict));lines=["🐞 MARKET DEBUG • V26 PUMP-HUNTER","",f"Snapshot: {snap_id}",f"State time: {snap_time}",f"Loaded tokens: {len(tokens)}",f"Analyzed tokens: {analyzed}",f"Whale data entries: {len(ws) if isinstance(ws,dict) else 0}","","V26: scan-to-scan pump detection • paper-only",f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • change ≥ {ENTRY_CHANGE:.0f} • M1H > 0 • M15 > 0 • flow > 0",f"WATCH: score ≥ {WATCH_SCORE:.0f}",f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN} BUY/scan • hard stop -{SL_PCT*100:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h","────────────────────────",f"🚀 V26 BUY READY in TOP {len(rows)}: {ready}","","🎯 TOP V26 CANDIDATES","────────────────────────"]
     if not rows:lines.append("⚪ No active candidates")
     for i,r in enumerate(rows,1):
-        d=r["d"];m=r["m"];score=_num(d.get("pump_score"));change=_num(d.get("pump_change"));phase=str(d.get("pump_phase") or "NO")
-        status="🟢 ENTRY READY" if phase=="ENTRY" else ("🟡 WATCH" if phase=="WATCH" else "🔴 NO ENTRY")
-        reasons=[]
+        d=r["d"];m=r["m"];score=_num(d.get("pump_score"));change=_num(d.get("pump_change"));phase=str(d.get("pump_phase") or "NO");status="🟢 ENTRY READY" if phase=="ENTRY" else ("🟡 WATCH" if phase=="WATCH" else "🔴 NO ENTRY");reasons=[]
         if score<ENTRY_SCORE:reasons.append(f"score {score:.0f}<{ENTRY_SCORE:.0f}")
-        if change<7:reasons.append(f"change +{change:.1f}<+7")
+        if change<ENTRY_CHANGE:reasons.append(f"change +{change:.1f}<+{ENTRY_CHANGE:.0f}")
         if m["m1"]<=0:reasons.append(f"M1H {m['m1']:+.1f}%≤0")
+        if m["m15"]<=MIN_M15:reasons.append(f"M15 {m['m15']:+.1f}%≤0")
         if m["flow"]<=0:reasons.append(f"flow {m['flow']:+.0f}≤0")
         if not reasons:reasons.append("ALL V26 ENTRY GATES PASS")
         lines += [f"{i}. {r['label']} • {status} • score {score:.0f}/100 • Δ +{change:.1f}",f"   M15/M1H/M4H {m['m15']:+.1f}%/{m['m1']:+.1f}%/{m['m4']:+.1f}% • flow {m['flow']:+.0f} SDA • vol {m['vol']:.0f} SDA • trades {m['trades']:.0f}",f"   buy/sell vol ratio {m['buy_ratio']:.2f} • trade ratio {m['trade_ratio']:.2f} • 15m vol accel {m['vol_accel']:+.1f}%",f"   WHY NOT BUY: {'; '.join(reasons)}"]
