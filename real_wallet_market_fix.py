@@ -12,12 +12,6 @@ def _n(v, default=0.0):
     except Exception: return default
 
 
-def _analysis(td):
-    if not isinstance(td, dict): return {}
-    x = td.get("analysis")
-    return x if isinstance(x, dict) else td
-
-
 def _merge_market(dashboard):
     md = dashboard.load("market_data.json", {"tokens": {}})
     compact = dashboard.load("market_analysis.json", {"tokens": {}})
@@ -35,7 +29,32 @@ def _wallet_rows(dashboard):
     ws = dashboard.load("whale_data.json", {})
     meta = dashboard.load("token_metadata.json", {})
     portfolio = dashboard.load("portfolio_data.json", {"current": {}})
-    return v26._wallet_position_rows(dashboard, md, ws, meta, portfolio)
+    try:
+        return v26._wallet_position_rows(dashboard, md, ws, meta, portfolio)
+    except Exception:
+        wallet = dashboard.load("wallet_data.json", {"holdings": []})
+        rows = []
+        for h in wallet.get("holdings", []) if isinstance(wallet, dict) else []:
+            if not isinstance(h, dict): continue
+            value = _n(h.get("value_sda"))
+            if value <= 0: continue
+            rows.append({"symbol": str(h.get("symbol") or "UNKNOWN").upper(), "action": "HOLD / MONITOR", "pnl_sda": None, "score": None, "value_sda": value})
+        return rows
+
+
+def position_action_section(dashboard):
+    rows = _wallet_rows(dashboard)
+    lines = ["", "🧭 POSITION ACTION • REAL WALLET", "────────────────────────"]
+    if not rows:
+        lines.append("⚪ No live wallet holdings")
+        return lines
+    for r in rows:
+        pnl = "UNKNOWN" if r.get("pnl_sda") is None else f"{_n(r.get('pnl_sda')):+.2f} SDA"
+        score = "N/A" if r.get("score") is None else f"{_n(r.get('score')):.0f}/100"
+        action = str(r.get("action") or "HOLD / MONITOR")
+        icon = "🔴" if action.startswith("EMERGENCY") or action.startswith("SELL") else ("🟢" if action == "HOLD / PUMP" else "🟡")
+        lines.append(f"{icon} {r.get('symbol')} • {action} • P/L {pnl} • score {score}")
+    return lines
 
 
 def real_trading_report(dashboard):
@@ -43,6 +62,8 @@ def real_trading_report(dashboard):
     wallet = dashboard.load("wallet_data.json", {})
     sda_balance = _n(wallet.get("native_sda"), _n(wallet.get("sda_balance_sda"), _n(wallet.get("sda_balance"))))
     known_value = sum(_n(r.get("value_sda")) for r in rows)
+    if known_value <= 0:
+        known_value = _n(wallet.get("total_token_value_sda"))
     total_wallet = _n(wallet.get("total_value_sda"), sda_balance + known_value)
     open_pnl = sum(_n(r.get("pnl_sda")) for r in rows if r.get("pnl_sda") is not None)
     portfolio = dashboard.load("portfolio_data.json", {})
@@ -54,9 +75,8 @@ def real_trading_report(dashboard):
     else:
         for r in rows:
             pnl = "UNKNOWN" if r.get("pnl_sda") is None else f"{_n(r.get('pnl_sda')):+.2f} SDA"
-            icon = "🟢" if r.get("pnl_sda") is not None and _n(r.get("pnl_sda")) > 0 else ("🔴" if r.get("pnl_sda") is not None and _n(r.get("pnl_sda")) < 0 else "⚪")
-            lines.append(f"{icon} {r.get('symbol')} • {r.get('action')} • P/L {pnl}")
-            lines.append(f"   Value: {_n(r.get('value_sda')):.2f} SDA • score {'N/A' if r.get('score') is None else f\"{_n(r.get('score')):.0f}/100\"}")
+            lines.append(f"{'🟢' if r.get('pnl_sda') is not None and _n(r.get('pnl_sda')) > 0 else '🔴' if r.get('pnl_sda') is not None and _n(r.get('pnl_sda')) < 0 else '⚪'} {r.get('symbol')} • {r.get('action')} • P/L {pnl}")
+            lines.append(f"   Value: {_n(r.get('value_sda')):.2f} SDA")
     lines += ["", "────────────────────────", f"📊 Known token value: {known_value:.2f} SDA", f"💼 TOTAL WALLET VALUE: {total_wallet:.2f} SDA", "", "💹 P/L SUMMARY", f"{'🟢' if open_pnl > 0 else '🔴' if open_pnl < 0 else '⚪'} Current open P/L {open_pnl:+.2f} SDA", f"{'🟢' if realized > 0 else '🔴' if realized < 0 else '⚪'} Historical realized P/L {realized:+.2f} SDA", f"{'🟢' if realized + open_pnl > 0 else '🔴' if realized + open_pnl < 0 else '⚪'} Total P/L {realized + open_pnl:+.2f} SDA", "", "👁 READ-ONLY • No real order is executed"]
     return "\n".join(lines)
 
@@ -68,6 +88,7 @@ def real_statistics_report(dashboard):
 def patch_dashboard(dashboard):
     dashboard.real_trading_report = lambda: real_trading_report(dashboard)
     dashboard.real_statistics_report = lambda: real_statistics_report(dashboard)
+    dashboard.real_wallet_position_action = lambda: position_action_section(dashboard)
     dashboard.market_debug_report = lambda snapshot=None: v26._market_debug(dashboard, snapshot)
     pa = sys.modules.get("position_action_v20")
     if pa is not None: pa._real_statistics_report = real_statistics_report
