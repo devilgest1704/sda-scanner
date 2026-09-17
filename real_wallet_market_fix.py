@@ -67,8 +67,7 @@ def _enrich_rows(dashboard, rows, md, ws, meta, portfolio):
     tokens = md.get("tokens", {}) if isinstance(md, dict) else {}
     out = []
     for row in rows if isinstance(rows, list) else []:
-        if not isinstance(row, dict):
-            continue
+        if not isinstance(row, dict): continue
         r = dict(row)
         address = str(r.get("address") or "").strip().lower()
         symbol = str(r.get("symbol") or "").strip().upper()
@@ -164,12 +163,17 @@ def real_trading_report(dashboard):
     return "\n".join(lines)
 
 
-def real_statistics_report(dashboard): return real_trading_report(dashboard)
+def real_statistics_report(dashboard):
+    """Compatibility report only; Position Action owns the statistics/history UI."""
+    return real_trading_report(dashboard)
 
 
 def patch_dashboard(dashboard):
-    dashboard.real_trading_report = lambda: real_trading_report(dashboard); dashboard.real_statistics_report = lambda: real_statistics_report(dashboard); dashboard.real_wallet_position_action = lambda: position_action_section(dashboard); dashboard.market_debug_report = lambda snapshot=None: v26._market_debug(dashboard, snapshot)
-    pa = sys.modules.get("position_action_v20")
-    if pa is not None: pa._real_statistics_report = real_statistics_report
+    dashboard.real_trading_report = lambda: real_trading_report(dashboard)
+    dashboard.real_wallet_position_action = lambda: position_action_section(dashboard)
+    dashboard.market_debug_report = lambda snapshot=None: v26._market_debug(dashboard, snapshot)
+    # Do not replace position_action_v20._real_statistics_report here.
+    # Its implementation contains the closed-position history, and this
+    # module is loaded after position_action_v20 in the dashboard bootstrap.
     dashboard._real_wallet_market_fix_patched = True
     return dashboard
