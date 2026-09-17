@@ -1,8 +1,10 @@
 """Runtime guard for the Telegram dashboard.
 
-The market API occasionally returns nested fields as lists instead of their
-normal mapping shape. Normalize the complete presentation snapshot before V26
-renders it so a malformed API field can never blank the whole dashboard.
+Normalizes malformed external data and V26 persistent state before rendering.
+The V26 scanner keeps scan-to-scan history in v26_pump_state.json; an old or
+corrupted history entry can be a list and cause the exact `'list' object has
+no attribute 'get'` exception inside V26 itself, which market-data guards
+cannot catch until too late.
 """
 
 
@@ -65,19 +67,55 @@ def _normalize_loaded(path, value):
     return value
 
 
+def _sanitize_v26_state(state):
+    """Repair V26 state shapes before v26._score/_cooldown can call .get()."""
+    if not isinstance(state, dict):
+        return {}
+    out = dict(state)
+    history = out.get("history")
+    if not isinstance(history, dict):
+        history = {}
+    clean_history = {}
+    for key, entry in history.items():
+        if not isinstance(entry, dict):
+            # A malformed list/string entry has no usable scan history. Drop it
+            # rather than letting V26 call entry.get(...) and crash.
+            continue
+        clean = dict(entry)
+        if not isinstance(clean.get("last"), dict):
+            clean["last"] = {}
+        clean_history[str(key).lower()] = clean
+    out["history"] = clean_history
+    cooldowns = out.get("cooldowns")
+    out["cooldowns"] = cooldowns if isinstance(cooldowns, dict) else {}
+    return out
+
+
 def patch_dashboard(dashboard):
     if getattr(dashboard, "_sda_runtime_guard_patched", False):
         return dashboard
 
-    # Normalize at the load boundary as well as at top_buy. This is the key
-    # fix: V26 merges market_analysis.json inside _merged_market(), so a
-    # malformed list could previously be reintroduced after top_buy had
-    # already normalized market_data.json.
     original_load = dashboard.load
+
     def guarded_load(path, default):
         value = original_load(path, default)
         return _normalize_loaded(path, value)
+
     dashboard.load = guarded_load
+
+    # The dashboard renderer calls V26.decision(), which has its own persistent
+    # state file. Guard that state too; otherwise a malformed history entry can
+    # still raise before the dashboard renderer gets a chance to handle it.
+    try:
+        import v26_pump_hunter as v26
+        original_v26_load = v26._load
+        if not getattr(v26, "_sda_state_guard_patched", False):
+            def guarded_v26_load():
+                return _sanitize_v26_state(original_v26_load())
+            v26._load = guarded_v26_load
+            v26._sda_state_guard_patched = True
+    except Exception:
+        pass
 
     original = dashboard.top_buy
 
