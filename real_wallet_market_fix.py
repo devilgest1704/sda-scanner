@@ -29,11 +29,10 @@ def _merge_market(dashboard):
 def _fifo_portfolio(dashboard, portfolio, meta, wallet):
     try:
         import telegram_dashboard_compact as compact
-        import engine
-        rebuild = getattr(engine, "_rebuild_fifo", None)
+        import main as scanner
+        rebuild = getattr(scanner, "_rebuild_fifo", None)
         if callable(rebuild):
             portfolio = rebuild(deepcopy(portfolio), meta)
-        # This is the same wallet/FIFO reconciliation used by the dashboard.
         return compact._sync_current_to_wallet(wallet, portfolio)
     except Exception as exc:
         print(f"Real Wallet FIFO enrichment error: {exc}")
@@ -67,7 +66,9 @@ def _enrich_rows(dashboard, rows, md, ws, meta, portfolio):
         if symbol: by_symbol[symbol] = pf
     tokens = md.get("tokens", {}) if isinstance(md, dict) else {}
     out = []
-    for row in rows:
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
         r = dict(row)
         address = str(r.get("address") or "").strip().lower()
         symbol = str(r.get("symbol") or "").strip().upper()
@@ -81,7 +82,6 @@ def _enrich_rows(dashboard, rows, md, ws, meta, portfolio):
                 r["phase"] = str(d.get("pump_phase") or "NO")
                 r["pump_change"] = _n(d.get("pump_change"))
             except Exception: pass
-        # Dashboard formula: live wallet value minus FIFO cost basis.
         cost = _n(pf.get("cost_sda"))
         value = _n(r.get("value_sda"))
         if cost > 0 and value > 0:
@@ -99,15 +99,18 @@ def _wallet_rows(dashboard):
     portfolio = dashboard.load("portfolio_data.json", {"current": {}})
     try:
         rows = v26._wallet_position_rows(dashboard, md, ws, meta, portfolio)
-        return _enrich_rows(dashboard, rows, md, ws, meta, portfolio)
-    except Exception:
+        enriched, _ = _enrich_rows(dashboard, rows, md, ws, meta, portfolio)
+        return enriched
+    except Exception as exc:
+        print(f"Real Wallet rows enrichment error: {exc}")
         wallet = dashboard.load("wallet_data.json", {"holdings": []}); rows = []
         for h in wallet.get("holdings", []) if isinstance(wallet, dict) else []:
             if not isinstance(h, dict): continue
             value = _n(h.get("value_sda")); amount = _n(h.get("amount"))
             if value <= 0 and amount <= 0: continue
             rows.append({"symbol": str(h.get("symbol") or "UNKNOWN").upper(), "address": str(h.get("address") or "").lower(), "amount": amount, "action": "HOLD / MONITOR", "pnl_sda": None, "score": None, "value_sda": value})
-        return _enrich_rows(dashboard, rows, md, ws, meta, portfolio)
+        enriched, _ = _enrich_rows(dashboard, rows, md, ws, meta, portfolio)
+        return enriched
 
 
 def _amount_for(dashboard, row):
@@ -134,6 +137,7 @@ def position_action_section(dashboard):
     rows = _wallet_rows(dashboard); lines = ["", "🧭 POSITION ACTION • REAL WALLET", "────────────────────────"]
     if not rows: lines.append("⚪ No live wallet holdings"); return lines
     for r in rows:
+        if not isinstance(r, dict): continue
         pnl = "UNKNOWN" if r.get("pnl_sda") is None else f"{_n(r.get('pnl_sda')):+.2f} SDA"; score = "N/A" if r.get("score") is None else f"{_n(r.get('score')):.0f}/100"; action = str(r.get("action") or "HOLD / MONITOR"); amount = _amount_for(dashboard, r)
         icon = "🔴" if action.startswith("EMERGENCY") or action.startswith("SELL") else ("🟢" if action == "HOLD / PUMP" else "🟡")
         qty = f" • {_qty(amount)}" if amount is not None else ""
@@ -146,12 +150,12 @@ def real_trading_report(dashboard):
     portfolio = _fifo_portfolio(dashboard, portfolio_raw, meta, wallet)
     rows = _wallet_rows(dashboard)
     sda_balance = _n(wallet.get("native_sda"), _n(wallet.get("sda_balance_sda"), _n(wallet.get("sda_balance"))))
-    known_value = sum(_n(r.get("value_sda")) for r in rows) or _n(wallet.get("total_token_value_sda")); total_wallet = _n(wallet.get("total_value_sda"), sda_balance + known_value)
-    # Use the same reconciled dashboard totals rather than summing presentation rows.
+    known_value = sum(_n(r.get("value_sda")) for r in rows if isinstance(r, dict)) or _n(wallet.get("total_token_value_sda")); total_wallet = _n(wallet.get("total_value_sda"), sda_balance + known_value)
     open_pnl = _n(portfolio.get("open_pnl_sda"), _n(portfolio.get("open_unrealized_pnl_sda")))
     open_cost = _n(portfolio.get("open_cost_sda")); realized = _n(portfolio.get("realized_pnl_sda")); total = realized + open_pnl
     lines = ["👛 REAL WALLET & POSITIONS", "────────────────────────"]
     for r in rows:
+        if not isinstance(r, dict): continue
         pnl = "UNKNOWN" if r.get("pnl_sda") is None else f"{_n(r.get('pnl_sda')):+.2f} SDA"; amount = _amount_for(dashboard, r); qty = f" • {_qty(amount)}" if amount is not None else ""; icon = "🟢" if r.get("pnl_sda") is not None and _n(r.get("pnl_sda")) > 0 else "🔴" if r.get("pnl_sda") is not None and _n(r.get("pnl_sda")) < 0 else "⚪"
         lines.append(f"{icon} {r.get('symbol')}{qty} • {r.get('action')} • P/L {pnl}"); lines.append(f"   Value: {_n(r.get('value_sda')):.2f} SDA")
     if not rows: lines.append("⚪ No live wallet holdings")
