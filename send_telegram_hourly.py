@@ -11,18 +11,46 @@ import real_wallet_market_fix
 import v26_dashboard_patch
 
 
-# V26 main-dashboard rendering calls this helper directly. The previous
-# canonical helper only searched market_data.json and missed wallet tokens
-# that are present in market_analysis.json. Use the same full resolver as
-# the dedicated Real Wallet view.
+# V26 main-dashboard rendering calls this helper directly. Resolve wallet
+# positions from the full market snapshot instead of relying on the current
+# candidate subset. Keep this renderer independent from the dedicated
+# Real Wallet portfolio renderer, which intentionally has no Position Action.
 def _fixed_position_action_section(dashboard, md, ws, meta):
-    report = real_wallet_market_fix.real_trading_report(dashboard)
-    lines = report.splitlines()
     try:
-        start = lines.index("🧭 POSITION ACTION • REAL WALLET")
-        return lines[start:]
-    except ValueError:
-        return ["", "🧭 POSITION ACTION • REAL WALLET", "────────────────────────", "⚠️ Real Wallet renderer unavailable"]
+        full_md = real_wallet_market_fix._merge_market(dashboard)
+        portfolio = dashboard.load("portfolio_data.json", {"current": {}})
+        builder = v26_dashboard_patch._position_recommendations
+        rows = builder(full_md, ws, meta, portfolio) if callable(builder) else []
+    except Exception as exc:
+        print(f"Hourly Position Action error: {exc}")
+        rows = []
+
+    lines = ["", "🧭 POSITION ACTION • REAL WALLET", "────────────────────────"]
+    if not rows:
+        lines.append("⚪ No open real-wallet positions")
+        return lines
+
+    for row in rows:
+        action = str(row.get("action") or "HOLD / WATCH")
+        icon = {
+            "EMERGENCY SELL": "🚨",
+            "SELL / EXIT": "🔴",
+            "PARTIAL SELL": "🟠",
+            "HOLD / TRAIL": "🟢",
+            "HOLD / PUMP": "🟢",
+            "HOLD / WATCH": "🟡",
+            "HOLD / NO COST BASIS": "🟡",
+            "HOLD / MARKET DATA N/A": "🟡",
+        }.get(action, "🟡")
+        pnl_sda = row.get("pnl_sda")
+        pnl = "UNKNOWN" if pnl_sda is None else f"{real_wallet_market_fix._n(pnl_sda):+.2f} SDA"
+        score = "N/A" if row.get("score") is None else f"{real_wallet_market_fix._n(row.get('score')):.0f}/100"
+        symbol = row.get("symbol") or row.get("token") or "UNKNOWN"
+        lines.append(f"{icon} {symbol}: {action} • P/L {pnl} • score {score}")
+        reason = str(row.get("reason") or "")
+        if reason:
+            lines.append(f"   {reason}")
+    return lines
 
 
 v26_dashboard_patch._position_action_section = _fixed_position_action_section
@@ -150,6 +178,23 @@ def main():
         return state
 
     dashboard.handle_update = _handle_update_with_refresh
+
+    # Some legacy compatibility layers still wrap the V26 main dashboard.
+    # If one of those layers encounters malformed numeric state (e.g. None),
+    # keep the hourly report alive and fall back to the canonical V26 renderer.
+    _wrapped_main_dashboard = dashboard.main_dashboard
+
+    def _safe_main_dashboard(*args, **kwargs):
+        try:
+            return _wrapped_main_dashboard(*args, **kwargs)
+        except Exception as exc:
+            print(f"Hourly dashboard wrapper error: {exc}")
+            md = dashboard.load("market_data.json", {"tokens": {}})
+            ws = dashboard.load("whale_data.json", {})
+            meta = dashboard.load("token_metadata.json", {})
+            return v26_dashboard_patch._top_buy(dashboard, md, ws, meta)
+
+    dashboard.main_dashboard = _safe_main_dashboard
 
     dashboard.send(dashboard.main_dashboard(), dashboard.menu_keyboard())
 
