@@ -1,12 +1,14 @@
-"""V26 self-learning pump hunter.
+"""V27 profit-max exit layer on the V26 self-learning pump hunter.
 
-Paper-only strategy overlay. It learns from scan-to-scan changes, not just
-absolute score. Objective: detect early pump pressure, capture asymmetric
-upside and exit on confirmed breakdown rather than fixed take-profit caps.
+Paper-only strategy overlay. Entry logic stays V26; V27 improves position
+lifecycle so stale losers free slots faster, weak losers are cut earlier and
+profitable pumps keep asymmetric upside with adaptive trailing protection.
 """
 import json, os, math
 from datetime import datetime, timezone, timedelta
 STATE_FILE="v26_pump_state.json"; SL_PCT=.05; MAX_OPEN=6; MAX_BUYS_PER_RUN=1; ENTRY_SCORE=70.; WATCH_SCORE=45.; ENTRY_CHANGE=10.; MIN_M15=0.; MIN_TRADES=10; MIN_VOLUME=2500.; MAX_VOL_ACCEL_DROP=-40.; COOLDOWN_HOURS=4.
+V27_EARLY_SL_PCT=.03; V27_EARLY_WEAK_COUNT=3; V27_STALE_HOURS=4.; V27_STALE_MFE_PCT=3.; V27_STALE_WEAK_COUNT=6
+V27_TRAIL_8=0.94; V27_TRAIL_15=0.91; V27_TRAIL_30=0.89; V27_TRAIL_50=0.88
 def _num(v,d=0.):
     try:return d if v is None else float(v)
     except:return d
@@ -29,8 +31,7 @@ def _metrics(a):
     m=a.get("momentum",{}) or {};f1=_flow(a);f15=_flow(a,"15m");bv=_num(f1.get("buy_volume"));sv=_num(f1.get("sell_volume"));bc=_num(f1.get("buy_count"));sc=_num(f1.get("sell_count"))
     return {"price":_num(a.get("price_in_sda")),"m1":_num(m.get("1h_pct")),"m15":_num(m.get("15m_pct")),"m4":_num(m.get("4h_pct")),"flow":_num(f1.get("net_flow")),"flow15":_num(f15.get("net_flow")),"vol":bv+sv,"trades":bc+sc,"buy_ratio":bv/max(sv,1.),"trade_ratio":bc/max(sc,1.),"vol_accel":_num(a.get("volume_acceleration_15m_pct"))}
 def _delta(c,p,k):return _num(c.get(k))-_num(p.get(k)) if p else 0.
-def _cooldown_until(state,key):
-    return str((state.get("cooldowns") or {}).get(key) or "")
+def _cooldown_until(state,key):return str((state.get("cooldowns") or {}).get(key) or "")
 def _cooldown_active(state,key):
     raw=_cooldown_until(state,key)
     if not raw:return False
@@ -45,19 +46,14 @@ def _score(address,analysis):
     if cur["flow"]<0:score-=12
     if cur["buy_ratio"]<.8:score-=10
     if cur["m1"]<0 and cur["m15"]<0:score-=12
-    score=max(0,min(100,score));
-    phase="ENTRY" if prev and score>=ENTRY_SCORE and change>=ENTRY_CHANGE and cur["flow"]>0 and cur["m1"]>0 and cur["m15"]>MIN_M15 and cur["trades"]>=MIN_TRADES and cur["vol"]>=MIN_VOLUME and cur["vol_accel"]>MAX_VOL_ACCEL_DROP else ("WATCH" if score>=WATCH_SCORE else "NO")
+    score=max(0,min(100,score));phase="ENTRY" if prev and score>=ENTRY_SCORE and change>=ENTRY_CHANGE and cur["flow"]>0 and cur["m1"]>0 and cur["m15"]>MIN_M15 and cur["trades"]>=MIN_TRADES and cur["vol"]>=MIN_VOLUME and cur["vol_accel"]>MAX_VOL_ACCEL_DROP else ("WATCH" if score>=WATCH_SCORE else "NO")
     hist[key]={"last":cur,"last_score":round(score,2),"last_change":round(change,2),"phase":phase,"updated_at":_now()};state["updated_at"]=_now();_save(state);return cur,round(score,1),round(change,1),phase
 def decision(address,analysis,whale_state=None):
-    cur,score,change,phase=_score(address,analysis);state=_load();key=str(address).lower();cooldown=_cooldown_active(state,key)
-    blocked=phase!="ENTRY" or cooldown
-    if cooldown:
-        reason=f"hard-stop cooldown active until {_cooldown_until(state,key)}"
-    elif phase=="ENTRY":
-        reason="PUMP ENTRY: all momentum/flow/activity gates passed"
-    else:
-        reason=f"pump phase {phase}; score {score:.0f}, acceleration +{change:.1f}"
-    return {"score":score,"confidence":score,"buy_score":score,"market_score":score,"m1h":cur["m1"],"m15":cur["m15"],"m4h":cur["m4"],"net_1h":cur["flow"],"whale_net":cur["flow"],"trades_1h":cur["trades"],"volume_1h":cur["vol"],"buy_ratio":cur["buy_ratio"],"trade_ratio":cur["trade_ratio"],"eligible_for_buy":cur["trades"]>0,"pump_score":score,"pump_change":change,"pump_phase":phase,"paper_buy_blocked":blocked,"paper_buy_block_reason":reason,"paper_prediction":{"ready":False,"role":"advisory"},"paper_prediction_role":"advisory","technical_bull":0,"technical_bear":0,"technical_evidence":[],"buy_score_components":{"momentum":round(min(100,max(0,cur["m1"]*5+50)),1),"flow":round(min(100,max(0,50+cur["flow"]/20)),1),"activity":round(min(100,max(0,40+cur["trades"]*2)),1),"prediction":0.,"liquidity":0.},"v23_prediction":{"ready":False},"v24":{"version":"V24","ready":False},"v25":{"version":"V25","ready":False,"learning_mode":"shadow"},"v26":{"version":"V26-PUMP-HUNTER","score":score,"change":change,"phase":phase,"metrics":cur,"cooldown":cooldown}}
+    cur,score,change,phase=_score(address,analysis);state=_load();key=str(address).lower();cooldown=_cooldown_active(state,key);blocked=phase!="ENTRY" or cooldown
+    if cooldown:reason=f"hard-stop cooldown active until {_cooldown_until(state,key)}"
+    elif phase=="ENTRY":reason="PUMP ENTRY: all momentum/flow/activity gates passed"
+    else:reason=f"pump phase {phase}; score {score:.0f}, acceleration +{change:.1f}"
+    return {"score":score,"confidence":score,"buy_score":score,"market_score":score,"m1h":cur["m1"],"m15":cur["m15"],"m4h":cur["m4"],"net_1h":cur["flow"],"whale_net":cur["flow"],"trades_1h":cur["trades"],"volume_1h":cur["vol"],"buy_ratio":cur["buy_ratio"],"trade_ratio":cur["trade_ratio"],"eligible_for_buy":cur["trades"]>0,"pump_score":score,"pump_change":change,"pump_phase":phase,"paper_buy_blocked":blocked,"paper_buy_block_reason":reason,"paper_prediction":{"ready":False,"role":"advisory"},"paper_prediction_role":"advisory","technical_bull":0,"technical_bear":0,"technical_evidence":[],"buy_score_components":{"momentum":round(min(100,max(0,cur["m1"]*5+50)),1),"flow":round(min(100,max(0,50+cur["flow"]/20)),1),"activity":round(min(100,max(0,40+cur["trades"]*2)),1),"prediction":0.,"liquidity":0.},"v23_prediction":{"ready":False},"v24":{"version":"V24","ready":False},"v25":{"version":"V25","ready":False,"learning_mode":"shadow"},"v26":{"version":"V26-PUMP-HUNTER","score":score,"change":change,"phase":phase,"metrics":cur,"cooldown":cooldown},"v27":{"version":"V27-PROFIT-LAYER","paper_only":True,"early_sl_pct":V27_EARLY_SL_PCT,"stale_hours":V27_STALE_HOURS,"trail_8":1-V27_TRAIL_8,"trail_15":1-V27_TRAIL_15,"trail_30":1-V27_TRAIL_30,"trail_50":1-V27_TRAIL_50}}
 
 def _market_debug(dashboard, snapshot=None):
     md=dashboard.load("market_data.json",{"tokens":{}}) if snapshot is None else snapshot.get("md",{});ws=dashboard.load("whale_data.json",{}) if snapshot is None else snapshot.get("ws",{});meta=dashboard.load("token_metadata.json",{}) if snapshot is None else snapshot.get("meta",{});tokens=md.get("tokens",{}) if isinstance(md,dict) else {};rows=[]
@@ -67,7 +63,7 @@ def _market_debug(dashboard, snapshot=None):
         cur=_metrics(analysis)
         if cur["vol"]<250:continue
         d=decision(address,analysis,ws);rows.append({"address":address,"label":dashboard.engine.lbl(address,meta),"d":d,"m":cur})
-    rows.sort(key=lambda r:(_num(r["d"].get("pump_score")),r["m"]["vol"],r["m"]["trades"]),reverse=True);rows=rows[:5];snap_id=getattr(dashboard,"_snapshot_id",lambda *a:"unknown")(md,ws,meta);snap_time=getattr(dashboard,"_snapshot_time",lambda *a:"unknown")(md,ws);ready=sum(1 for r in rows if r["d"].get("pump_phase")=="ENTRY" and not r["d"].get("cooldown"));analyzed=sum(1 for td in tokens.values() if isinstance(td,dict) and isinstance(td.get("analysis",td),dict));lines=["🐞 MARKET DEBUG • V26 PUMP-HUNTER","",f"Snapshot: {snap_id}",f"State time: {snap_time}",f"Loaded tokens: {len(tokens)}",f"Analyzed tokens: {analyzed}",f"Whale data entries: {len(ws) if isinstance(ws,dict) else 0}","","V26: scan-to-scan pump detection • paper-only",f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • change ≥ {ENTRY_CHANGE:.0f} • M1H > 0 • M15 > 0 • flow > 0",f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • 15m vol accel > {MAX_VOL_ACCEL_DROP:.0f}%",f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN} BUY/scan • hard stop -{SL_PCT*100:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h","────────────────────────",f"🚀 V26 BUY READY in TOP {len(rows)}: {ready}","","🎯 TOP V26 CANDIDATES","────────────────────────"]
+    rows.sort(key=lambda r:(_num(r["d"].get("pump_score")),r["m"]["vol"],r["m"]["trades"]),reverse=True);rows=rows[:5];snap_id=getattr(dashboard,"_snapshot_id",lambda *a:"unknown")(md,ws,meta);snap_time=getattr(dashboard,"_snapshot_time",lambda *a:"unknown")(md,ws);ready=sum(1 for r in rows if r["d"].get("pump_phase")=="ENTRY" and not r["d"].get("cooldown"));analyzed=sum(1 for td in tokens.values() if isinstance(td,dict) and isinstance(td.get("analysis",td),dict));lines=["🐞 MARKET DEBUG • V27 PROFIT-LAYER","",f"Snapshot: {snap_id}",f"State time: {snap_time}",f"Loaded tokens: {len(tokens)}",f"Analyzed tokens: {analyzed}",f"Whale data entries: {len(ws) if isinstance(ws,dict) else 0}","","V26 entry engine + V27 paper-only exit layer",f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • change ≥ {ENTRY_CHANGE:.0f} • M1H > 0 • M15 > 0 • flow > 0",f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • 15m vol accel > {MAX_VOL_ACCEL_DROP:.0f}%",f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN} BUY/scan • hard stop -{SL_PCT*100:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",f"V27: early cut -{V27_EARLY_SL_PCT*100:.0f}% • stale {V27_STALE_HOURS:.0f}h • trail 8/15/30/50% = 6/9/11/12%","────────────────────────",f"🚀 V26 BUY READY in TOP {len(rows)}: {ready}","","🎯 TOP V27 CANDIDATES","────────────────────────"]
     if not rows:lines.append("⚪ No active candidates")
     for i,r in enumerate(rows,1):
         d=r["d"];m=r["m"];score=_num(d.get("pump_score"));change=_num(d.get("pump_change"));phase=str(d.get("pump_phase") or "NO");status="🟢 ENTRY READY" if phase=="ENTRY" and not d.get("cooldown") else ("🟡 WATCH" if phase=="WATCH" else "🔴 NO ENTRY");reasons=[]
@@ -84,32 +80,48 @@ def _market_debug(dashboard, snapshot=None):
         lines += [f"{i}. {r['label']} • {status} • score {score:.0f}/100 • Δ +{change:.1f}",f"   M15/M1H/M4H {m['m15']:+.1f}%/{m['m1']:+.1f}%/{m['m4']:+.1f}% • flow {m['flow']:+.0f} SDA • vol {m['vol']:.0f} SDA • trades {m['trades']:.0f}",f"   buy/sell vol ratio {m['buy_ratio']:.2f} • trade ratio {m['trade_ratio']:.2f} • 15m vol accel {m['vol_accel']:+.1f}%",f"   WHY NOT BUY: {'; '.join(reasons)}"]
     return "\n".join(lines)
 
+def _position_age_hours(pos):
+    raw=str(pos.get("opened_at") or pos.get("created_at") or pos.get("entry_time") or "")
+    if not raw:return 0.
+    try:
+        dt=datetime.fromisoformat(raw.replace("Z","+00:00"))
+        if dt.tzinfo is None:dt=dt.replace(tzinfo=timezone.utc)
+        return max(0.,(datetime.now(timezone.utc)-dt).total_seconds()/3600.)
+    except:return 0.
+
 def patch(main_module,engine_module):
     original_create=getattr(engine_module,"create",None);legacy=getattr(engine_module,"_legacy",None);targets=[engine_module]+([legacy] if legacy is not None else [])
     def paper_decision(address,analysis,ws):
         d=decision(address,analysis,ws);return {**d,"data":d,"prediction":d["paper_prediction"],"blocked":d["paper_buy_blocked"],"reason":d["paper_buy_block_reason"],"score_band":"PUMP ENTRY" if not d["paper_buy_blocked"] else d["pump_phase"]}
     def score(address,analysis,ws):return decision(address,analysis,ws)
     def create(a,an,s,meta,liq,investment=None):
-        z=original_create(a,an,s,meta,liq,investment) if callable(original_create) else {};e=_num(z.get("entry_price"),_num(an.get("price_in_sda")));z.update({"v26_mode":"PUMP-HUNTER","pump_peak_price":e,"pump_mfe_pct":0.,"pump_weak_count":0,"pump_age_scans":0,"sl_pct":SL_PCT,"tp1_pct":9.99,"tp2_pct":9.99,"trail_pct":0.,"sl":e*(1-SL_PCT),"initial_sl":e*(1-SL_PCT),"tp1":e*10.99,"tp2":e*10.99,"risk_profile":"V26-PUMP","entry_pump_score":_num(s.get("pump_score",s.get("confidence"))),"entry_pump_change":_num(s.get("pump_change")),"entry_phase":s.get("pump_phase","ENTRY")});return z
+        z=original_create(a,an,s,meta,liq,investment) if callable(original_create) else {};e=_num(z.get("entry_price"),_num(an.get("price_in_sda")));z.update({"v26_mode":"PUMP-HUNTER","v27_mode":"PROFIT-LAYER","pump_peak_price":e,"pump_mfe_pct":0.,"pump_weak_count":0,"pump_age_scans":0,"sl_pct":SL_PCT,"tp1_pct":9.99,"tp2_pct":9.99,"trail_pct":0.,"sl":e*(1-SL_PCT),"initial_sl":e*(1-SL_PCT),"tp1":e*10.99,"tp2":e*10.99,"risk_profile":"V27-PROFIT","entry_pump_score":_num(s.get("pump_score",s.get("confidence"))),"entry_pump_change":_num(s.get("pump_change")),"entry_phase":s.get("pump_phase","ENTRY")});return z
     def auto_exit(p,tokens,ws):
         events=[]
         for address in list((p.get("positions") or {}).keys()):
             pos=p["positions"].get(address);td=(tokens or {}).get(address,{}) or {};analysis=td.get("analysis",td) if isinstance(td,dict) else {};current=_num(analysis.get("price_in_sda"))
             if not pos or current<=0:continue
-            s=decision(address,analysis,ws);score=_num(s.get("pump_score"));entry=_num(pos.get("entry_price"));roi=(current-entry)/entry*100 if entry else 0;peak=max(_num(pos.get("pump_peak_price"),entry),current);pos["pump_peak_price"]=peak;pos["pump_mfe_pct"]=(peak-entry)/entry*100 if entry else 0;pos["pump_age_scans"]=int(_num(pos.get("pump_age_scans"))+1)
-            if roi>=15:pos["sl"]=max(_num(pos.get("sl")),peak*.90)
-            if roi>=30:pos["sl"]=max(_num(pos.get("sl")),peak*.915)
-            if roi>=50:pos["sl"]=max(_num(pos.get("sl")),peak*.93)
+            s=decision(address,analysis,ws);score=_num(s.get("pump_score"));entry=_num(pos.get("entry_price"));roi=(current-entry)/entry*100 if entry else 0;peak=max(_num(pos.get("pump_peak_price"),entry),current);pos["pump_peak_price"]=peak;pos["pump_mfe_pct"]=(peak-entry)/entry*100 if entry else 0;pos["pump_age_scans"]=int(_num(pos.get("pump_age_scans"))+1);age_h=_position_age_hours(pos)
+            if roi>=8:pos["sl"]=max(_num(pos.get("sl")),peak*V27_TRAIL_8)
+            if roi>=15:pos["sl"]=max(_num(pos.get("sl")),peak*V27_TRAIL_15)
+            if roi>=30:pos["sl"]=max(_num(pos.get("sl")),peak*V27_TRAIL_30)
+            if roi>=50:pos["sl"]=max(_num(pos.get("sl")),peak*V27_TRAIL_50)
             weak=(s.get("m1h",0)<=0 and s.get("net_1h",0)<=0) or score<40;pos["pump_weak_count"]=int(_num(pos.get("pump_weak_count"))+1 if weak else max(0,_num(pos.get("pump_weak_count"))-1));stop=_num(pos.get("sl"))
             if current<=stop:
-                hard=roi<=-SL_PCT*100;reason="V26 HARD STOP" if hard else "V26 TRAILING STOP";r=engine_module.close(p,address,current,reason)
+                hard=roi<=-SL_PCT*100;reason="V27 HARD STOP" if hard else "V27 TRAILING STOP";r=engine_module.close(p,address,current,reason)
                 if r:
                     if hard:
-                        state=_load();state.setdefault("cooldowns",{})[str(address).lower()]= (datetime.now(timezone.utc)+timedelta(hours=COOLDOWN_HOURS)).isoformat();_save(state)
-                    events.append(f"🔴 V26 STOP {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | score {score:.0f}")
+                        state=_load();state.setdefault("cooldowns",{})[str(address).lower()]=(datetime.now(timezone.utc)+timedelta(hours=COOLDOWN_HOURS)).isoformat();_save(state)
+                    events.append(f"🔴 V27 STOP {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | age {age_h:.1f}h | score {score:.0f}")
+            elif roi<=-V27_EARLY_SL_PCT*100 and pos["pump_weak_count"]>=V27_EARLY_WEAK_COUNT and (score<40 or (s.get("m1h",0)<=0 and s.get("net_1h",0)<=0)):
+                r=engine_module.close(p,address,current,"V27 EARLY WEAKNESS")
+                if r:events.append(f"🟠 V27 EARLY EXIT {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | weak {pos['pump_weak_count']} | score {score:.0f}")
+            elif age_h>=V27_STALE_HOURS and pos["pump_mfe_pct"]<V27_STALE_MFE_PCT and pos["pump_weak_count"]>=V27_STALE_WEAK_COUNT and roi<2:
+                r=engine_module.close(p,address,current,"V27 STALE POSITION")
+                if r:events.append(f"⚪ V27 STALE EXIT {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | age {age_h:.1f}h | weak {pos['pump_weak_count']}")
             elif roi>0 and pos["pump_weak_count"]>=3:
-                r=engine_module.close(p,address,current,"V26 PUMP BREAKDOWN")
-                if r:events.append(f"🟠 V26 PUMP EXIT {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | score {score:.0f}")
+                r=engine_module.close(p,address,current,"V27 PUMP BREAKDOWN")
+                if r:events.append(f"🟠 V27 PUMP EXIT {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | score {score:.0f}")
         return events
     main_module.paper_decision=paper_decision
     for target in targets:
