@@ -79,7 +79,14 @@ def paper_statistics_report():return "📊 PAPER TRADING • STATISTICS\n\nRead-
 def main_dashboard():
     try:
         md=load("market_data.json",{"tokens":{}});ws=load("whale_data.json",{});meta=load("token_metadata.json",{})
-        text=v26_dashboard_patch._top_buy(sys.modules[__name__],md,ws,meta)
+        # Always call the dashboard's patched entry point.  The runtime guard
+        # wraps this function and must not be bypassed by calling the private
+        # V26 renderer directly (which previously allowed the list/.get error
+        # to escape on Refresh/MAIN).
+        renderer=getattr(sys.modules[__name__],"top_buy",None)
+        if not callable(renderer):
+            renderer=v26_dashboard_patch._top_buy
+        text=renderer(md,ws,meta)
         if "⚪ No open real-wallet positions" in text:
             rw=getattr(sys.modules[__name__],"real_wallet_position_action",None)
             if callable(rw):
