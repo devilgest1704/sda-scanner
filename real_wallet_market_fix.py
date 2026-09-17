@@ -147,28 +147,33 @@ def real_trading_report(dashboard):
     # Best P/L first: profitable positions at the top, largest losses at the bottom.
     rows.sort(key=lambda r: (r["pnl_sda"] is None, -(r["pnl_sda"] if r["pnl_sda"] is not None else r["pnl_pct"])))
 
-    lines = ["🧭 POSITION ACTION • REAL WALLET", "────────────────────────", f"Market snapshot: {len(tokens)} tokens (market_data + market_analysis)"]
+    lines = ["👛 REAL WALLET & PORTFOLIO", "────────────────────────"]
     if not rows:
-        lines.append("⚪ No open real-wallet positions")
+        lines.append("⚪ No open real-wallet token positions")
     for row in rows:
         pf = row["pf"]
         analysis = row["analysis"]
-        d = row["d"]
-        score = row["score"]
-        phase = row["phase"]
         pnl_pct = row["pnl_pct"]
         pnl_sda = row["pnl_sda"]
-        action = row["action"]
-        reason = row["reason"]
-        icon = {"EMERGENCY SELL":"🚨", "SELL / EXIT":"🔴", "HOLD / PUMP":"🟢", "HOLD / WATCH":"🟡", "HOLD / MARKET DATA N/A":"🟡"}.get(action, "🟡")
-        score_text = "N/A" if score is None else f"{_n(score):.0f}/100"
         symbol = pf.get("symbol") or pf.get("label") or str(row["token"])[:10]
+        amount = next((pf.get(k) for k in ("amount", "token_amount", "quantity", "balance") if pf.get(k) is not None), None)
+        value = next((pf.get(k) for k in ("current_value_sda", "value_sda", "market_value_sda", "current_sda") if pf.get(k) is not None), None)
+        price = _n(analysis.get("price_in_sda")) if analysis else 0.0
+        icon = "🟢" if pnl_sda is not None and pnl_sda > 0 else ("🔴" if pnl_sda is not None and pnl_sda < 0 else "⚪")
         pnl_text = "N/A SDA" if pnl_sda is None else f"{pnl_sda:+.2f} SDA"
-        lines.append(f"{icon} {symbol}: {action} • P/L {pnl_text} ({pnl_pct:+.2f}%) • score {score_text}")
-        if analysis:
-            lines.append(f"   phase {phase} • Δ {_n(d.get('pump_change')):+.1f} • M1H {_n(d.get('m1h')):+.2f}% • flow {_n(d.get('net_1h')):+.0f} SDA")
-        lines.append(f"   {reason}")
-    lines += ["", "👁 READ-ONLY • V26 paper policy; no real order is executed"]
+        amount_text = f"{_n(amount):g}" if amount is not None else "?"
+        value_text = f"{_n(value):.2f} SDA" if value is not None else "N/A SDA"
+        lines.append(f"{icon} {symbol} • P/L {pnl_text} ({pnl_pct:+.2f}%)")
+        lines.append(f"   {amount_text} • {value_text} • Price: {price:.6f} SDA")
+
+    wallet = dashboard.load("wallet_data.json", {})
+    known_value = sum(_n(r["pf"].get(k)) for r in rows for k in ("current_value_sda",) if r["pf"].get(k) is not None)
+    total_wallet = _n(wallet.get("total_value_sda"), known_value + _n(wallet.get("sda_balance_sda"), wallet.get("sda_balance")))
+    sda_balance = _n(wallet.get("sda_balance_sda"), wallet.get("sda_balance"))
+    realized = _n(portfolio.get("realized_pnl_sda"))
+    open_pnl = sum(_n(r["pnl_sda"]) for r in rows if r["pnl_sda"] is not None)
+    cost_basis = sum(next((_n(r["pf"].get(k)) for k in ("cost_basis_sda", "invested_sda", "cost_sda", "entry_value_sda", "position_value_sda") if r["pf"].get(k) is not None), 0.0) for r in rows)
+    lines += ["", "────────────────────────", f"💰 SDA: {sda_balance:.4f}", f"📊 Known token value: {known_value:.2f} SDA", f"💼 TOTAL WALLET VALUE: {total_wallet:.2f} SDA", "", "💹 P/L SUMMARY", f"{'🟢' if open_pnl > 0 else '🔴' if open_pnl < 0 else '⚪'} Current open P/L {open_pnl:+.2f} SDA", f"{'🟢' if realized > 0 else '🔴' if realized < 0 else '⚪'} Historical realized P/L {realized:+.2f} SDA", f"{'🟢' if realized + open_pnl > 0 else '🔴' if realized + open_pnl < 0 else '⚪'} Total P/L {realized + open_pnl:+.2f} SDA", f"Matched positions: {len(rows)} • Cost basis: {cost_basis:.2f} SDA", f"🪙 Token positions: {len(rows)}", "", "👁 READ-ONLY • No real order is executed"]
     return "\n".join(lines)
 
 
