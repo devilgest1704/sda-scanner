@@ -11,6 +11,7 @@ import json, os, math
 from datetime import datetime, timezone, timedelta
 
 STATE_FILE="v28_pump_state.json"
+_RUNTIME_STATE=None
 SL_PCT=.04
 MAX_OPEN=5
 MAX_BUYS_PER_RUN=1
@@ -42,19 +43,32 @@ def _num(v,d=0.):
 def _now():return datetime.now(timezone.utc).isoformat()
 
 def _load():
+    global _RUNTIME_STATE
+    if isinstance(_RUNTIME_STATE,dict):
+        return _RUNTIME_STATE
+    try:
+        with open("positions.json",encoding="utf-8") as f:
+            p=json.load(f)
+        s=p.get("_v28_state") if isinstance(p,dict) else None
+        if isinstance(s,dict):
+            _RUNTIME_STATE=s
+            return s
+    except Exception:
+        pass
     try:
         with open(STATE_FILE,encoding="utf-8") as f:
             x=json.load(f)
-        return x if isinstance(x,dict) else {}
-    except:return {}
+        if isinstance(x,dict):
+            _RUNTIME_STATE=x
+            return x
+    except Exception:
+        pass
+    _RUNTIME_STATE={}
+    return _RUNTIME_STATE
 
 def _save(x):
-    t=STATE_FILE+".tmp"
-    try:
-        with open(t,"w",encoding="utf-8") as f:
-            json.dump(x,f,indent=2,ensure_ascii=False)
-        os.replace(t,STATE_FILE)
-    except:pass
+    global _RUNTIME_STATE
+    _RUNTIME_STATE=x
 
 def _flow(a,w="1h"):
     f=(a.get("flow",{}) or {}).get(w,{}) if isinstance(a,dict) else {}
@@ -232,6 +246,28 @@ def _market_debug(dashboard,snapshot=None):
     return "\n".join(lines)
 
 def patch(main_module,engine_module):
+    global _RUNTIME_STATE
+    _original_engine_main=getattr(engine_module,"main",None)
+    def _v28_main(*args,**kwargs):
+        global _RUNTIME_STATE
+        _RUNTIME_STATE=None
+        result=_original_engine_main(*args,**kwargs)
+        try:
+            with open(engine_module.POSITIONS_FILE,encoding="utf-8") as f:
+                p=json.load(f)
+            if not isinstance(p,dict):
+                p={}
+            if isinstance(_RUNTIME_STATE,dict):
+                p["_v28_state"]=_RUNTIME_STATE
+                tmp=engine_module.POSITIONS_FILE+".v28tmp"
+                with open(tmp,"w",encoding="utf-8") as f:
+                    json.dump(p,f,indent=2,ensure_ascii=False)
+                os.replace(tmp,engine_module.POSITIONS_FILE)
+        except Exception:
+            pass
+        return result
+    if callable(_original_engine_main):
+        engine_module.main=_v28_main
     original_create=getattr(engine_module,"create",None)
     legacy=getattr(engine_module,"_legacy",None)
     targets=[engine_module]+([legacy] if legacy is not None else [])
