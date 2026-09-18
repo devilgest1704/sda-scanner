@@ -250,7 +250,7 @@ def _market_debug(dashboard,snapshot=None):
         f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15 • vol accel = confirmation • history persisted",
         f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.0f}% • emergency scan drop -{EMERGENCY_DROP_PCT:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
         f"Profit: MFE ≥ {PROFIT_PROTECT_MFE:.0f}% ⇒ protect ≥ +{PROFIT_PROTECT_ROI:.0f}% • trails 5/10/20/40/70 = 3/5/8/10/12%",
-        f"Exit: early -{EARLY_SL_PCT*100:.1f}% • stale {STALE_HOURS:.1f}h,
+        f"Exit: early -{EARLY_SL_PCT*100:.1f}% • stale {STALE_HOURS:.1f}h",
         "────────────────────────",f"🚀 V28 ENTRY READY in TOP {len(rows)}: {ready}",
         "","🎯 TOP V28 CANDIDATES","────────────────────────"
     ]
@@ -348,6 +348,8 @@ def patch(main_module,engine_module):
             current=_num(analysis.get("price_in_sda"))
             if not pos or current<=0:continue
 
+            previous_price=_num(pos.get("pump_last_price"),_num(pos.get("entry_price")))
+            scan_drop=(current-previous_price)/previous_price*100 if previous_price else 0
             s=decision(address,analysis,ws)
             score=_num(s.get("pump_score"))
             entry=_num(pos.get("entry_price"))
