@@ -16,11 +16,11 @@ MAX_OPEN=5
 MAX_BUYS_PER_RUN=1
 ENTRY_SCORE=72.
 WATCH_SCORE=48.
-ENTRY_CHANGE=8.
-MIN_M15=.5
+ENTRY_CHANGE=5.
+MIN_M15=-1.5
 MIN_TRADES=5
 MIN_VOLUME=750.
-MAX_VOL_ACCEL_DROP=-25.
+MAX_VOL_ACCEL_DROP=-100.
 COOLDOWN_HOURS=6.
 
 EARLY_SL_PCT=.025
@@ -92,7 +92,7 @@ def _cooldown_active(state,key):
     except:return False
 
 def _score(address,analysis):
-    state=_load(); hist=state.setdefault("history",{})
+    state=_load(); state["strategy_version"]="V28.1"; hist=state.setdefault("history",{})
     key=str(address).lower(); cur=_metrics(analysis)
     prev=hist.get(key,{}).get("last",{}); old=hist.get(key,{})
     if prev and all(abs(_num(cur.get(k))-_num(prev.get(k)))<1e-12 for k in cur):
@@ -103,7 +103,7 @@ def _score(address,analysis):
     flow=min(22,max(0,cur["flow"]/450*10+cur["flow15"]/300*5))
     buy=min(16,max(0,(cur["buy_ratio"]-1)*8))
     activity=min(12,max(0,math.log(max(1,cur["vol"]/300))*4+math.log(max(1,cur["trades"]/3))*4))
-    accel=min(8,max(0,cur["vol_accel"]/12+4))
+    accel=min(8,max(0,cur["vol_accel"]/20+4))
     trend=min(6,max(0,cur["m4"]*.5))
     quality=momentum+flow+buy+activity+accel+trend
 
@@ -119,8 +119,8 @@ def _score(address,analysis):
     if cur["flow"]<0:score-=14
     if cur["buy_ratio"]<1.:score-=10
     if cur["m1"]<0 and cur["m15"]<0:score-=14
-    if cur["m15"]<.5:score-=8
-    if cur["vol_accel"]<=MAX_VOL_ACCEL_DROP:score-=8
+    if cur["m15"]<-3:score-=6
+    if cur["vol_accel"]<=-100:score-=3
     score=max(0,min(100,score))
 
     trigger=(
@@ -128,7 +128,8 @@ def _score(address,analysis):
         and cur["flow"]>0 and cur["flow15"]>=0
         and cur["m1"]>0 and cur["m15"]>=MIN_M15
         and cur["trades"]>=MIN_TRADES and cur["vol"]>=MIN_VOLUME
-        and cur["buy_ratio"]>=1.15 and cur["vol_accel"]>MAX_VOL_ACCEL_DROP
+        and cur["buy_ratio"]>=1.15
+        and (cur["vol_accel"]>MAX_VOL_ACCEL_DROP or (cur["m1"]>=4 and cur["flow"]>0 and cur["buy_ratio"]>=1.5))
     )
     phase="ENTRY" if trigger else ("WATCH" if score>=WATCH_SCORE else "NO")
     hist[key]={"last":cur,"last_score":round(score,2),"last_change":round(change,2),
@@ -211,8 +212,8 @@ def _market_debug(dashboard,snapshot=None):
         "🐞 MARKET DEBUG • V28 ADAPTIVE PUMP HUNTER","",
         f"Loaded tokens: {len(tokens)}",
         "V28: quality + acceleration entry; asymmetric exit; paper-only",
-        f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • trigger ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
-        f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15",
+        f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
+        f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15 • vol accel = confirmation",
         f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
         f"Exit: early -{EARLY_SL_PCT*100:.1f}% • stale {STALE_HOURS:.1f}h • trails 5/10/20/40/70 = 3/5/8/10/12%",
         "────────────────────────",f"🚀 V28 ENTRY READY in TOP {len(rows)}: {ready}",
@@ -224,7 +225,7 @@ def _market_debug(dashboard,snapshot=None):
         phase=str(d.get("pump_phase") or "NO")
         status="🟢 ENTRY READY" if phase=="ENTRY" and not d.get("paper_buy_blocked") else ("🟡 WATCH" if phase=="WATCH" else "🔴 NO ENTRY")
         lines += [
-            f"{i}. {r['label']} • {status} • score {score:.0f}/100 • Δ +{change:.1f}",
+            f"{i}. {r['label']} • {status} • score {score:.0f}/100 • impulse +{change:.1f}",
             f"   M15/M1H/M4H {m['m15']:+.1f}%/{m['m1']:+.1f}%/{m['m4']:+.1f}% • flow {m['flow']:+.0f} SDA • vol {m['vol']:.0f} • trades {m['trades']:.0f}",
             f"   buy/sell {m['buy_ratio']:.2f} • trade ratio {m['trade_ratio']:.2f} • vol accel {m['vol_accel']:+.1f}%"
         ]
