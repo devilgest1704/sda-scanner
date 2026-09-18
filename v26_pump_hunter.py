@@ -1,4 +1,4 @@
-"""V28 adaptive pump hunter for paper trading.
+"""V28.4 adaptive pump hunter for paper trading.
 
 V28 keeps the asymmetric "let winners run" idea but changes the weak point
 identified in the V27 trade history: too many low-quality entries and oversized
@@ -15,8 +15,9 @@ _RUNTIME_STATE=None
 SL_PCT=.04
 MAX_OPEN=5
 MAX_BUYS_PER_RUN=1
-ENTRY_SCORE=72.
-WATCH_SCORE=48.
+ENTRY_SCORE=70.
+ENTRY_QUALITY=58.
+WATCH_SCORE=42.
 ENTRY_CHANGE=5.
 MIN_M15=-1.5
 MIN_TRADES=5
@@ -29,6 +30,10 @@ EARLY_WEAK_COUNT=2
 STALE_HOURS=2.5
 STALE_MFE_PCT=2.
 STALE_WEAK_COUNT=4
+
+PROFIT_PROTECT_MFE=5.
+PROFIT_PROTECT_ROI=1.
+EMERGENCY_DROP_PCT=6.
 
 TRAIL_5=.97
 TRAIL_10=.95
@@ -113,7 +118,7 @@ def _cooldown_active(state,key):
     except:return False
 
 def _score(address,analysis):
-    state=_load(); state["strategy_version"]="V28.3"; hist=state.setdefault("history",{})
+    state=_load(); state["strategy_version"]="V28.4"; hist=state.setdefault("history",{})
     key=str(address).lower(); cur=_metrics(analysis)
     prev=hist.get(key,{}).get("last",{}); old=hist.get(key,{})
     if prev and all(abs(_num(cur.get(k))-_num(prev.get(k)))<1e-12 for k in cur):
@@ -128,6 +133,7 @@ def _score(address,analysis):
     trend=min(6,max(0,cur["m4"]*.5))
     quality=momentum+flow+buy+activity+accel+trend
 
+    # V28.4: require both persistent quality and a fresh impulse.
     # Trigger = new pressure, not merely a high absolute score.
     d1=max(0,_delta(cur,prev,"m1"))
     d15=max(0,_delta(cur,prev,"m15"))
@@ -145,7 +151,7 @@ def _score(address,analysis):
     score=max(0,min(100,score))
 
     trigger=(
-        prev and score>=ENTRY_SCORE and change>=ENTRY_CHANGE
+        prev and quality>=ENTRY_QUALITY and score>=ENTRY_SCORE and change>=ENTRY_CHANGE
         and cur["flow"]>0 and cur["flow15"]>=0
         and cur["m1"]>0 and cur["m15"]>=MIN_M15
         and cur["trades"]>=MIN_TRADES and cur["vol"]>=MIN_VOLUME
@@ -154,7 +160,7 @@ def _score(address,analysis):
     )
     phase="ENTRY" if trigger else ("WATCH" if score>=WATCH_SCORE else "NO")
     hist[key]={"last":cur,"last_score":round(score,2),"last_change":round(change,2),
-               "phase":phase,"updated_at":_now(),
+               "phase":phase,"updated_at":_now(),"last_quality":round(quality,2),
                "impulse_components":{
                    "d1h_pct":round(d1,4),"d15m_pct":round(d15,4),
                    "flow_delta":round(df,4),"volume_ratio_delta":round(dv,4),
@@ -200,8 +206,9 @@ def decision(address,analysis,whale_state=None):
                "phase":phase,"metrics":cur,"cooldown":cooldown},
         "v27":{"version":"V27-PROFIT-LAYER","paper_only":True},
         "v28":{
-            "version":"V28-ADAPTIVE-PUMP-HUNTER","paper_only":True,
-            "entry_score":ENTRY_SCORE,"entry_change":ENTRY_CHANGE,
+            "version":"V28.4-ADAPTIVE-PUMP-HUNTER","paper_only":True,
+            "entry_score":ENTRY_SCORE,"entry_quality":ENTRY_QUALITY,"entry_change":ENTRY_CHANGE,
+            "emergency_drop_pct":EMERGENCY_DROP_PCT,"profit_protect_mfe":PROFIT_PROTECT_MFE,"profit_protect_roi":PROFIT_PROTECT_ROI,
             "hard_stop_pct":SL_PCT,"early_sl_pct":EARLY_SL_PCT,
             "stale_hours":STALE_HOURS,
             "trail_5":1-TRAIL_5,"trail_10":1-TRAIL_10,
@@ -236,13 +243,14 @@ def _market_debug(dashboard,snapshot=None):
     rows=rows[:5]
     ready=sum(1 for r in rows if r["d"].get("pump_phase")=="ENTRY" and not r["d"].get("paper_buy_blocked"))
     lines=[
-        "🐞 MARKET DEBUG • V28.3 ADAPTIVE PUMP HUNTER","",
+        "🐞 MARKET DEBUG • V28.4 ADAPTIVE PUMP HUNTER","",
         f"Loaded tokens: {len(tokens)}",
-        "V28: quality + acceleration entry; asymmetric exit; paper-only",
-        f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • real impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
+        "V28.4: quality + fresh impulse entry; emergency loss protection; asymmetric exit",
+        f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • quality ≥ {ENTRY_QUALITY:.0f} • impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
         f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15 • vol accel = confirmation • history persisted",
-        f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
-        f"Exit: early -{EARLY_SL_PCT*100:.1f}% • stale {STALE_HOURS:.1f}h • trails 5/10/20/40/70 = 3/5/8/10/12%",
+        f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.0f}% • emergency scan drop -{EMERGENCY_DROP_PCT:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
+        f"Profit: MFE ≥ {PROFIT_PROTECT_MFE:.0f}% ⇒ protect ≥ +{PROFIT_PROTECT_ROI:.0f}% • trails 5/10/20/40/70 = 3/5/8/10/12%",
+        f"Exit: early -{EARLY_SL_PCT*100:.1f}% • stale {STALE_HOURS:.1f}h,
         "────────────────────────",f"🚀 V28 ENTRY READY in TOP {len(rows)}: {ready}",
         "","🎯 TOP V28 CANDIDATES","────────────────────────"
     ]
@@ -321,7 +329,7 @@ def patch(main_module,engine_module):
             "v26_mode":"PUMP-HUNTER","v27_mode":"PROFIT-LAYER",
             "v28_mode":"ADAPTIVE-PUMP-HUNTER",
             "pump_peak_price":e,"pump_mfe_pct":0.,"pump_weak_count":0,
-            "pump_age_scans":0,"sl_pct":SL_PCT,"tp1_pct":9.99,"tp2_pct":9.99,
+            "pump_age_scans":0,"pump_last_price":e,"sl_pct":SL_PCT,"tp1_pct":9.99,"tp2_pct":9.99,
             "trail_pct":0.,"sl":e*(1-SL_PCT),"initial_sl":e*(1-SL_PCT),
             "tp1":e*10.99,"tp2":e*10.99,
             "risk_profile":"V28-ADAPTIVE-PUMP",
@@ -355,6 +363,8 @@ def patch(main_module,engine_module):
             if roi>=20:pos["sl"]=max(_num(pos.get("sl")),peak*TRAIL_20)
             if roi>=40:pos["sl"]=max(_num(pos.get("sl")),peak*TRAIL_40)
             if roi>=70:pos["sl"]=max(_num(pos.get("sl")),peak*TRAIL_70)
+            if pos["pump_mfe_pct"]>=PROFIT_PROTECT_MFE:
+                pos["sl"]=max(_num(pos.get("sl")),entry*(1+PROFIT_PROTECT_ROI/100))
 
             weak=(s.get("m1h",0)<=0 and s.get("net_1h",0)<=0) or score<42
             if weak:
@@ -363,7 +373,12 @@ def patch(main_module,engine_module):
                 pos["pump_weak_count"]=max(0,int(_num(pos.get("pump_weak_count")))-1)
 
             stop=_num(pos.get("sl"))
-            if current<=stop:
+            if scan_drop<=-EMERGENCY_DROP_PCT:
+                r=engine_module.close(p,address,current,"V28 EMERGENCY GAP")
+                if r:
+                    state=_load(); state.setdefault("cooldowns",{})[str(address).lower()]=(datetime.now(timezone.utc)+timedelta(hours=COOLDOWN_HOURS)).isoformat(); _save(state)
+                    events.append(f"🚨 V28 EMERGENCY GAP {r['label']} | ROI {roi:+.2f}% | scan {scan_drop:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}%")
+            elif current<=stop:
                 hard=roi<=-SL_PCT*100
                 reason="V28 HARD STOP" if hard else "V28 TRAILING STOP"
                 r=engine_module.close(p,address,current,reason)
