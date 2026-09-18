@@ -261,16 +261,37 @@ def _market_debug(dashboard,snapshot=None):
 def patch(main_module,engine_module):
     global _RUNTIME_STATE
     _original_engine_main=getattr(engine_module,"main",None)
+
+    # IMPORTANT: engine.main() ultimately resolves save() from engine_legacy.
+    # Persisting V28 state only after main() returned was fragile because another
+    # save() path could overwrite positions.json. Hook the canonical save path
+    # instead, so every normal positions.json write carries the latest V28 state.
+    original_saves={}
+    for _target in [engine_module, getattr(engine_module,"_legacy",None)]:
+        if _target is None or getattr(_target,"_v28_save_patched",False):
+            continue
+        _orig_save=getattr(_target,"save",None)
+        if not callable(_orig_save):
+            continue
+        original_saves[id(_target)]=(_target,_orig_save)
+        def _v28_save(filename,data,_orig_save=_orig_save):
+            global _RUNTIME_STATE
+            if str(filename)==str(getattr(engine_module,"POSITIONS_FILE","positions.json")) and isinstance(data,dict) and isinstance(_RUNTIME_STATE,dict):
+                data=dict(data)
+                data["_v28_state"]=_RUNTIME_STATE
+            return _orig_save(filename,data)
+        _target.save=_v28_save
+        _target._v28_save_patched=True
+
     def _v28_main(*args,**kwargs):
         global _RUNTIME_STATE
         _RUNTIME_STATE=None
         result=_original_engine_main(*args,**kwargs)
+        # Defensive final flush for callers that bypass the normal save path.
         try:
             with open(engine_module.POSITIONS_FILE,encoding="utf-8") as f:
                 p=json.load(f)
-            if not isinstance(p,dict):
-                p={}
-            if isinstance(_RUNTIME_STATE,dict):
+            if isinstance(p,dict) and isinstance(_RUNTIME_STATE,dict):
                 p["_v28_state"]=_RUNTIME_STATE
                 tmp=engine_module.POSITIONS_FILE+".v28tmp"
                 with open(tmp,"w",encoding="utf-8") as f:
