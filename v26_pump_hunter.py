@@ -17,6 +17,12 @@ MAX_OPEN=5
 MAX_BUYS_PER_RUN=1
 ENTRY_SCORE=70.
 ENTRY_QUALITY=58.
+EARLY_M1_MAX=18.
+LATE_M1_MIN=18.
+LATE_M15_MIN=1.5.
+LATE_M4_MIN=0.
+EARLY_M15_MIN=.8.
+EARLY_FLOW15_MIN=50.
 WATCH_SCORE=42.
 ENTRY_CHANGE=5.
 MIN_M15=-1.5
@@ -118,7 +124,7 @@ def _cooldown_active(state,key):
     except:return False
 
 def _score(address,analysis):
-    state=_load(); state["strategy_version"]="V28.4"; hist=state.setdefault("history",{})
+    state=_load(); state["strategy_version"]="V28.5"; hist=state.setdefault("history",{})
     key=str(address).lower(); cur=_metrics(analysis)
     prev=hist.get(key,{}).get("last",{}); old=hist.get(key,{})
     if prev and all(abs(_num(cur.get(k))-_num(prev.get(k)))<1e-12 for k in cur):
@@ -133,7 +139,11 @@ def _score(address,analysis):
     trend=min(6,max(0,cur["m4"]*.5))
     quality=momentum+flow+buy+activity+accel+trend
 
-    # V28.4: require both persistent quality and a fresh impulse.
+    # Reject exhausted spikes: high 1h momentum without fresh 15m confirmation.
+    late_spike = cur["m1"] >= LATE_M1_MIN and (cur["m15"] < LATE_M15_MIN or cur["m4"] < LATE_M4_MIN)
+    early_setup = (cur["m1"] <= EARLY_M1_MAX and cur["m15"] >= EARLY_M15_MIN and cur["flow15"] >= EARLY_FLOW15_MIN)
+
+    # V28.5: require both persistent quality and a fresh impulse.
     # Trigger = new pressure, not merely a high absolute score.
     d1=max(0,_delta(cur,prev,"m1"))
     d15=max(0,_delta(cur,prev,"m15"))
@@ -152,6 +162,7 @@ def _score(address,analysis):
 
     trigger=(
         prev and quality>=ENTRY_QUALITY and score>=ENTRY_SCORE and change>=ENTRY_CHANGE
+        and not late_spike and (early_setup or cur["m1"]>=LATE_M1_MIN)
         and cur["flow"]>0 and cur["flow15"]>=0
         and cur["m1"]>0 and cur["m15"]>=MIN_M15
         and cur["trades"]>=MIN_TRADES and cur["vol"]>=MIN_VOLUME
@@ -206,8 +217,10 @@ def decision(address,analysis,whale_state=None):
                "phase":phase,"metrics":cur,"cooldown":cooldown},
         "v27":{"version":"V27-PROFIT-LAYER","paper_only":True},
         "v28":{
-            "version":"V28.4-ADAPTIVE-PUMP-HUNTER","paper_only":True,
+            "version":"V28.5-EARLY-PUMP-HUNTER","paper_only":True,
             "entry_score":ENTRY_SCORE,"entry_quality":ENTRY_QUALITY,"entry_change":ENTRY_CHANGE,
+            "early_m1_max":EARLY_M1_MAX,"early_m15_min":EARLY_M15_MIN,"early_flow15_min":EARLY_FLOW15_MIN,
+            "late_m1_min":LATE_M1_MIN,"late_m15_min":LATE_M15_MIN,"late_m4_min":LATE_M4_MIN,
             "emergency_drop_pct":EMERGENCY_DROP_PCT,"profit_protect_mfe":PROFIT_PROTECT_MFE,"profit_protect_roi":PROFIT_PROTECT_ROI,
             "hard_stop_pct":SL_PCT,"early_sl_pct":EARLY_SL_PCT,
             "stale_hours":STALE_HOURS,
@@ -247,6 +260,7 @@ def _market_debug(dashboard,snapshot=None):
         f"Loaded tokens: {len(tokens)}",
         "V28.4: quality + fresh impulse entry; emergency loss protection; asymmetric exit",
         f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • quality ≥ {ENTRY_QUALITY:.0f} • impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
+        f"Anti-spike: M1H ≥ {LATE_M1_MIN:.0f}% requires M15 ≥ {LATE_M15_MIN:.1f}% and M4H ≥ {LATE_M4_MIN:.1f}%",
         f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15 • vol accel = confirmation • history persisted",
         f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.0f}% • emergency scan drop -{EMERGENCY_DROP_PCT:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
         f"Profit: MFE ≥ {PROFIT_PROTECT_MFE:.0f}% ⇒ protect ≥ +{PROFIT_PROTECT_ROI:.0f}% • trails 5/10/20/40/70 = 3/5/8/10/12%",
