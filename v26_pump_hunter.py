@@ -69,6 +69,13 @@ def _load():
 def _save(x):
     global _RUNTIME_STATE
     _RUNTIME_STATE=x
+    try:
+        tmp=STATE_FILE+".tmp"
+        with open(tmp,"w",encoding="utf-8") as f:
+            json.dump(x,f,indent=2,ensure_ascii=False)
+        os.replace(tmp,STATE_FILE)
+    except Exception:
+        pass
 
 def _flow(a,w="1h"):
     f=(a.get("flow",{}) or {}).get(w,{}) if isinstance(a,dict) else {}
@@ -106,7 +113,7 @@ def _cooldown_active(state,key):
     except:return False
 
 def _score(address,analysis):
-    state=_load(); state["strategy_version"]="V28.1"; hist=state.setdefault("history",{})
+    state=_load(); state["strategy_version"]="V28.3"; hist=state.setdefault("history",{})
     key=str(address).lower(); cur=_metrics(analysis)
     prev=hist.get(key,{}).get("last",{}); old=hist.get(key,{})
     if prev and all(abs(_num(cur.get(k))-_num(prev.get(k)))<1e-12 for k in cur):
@@ -147,7 +154,13 @@ def _score(address,analysis):
     )
     phase="ENTRY" if trigger else ("WATCH" if score>=WATCH_SCORE else "NO")
     hist[key]={"last":cur,"last_score":round(score,2),"last_change":round(change,2),
-               "phase":phase,"updated_at":_now()}
+               "phase":phase,"updated_at":_now(),
+               "impulse_components":{
+                   "d1h_pct":round(d1,4),"d15m_pct":round(d15,4),
+                   "flow_delta":round(df,4),"volume_ratio_delta":round(dv,4),
+                   "trade_ratio_delta":round(dt,4)
+               }}
+    state["updated_at"]=_now(); _save(state)
     state["updated_at"]=_now(); _save(state)
     return cur,round(score,1),round(change,1),phase
 
@@ -223,11 +236,11 @@ def _market_debug(dashboard,snapshot=None):
     rows=rows[:5]
     ready=sum(1 for r in rows if r["d"].get("pump_phase")=="ENTRY" and not r["d"].get("paper_buy_blocked"))
     lines=[
-        "🐞 MARKET DEBUG • V28 ADAPTIVE PUMP HUNTER","",
+        "🐞 MARKET DEBUG • V28.3 ADAPTIVE PUMP HUNTER","",
         f"Loaded tokens: {len(tokens)}",
         "V28: quality + acceleration entry; asymmetric exit; paper-only",
-        f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
-        f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15 • vol accel = confirmation",
+        f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • real impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
+        f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15 • vol accel = confirmation • history persisted",
         f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
         f"Exit: early -{EARLY_SL_PCT*100:.1f}% • stale {STALE_HOURS:.1f}h • trails 5/10/20/40/70 = 3/5/8/10/12%",
         "────────────────────────",f"🚀 V28 ENTRY READY in TOP {len(rows)}: {ready}",
