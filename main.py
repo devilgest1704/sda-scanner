@@ -1,4 +1,4 @@
-"""Canonical SDA scanner entrypoint: V28 adaptive paper Pump Hunter.
+"""Canonical SDA scanner entrypoint: V28.3 adaptive paper Pump Hunter.
 
 The legacy stack remains available inside main_core for compatibility.
 Paper Trading decisions are replaced by V28. Real wallet remains read-only.
@@ -16,7 +16,7 @@ MAX_WIN_BUY_THRESHOLD=_v28.ENTRY_SCORE
 MAX_WIN_MAX_OPEN_POSITIONS=_v28.MAX_OPEN
 MAX_WIN_MAX_NEW_BUYS_PER_RUN=_v28.MAX_BUYS_PER_RUN
 MAX_WIN_SL_COOLDOWN_SCANS=0
-PUMP_HUNTER_VERSION="V28-ADAPTIVE-PUMP-HUNTER"
+PUMP_HUNTER_VERSION="V28.3-ADAPTIVE-PUMP-HUNTER"
 
 _paper.BUY_THRESHOLD=_v28.ENTRY_SCORE
 _paper.MAX_OPEN_POSITIONS=_v28.MAX_OPEN
