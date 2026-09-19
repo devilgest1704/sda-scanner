@@ -23,6 +23,11 @@ LATE_M15_MIN=1.5
 LATE_M4_MIN=0.
 EARLY_M15_MIN=.8
 EARLY_FLOW15_MIN=50.
+# V28.7: reject price-only spikes when price momentum is large but flow is weak.
+PRICE_FLOW_M1_MIN=18.
+PRICE_FLOW_WEAK_MAX=75.
+PRICE_FLOW_RATIO_MIN=0.75.
+PRICE_FLOW_EXTREME_M1=35.
 WATCH_SCORE=42.
 ENTRY_CHANGE=5.
 MIN_M15=-1.5
@@ -124,7 +129,7 @@ def _cooldown_active(state,key):
     except:return False
 
 def _score(address,analysis):
-    state=_load(); state["strategy_version"]="V28.5"; hist=state.setdefault("history",{})
+    state=_load(); state["strategy_version"]="V28.7"; hist=state.setdefault("history",{})
     key=str(address).lower(); cur=_metrics(analysis)
     prev=hist.get(key,{}).get("last",{}); old=hist.get(key,{})
     if prev and all(abs(_num(cur.get(k))-_num(prev.get(k)))<1e-12 for k in cur):
@@ -141,6 +146,11 @@ def _score(address,analysis):
 
     # Reject exhausted spikes: high 1h momentum without fresh 15m confirmation.
     late_spike = cur["m1"] >= LATE_M1_MIN and (cur["m15"] < LATE_M15_MIN or cur["m4"] < LATE_M4_MIN)
+    # Price/flow consistency: a large price move must have meaningful capital flow.
+    # Scale flow gently with the size of the move so genuine high-flow pumps survive.
+    flow_floor = max(PRICE_FLOW_WEAK_MAX, cur["m1"] * PRICE_FLOW_RATIO_MIN)
+    price_only_spike = cur["m1"] >= PRICE_FLOW_M1_MIN and cur["flow"] < flow_floor
+    extreme_price_only = cur["m1"] >= PRICE_FLOW_EXTREME_M1 and cur["flow"] < flow_floor * 1.25
     early_setup = (cur["m1"] <= EARLY_M1_MAX and cur["m15"] >= EARLY_M15_MIN and cur["flow15"] >= EARLY_FLOW15_MIN)
 
     # V28.5: require both persistent quality and a fresh impulse.
@@ -158,11 +168,13 @@ def _score(address,analysis):
     if cur["m1"]<0 and cur["m15"]<0:score-=14
     if cur["m15"]<-3:score-=6
     if cur["vol_accel"]<=-100:score-=3
+    if price_only_spike: score-=12
+    if extreme_price_only: score-=8
     score=max(0,min(100,score))
 
     trigger=(
         prev and quality>=ENTRY_QUALITY and score>=ENTRY_SCORE and change>=ENTRY_CHANGE
-        and not late_spike and (early_setup or cur["m1"]>=LATE_M1_MIN)
+        and not late_spike and not extreme_price_only and (early_setup or cur["m1"]>=LATE_M1_MIN)
         and cur["flow"]>0 and cur["flow15"]>=0
         and cur["m1"]>0 and cur["m15"]>=MIN_M15
         and cur["trades"]>=MIN_TRADES and cur["vol"]>=MIN_VOLUME
@@ -221,7 +233,7 @@ def decision(address,analysis,whale_state=None):
                "phase":phase,"metrics":cur,"cooldown":cooldown},
         "v27":{"version":"V27-PROFIT-LAYER","paper_only":True},
         "v28":{
-            "version":"V28.6-EARLY-PUMP-HUNTER","paper_only":True,
+            "version":"V28.7-EARLY-PUMP-HUNTER","paper_only":True,
             "entry_score":ENTRY_SCORE,"entry_quality":ENTRY_QUALITY,"entry_change":ENTRY_CHANGE,
             "early_m1_max":EARLY_M1_MAX,"early_m15_min":EARLY_M15_MIN,"early_flow15_min":EARLY_FLOW15_MIN,
             "late_m1_min":LATE_M1_MIN,"late_m15_min":LATE_M15_MIN,"late_m4_min":LATE_M4_MIN,
@@ -262,14 +274,14 @@ def _market_debug(dashboard,snapshot=None):
     lines=[
         "🐞 MARKET DEBUG • V28.4 ADAPTIVE PUMP HUNTER","",
         f"Loaded tokens: {len(tokens)}",
-        "V28.6: quality + fresh impulse entry; hard WATCH/NO buy enforcement; emergency loss protection; asymmetric exit",
+        "V28.7: quality + price/flow consistency + hard WATCH/NO buy enforcement; emergency loss protection; asymmetric exit",
         f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • quality ≥ {ENTRY_QUALITY:.0f} • impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
         f"Anti-spike: M1H ≥ {LATE_M1_MIN:.0f}% requires M15 ≥ {LATE_M15_MIN:.1f}% and M4H ≥ {LATE_M4_MIN:.1f}%",
         f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15 • vol accel = confirmation • history persisted",
         f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.0f}% • emergency scan drop -{EMERGENCY_DROP_PCT:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
         f"Profit: MFE ≥ {PROFIT_PROTECT_MFE:.0f}% ⇒ protect ≥ +{PROFIT_PROTECT_ROI:.0f}% • trails 5/10/20/40/70 = 3/5/8/10/12%",
         f"Exit: early -{EARLY_SL_PCT*100:.1f}% • stale {STALE_HOURS:.1f}h",
-        "────────────────────────",f"🚀 V28.6 ENTRY READY in TOP {len(rows)}: {ready}",
+        "────────────────────────",f"🚀 V28.7 ENTRY READY in TOP {len(rows)}: {ready}",
         "","🎯 TOP V28 CANDIDATES","────────────────────────"
     ]
     if not rows:lines.append("⚪ No active candidates")
