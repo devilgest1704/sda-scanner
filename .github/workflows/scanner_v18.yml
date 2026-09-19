@@ -135,28 +135,34 @@ jobs:
         run: |
           git config user.name 'sda-scanner-bot'
           git config user.email 'scanner@github.local'
-          git add main.py market_scanner.py liquidity_scanner.py state.json whale_state.json whale_data.json market_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json paper_buy_guard_state.json sync_real_wallet.py real_trading_config.py real_trader.py real_trader_dry_run.py real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json
+          # IMPORTANT: this step owns runtime STATE only. Never stage source/code files here.
+          # Strategy commits (e.g. V28.7/V28.8) must remain authoritative on main.
+          STATE_FILES="state.json whale_state.json whale_data.json market_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json paper_buy_guard_state.json real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json"
+          git add $STATE_FILES
           if git diff --staged --quiet; then
             echo 'No scanner state changes to commit.'
             exit 0
           fi
           git commit -m 'Update SDA scanner state'
 
+          # Runtime state is rebased onto the newest main before every retry.
+          # Do NOT use reset --soft: it can accidentally turn a strategy commit
+          # into part of the state commit and later overwrite source changes.
           for attempt in 1 2 3 4 5; do
-            if git push origin main; then
+            if git push origin HEAD:main; then
               echo "State push succeeded on attempt $attempt."
-              break
+              exit 0
             fi
             if [ "$attempt" = "5" ]; then
               echo 'State push failed after 5 attempts.'
               exit 1
             fi
+
             git fetch origin main
-            git reset --soft origin/main
-            git commit -C HEAD --no-edit || true
-            if git diff --cached --quiet; then
-              git add main.py market_scanner.py liquidity_scanner.py state.json whale_state.json whale_data.json market_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json paper_buy_guard_state.json sync_real_wallet.py real_trading_config.py real_trader.py real_trader_dry_run.py real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json
-              git commit -m 'Update SDA scanner state'
+            if ! git rebase origin/main; then
+              echo 'State rebase conflict detected; aborting rather than modifying strategy/source files.'
+              git rebase --abort || true
+              exit 1
             fi
             sleep 2
           done
