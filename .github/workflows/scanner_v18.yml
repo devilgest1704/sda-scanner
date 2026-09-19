@@ -81,6 +81,20 @@ jobs:
               print(f"Telegram webhook already active: {desired}")
           PY
 
+      - name: Verify scanner source and bytecode before run
+        run: |
+          echo "HEAD=$(git rev-parse HEAD)"
+          git status --short
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          python -m py_compile v26_pump_hunter.py main.py paper_engine_v19.py
+          python - <<'PY'
+          from pathlib import Path
+          line = Path("v26_pump_hunter.py").read_text(encoding="utf-8").splitlines()[28]
+          print(f"v26 line 29: {line}")
+          if "PRICE_FLOW_RATIO_MIN=0.75." in line:
+              raise SystemExit("Refusing to run: stale/malformed V28.7 source detected")
+          PY
+
       - name: Run SDA Scanner V18
         run: bash run_scanner_v18.sh
 
