@@ -85,6 +85,13 @@ jobs:
         run: |
           echo "HEAD=$(git rev-parse HEAD)"
           git status --short
+          # Force tracked source files back to the exact blobs from HEAD.
+          # This prevents any stale workspace copy from reaching the Python interpreter.
+          git checkout HEAD -- v26_pump_hunter.py main.py paper_engine_v19.py
+          echo "HEAD v26 blob:"
+          git rev-parse HEAD:v26_pump_hunter.py
+          echo "WORKTREE v26 sha256:"
+          sha256sum v26_pump_hunter.py
           find . -type d -name __pycache__ -prune -exec rm -rf {} +
           python -m py_compile v26_pump_hunter.py main.py paper_engine_v19.py
           python - <<'PY'
