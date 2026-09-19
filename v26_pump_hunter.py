@@ -23,6 +23,19 @@ LATE_M15_MIN=1.5
 LATE_M4_MIN=0.
 EARLY_M15_MIN=.8
 EARLY_FLOW15_MIN=50.
+# V28.8 controlled early-entry lane.
+EARLY_ENTRY_SCORE=70.
+EARLY_ENTRY_QUALITY=44.
+EARLY_ENTRY_M1_MIN=1.5.
+EARLY_ENTRY_M1_MAX=12.
+EARLY_ENTRY_M15_MIN=-2.
+EARLY_ENTRY_M4_MIN=-2.5.
+EARLY_ENTRY_FLOW_MIN=300.
+EARLY_ENTRY_FLOW15_MIN=0.
+EARLY_ENTRY_VOLUME_MIN=500.
+EARLY_ENTRY_TRADES_MIN=8.
+EARLY_ENTRY_BUY_RATIO=1.5.
+EARLY_ENTRY_VOL_ACCEL_MIN=-60.
 # V28.7: reject price-only spikes when price momentum is large but flow is weak.
 PRICE_FLOW_M1_MIN=18.
 PRICE_FLOW_WEAK_MAX=75.
@@ -129,7 +142,7 @@ def _cooldown_active(state,key):
     except:return False
 
 def _score(address,analysis):
-    state=_load(); state["strategy_version"]="V28.7"; hist=state.setdefault("history",{})
+    state=_load(); state["strategy_version"]="V28.8"; hist=state.setdefault("history",{})
     key=str(address).lower(); cur=_metrics(analysis)
     prev=hist.get(key,{}).get("last",{}); old=hist.get(key,{})
     if prev and all(abs(_num(cur.get(k))-_num(prev.get(k)))<1e-12 for k in cur):
@@ -172,7 +185,7 @@ def _score(address,analysis):
     if extreme_price_only: score-=8
     score=max(0,min(100,score))
 
-    trigger=(
+    confirmed_trigger=(
         prev and quality>=ENTRY_QUALITY and score>=ENTRY_SCORE and change>=ENTRY_CHANGE
         and not late_spike and not extreme_price_only and (early_setup or cur["m1"]>=LATE_M1_MIN)
         and cur["flow"]>0 and cur["flow15"]>=0
@@ -181,7 +194,22 @@ def _score(address,analysis):
         and cur["buy_ratio"]>=1.15
         and (cur["vol_accel"]>MAX_VOL_ACCEL_DROP or (cur["m1"]>=4 and cur["flow"]>0 and cur["buy_ratio"]>=1.5))
     )
-    phase="ENTRY" if trigger else ("WATCH" if score>=WATCH_SCORE else "NO")
+    early_flow_confirm=(
+        cur["flow"]>=EARLY_ENTRY_FLOW_MIN and cur["flow15"]>=EARLY_ENTRY_FLOW15_MIN
+        and cur["buy_ratio"]>=EARLY_ENTRY_BUY_RATIO
+        and (cur["vol_accel"]>=EARLY_ENTRY_VOL_ACCEL_MIN or
+             (cur["flow"]>=EARLY_ENTRY_FLOW_MIN*2 and cur["buy_ratio"]>=2.0))
+    )
+    early_trigger=(
+        prev and quality>=EARLY_ENTRY_QUALITY and score>=EARLY_ENTRY_SCORE and change>=ENTRY_CHANGE
+        and not extreme_price_only
+        and EARLY_ENTRY_M1_MIN<=cur["m1"]<=EARLY_ENTRY_M1_MAX
+        and cur["m15"]>=EARLY_ENTRY_M15_MIN and cur["m4"]>=EARLY_ENTRY_M4_MIN
+        and cur["trades"]>=EARLY_ENTRY_TRADES_MIN and cur["vol"]>=EARLY_ENTRY_VOLUME_MIN
+        and early_flow_confirm
+    )
+    trigger=confirmed_trigger or early_trigger
+    phase="ENTRY" if confirmed_trigger else ("EARLY" if early_trigger else ("WATCH" if score>=WATCH_SCORE else "NO"))
     hist[key]={"last":cur,"last_score":round(score,2),"last_change":round(change,2),
                "phase":phase,"updated_at":_now(),"last_quality":round(quality,2),
                "impulse_components":{
@@ -197,15 +225,15 @@ def decision(address,analysis,whale_state=None):
     cur,score,change,phase=_score(address,analysis)
     state=_load(); key=str(address).lower()
     cooldown=_cooldown_active(state,key)
-    blocked=phase!="ENTRY" or cooldown
+    blocked=phase not in ("ENTRY","EARLY") or cooldown
     # The engine historically used confidence/buy_score as the actual buy gate.
     # Keep the raw pump score for diagnostics, but force every WATCH/NO/cooldown
     # decision below the engine threshold so a WATCH candidate can never open.
     effective_score=score if not blocked else min(score,ENTRY_SCORE-1.0)
     if cooldown:
         reason=f"V28 cooldown until {_cooldown_until(state,key)}"
-    elif phase=="ENTRY":
-        reason="V28 PUMP ENTRY: momentum + flow + activity + acceleration gates passed"
+    elif phase in ("ENTRY","EARLY"):
+        reason=("V28.8 EARLY PUMP ENTRY: controlled early momentum + strong flow + buy pressure gates passed" if phase=="EARLY" else "V28 PUMP ENTRY: momentum + flow + activity + acceleration gates passed")
     else:
         reason=f"V28 {phase}; score {score:.0f}, trigger +{change:.1f}"
     return {
@@ -233,7 +261,7 @@ def decision(address,analysis,whale_state=None):
                "phase":phase,"metrics":cur,"cooldown":cooldown},
         "v27":{"version":"V27-PROFIT-LAYER","paper_only":True},
         "v28":{
-            "version":"V28.7-EARLY-PUMP-HUNTER","paper_only":True,
+            "version":"V28.8-DUAL-LANE-PUMP-HUNTER","paper_only":True,
             "entry_score":ENTRY_SCORE,"entry_quality":ENTRY_QUALITY,"entry_change":ENTRY_CHANGE,
             "early_m1_max":EARLY_M1_MAX,"early_m15_min":EARLY_M15_MIN,"early_flow15_min":EARLY_FLOW15_MIN,
             "late_m1_min":LATE_M1_MIN,"late_m15_min":LATE_M15_MIN,"late_m4_min":LATE_M4_MIN,
@@ -270,12 +298,13 @@ def _market_debug(dashboard,snapshot=None):
         rows.append({"address":address,"label":dashboard.engine.lbl(address,meta),"d":d,"m":cur})
     rows.sort(key=lambda r:(_num(r["d"].get("pump_score")),r["m"]["vol"],r["m"]["trades"]),reverse=True)
     rows=rows[:5]
-    ready=sum(1 for r in rows if r["d"].get("pump_phase")=="ENTRY" and not r["d"].get("paper_buy_blocked"))
+    ready=sum(1 for r in rows if r["d"].get("pump_phase") in ("ENTRY","EARLY") and not r["d"].get("paper_buy_blocked"))
     lines=[
         "🐞 MARKET DEBUG • V28.4 ADAPTIVE PUMP HUNTER","",
         f"Loaded tokens: {len(tokens)}",
-        "V28.7: quality + price/flow consistency + hard WATCH/NO buy enforcement; emergency loss protection; asymmetric exit",
+        "V28.8: dual-lane early + confirmed entry; price/flow consistency; hard WATCH/NO buy enforcement; asymmetric exit",
         f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • quality ≥ {ENTRY_QUALITY:.0f} • impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
+        f"EARLY: score ≥ {EARLY_ENTRY_SCORE:.0f} • quality ≥ {EARLY_ENTRY_QUALITY:.0f} • M1H {EARLY_ENTRY_M1_MIN:.1f}–{EARLY_ENTRY_M1_MAX:.0f}% • M15 ≥ {EARLY_ENTRY_M15_MIN:.1f}% • flow ≥ {EARLY_ENTRY_FLOW_MIN:.0f} • vol ≥ {EARLY_ENTRY_VOLUME_MIN:.0f}",
         f"Anti-spike: M1H ≥ {LATE_M1_MIN:.0f}% requires M15 ≥ {LATE_M15_MIN:.1f}% and M4H ≥ {LATE_M4_MIN:.1f}%",
         f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15 • vol accel = confirmation • history persisted",
         f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.0f}% • emergency scan drop -{EMERGENCY_DROP_PCT:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
@@ -288,7 +317,7 @@ def _market_debug(dashboard,snapshot=None):
     for i,r in enumerate(rows,1):
         d=r["d"];m=r["m"];score=_num(d.get("pump_score"));change=_num(d.get("pump_change"))
         phase=str(d.get("pump_phase") or "NO")
-        status="🟢 ENTRY READY" if phase=="ENTRY" and not d.get("paper_buy_blocked") else ("🟡 WATCH" if phase=="WATCH" else "🔴 NO ENTRY")
+        status=("🟢 EARLY ENTRY" if phase=="EARLY" else "🟢 ENTRY READY") if phase in ("ENTRY","EARLY") and not d.get("paper_buy_blocked") else ("🟡 WATCH" if phase=="WATCH" else "🔴 NO ENTRY")
         lines += [
             f"{i}. {r['label']} • {status} • score {score:.0f}/100 • impulse +{change:.1f}",
             f"   M15/M1H/M4H {m['m15']:+.1f}%/{m['m1']:+.1f}%/{m['m4']:+.1f}% • flow {m['flow']:+.0f} SDA • vol {m['vol']:.0f} • trades {m['trades']:.0f}",
