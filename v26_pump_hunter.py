@@ -306,11 +306,11 @@ def _market_debug(dashboard,snapshot=None):
         f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • quality ≥ {ENTRY_QUALITY:.0f} • impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
         f"EARLY: score ≥ {EARLY_ENTRY_SCORE:.0f} • quality ≥ {EARLY_ENTRY_QUALITY:.0f} • M1H {EARLY_ENTRY_M1_MIN:.1f}–{EARLY_ENTRY_M1_MAX:.0f}% • M15 ≥ {EARLY_ENTRY_M15_MIN:.1f}% • flow ≥ {EARLY_ENTRY_FLOW_MIN:.0f} • vol ≥ {EARLY_ENTRY_VOLUME_MIN:.0f}",
         f"Anti-spike: M1H ≥ {LATE_M1_MIN:.0f}% requires M15 ≥ {LATE_M15_MIN:.1f}% and M4H ≥ {LATE_M4_MIN:.1f}%",
-        f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15 • vol accel = confirmation • history persisted",
+        f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15 • vol accel = gated confirmation • history persisted",
         f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.0f}% • emergency scan drop -{EMERGENCY_DROP_PCT:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
         f"Profit: MFE ≥ {PROFIT_PROTECT_MFE:.0f}% ⇒ protect ≥ +{PROFIT_PROTECT_ROI:.0f}% • trails 5/10/20/40/70 = 3/5/8/10/12%",
         f"Exit: early -{EARLY_SL_PCT*100:.1f}% • stale {STALE_HOURS:.1f}h",
-        "────────────────────────",f"🚀 V28.7 ENTRY READY in TOP {len(rows)}: {ready}",
+        "────────────────────────",f"🚀 V28.8 BUY READY in TOP {len(rows)}: {ready}",
         "","🎯 TOP V28 CANDIDATES","────────────────────────"
     ]
     if not rows:lines.append("⚪ No active candidates")
@@ -377,7 +377,7 @@ def patch(main_module,engine_module):
         d=decision(address,analysis,ws)
         return {**d,"data":d,"prediction":d["paper_prediction"],
                 "blocked":d["paper_buy_blocked"],"reason":d["paper_buy_block_reason"],
-                "score_band":"V28 PUMP ENTRY" if not d["paper_buy_blocked"] else d["pump_phase"]}
+                "score_band":("V28.8 EARLY PUMP ENTRY" if d["pump_phase"]=="EARLY" else "V28 PUMP ENTRY") if not d["paper_buy_blocked"] else d["pump_phase"]}
 
     def score(address,analysis,ws):return decision(address,analysis,ws)
 
