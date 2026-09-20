@@ -148,7 +148,7 @@ def _cooldown_active(state,key):
     except:return False
 
 def _score(address,analysis):
-    state=_load(); state["strategy_version"]="V28.8"; hist=state.setdefault("history",{})
+    state=_load(); state["strategy_version"]="V28.9"; hist=state.setdefault("history",{})
     key=str(address).lower(); cur=_metrics(analysis)
     prev=hist.get(key,{}).get("last",{}); old=hist.get(key,{})
     if prev and all(abs(_num(cur.get(k))-_num(prev.get(k)))<1e-12 for k in cur):
@@ -244,7 +244,7 @@ def decision(address,analysis,whale_state=None):
     if cooldown:
         reason=f"V28 cooldown until {_cooldown_until(state,key)}"
     elif phase in ("ENTRY","EARLY"):
-        reason=("V28.8 EARLY PUMP ENTRY: controlled early momentum + strong flow + buy pressure gates passed" if phase=="EARLY" else "V28 PUMP ENTRY: momentum + flow + activity + acceleration gates passed")
+        reason=("V28.9 EARLY PUMP ENTRY: controlled early momentum + strong flow + buy pressure gates passed" if phase=="EARLY" else "V28.9 PUMP ENTRY: momentum + flow + activity + acceleration gates passed")
     else:
         reason=f"V28 {phase}; score {score:.0f}, trigger +{change:.1f}"
     return {
@@ -272,7 +272,7 @@ def decision(address,analysis,whale_state=None):
                "phase":phase,"metrics":cur,"cooldown":cooldown},
         "v27":{"version":"V27-PROFIT-LAYER","paper_only":True},
         "v28":{
-            "version":"V28.8-DUAL-LANE-PUMP-HUNTER","paper_only":True,
+            "version":"V28.9-DUAL-LANE-PUMP-HUNTER","paper_only":True,
             "entry_score":ENTRY_SCORE,"entry_quality":ENTRY_QUALITY,"entry_change":ENTRY_CHANGE,
             "early_m1_max":EARLY_M1_MAX,"early_m15_min":EARLY_M15_MIN,"early_flow15_min":EARLY_FLOW15_MIN,
             "late_m1_min":LATE_M1_MIN,"late_m15_min":LATE_M15_MIN,"late_m4_min":LATE_M4_MIN,
@@ -313,7 +313,7 @@ def _market_debug(dashboard,snapshot=None):
     lines=[
         "🐞 MARKET DEBUG • V28.4 ADAPTIVE PUMP HUNTER","",
         f"Loaded tokens: {len(tokens)}",
-        "V28.8: dual-lane early + confirmed entry; price/flow consistency; hard WATCH/NO buy enforcement; asymmetric exit",
+        "V28.9: dual-lane early + confirmed entry; continuation gate; price/flow consistency; hard WATCH/NO buy enforcement; asymmetric exit",
         f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • quality ≥ {ENTRY_QUALITY:.0f} • impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
         f"EARLY: score ≥ {EARLY_ENTRY_SCORE:.0f} • quality ≥ {EARLY_ENTRY_QUALITY:.0f} • M1H {EARLY_ENTRY_M1_MIN:.1f}–{EARLY_ENTRY_M1_MAX:.0f}% • M15 ≥ {EARLY_ENTRY_M15_MIN:.1f}% • flow ≥ {EARLY_ENTRY_FLOW_MIN:.0f} • vol ≥ {EARLY_ENTRY_VOLUME_MIN:.0f}",
         f"Continuation: M15 ≥ {CONTINUATION_M15_MIN:.1f}% • M4H ≥ {CONTINUATION_M4_MIN:.1f}% • net-flow/volume ≥ {CONTINUATION_FLOW_RATIO_MIN:.2f}",
@@ -322,7 +322,7 @@ def _market_debug(dashboard,snapshot=None):
         f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.0f}% • emergency scan drop -{EMERGENCY_DROP_PCT:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
         f"Profit: MFE ≥ {PROFIT_PROTECT_MFE:.0f}% ⇒ protect ≥ +{PROFIT_PROTECT_ROI:.0f}% • trails 5/10/20/40/70 = 3/5/8/10/12%",
         f"Exit: early -{EARLY_SL_PCT*100:.1f}% • stale {STALE_HOURS:.1f}h",
-        "────────────────────────",f"🚀 V28.8 BUY READY in TOP {len(rows)}: {ready}",
+        "────────────────────────",f"🚀 V28.9 BUY READY in TOP {len(rows)}: {ready}",
         "","🎯 TOP V28 CANDIDATES","────────────────────────"
     ]
     if not rows:lines.append("⚪ No active candidates")
@@ -389,7 +389,7 @@ def patch(main_module,engine_module):
         d=decision(address,analysis,ws)
         return {**d,"data":d,"prediction":d["paper_prediction"],
                 "blocked":d["paper_buy_blocked"],"reason":d["paper_buy_block_reason"],
-                "score_band":("V28.8 EARLY PUMP ENTRY" if d["pump_phase"]=="EARLY" else "V28 PUMP ENTRY") if not d["paper_buy_blocked"] else d["pump_phase"]}
+                "score_band":("V28.9 EARLY PUMP ENTRY" if d["pump_phase"]=="EARLY" else "V28 PUMP ENTRY") if not d["paper_buy_blocked"] else d["pump_phase"]}
 
     def score(address,analysis,ws):return decision(address,analysis,ws)
 
@@ -467,13 +467,25 @@ def patch(main_module,engine_module):
                 score<42 or (s.get("m1h",0)<=0 and s.get("net_1h",0)<=0)
             ):
                 r=engine_module.close(p,address,current,"V28 EARLY WEAKNESS")
-                if r:events.append(f"🟠 V28 EARLY EXIT {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | weak {pos['pump_weak_count']} | score {score:.0f}")
+                if r:
+                    state=_load()
+                    state.setdefault("cooldowns",{})[str(address).lower()]=(datetime.now(timezone.utc)+timedelta(hours=COOLDOWN_HOURS)).isoformat()
+                    _save(state)
+                    events.append(f"🟠 V28 EARLY EXIT {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | weak {pos['pump_weak_count']} | score {score:.0f}")
             elif age_h>=STALE_HOURS and pos["pump_mfe_pct"]<STALE_MFE_PCT and pos["pump_weak_count"]>=STALE_WEAK_COUNT and roi<1.5:
                 r=engine_module.close(p,address,current,"V28 STALE POSITION")
-                if r:events.append(f"⚪ V28 STALE EXIT {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | age {age_h:.1f}h")
+                if r:
+                    state=_load()
+                    state.setdefault("cooldowns",{})[str(address).lower()]=(datetime.now(timezone.utc)+timedelta(hours=COOLDOWN_HOURS)).isoformat()
+                    _save(state)
+                    events.append(f"⚪ V28 STALE EXIT {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | age {age_h:.1f}h")
             elif roi>1.0 and pos["pump_mfe_pct"]>=3 and pos["pump_weak_count"]>=4:
                 r=engine_module.close(p,address,current,"V28 PUMP BREAKDOWN")
-                if r:events.append(f"🟠 V28 PUMP EXIT {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | score {score:.0f}")
+                if r:
+                    state=_load()
+                    state.setdefault("cooldowns",{})[str(address).lower()]=(datetime.now(timezone.utc)+timedelta(hours=COOLDOWN_HOURS)).isoformat()
+                    _save(state)
+                    events.append(f"🟠 V28 PUMP EXIT {r['label']} | ROI {roi:+.2f}% | MFE {pos['pump_mfe_pct']:+.2f}% | score {score:.0f}")
         return events
 
     main_module.paper_decision=paper_decision
