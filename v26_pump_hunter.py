@@ -28,14 +28,20 @@ EARLY_ENTRY_SCORE=70
 EARLY_ENTRY_QUALITY=44
 EARLY_ENTRY_M1_MIN=1.5
 EARLY_ENTRY_M1_MAX=12
-EARLY_ENTRY_M15_MIN=-2
-EARLY_ENTRY_M4_MIN=-2.5
-EARLY_ENTRY_FLOW_MIN=300
-EARLY_ENTRY_FLOW15_MIN=0
-EARLY_ENTRY_VOLUME_MIN=500
+EARLY_ENTRY_M15_MIN=0
+EARLY_ENTRY_M4_MIN=-1
+EARLY_ENTRY_FLOW_MIN=500
+EARLY_ENTRY_FLOW15_MIN=50
+EARLY_ENTRY_VOLUME_MIN=600
 EARLY_ENTRY_TRADES_MIN=8
-EARLY_ENTRY_BUY_RATIO=1.5
-EARLY_ENTRY_VOL_ACCEL_MIN=-60
+EARLY_ENTRY_BUY_RATIO=1.75
+EARLY_ENTRY_VOL_ACCEL_MIN=-50
+# V28.9 continuation gate: require fresh 15m confirmation rather than buying
+# a 1h spike that is already flattening or reversing.
+CONTINUATION_M15_MIN=0
+CONTINUATION_M4_MIN=-1
+CONTINUATION_FLOW_RATIO_MIN=0.25
+BUY_RATIO_SATURATION_VOLUME=500
 # V28.7: reject price-only spikes when price momentum is large but flow is weak.
 PRICE_FLOW_M1_MIN=18.
 PRICE_FLOW_WEAK_MAX=75.
@@ -151,7 +157,9 @@ def _score(address,analysis):
     # Base quality: positive short-term momentum + buying pressure + activity.
     momentum=min(32,max(0,cur["m1"]*1.7+max(0,cur["m15"])*1.2))
     flow=min(22,max(0,cur["flow"]/450*10+cur["flow15"]/300*5))
-    buy=min(16,max(0,(cur["buy_ratio"]-1)*8))
+    ratio_edge=max(0,cur["buy_ratio"]-1)
+    volume_factor=min(1.,cur["vol"]/BUY_RATIO_SATURATION_VOLUME)
+    buy=min(16,max(0,ratio_edge*8*volume_factor))
     activity=min(12,max(0,math.log(max(1,cur["vol"]/300))*4+math.log(max(1,cur["trades"]/3))*4))
     accel=min(8,max(0,cur["vol_accel"]/20+4))
     trend=min(6,max(0,cur["m4"]*.5))
@@ -185,9 +193,12 @@ def _score(address,analysis):
     if extreme_price_only: score-=8
     score=max(0,min(100,score))
 
+    flow_ratio=cur["flow"]/max(cur["vol"],1.)
+    continuation_gate=(cur["m15"]>=CONTINUATION_M15_MIN and cur["m4"]>=CONTINUATION_M4_MIN and flow_ratio>=CONTINUATION_FLOW_RATIO_MIN)
     confirmed_trigger=(
         prev and quality>=ENTRY_QUALITY and score>=ENTRY_SCORE and change>=ENTRY_CHANGE
         and not late_spike and not extreme_price_only and (early_setup or cur["m1"]>=LATE_M1_MIN)
+        and continuation_gate
         and cur["flow"]>0 and cur["flow15"]>=0
         and cur["m1"]>0 and cur["m15"]>=MIN_M15
         and cur["trades"]>=MIN_TRADES and cur["vol"]>=MIN_VOLUME
@@ -206,7 +217,7 @@ def _score(address,analysis):
         and EARLY_ENTRY_M1_MIN<=cur["m1"]<=EARLY_ENTRY_M1_MAX
         and cur["m15"]>=EARLY_ENTRY_M15_MIN and cur["m4"]>=EARLY_ENTRY_M4_MIN
         and cur["trades"]>=EARLY_ENTRY_TRADES_MIN and cur["vol"]>=EARLY_ENTRY_VOLUME_MIN
-        and early_flow_confirm
+        and early_flow_confirm and continuation_gate
     )
     trigger=confirmed_trigger or early_trigger
     phase="ENTRY" if confirmed_trigger else ("EARLY" if early_trigger else ("WATCH" if score>=WATCH_SCORE else "NO"))
@@ -305,6 +316,7 @@ def _market_debug(dashboard,snapshot=None):
         "V28.8: dual-lane early + confirmed entry; price/flow consistency; hard WATCH/NO buy enforcement; asymmetric exit",
         f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • quality ≥ {ENTRY_QUALITY:.0f} • impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
         f"EARLY: score ≥ {EARLY_ENTRY_SCORE:.0f} • quality ≥ {EARLY_ENTRY_QUALITY:.0f} • M1H {EARLY_ENTRY_M1_MIN:.1f}–{EARLY_ENTRY_M1_MAX:.0f}% • M15 ≥ {EARLY_ENTRY_M15_MIN:.1f}% • flow ≥ {EARLY_ENTRY_FLOW_MIN:.0f} • vol ≥ {EARLY_ENTRY_VOLUME_MIN:.0f}",
+        f"Continuation: M15 ≥ {CONTINUATION_M15_MIN:.1f}% • M4H ≥ {CONTINUATION_M4_MIN:.1f}% • net-flow/volume ≥ {CONTINUATION_FLOW_RATIO_MIN:.2f}",
         f"Anti-spike: M1H ≥ {LATE_M1_MIN:.0f}% requires M15 ≥ {LATE_M15_MIN:.1f}% and M4H ≥ {LATE_M4_MIN:.1f}%",
         f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15 • vol accel = gated confirmation • history persisted",
         f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.0f}% • emergency scan drop -{EMERGENCY_DROP_PCT:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
