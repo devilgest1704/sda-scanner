@@ -1,4 +1,4 @@
-"""V28.6 adaptive pump hunter for paper trading.
+"""V29 lifecycle-based adaptive pump hunter for paper trading.
 
 V28 keeps the asymmetric "let winners run" idea but changes the weak point
 identified in the V27 trade history: too many low-quality entries and oversized
@@ -36,6 +36,16 @@ EARLY_ENTRY_VOLUME_MIN=600
 EARLY_ENTRY_TRADES_MIN=8
 EARLY_ENTRY_BUY_RATIO=1.75
 EARLY_ENTRY_VOL_ACCEL_MIN=-50
+# V29 lifecycle gates: distinguish fresh ignition, confirmation and late/breakout states.
+# Historical audit showed that very high 1h momentum often represented an exhausted
+# move rather than a fresh pump. High-M1H entry now requires a genuine breakout.
+PUMP_IGNITION_M1_MAX=8.
+PUMP_CONFIRM_M1_MAX=18.
+PUMP_EXTENDED_M1_MAX=35.
+PUMP_BREAKOUT_M15_MIN=3.
+PUMP_BREAKOUT_D15_MIN=1.
+PUMP_BREAKOUT_FLOW_RATIO_MIN=.35
+PUMP_BREAKOUT_M4_MIN=.5
 # V28.9 continuation gate: require fresh 15m confirmation rather than buying
 # a 1h spike that is already flattening or reversing.
 CONTINUATION_M15_MIN=0
@@ -148,7 +158,7 @@ def _cooldown_active(state,key):
     except:return False
 
 def _score(address,analysis):
-    state=_load(); state["strategy_version"]="V28.9"; hist=state.setdefault("history",{})
+    state=_load(); state["strategy_version"]="V29.0"; hist=state.setdefault("history",{})
     key=str(address).lower(); cur=_metrics(analysis)
     prev=hist.get(key,{}).get("last",{}); old=hist.get(key,{})
     if prev and all(abs(_num(cur.get(k))-_num(prev.get(k)))<1e-12 for k in cur):
@@ -195,9 +205,13 @@ def _score(address,analysis):
 
     flow_ratio=cur["flow"]/max(cur["vol"],1.)
     continuation_gate=(cur["m15"]>=CONTINUATION_M15_MIN and cur["m4"]>=CONTINUATION_M4_MIN and flow_ratio>=CONTINUATION_FLOW_RATIO_MIN)
+    ignition_lane=(cur["m1"]>0 and cur["m1"]<=PUMP_IGNITION_M1_MAX and cur["m15"]>=.5 and cur["flow15"]>=EARLY_ENTRY_FLOW15_MIN)
+    confirmation_lane=(cur["m1"]>PUMP_IGNITION_M1_MAX and cur["m1"]<=PUMP_CONFIRM_M1_MAX and cur["m15"]>=1.5 and cur["m4"]>=0)
+    breakout_lane=(cur["m1"]>PUMP_CONFIRM_M1_MAX and cur["m1"]<=PUMP_EXTENDED_M1_MAX and cur["m15"]>=PUMP_BREAKOUT_M15_MIN and cur["m4"]>=PUMP_BREAKOUT_M4_MIN and d15>=PUMP_BREAKOUT_D15_MIN and flow_ratio>=PUMP_BREAKOUT_FLOW_RATIO_MIN)
+    lifecycle_lane=ignition_lane or confirmation_lane or breakout_lane
     confirmed_trigger=(
         prev and quality>=ENTRY_QUALITY and score>=ENTRY_SCORE and change>=ENTRY_CHANGE
-        and not late_spike and not extreme_price_only and (early_setup or cur["m1"]>=LATE_M1_MIN)
+        and not late_spike and not extreme_price_only and lifecycle_lane
         and continuation_gate
         and cur["flow"]>0 and cur["flow15"]>=0
         and cur["m1"]>0 and cur["m15"]>=MIN_M15
@@ -214,6 +228,7 @@ def _score(address,analysis):
     early_trigger=(
         prev and quality>=EARLY_ENTRY_QUALITY and score>=EARLY_ENTRY_SCORE and change>=ENTRY_CHANGE
         and not extreme_price_only
+        and ignition_lane
         and EARLY_ENTRY_M1_MIN<=cur["m1"]<=EARLY_ENTRY_M1_MAX
         and cur["m15"]>=EARLY_ENTRY_M15_MIN and cur["m4"]>=EARLY_ENTRY_M4_MIN
         and cur["trades"]>=EARLY_ENTRY_TRADES_MIN and cur["vol"]>=EARLY_ENTRY_VOLUME_MIN
@@ -244,7 +259,7 @@ def decision(address,analysis,whale_state=None):
     if cooldown:
         reason=f"V28 cooldown until {_cooldown_until(state,key)}"
     elif phase in ("ENTRY","EARLY"):
-        reason=("V28.9 EARLY PUMP ENTRY: controlled early momentum + strong flow + buy pressure gates passed" if phase=="EARLY" else "V28.9 PUMP ENTRY: momentum + flow + activity + acceleration gates passed")
+        reason=("V29.0 EARLY PUMP ENTRY: controlled early momentum + strong flow + buy pressure gates passed" if phase=="EARLY" else "V29.0 PUMP ENTRY: momentum + flow + activity + acceleration gates passed")
     else:
         reason=f"V28 {phase}; score {score:.0f}, trigger +{change:.1f}"
     return {
@@ -272,7 +287,7 @@ def decision(address,analysis,whale_state=None):
                "phase":phase,"metrics":cur,"cooldown":cooldown},
         "v27":{"version":"V27-PROFIT-LAYER","paper_only":True},
         "v28":{
-            "version":"V28.9-DUAL-LANE-PUMP-HUNTER","paper_only":True,
+            "version":"V29.0-LIFECYCLE-PUMP-HUNTER","paper_only":True,
             "entry_score":ENTRY_SCORE,"entry_quality":ENTRY_QUALITY,"entry_change":ENTRY_CHANGE,
             "early_m1_max":EARLY_M1_MAX,"early_m15_min":EARLY_M15_MIN,"early_flow15_min":EARLY_FLOW15_MIN,
             "late_m1_min":LATE_M1_MIN,"late_m15_min":LATE_M15_MIN,"late_m4_min":LATE_M4_MIN,
@@ -313,7 +328,7 @@ def _market_debug(dashboard,snapshot=None):
     lines=[
         "🐞 MARKET DEBUG • V28.4 ADAPTIVE PUMP HUNTER","",
         f"Loaded tokens: {len(tokens)}",
-        "V28.9: dual-lane early + confirmed entry; continuation gate; price/flow consistency; hard WATCH/NO buy enforcement; asymmetric exit",
+        "V29.0: lifecycle entry (ignition/confirmation/breakout); continuation gate; price/flow consistency; hard WATCH/NO buy enforcement; asymmetric exit",
         f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • quality ≥ {ENTRY_QUALITY:.0f} • impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
         f"EARLY: score ≥ {EARLY_ENTRY_SCORE:.0f} • quality ≥ {EARLY_ENTRY_QUALITY:.0f} • M1H {EARLY_ENTRY_M1_MIN:.1f}–{EARLY_ENTRY_M1_MAX:.0f}% • M15 ≥ {EARLY_ENTRY_M15_MIN:.1f}% • flow ≥ {EARLY_ENTRY_FLOW_MIN:.0f} • vol ≥ {EARLY_ENTRY_VOLUME_MIN:.0f}",
         f"Continuation: M15 ≥ {CONTINUATION_M15_MIN:.1f}% • M4H ≥ {CONTINUATION_M4_MIN:.1f}% • net-flow/volume ≥ {CONTINUATION_FLOW_RATIO_MIN:.2f}",
