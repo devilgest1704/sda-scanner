@@ -46,6 +46,10 @@ PUMP_BREAKOUT_M15_MIN=3.
 PUMP_BREAKOUT_D15_MIN=1.
 PUMP_BREAKOUT_FLOW_RATIO_MIN=.35
 PUMP_BREAKOUT_M4_MIN=.5
+# V29.1: fresh ignition may start before the 4h trend turns positive.
+# Require strong current flow instead of forcing the continuation M4H gate.
+IGNITION_M4_MIN=-2.5
+IGNITION_FLOW_RATIO_MIN=.50
 # V28.9 continuation gate: require fresh 15m confirmation rather than buying
 # a 1h spike that is already flattening or reversing.
 CONTINUATION_M15_MIN=0
@@ -158,7 +162,7 @@ def _cooldown_active(state,key):
     except:return False
 
 def _score(address,analysis):
-    state=_load(); state["strategy_version"]="V29.0"; hist=state.setdefault("history",{})
+    state=_load(); state["strategy_version"]="V29.1"; hist=state.setdefault("history",{})
     key=str(address).lower(); cur=_metrics(analysis)
     prev=hist.get(key,{}).get("last",{}); old=hist.get(key,{})
     if prev and all(abs(_num(cur.get(k))-_num(prev.get(k)))<1e-12 for k in cur):
@@ -205,7 +209,14 @@ def _score(address,analysis):
 
     flow_ratio=cur["flow"]/max(cur["vol"],1.)
     continuation_gate=(cur["m15"]>=CONTINUATION_M15_MIN and cur["m4"]>=CONTINUATION_M4_MIN and flow_ratio>=CONTINUATION_FLOW_RATIO_MIN)
-    ignition_lane=(cur["m1"]>0 and cur["m1"]<=PUMP_IGNITION_M1_MAX and cur["m15"]>=.5 and cur["flow15"]>=EARLY_ENTRY_FLOW15_MIN)
+    ignition_flow_ratio=cur["flow"]/max(cur["vol"],1.)
+    ignition_lane=(
+        cur["m1"]>0 and cur["m1"]<=PUMP_IGNITION_M1_MAX
+        and cur["m15"]>=.5
+        and cur["m4"]>=IGNITION_M4_MIN
+        and cur["flow15"]>=EARLY_ENTRY_FLOW15_MIN
+        and ignition_flow_ratio>=IGNITION_FLOW_RATIO_MIN
+    )
     confirmation_lane=(cur["m1"]>PUMP_IGNITION_M1_MAX and cur["m1"]<=PUMP_CONFIRM_M1_MAX and cur["m15"]>=1.5 and cur["m4"]>=0)
     breakout_lane=(cur["m1"]>PUMP_CONFIRM_M1_MAX and cur["m1"]<=PUMP_EXTENDED_M1_MAX and cur["m15"]>=PUMP_BREAKOUT_M15_MIN and cur["m4"]>=PUMP_BREAKOUT_M4_MIN and d15>=PUMP_BREAKOUT_D15_MIN and flow_ratio>=PUMP_BREAKOUT_FLOW_RATIO_MIN)
     lifecycle_lane=ignition_lane or confirmation_lane or breakout_lane
@@ -230,9 +241,11 @@ def _score(address,analysis):
         and not extreme_price_only
         and ignition_lane
         and EARLY_ENTRY_M1_MIN<=cur["m1"]<=EARLY_ENTRY_M1_MAX
-        and cur["m15"]>=EARLY_ENTRY_M15_MIN and cur["m4"]>=EARLY_ENTRY_M4_MIN
+        and cur["m15"]>=EARLY_ENTRY_M15_MIN
+        and cur["m4"]>=IGNITION_M4_MIN
         and cur["trades"]>=EARLY_ENTRY_TRADES_MIN and cur["vol"]>=EARLY_ENTRY_VOLUME_MIN
-        and early_flow_confirm and continuation_gate
+        and early_flow_confirm
+        and ignition_flow_ratio>=IGNITION_FLOW_RATIO_MIN
     )
     trigger=confirmed_trigger or early_trigger
     phase="ENTRY" if confirmed_trigger else ("EARLY" if early_trigger else ("WATCH" if score>=WATCH_SCORE else "NO"))
@@ -287,7 +300,7 @@ def decision(address,analysis,whale_state=None):
                "phase":phase,"metrics":cur,"cooldown":cooldown},
         "v27":{"version":"V27-PROFIT-LAYER","paper_only":True},
         "v28":{
-            "version":"V29.0-LIFECYCLE-PUMP-HUNTER","paper_only":True,
+            "version":"V29.1-LIFECYCLE-PUMP-HUNTER","paper_only":True,
             "entry_score":ENTRY_SCORE,"entry_quality":ENTRY_QUALITY,"entry_change":ENTRY_CHANGE,
             "early_m1_max":EARLY_M1_MAX,"early_m15_min":EARLY_M15_MIN,"early_flow15_min":EARLY_FLOW15_MIN,
             "late_m1_min":LATE_M1_MIN,"late_m15_min":LATE_M15_MIN,"late_m4_min":LATE_M4_MIN,
@@ -326,19 +339,19 @@ def _market_debug(dashboard,snapshot=None):
     rows=rows[:5]
     ready=sum(1 for r in rows if r["d"].get("pump_phase") in ("ENTRY","EARLY") and not r["d"].get("paper_buy_blocked"))
     lines=[
-        "🐞 MARKET DEBUG • V28.4 ADAPTIVE PUMP HUNTER","",
+        "🐞 MARKET DEBUG • V29.1 ADAPTIVE PUMP HUNTER","",
         f"Loaded tokens: {len(tokens)}",
         "V29.0: lifecycle entry (ignition/confirmation/breakout); continuation gate; price/flow consistency; hard WATCH/NO buy enforcement; asymmetric exit",
         f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • quality ≥ {ENTRY_QUALITY:.0f} • impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
         f"EARLY: score ≥ {EARLY_ENTRY_SCORE:.0f} • quality ≥ {EARLY_ENTRY_QUALITY:.0f} • M1H {EARLY_ENTRY_M1_MIN:.1f}–{EARLY_ENTRY_M1_MAX:.0f}% • M15 ≥ {EARLY_ENTRY_M15_MIN:.1f}% • flow ≥ {EARLY_ENTRY_FLOW_MIN:.0f} • vol ≥ {EARLY_ENTRY_VOLUME_MIN:.0f}",
-        f"Continuation: M15 ≥ {CONTINUATION_M15_MIN:.1f}% • M4H ≥ {CONTINUATION_M4_MIN:.1f}% • net-flow/volume ≥ {CONTINUATION_FLOW_RATIO_MIN:.2f}",
+        f"Ignition: M1H 0–{PUMP_IGNITION_M1_MAX:.0f}% • M15 ≥ +0.5% • M4H ≥ {IGNITION_M4_MIN:.1f}% • flow/vol ≥ {IGNITION_FLOW_RATIO_MIN:.2f}",
         f"Anti-spike: M1H ≥ {LATE_M1_MIN:.0f}% requires M15 ≥ {LATE_M15_MIN:.1f}% and M4H ≥ {LATE_M4_MIN:.1f}%",
         f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15 • vol accel = gated confirmation • history persisted",
         f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.0f}% • emergency scan drop -{EMERGENCY_DROP_PCT:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
         f"Profit: MFE ≥ {PROFIT_PROTECT_MFE:.0f}% ⇒ protect ≥ +{PROFIT_PROTECT_ROI:.0f}% • trails 5/10/20/40/70 = 3/5/8/10/12%",
         f"Exit: early -{EARLY_SL_PCT*100:.1f}% • stale {STALE_HOURS:.1f}h",
-        "────────────────────────",f"🚀 V28.9 BUY READY in TOP {len(rows)}: {ready}",
-        "","🎯 TOP V28 CANDIDATES","────────────────────────"
+        "────────────────────────",f"🚀 V29.1 BUY READY in TOP {len(rows)}: {ready}",
+        "","🎯 TOP V29 CANDIDATES","────────────────────────"
     ]
     if not rows:lines.append("⚪ No active candidates")
     for i,r in enumerate(rows,1):
