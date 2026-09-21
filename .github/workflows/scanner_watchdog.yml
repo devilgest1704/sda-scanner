@@ -23,11 +23,30 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Dispatch scanner with retry
+      - name: Dispatch scanner only when no worker is active
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+
+          # The scanner itself is now a long-lived 60s worker. The watchdog is
+          # only a recovery mechanism for the case where that worker ended.
+          # Do not create queued/pending scanner runs while one is already
+          # active (or another dispatch is waiting for the concurrency slot).
+          active_or_pending="$(gh run list \
+            --workflow scanner_v18.yml \
+            --repo "${{ github.repository }}" \
+            --branch main \
+            --limit 20 \
+            --json status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending" or .status == "waiting" or .status == "requested")] | length')"
+
+          echo "Scanner active/pending runs: ${active_or_pending}"
+
+          if [ "${active_or_pending}" -gt 0 ]; then
+            echo 'Scanner worker already active/pending; watchdog will not dispatch another run.'
+            exit 0
+          fi
 
           for attempt in 1 2 3; do
             echo "Dispatch attempt ${attempt}/3"
