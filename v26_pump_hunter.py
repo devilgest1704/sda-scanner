@@ -272,9 +272,9 @@ def decision(address,analysis,whale_state=None):
     if cooldown:
         reason=f"V28 cooldown until {_cooldown_until(state,key)}"
     elif phase in ("ENTRY","EARLY"):
-        reason=("V29.0 EARLY PUMP ENTRY: controlled early momentum + strong flow + buy pressure gates passed" if phase=="EARLY" else "V29.0 PUMP ENTRY: momentum + flow + activity + acceleration gates passed")
+        reason=("V29.1 EARLY PUMP ENTRY: controlled early momentum + strong flow + buy pressure gates passed" if phase=="EARLY" else "V29.1 PUMP ENTRY: momentum + flow + activity + acceleration gates passed")
     else:
-        reason=f"V28 {phase}; score {score:.0f}, trigger +{change:.1f}"
+        reason=f"V29.1 {phase}; score {score:.0f}, trigger +{change:.1f}"
     return {
         "score":effective_score,"confidence":effective_score,"buy_score":effective_score,"market_score":effective_score,
         "m1h":cur["m1"],"m15":cur["m15"],"m4h":cur["m4"],
@@ -341,7 +341,7 @@ def _market_debug(dashboard,snapshot=None):
     lines=[
         "🐞 MARKET DEBUG • V29.1 ADAPTIVE PUMP HUNTER","",
         f"Loaded tokens: {len(tokens)}",
-        "V29.0: lifecycle entry (ignition/confirmation/breakout); continuation gate; price/flow consistency; hard WATCH/NO buy enforcement; asymmetric exit",
+        "V29.1: lifecycle entry (ignition/confirmation/breakout); fresh ignition before 4h confirmation; continuation gate; price/flow consistency; hard WATCH/NO buy enforcement; asymmetric exit",
         f"ENTRY: score ≥ {ENTRY_SCORE:.0f} • quality ≥ {ENTRY_QUALITY:.0f} • impulse ≥ +{ENTRY_CHANGE:.0f} • M15 ≥ {MIN_M15:.1f}%",
         f"EARLY: score ≥ {EARLY_ENTRY_SCORE:.0f} • quality ≥ {EARLY_ENTRY_QUALITY:.0f} • M1H {EARLY_ENTRY_M1_MIN:.1f}–{EARLY_ENTRY_M1_MAX:.0f}% • M15 ≥ {EARLY_ENTRY_M15_MIN:.1f}% • flow ≥ {EARLY_ENTRY_FLOW_MIN:.0f} • vol ≥ {EARLY_ENTRY_VOLUME_MIN:.0f}",
         f"Ignition: M1H 0–{PUMP_IGNITION_M1_MAX:.0f}% • M15 ≥ +0.5% • M4H ≥ {IGNITION_M4_MIN:.1f}% • flow/vol ≥ {IGNITION_FLOW_RATIO_MIN:.2f}",
@@ -417,7 +417,7 @@ def patch(main_module,engine_module):
         d=decision(address,analysis,ws)
         return {**d,"data":d,"prediction":d["paper_prediction"],
                 "blocked":d["paper_buy_blocked"],"reason":d["paper_buy_block_reason"],
-                "score_band":("V28.9 EARLY PUMP ENTRY" if d["pump_phase"]=="EARLY" else "V28 PUMP ENTRY") if not d["paper_buy_blocked"] else d["pump_phase"]}
+                "score_band":("V29.1 EARLY PUMP ENTRY" if d["pump_phase"]=="EARLY" else "V29.1 PUMP ENTRY") if not d["paper_buy_blocked"] else d["pump_phase"]}
 
     def score(address,analysis,ws):return decision(address,analysis,ws)
 
