@@ -19,11 +19,15 @@ permissions:
 
 concurrency:
   group: sda-scanner-paper
+  # The minute cron may continue dispatching this workflow. Only one worker
+  # runs; at most one pending dispatch is kept by GitHub's default queue.
+  # NEVER cancel the active worker: it owns the paper-trading state loop.
   cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 350
     env:
       TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
       CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -32,6 +36,9 @@ jobs:
       REAL_TRADING_PRIVATE_KEY: ${{ secrets.REAL_TRADING_PRIVATE_KEY }}
       REAL_TRADING_WALLET_ADDRESS: ${{ secrets.REAL_TRADING_WALLET_ADDRESS }}
       GITHUB_DISPATCH_TOKEN: ${{ secrets.GITHUB_DISPATCH_TOKEN }}
+      SCANNER_CONTINUOUS: "true"
+      SCANNER_INTERVAL_SECONDS: "60"
+      SCANNER_STATE_CHECKPOINT_SECONDS: "300"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -102,127 +109,6 @@ jobs:
               raise SystemExit("Refusing to run: stale/malformed V28.7 source detected")
           PY
 
-      - name: Run SDA Scanner V18
+      - name: Run SDA Scanner V18 continuously
         run: bash run_scanner_v18.sh
 
-      - name: Protect wallet snapshot and sync portfolio
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          wallet_path = Path('wallet_data.json')
-          backup_path = Path('/tmp/wallet_data.before.json')
-          try:
-              current = json.loads(wallet_path.read_text(encoding='utf-8'))
-          except Exception:
-              current = {}
-          try:
-              backup = json.loads(backup_path.read_text(encoding='utf-8'))
-          except Exception:
-              backup = {}
-
-          failed = bool(current.get('error')) or not isinstance(current.get('holdings'), list)
-          if failed and isinstance(backup, dict) and backup.get('holdings'):
-              preserved = dict(backup)
-              preserved['error'] = current.get('error') or 'Wallet refresh failed; preserved previous snapshot.'
-              preserved['stale'] = True
-              preserved['stale_at'] = current.get('updated_at')
-              wallet_path.write_text(json.dumps(preserved, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-              print('Preserved previous valid wallet snapshot after failed refresh.')
-          elif isinstance(current, dict):
-              current['stale'] = False
-              current.pop('stale_at', None)
-              wallet_path.write_text(json.dumps(current, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-          PY
-          python sync_real_wallet.py
-
-      - name: Verify real trader remains disabled
-        run: python real_trader.py
-
-      - name: Read-only real wallet dry-run check
-        run: python real_trader_dry_run.py
-
-      - name: Build V25 shadow learning summary
-        run: python v25_shadow_learning_summary.py
-
-      - name: Build V25 false-negative drill-down report
-        run: python v25_shadow_learning_false_negative_report.py
-
-      - name: Build V25 event-level false-negative report
-        run: python v25_shadow_learning_event_report.py
-
-      - name: Commit scanner state
-        run: |
-          git config user.name 'sda-scanner-bot'
-          git config user.email 'scanner@github.local'
-          # IMPORTANT: this step owns runtime STATE only. Never stage source/code files here.
-          # Strategy commits (e.g. V28.7/V28.8) must remain authoritative on main.
-          STATE_FILES="state.json whale_state.json whale_data.json market_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json wallet_data.json decision_state_v15.json whale_history.json portfolio_data.json paper_auto_state.json paper_buy_guard_state.json real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json"
-          git add $STATE_FILES
-          if git diff --staged --quiet; then
-            echo 'No scanner state changes to commit.'
-            exit 0
-          fi
-          git commit -m 'Update SDA scanner state'
-
-          # Runtime state is rebased onto the newest main before every retry.
-          # Do NOT use reset --soft: it can accidentally turn a strategy commit
-          # into part of the state commit and later overwrite source changes.
-          for attempt in 1 2 3 4 5; do
-            if git push origin HEAD:main; then
-              echo "State push succeeded on attempt $attempt."
-              exit 0
-            fi
-            if [ "$attempt" = "5" ]; then
-              echo 'State push failed after 5 attempts.'
-              exit 1
-            fi
-
-            git fetch origin main
-            if ! git rebase origin/main; then
-              echo 'State rebase conflict detected; aborting rather than modifying strategy/source files.'
-              git rebase --abort || true
-              exit 1
-            fi
-            sleep 2
-          done
-
-      - name: Dispatch SDA Telegram Hourly Report after requested refresh
-        if: ${{ inputs.send_report == true || inputs.send_report == 'true' }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          import urllib.error
-          import urllib.request
-
-          token = os.environ.get('GITHUB_DISPATCH_TOKEN', '')
-          if not token:
-              raise SystemExit('missing GITHUB_DISPATCH_TOKEN')
-
-          url = 'https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/telegram_hourly.yml/dispatches'
-          payload = json.dumps({
-              'ref': 'main',
-              'inputs': {'run_reason': 'Telegram Refresh'},
-          }).encode()
-          req = urllib.request.Request(
-              url,
-              data=payload,
-              headers={
-                  'Accept': 'application/vnd.github+json',
-                  'Authorization': f'Bearer {token}',
-                  'X-GitHub-Api-Version': '2022-11-28',
-                  'Content-Type': 'application/json',
-              },
-              method='POST',
-          )
-          try:
-              with urllib.request.urlopen(req, timeout=20) as response:
-                  if response.status not in (200, 201, 204):
-                      raise SystemExit(f'GitHub dispatch HTTP {response.status}')
-                  print('SDA Telegram Hourly Report dispatched.')
-          except urllib.error.HTTPError as exc:
-              body = exc.read().decode('utf-8', errors='replace')
-              raise SystemExit(f'GitHub dispatch HTTP {exc.code}: {body[:500]}')
-          PY
