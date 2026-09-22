@@ -74,6 +74,33 @@ def _wallet_position_rows(dashboard, md, ws, meta, portfolio):
 
     rows = []
     tokens = md.get("tokens", {}) if isinstance(md, dict) else {}
+    # Preserve known real-wallet positions when the explorer snapshot fails.
+    # portfolio.current is reconstructed from the real wallet trade ledger.
+    wallet_snapshot_failed = bool(isinstance(wallet, dict) and wallet.get("error"))
+    if not holdings and wallet_snapshot_failed and isinstance(current, dict):
+        fallback_holdings = []
+        md_meta = dashboard.load("token_metadata.json", {})
+        for key, pf in current.items():
+            if not isinstance(pf, dict):
+                continue
+            address = str(pf.get("address") or pf.get("token_address") or key).strip().lower()
+            symbol = str(pf.get("symbol") or pf.get("label") or "").split("/", 1)[0].strip().upper()
+            if not address or not symbol:
+                continue
+            td = tokens.get(address, {}) or {}
+            an = _analysis(td)
+            price = _n(an.get("price_in_sda"))
+            if price <= 0:
+                continue
+            entry = md_meta.get(address, {}) if isinstance(md_meta, dict) else {}
+            try:
+                decimals = int(entry.get("decimals", entry.get("token_decimals", 18)) or 18)
+            except Exception:
+                decimals = 18
+            amount = _n(pf.get("amount"))
+            value = amount / (10 ** decimals) * price if amount > 0 else 0.0
+            fallback_holdings.append({"address": address, "symbol": symbol, "amount": amount, "value_sda": value, "price_sda": price})
+        holdings = fallback_holdings
     for holding in holdings:
         if not isinstance(holding, dict):
             continue
