@@ -59,7 +59,7 @@ def ts(v):
 def fetch_supabase():
     since=(datetime.now(timezone.utc)-timedelta(hours=HISTORY_HOURS)).isoformat(timespec='milliseconds').replace('+00:00','Z')
     params={
-        'select':'id,tx_hash,token_address,from_address,to_address,price_in_sda,tx_timestamp,tx_type',
+        'select':'id,tx_hash,token_address,from_address,to_address,price_in_sda,volume_in_sda,tx_timestamp,tx_type',
         'tx_timestamp':f'gte.{since}',
         'volume_in_sda':f'gte.{MIN_WHALE_SDA:g}',
         'order':'tx_timestamp.desc',
