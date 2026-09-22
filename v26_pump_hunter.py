@@ -210,6 +210,14 @@ def _score(address,analysis):
     flow_ratio=cur["flow"]/max(cur["vol"],1.)
     continuation_gate=(cur["m15"]>=CONTINUATION_M15_MIN and cur["m4"]>=CONTINUATION_M4_MIN and flow_ratio>=CONTINUATION_FLOW_RATIO_MIN)
     ignition_flow_ratio=cur["flow"]/max(cur["vol"],1.)
+    ignition_flow_ok=(
+        ignition_flow_ratio>=IGNITION_FLOW_RATIO_MIN
+        or (
+            cur["flow"]>=IGNITION_STRONG_FLOW_MIN
+            and cur["buy_ratio"]>=IGNITION_STRONG_BUY_RATIO
+            and cur["flow15"]>=EARLY_ENTRY_FLOW15_MIN
+        )
+    )
     ignition_lane=(
         cur["m1"]>0 and cur["m1"]<=PUMP_IGNITION_M1_MAX
         and cur["m15"]>=.5
