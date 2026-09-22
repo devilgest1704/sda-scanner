@@ -92,7 +92,21 @@ run_one_scan() {
   echo "🚀 SDA SCAN START $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
   echo "════════════════════════════════════════════════════════════"
 
+  # Supabase can return transient 5xx/522 errors. The whale scanner
+  # retries those internally; if they still fail, skip this whole scan and
+  # keep the long-lived worker alive for the next cadence.
+  set +e
   python whale_scanner.py
+  local whale_rc=$?
+  set -e
+  if [ "$whale_rc" -eq 75 ]; then
+    echo "⚠️ WHALE SCAN SKIPPED: transient Supabase failure; worker remains alive."
+    return 0
+  elif [ "$whale_rc" -ne 0 ]; then
+    echo "❌ WHALE SCANNER FAILED: exit $whale_rc" >&2
+    return "$whale_rc"
+  fi
+
   python market_scanner.py
   python technical_analysis.py
   python market_analysis_export.py
