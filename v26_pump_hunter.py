@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 
 STATE_FILE="v28_pump_state.json"
 _RUNTIME_STATE=None
+STRATEGY_VERSION="V29.3"
 SL_PCT=.035
 MAX_OPEN=5
 MAX_BUYS_PER_RUN=1
@@ -26,15 +27,15 @@ EARLY_FLOW15_MIN=50.
 # V28.8 controlled early-entry lane.
 EARLY_ENTRY_SCORE=70
 EARLY_ENTRY_QUALITY=44
-EARLY_ENTRY_M1_MIN=1.5
+EARLY_ENTRY_M1_MIN=.5
 EARLY_ENTRY_M1_MAX=12
 EARLY_ENTRY_M15_MIN=0
 EARLY_ENTRY_M4_MIN=-1
-EARLY_ENTRY_FLOW_MIN=500
+EARLY_ENTRY_FLOW_MIN=350
 EARLY_ENTRY_FLOW15_MIN=50
-EARLY_ENTRY_VOLUME_MIN=600
-EARLY_ENTRY_TRADES_MIN=8
-EARLY_ENTRY_BUY_RATIO=1.75
+EARLY_ENTRY_VOLUME_MIN=500
+EARLY_ENTRY_TRADES_MIN=6
+EARLY_ENTRY_BUY_RATIO=1.5
 EARLY_ENTRY_VOL_ACCEL_MIN=-50
 # V29 lifecycle gates: distinguish fresh ignition, confirmation and late/breakout states.
 # Historical audit showed that very high 1h momentum often represented an exhausted
@@ -49,7 +50,9 @@ PUMP_BREAKOUT_M4_MIN=.5
 # V29.1: fresh ignition may start before the 4h trend turns positive.
 # Require strong current flow instead of forcing the continuation M4H gate.
 IGNITION_M4_MIN=-2.5
-IGNITION_FLOW_RATIO_MIN=.50
+IGNITION_FLOW_RATIO_MIN=.30
+IGNITION_STRONG_FLOW_MIN=900.
+IGNITION_STRONG_BUY_RATIO=1.75
 # V28.9 continuation gate: require fresh 15m confirmation rather than buying
 # a 1h spike that is already flattening or reversing.
 CONTINUATION_M15_MIN=0
@@ -162,7 +165,7 @@ def _cooldown_active(state,key):
     except:return False
 
 def _score(address,analysis):
-    state=_load(); state["strategy_version"]="V29.2"; hist=state.setdefault("history",{})
+    state=_load(); state["strategy_version"]=STRATEGY_VERSION; hist=state.setdefault("history",{})
     key=str(address).lower(); cur=_metrics(analysis)
     prev=hist.get(key,{}).get("last",{}); old=hist.get(key,{})
     if prev and all(abs(_num(cur.get(k))-_num(prev.get(k)))<1e-12 for k in cur):
@@ -280,9 +283,9 @@ def decision(address,analysis,whale_state=None):
     if cooldown:
         reason=f"V28 cooldown until {_cooldown_until(state,key)}"
     elif phase in ("ENTRY","EARLY"):
-        reason=("V29.2 EARLY PUMP ENTRY: controlled early momentum + strong flow + buy pressure gates passed" if phase=="EARLY" else "V29.2 PUMP ENTRY: momentum + flow + activity + acceleration gates passed")
+        reason=("V29.3 EARLY PUMP ENTRY: fresh ignition + flow + buy pressure gates passed" if phase=="EARLY" else "V29.3 PUMP ENTRY: lifecycle momentum + flow + activity gates passed")
     else:
-        reason=f"V29.1 {phase}; score {score:.0f}, trigger +{change:.1f}"
+        reason=f"{STRATEGY_VERSION} {phase}; score {score:.0f}, trigger +{change:.1f}"
     return {
         "score":effective_score,"confidence":effective_score,"buy_score":effective_score,"market_score":effective_score,
         "m1h":cur["m1"],"m15":cur["m15"],"m4h":cur["m4"],
@@ -425,7 +428,7 @@ def patch(main_module,engine_module):
         d=decision(address,analysis,ws)
         return {**d,"data":d,"prediction":d["paper_prediction"],
                 "blocked":d["paper_buy_blocked"],"reason":d["paper_buy_block_reason"],
-                "score_band":("V29.1 EARLY PUMP ENTRY" if d["pump_phase"]=="EARLY" else "V29.1 PUMP ENTRY") if not d["paper_buy_blocked"] else d["pump_phase"]}
+                "score_band":(f"{STRATEGY_VERSION} EARLY PUMP ENTRY" if d["pump_phase"]=="EARLY" else f"{STRATEGY_VERSION} PUMP ENTRY") if not d["paper_buy_blocked"] else d["pump_phase"]}
 
     def score(address,analysis,ws):return decision(address,analysis,ws)
 
