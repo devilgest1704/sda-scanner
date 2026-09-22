@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 STATE_FILE="v28_pump_state.json"
 _RUNTIME_STATE=None
 STRATEGY_VERSION="V29.3"
-SL_PCT=.035
+SL_PCT=.0275
 MAX_OPEN=5
 MAX_BUYS_PER_RUN=1
 ENTRY_SCORE=70.
@@ -79,7 +79,7 @@ STALE_MFE_PCT=2.
 STALE_WEAK_COUNT=4
 
 PROFIT_PROTECT_MFE=3.
-PROFIT_PROTECT_ROI=.5
+PROFIT_PROTECT_ROI=1.0
 EMERGENCY_DROP_PCT=4.
 
 TRAIL_5=.97
@@ -210,6 +210,15 @@ def _score(address,analysis):
     if extreme_price_only: score-=8
     score=max(0,min(100,score))
 
+    # Require fresh acceleration in more than one dimension. This avoids
+    # buying a one-scan price spike after the move is already exhausted.
+    fresh_pressure = (
+        bool(prev)
+        and d1 >= 0.50
+        and (d15 >= 0.10 or df >= 100.)
+        and (df > 0 or dv > 0)
+    )
+
     flow_ratio=cur["flow"]/max(cur["vol"],1.)
     continuation_gate=(cur["m15"]>=CONTINUATION_M15_MIN and cur["m4"]>=CONTINUATION_M4_MIN and flow_ratio>=CONTINUATION_FLOW_RATIO_MIN)
     ignition_flow_ratio=cur["flow"]/max(cur["vol"],1.)
@@ -232,7 +241,7 @@ def _score(address,analysis):
     breakout_lane=(cur["m1"]>PUMP_CONFIRM_M1_MAX and cur["m1"]<=PUMP_EXTENDED_M1_MAX and cur["m15"]>=PUMP_BREAKOUT_M15_MIN and cur["m4"]>=PUMP_BREAKOUT_M4_MIN and d15>=PUMP_BREAKOUT_D15_MIN and flow_ratio>=PUMP_BREAKOUT_FLOW_RATIO_MIN)
     lifecycle_lane=ignition_lane or confirmation_lane or breakout_lane
     confirmed_trigger=(
-        prev and quality>=ENTRY_QUALITY and score>=ENTRY_SCORE and change>=ENTRY_CHANGE
+        fresh_pressure and quality>=ENTRY_QUALITY and score>=ENTRY_SCORE and change>=ENTRY_CHANGE
         and not late_spike and not extreme_price_only and lifecycle_lane
         and continuation_gate
         and cur["flow"]>0 and cur["flow15"]>=0
@@ -248,7 +257,7 @@ def _score(address,analysis):
              (cur["flow"]>=EARLY_ENTRY_FLOW_MIN*2 and cur["buy_ratio"]>=2.0))
     )
     early_trigger=(
-        prev and quality>=EARLY_ENTRY_QUALITY and score>=EARLY_ENTRY_SCORE and change>=ENTRY_CHANGE
+        fresh_pressure and quality>=EARLY_ENTRY_QUALITY and score>=EARLY_ENTRY_SCORE and change>=ENTRY_CHANGE
         and not extreme_price_only
         and ignition_lane
         and EARLY_ENTRY_M1_MIN<=cur["m1"]<=EARLY_ENTRY_M1_MAX
@@ -358,7 +367,7 @@ def _market_debug(dashboard,snapshot=None):
         f"Ignition: M1H 0–{PUMP_IGNITION_M1_MAX:.0f}% • M15 ≥ +0.5% • M4H ≥ {IGNITION_M4_MIN:.1f}% • flow/vol ≥ {IGNITION_FLOW_RATIO_MIN:.2f}",
         f"Anti-spike: M1H ≥ {LATE_M1_MIN:.0f}% requires M15 ≥ {LATE_M15_MIN:.1f}% and M4H ≥ {LATE_M4_MIN:.1f}%",
         f"Activity: trades ≥ {MIN_TRADES} • volume ≥ {MIN_VOLUME:.0f} SDA • buy/sell ≥ 1.15 • vol accel = gated confirmation • history persisted",
-        f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.0f}% • emergency scan drop -{EMERGENCY_DROP_PCT:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
+        f"Risk: max {MAX_OPEN} open • max {MAX_BUYS_PER_RUN}/scan • hard stop -{SL_PCT*100:.1f}% • emergency scan drop -{EMERGENCY_DROP_PCT:.0f}% • cooldown {COOLDOWN_HOURS:.0f}h",
         f"Profit: MFE ≥ {PROFIT_PROTECT_MFE:.0f}% ⇒ protect ≥ +{PROFIT_PROTECT_ROI:.0f}% • trails 5/10/20/40/70 = 3/5/8/10/12%",
         f"Exit: early -{EARLY_SL_PCT*100:.1f}% • stale {STALE_HOURS:.1f}h",
         "────────────────────────",f"🚀 V29.3 BUY READY in TOP {len(rows)}: {ready}",
