@@ -1,6 +1,6 @@
 # SDA whale scanner — direct PinetSwap Supabase source
 # Read-only. Uses the exact token_transactions endpoint observed from PinetSwap Whale Alerts.
-import os, json, traceback
+import os, json, traceback, time
 from datetime import datetime, timezone, timedelta
 import requests
 
@@ -20,6 +20,13 @@ FETCH_LIMIT=int(os.environ.get('WHALE_FETCH_LIMIT','1000'))
 MIN_WHALE_SDA=float(os.environ.get('WHALE_THRESHOLD_SDA','200'))
 WINDOWS={'15m':15,'30m':30,'1h':60,'4h':240}
 SOURCE='pinet-supabase-token_transactions-v2'
+SUPABASE_RETRIES=int(os.environ.get('WHALE_SUPABASE_RETRIES','3'))
+SUPABASE_RETRY_BASE_SECONDS=float(os.environ.get('WHALE_SUPABASE_RETRY_BASE_SECONDS','5'))
+TRANSIENT_SUPABASE_STATUS={429,500,502,503,504,522,523,524}
+
+
+class TransientSupabaseError(RuntimeError):
+    pass
 
 
 def load(path, default):
@@ -52,16 +59,44 @@ def ts(v):
 def fetch_supabase():
     since=(datetime.now(timezone.utc)-timedelta(hours=HISTORY_HOURS)).isoformat(timespec='milliseconds').replace('+00:00','Z')
     params={
-        'select':'id,tx_hash,token_address,from_address,to_address,price_in_sda,volume_in_sda,tx_timestamp,tx_type',
+        'select':'id,tx_hash,token_address,from_address,to_address,price_in_sda,tx_timestamp,tx_type',
         'tx_timestamp':f'gte.{since}',
         'volume_in_sda':f'gte.{MIN_WHALE_SDA:g}',
         'order':'tx_timestamp.desc',
         'limit':str(FETCH_LIMIT),
     }
-    r=requests.get(SUPABASE_URL,params=params,headers=SUPABASE_HEADERS,timeout=30)
-    r.raise_for_status()
-    obj=r.json()
-    return obj if isinstance(obj,list) else []
+
+    last_error=None
+    for attempt in range(1, SUPABASE_RETRIES + 1):
+        try:
+            r=requests.get(SUPABASE_URL,params=params,headers=SUPABASE_HEADERS,timeout=30)
+            if r.status_code in TRANSIENT_SUPABASE_STATUS:
+                raise requests.exceptions.HTTPError(
+                    f'Supabase transient HTTP {r.status_code}', response=r
+                )
+            r.raise_for_status()
+            obj=r.json()
+            return obj if isinstance(obj,list) else []
+        except requests.exceptions.RequestException as exc:
+            last_error=exc
+            status=getattr(getattr(exc,'response',None),'status_code',None)
+            transient = isinstance(exc, requests.exceptions.Timeout) or isinstance(
+                exc, (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError)
+            ) or status in TRANSIENT_SUPABASE_STATUS
+            if not transient or attempt >= SUPABASE_RETRIES:
+                if transient:
+                    raise TransientSupabaseError(
+                        f'Supabase temporarily unavailable after {attempt} attempts: {exc}'
+                    ) from exc
+                raise
+            delay=SUPABASE_RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+            print(
+                f'⚠️ SUPABASE TRANSIENT ERROR (attempt {attempt}/{SUPABASE_RETRIES}, '
+                f'HTTP {status or "network"}); retrying in {delay:g}s: {exc}'
+            )
+            time.sleep(delay)
+
+    raise TransientSupabaseError(f'Supabase fetch failed: {last_error}')
 
 
 def normalize(rows):
@@ -202,6 +237,11 @@ def main():
 if __name__=='__main__':
     try:
         main()
+    except TransientSupabaseError as exc:
+        print(f'⚠️ WHALE SCANNER TRANSIENT FAILURE: {exc}')
+        # Exit 75 is reserved for the continuous runner to skip this scan
+        # without killing the long-lived worker.
+        raise SystemExit(75)
     except Exception:
         e=traceback.format_exc(); print(e)
         if TOKEN and CHAT_ID:
