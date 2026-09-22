@@ -180,6 +180,14 @@ def wallet_snapshot(md,meta):
         if items:w["holding_source"]=f"/addresses/{WALLET_ADDRESS}/token-balances"
     except Exception as e:
         if not w["error"]:w["error"]=f"token balances: {e}"
+    # Fail closed on transient explorer/API failures: preserve the last known-good holdings snapshot.
+    if w.get("error") and not w.get("holdings") and isinstance(previous,dict) and previous.get("holdings"):
+        w["holdings"]=previous.get("holdings") or []
+        w["native_sda"]=previous.get("native_sda")
+        w["holding_source"]=previous.get("holding_source")
+        w["snapshot_stale"]=True
+    else:
+        w["snapshot_stale"]=False
     w["total_token_value_sda"]=sum(num(h.get("value_sda")) for h in w["holdings"] if h.get("value_sda") is not None)
     if w["native_sda"] is not None:w["total_value_sda"]=w["native_sda"]+w["total_token_value_sda"]
     save(WALLET_FILE,w);return w
