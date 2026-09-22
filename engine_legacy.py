@@ -159,6 +159,7 @@ def transfer_addr(x):
     return ""
 
 def wallet_snapshot(md,meta):
+    previous=load(WALLET_FILE,{})
     w={"wallet":WALLET_ADDRESS,"native_sda":None,"holdings":[],"total_token_value_sda":0.0,"total_value_sda":None,"updated_at":now(),"error":None,"holding_source":None}
     try:
         d=api_get(f"/addresses/{WALLET_ADDRESS}");raw=d.get("coin_balance",d.get("balance")) if isinstance(d,dict) else None
