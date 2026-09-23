@@ -101,6 +101,12 @@ dashboard_pump_patch.patch_dashboard(dashboard)
 v25_runtime_tuning_patch.patch()
 real_wallet_market_fix.patch_dashboard(dashboard)
 
+# V30 must be the final dashboard decision/DEBUG layer. Several legacy
+# compatibility patches above can replace market_debug_report after the
+# initial telegram_dashboard import, so re-apply V30 last.
+import v30_dashboard_patch
+v30_dashboard_patch.patch_dashboard(dashboard)
+
 _original_menu_keyboard = dashboard.menu_keyboard
 
 def _menu_keyboard_with_refresh():
