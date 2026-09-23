@@ -24,6 +24,7 @@ jobs:
     # Its commits must never create a Vercel deployment.
     if: ${{ github.event.head_commit.message != 'Update SDA scanner state' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,11 +40,13 @@ jobs:
             echo 'VERCEL_TOKEN is missing.'
             exit 1
           fi
-          npm install --global vercel@latest
-          vercel link --yes \
+          # Never allow a Vercel CLI/network stall to hold the Actions
+          # concurrency group forever and leave later deploys pending.
+          timeout 90s npm install --global vercel@latest
+          timeout 60s vercel link --yes \
             --project="$VERCEL_PROJECT_ID" \
             --scope="$VERCEL_ORG_ID" \
             --token="$VERCEL_TOKEN"
-          vercel deploy --prod --yes \
+          timeout 180s vercel deploy --prod --yes \
             --scope="$VERCEL_ORG_ID" \
             --token="$VERCEL_TOKEN"
