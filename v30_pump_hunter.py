@@ -130,10 +130,11 @@ def cooldown_active(address):
 def decision(address,a,ws=None,persist=True):
     c,s,q,i,phase=score(address,a,persist=persist)
     cd=cooldown_active(address)
-    blocked=(phase not in ("IGNITION","CONFIRMATION","BREAKOUT")) or cd
+    blocked=(not buy) or cd or s<ENTRY_SCORE
     failures=[]
     if phase=="NO": failures.append("no lifecycle lane")
     if not bool(p:=load_state().get("history",{}).get(str(address).lower(),{})): failures.append("no prior sample")
+    if s<ENTRY_SCORE: failures.append(f"score {s:.0f}<{ENTRY_SCORE:.0f}")
     if q<MIN_QUALITY: failures.append(f"quality {q:.0f}<{MIN_QUALITY:.0f}")
     if i<MIN_IMPULSE: failures.append(f"impulse +{i:.1f}<{MIN_IMPULSE:.1f}")
     if c["flow"]<=0: failures.append("flow<=0")
