@@ -28,7 +28,20 @@ def load_state():
     try:
         with open(STATE_FILE,encoding="utf-8") as f:x=json.load(f)
         _RUNTIME=x if isinstance(x,dict) else {}
-    except Exception:_RUNTIME={}
+    except Exception:
+        _RUNTIME={}
+        # Vercel's serverless filesystem is not durable. For read-only
+        # dashboard decisions, fall back to the scanner's checkpointed V30
+        # state in the public repository so impulse survives deployment swaps.
+        if not os.path.exists(STATE_FILE):
+            try:
+                import urllib.request
+                url="https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/v30_pump_state.json"
+                with urllib.request.urlopen(url,timeout=4) as r:
+                    remote=json.loads(r.read().decode("utf-8"))
+                if isinstance(remote,dict): _RUNTIME=remote
+            except Exception:
+                pass
     return _RUNTIME
 
 def save_state(s):
