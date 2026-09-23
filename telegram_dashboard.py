@@ -11,6 +11,7 @@ import engine
 import main as scanner
 from strategy_v21 import patch_engine
 import v26_dashboard_patch
+import v30_dashboard_patch
 
 patch_engine(engine)
 STATE_FILE = "telegram_menu_state.json"
