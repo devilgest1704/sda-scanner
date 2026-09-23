@@ -196,6 +196,13 @@ import telegram_callback_router
 dashboard._sda_callback_router_patched = False
 telegram_callback_router.patch_dashboard(dashboard)
 
+# V30 must be the absolute final DEBUG renderer. The callback router only
+# replaces handle_update, but legacy compatibility layers can leave the V30
+# patch guard set from telegram_dashboard import time. Reset the guard and
+# install V30 once more so DEBUG can never resolve to the V26/V29 renderer.
+dashboard._v30_dashboard_patched = False
+v30_dashboard_patch.patch_dashboard(dashboard)
+
 app = FastAPI()
 
 def _cron_authorized(request: Request) -> bool:
