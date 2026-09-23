@@ -19,7 +19,7 @@ def _analysis(td):
 
 
 def _decision(dashboard,address,analysis,ws):
-    try:return v30.decision(address,analysis,ws)
+    try:return v30.decision(address,analysis,ws,persist=False)
     except Exception as exc:
         return {"score":0,"pump_score":0,"pump_change":0,"pump_phase":"NO",
                 "m15":0,"m1h":0,"m4h":0,"net_1h":0,"volume_1h":0,
