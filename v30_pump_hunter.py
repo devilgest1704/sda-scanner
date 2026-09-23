@@ -57,9 +57,12 @@ def metrics(a):
       "trade_ratio":bc/max(sc,1.0),"accel":n(a.get("volume_acceleration_15m_pct"))
     }
 
-def score(address,a):
+def score(address,a,persist=True):
     st=load_state(); hist=st.setdefault("history",{}); key=str(address).lower()
-    c=metrics(a); p=hist.get(key,{}).get("last",{})
+    c=metrics(a); rec=hist.get(key,{})
+    # Keep the sample before the latest scanner observation separately.
+    # Dashboard reads are read-only and must not erase impulse history.
+    p=rec.get("prev") or rec.get("last",{})
     d1=max(0,c["m1"]-n(p.get("m1"))); d15=max(0,c["m15"]-n(p.get("m15")))
     df=c["flow"]-n(p.get("flow")); dv=max(0,c["vol"]-n(p.get("vol")))
     # Quality rewards early momentum, fresh flow and real activity, not absolute 1h spike alone.
@@ -86,9 +89,12 @@ def score(address,a):
     # Late spikes need materially stronger confirmation.
     if c["m1"]>18 and (c["m15"]<2 or c["flow15"]<=0): buy=False
     phase=lane if buy else ("WATCH" if quality>=40 and c["flow"]>0 else "NO")
-    hist[key]={"last":c,"score":round(min(100,quality+impulse),1),"quality":round(quality,1),
-               "impulse":round(impulse,1),"phase":phase,"updated_at":now()}
-    st["updated_at"]=now();save_state(st)
+    if persist:
+        old=hist.get(key,{})
+        hist[key]={"prev":old.get("last") or old.get("prev") or {},
+                   "last":c,"score":round(min(100,quality+impulse),1),"quality":round(quality,1),
+                   "impulse":round(impulse,1),"phase":phase,"updated_at":now()}
+        st["updated_at"]=now();save_state(st)
     return c,round(min(100,quality+impulse),1),round(quality,1),round(impulse,1),phase
 
 def cooldown_active(address):
@@ -97,8 +103,8 @@ def cooldown_active(address):
     try:return datetime.fromisoformat(x.replace("Z","+00:00"))>datetime.now(timezone.utc)
     except:return False
 
-def decision(address,a,ws=None):
-    c,s,q,i,phase=score(address,a)
+def decision(address,a,ws=None,persist=True):
+    c,s,q,i,phase=score(address,a,persist=persist)
     blocked=(phase not in ("IGNITION","CONFIRMATION","BREAKOUT")) or cooldown_active(address)
     reason=("cooldown" if cooldown_active(address) else f"{phase} / score {s:.0f}, quality {q:.0f}, impulse +{i:.1f}")
     eff=s if not blocked else min(s,ENTRY_SCORE-1)
