@@ -146,6 +146,9 @@ try:
     _rw.patch_dashboard(sys.modules[__name__])
 except Exception as exc:print(f"Real Wallet patch unavailable: {exc}")
 try:
+    v30_dashboard_patch.patch_dashboard(sys.modules[__name__])
+except Exception as exc:print(f"V30 dashboard patch unavailable: {exc}")
+try:
     import dashboard_runtime_guard as _runtime_guard
     _runtime_guard.patch_dashboard(sys.modules[__name__])
 except Exception as exc:print(f"Dashboard runtime guard unavailable: {exc}")
