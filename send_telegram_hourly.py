@@ -203,7 +203,16 @@ def main():
             md = dashboard.load("market_data.json", {"tokens": {}})
             ws = dashboard.load("whale_data.json", {})
             meta = dashboard.load("token_metadata.json", {})
-            return v26_dashboard_patch._top_buy(dashboard, md, ws, meta)
+            # Never fall back to V26/V29 here: that silently made the hourly
+            # Telegram report look like V29.3 whenever the legacy wrapper failed.
+            try:
+                import v30_dashboard_patch
+                dashboard._v30_dashboard_patched = False
+                v30_dashboard_patch.patch_dashboard(dashboard)
+                return dashboard.top_buy(md, ws, meta)
+            except Exception as v30_exc:
+                print(f"V30 dashboard fallback error: {v30_exc}")
+                return "🔥 TOP BUY CANDIDATES • V30 CLEAN PUMP-HUNTER\\n\\n⚠️ V30 dashboard error — legacy V29 renderer intentionally disabled."
 
     dashboard.main_dashboard = _safe_main_dashboard
 
