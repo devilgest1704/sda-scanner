@@ -93,7 +93,7 @@ def score(address,a,persist=True):
     confirmation=(8<c["m1"]<=18 and c["m15"]>=1.0 and c["m4"]>=-0.5 and ratio>=0.22)
     breakout=(18<c["m1"]<=35 and c["m15"]>=2.0 and c["m4"]>=0.5 and d15>=0.3 and ratio>=0.30)
     lane="IGNITION" if ignition else ("CONFIRMATION" if confirmation else ("BREAKOUT" if breakout else "NO"))
-    fresh=bool(p) and (d1>=0.35 or d15>=0.15) and (df>=50 or dv>0)
+    fresh=bool(p) and (d1>=0.35 or d15>=0.15 or df>=50 or dv>0)
     # Liquidity gate: keep the hard 500 SDA baseline, but allow smaller
     # early pumps when there is enough real trade activity and flow. This
     # avoids rejecting candidates such as a 400-500 SDA move solely because
@@ -145,7 +145,7 @@ def decision(address,a,ws=None,persist=True):
     d15=max(0,c["m15"]-n(p.get("m15")))
     df=c["flow"]-n(p.get("flow"))
     dv=max(0,c["vol"]-n(p.get("vol")))
-    fresh=bool(p) and (d1>=0.35 or d15>=0.15) and (df>=50 or dv>0)
+    fresh=bool(p) and (d1>=0.35 or d15>=0.15 or df>=50 or dv>0)
     buy=(
         lane_ok and fresh and q>=MIN_QUALITY and i>=MIN_IMPULSE
         and c["flow"]>0 and c["flow15"]>=0 and c["trades"]>=5
