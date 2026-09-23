@@ -152,5 +152,12 @@ try:
     import dashboard_runtime_guard as _runtime_guard
     _runtime_guard.patch_dashboard(sys.modules[__name__])
 except Exception as exc:print(f"Dashboard runtime guard unavailable: {exc}")
+try:
+    # V30 must be the final dashboard layer. Runtime guard may wrap/replace
+    # market_debug_report, so re-apply V30 after it.
+    v30_dashboard_patch.patch_dashboard.__module__
+    sys.modules[__name__]._v30_dashboard_patched = False
+    v30_dashboard_patch.patch_dashboard(sys.modules[__name__])
+except Exception as exc:print(f"Final V30 dashboard patch unavailable: {exc}")
 
 if __name__=="__main__":run()
