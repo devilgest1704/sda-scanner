@@ -5,7 +5,7 @@ Entry and exit logic are intentionally separated.
 import json, os
 from datetime import datetime, timezone, timedelta
 
-VERSION="V30.0"
+VERSION="V30.1"
 STATE_FILE="v30_pump_state.json"
 SL_PCT=0.025
 MAX_OPEN=5
@@ -102,11 +102,22 @@ def score(address,a,persist=True):
         c["vol"]>=300 and c["trades"]>=10 and c["flow"]>=100 and
         c["buy_ratio"]>=1.15 and ratio>=0.25
     )
-    buy=(
-      lane!="NO" and fresh and quality>=MIN_QUALITY and impulse>=MIN_IMPULSE
+    ignition_buy=(
+      lane=="IGNITION" and quality>=48 and impulse>=8
+      and c["flow"]>=150 and c["trades"]>=8 and c["m15"]>=0
+      and liquidity_ok and c["buy_ratio"]>=1.10 and price_flow_ok
+    )
+    confirmation_buy=(
+      lane=="CONFIRMATION" and fresh and quality>=50 and impulse>=3
       and c["flow"]>0 and c["flow15"]>=0 and c["trades"]>=5 and liquidity_ok
       and c["buy_ratio"]>=1.10 and c["m15"]>=-0.25 and price_flow_ok
     )
+    breakout_buy=(
+      lane=="BREAKOUT" and fresh and quality>=50 and impulse>=3
+      and c["flow"]>0 and c["flow15"]>=0 and c["trades"]>=5 and liquidity_ok
+      and c["buy_ratio"]>=1.10 and c["m15"]>=-0.25 and price_flow_ok
+    )
+    buy=ignition_buy or confirmation_buy or breakout_buy
     # Late spikes need materially stronger confirmation.
     if c["m1"]>18 and (c["m15"]<2 or c["flow15"]<=0): buy=False
     # Keep lifecycle phase visible even when a gate blocks the actual BUY.
@@ -146,12 +157,24 @@ def decision(address,a,ws=None,persist=True):
     df=c["flow"]-n(p.get("flow"))
     dv=max(0,c["vol"]-n(p.get("vol")))
     fresh=bool(p) and (d1>=0.35 or d15>=0.15 or df>=50 or dv>0)
-    buy=(
-        lane_ok and fresh and q>=MIN_QUALITY and i>=MIN_IMPULSE
+    ignition_buy=(
+        phase=="IGNITION" and q>=48 and i>=8
+        and c["flow"]>=150 and c["trades"]>=8 and c["m15"]>=0
+        and liquidity_ok and c["buy_ratio"]>=1.10 and price_flow_ok
+    )
+    confirmation_buy=(
+        phase=="CONFIRMATION" and fresh and q>=50 and i>=3
         and c["flow"]>0 and c["flow15"]>=0 and c["trades"]>=5
         and liquidity_ok and c["buy_ratio"]>=1.10
         and c["m15"]>=-0.25 and price_flow_ok
     )
+    breakout_buy=(
+        phase=="BREAKOUT" and fresh and q>=50 and i>=3
+        and c["flow"]>0 and c["flow15"]>=0 and c["trades"]>=5
+        and liquidity_ok and c["buy_ratio"]>=1.10
+        and c["m15"]>=-0.25 and price_flow_ok
+    )
+    buy=ignition_buy or confirmation_buy or breakout_buy
     if c["m1"]>18 and (c["m15"]<2 or c["flow15"]<=0):
         buy=False
     blocked=(not buy) or cd or s<ENTRY_SCORE
