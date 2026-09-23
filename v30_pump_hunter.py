@@ -278,13 +278,21 @@ def patch(main_module,engine):
         return {**d,"data":d,"prediction":d["paper_prediction"],"blocked":d["paper_buy_blocked"],
                 "reason":d["paper_buy_block_reason"],"score_band":d["pump_phase"]}
 
-    engine.score=decision
-    engine.create=create
-    engine.BUY_THRESHOLD=ENTRY_SCORE
-    engine.MAX_OPEN_POSITIONS=MAX_OPEN
-    engine.MAX_NEW_BUYS_PER_RUN=MAX_BUYS_PER_RUN
-    engine.SL_PCT=SL_PCT
-    engine._auto_exit=auto_exit
+    # engine.py re-exports engine_legacy.py symbols. The actual paper runner
+    # calls engine_legacy.main(), whose global lookups therefore bypass only
+    # changing engine.score/create/_auto_exit. Patch both the public facade and
+    # the legacy module so the V30 decision is the decision that actually opens
+    # paper positions.
+    legacy=getattr(engine,"_legacy",None)
+    targets=[engine] + ([legacy] if legacy is not None else [])
+    for target in targets:
+        target.score=decision
+        target.create=create
+        target.BUY_THRESHOLD=ENTRY_SCORE
+        target.MAX_OPEN_POSITIONS=MAX_OPEN
+        target.MAX_NEW_BUYS_PER_RUN=MAX_BUYS_PER_RUN
+        target.SL_PCT=SL_PCT
+        target._auto_exit=auto_exit
     main_module.paper_decision=paper_decision
     if callable(original_main):
         def wrapped_main(*args,**kwargs):
