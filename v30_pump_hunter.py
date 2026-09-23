@@ -130,18 +130,41 @@ def cooldown_active(address):
 def decision(address,a,ws=None,persist=True):
     c,s,q,i,phase=score(address,a,persist=persist)
     cd=cooldown_active(address)
+    # Re-evaluate the same BUY gates here so dashboard and paper engine have
+    # one source of truth. Do not reference local variables from score().
+    ratio=c["flow"]/max(c["vol"],1)
+    price_flow_ok=not(c["m1"]>=12 and ratio<0.18)
+    lane_ok=phase in ("IGNITION","CONFIRMATION","BREAKOUT")
+    liquidity_ok=(c["vol"]>=500) or (
+        c["vol"]>=300 and c["trades"]>=10 and c["flow"]>=100 and
+        c["buy_ratio"]>=1.15 and ratio>=0.25
+    )
+    fresh_hist=load_state().get("history",{}).get(str(address).lower(),{})
+    p=fresh_hist.get("prev") or fresh_hist.get("last") or {}
+    d1=max(0,c["m1"]-n(p.get("m1")))
+    d15=max(0,c["m15"]-n(p.get("m15")))
+    df=c["flow"]-n(p.get("flow"))
+    dv=max(0,c["vol"]-n(p.get("vol")))
+    fresh=bool(p) and (d1>=0.35 or d15>=0.15) and (df>=50 or dv>0)
+    buy=(
+        lane_ok and fresh and q>=MIN_QUALITY and i>=MIN_IMPULSE
+        and c["flow"]>0 and c["flow15"]>=0 and c["trades"]>=5
+        and liquidity_ok and c["buy_ratio"]>=1.10
+        and c["m15"]>=-0.25 and price_flow_ok
+    )
+    if c["m1"]>18 and (c["m15"]<2 or c["flow15"]<=0):
+        buy=False
     blocked=(not buy) or cd or s<ENTRY_SCORE
     failures=[]
-    if phase=="NO": failures.append("no lifecycle lane")
-    if not bool(p:=load_state().get("history",{}).get(str(address).lower(),{})): failures.append("no prior sample")
+    if not lane_ok: failures.append("no lifecycle lane")
+    if not fresh: failures.append("no fresh impulse")
     if s<ENTRY_SCORE: failures.append(f"score {s:.0f}<{ENTRY_SCORE:.0f}")
     if q<MIN_QUALITY: failures.append(f"quality {q:.0f}<{MIN_QUALITY:.0f}")
     if i<MIN_IMPULSE: failures.append(f"impulse +{i:.1f}<{MIN_IMPULSE:.1f}")
     if c["flow"]<=0: failures.append("flow<=0")
     if c["flow15"]<0: failures.append("15m flow<0")
     if c["trades"]<5: failures.append(f"trades {c['trades']:.0f}<5")
-    if not ((c["vol"]>=500) or (c["vol"]>=300 and c["trades"]>=10 and c["flow"]>=100 and c["buy_ratio"]>=1.15 and (c["flow"]/max(c["vol"],1))>=0.25)):
-        failures.append(f"liquidity vol {c['vol']:.0f}, flow {c['flow']:.0f}")
+    if not liquidity_ok: failures.append(f"liquidity vol {c['vol']:.0f}, flow {c['flow']:.0f}")
     if c["buy_ratio"]<1.10: failures.append(f"buy ratio {c['buy_ratio']:.2f}<1.10")
     if c["m15"]<-0.25: failures.append(f"M15 {c['m15']:+.2f}<-0.25%")
     if not price_flow_ok: failures.append("price/flow mismatch")
