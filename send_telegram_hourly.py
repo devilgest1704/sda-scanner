@@ -133,6 +133,11 @@ def main():
     # intentionally comes AFTER all dashboard patches.
     real_wallet_market_fix.patch_dashboard(dashboard)
 
+    # V30 must be the final dashboard decision/debug layer so legacy V26/V29
+    # renderers cannot overwrite the clean V30 paper strategy in hourly output.
+    import v30_dashboard_patch
+    v30_dashboard_patch.patch_dashboard(dashboard)
+
     _patched_menu_keyboard = dashboard.menu_keyboard
 
     def _menu_keyboard_with_refresh():
