@@ -94,14 +94,25 @@ def score(address,a,persist=True):
     breakout=(18<c["m1"]<=35 and c["m15"]>=2.0 and c["m4"]>=0.5 and d15>=0.3 and ratio>=0.30)
     lane="IGNITION" if ignition else ("CONFIRMATION" if confirmation else ("BREAKOUT" if breakout else "NO"))
     fresh=bool(p) and (d1>=0.35 or d15>=0.15) and (df>=50 or dv>0)
+    # Liquidity gate: keep the hard 500 SDA baseline, but allow smaller
+    # early pumps when there is enough real trade activity and flow. This
+    # avoids rejecting candidates such as a 400-500 SDA move solely because
+    # absolute volume is still building.
+    liquidity_ok=(c["vol"]>=500) or (
+        c["vol"]>=300 and c["trades"]>=10 and c["flow"]>=100 and
+        c["buy_ratio"]>=1.15 and ratio>=0.25
+    )
     buy=(
       lane!="NO" and fresh and quality>=MIN_QUALITY and impulse>=MIN_IMPULSE
-      and c["flow"]>0 and c["flow15"]>=0 and c["trades"]>=5 and c["vol"]>=500
+      and c["flow"]>0 and c["flow15"]>=0 and c["trades"]>=5 and liquidity_ok
       and c["buy_ratio"]>=1.10 and c["m15"]>=-0.25 and price_flow_ok
     )
     # Late spikes need materially stronger confirmation.
     if c["m1"]>18 and (c["m15"]<2 or c["flow15"]<=0): buy=False
-    phase=lane if buy else ("WATCH" if quality>=40 and c["flow"]>0 else "NO")
+    # Keep lifecycle phase visible even when a gate blocks the actual BUY.
+    # The dashboard can then distinguish "confirmation but blocked" from
+    # "not in a pump lane yet".
+    phase=lane if lane!="NO" else ("WATCH" if quality>=40 and c["flow"]>0 else "NO")
     if persist:
         old=hist.get(key,{})
         hist[key]={"prev":old.get("last") or old.get("prev") or {},
@@ -118,13 +129,29 @@ def cooldown_active(address):
 
 def decision(address,a,ws=None,persist=True):
     c,s,q,i,phase=score(address,a,persist=persist)
-    blocked=(phase not in ("IGNITION","CONFIRMATION","BREAKOUT")) or cooldown_active(address)
-    reason=("cooldown" if cooldown_active(address) else f"{phase} / score {s:.0f}, quality {q:.0f}, impulse +{i:.1f}")
+    cd=cooldown_active(address)
+    blocked=(phase not in ("IGNITION","CONFIRMATION","BREAKOUT")) or cd
+    failures=[]
+    if phase=="NO": failures.append("no lifecycle lane")
+    if not bool(p:=load_state().get("history",{}).get(str(address).lower(),{})): failures.append("no prior sample")
+    if q<MIN_QUALITY: failures.append(f"quality {q:.0f}<{MIN_QUALITY:.0f}")
+    if i<MIN_IMPULSE: failures.append(f"impulse +{i:.1f}<{MIN_IMPULSE:.1f}")
+    if c["flow"]<=0: failures.append("flow<=0")
+    if c["flow15"]<0: failures.append("15m flow<0")
+    if c["trades"]<5: failures.append(f"trades {c['trades']:.0f}<5")
+    if not ((c["vol"]>=500) or (c["vol"]>=300 and c["trades"]>=10 and c["flow"]>=100 and c["buy_ratio"]>=1.15 and (c["flow"]/max(c["vol"],1))>=0.25)):
+        failures.append(f"liquidity vol {c['vol']:.0f}, flow {c['flow']:.0f}")
+    if c["buy_ratio"]<1.10: failures.append(f"buy ratio {c['buy_ratio']:.2f}<1.10")
+    if c["m15"]<-0.25: failures.append(f"M15 {c['m15']:+.2f}<-0.25%")
+    if not price_flow_ok: failures.append("price/flow mismatch")
+    if c["m1"]>18 and (c["m15"]<2 or c["flow15"]<=0): failures.append("late spike confirmation")
+    if cd: failures.insert(0,"cooldown")
+    reason="READY" if not blocked else f"{phase} / "+"; ".join(failures[:3])
     eff=s if not blocked else min(s,ENTRY_SCORE-1)
     return {"score":eff,"confidence":eff,"buy_score":eff,"market_score":eff,
       "m1h":c["m1"],"m15":c["m15"],"m4h":c["m4"],"net_1h":c["flow"],"whale_net":c["flow"],
       "trades_1h":c["trades"],"volume_1h":c["vol"],"buy_ratio":c["buy_ratio"],"trade_ratio":c["trade_ratio"],
-      "eligible_for_buy":c["trades"]>0,"pump_score":s,"pump_quality":q,"pump_change":i,"pump_phase":phase,
+      "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":i,"pump_phase":phase,
       "paper_buy_blocked":blocked,"paper_buy_block_reason":reason,
       "paper_prediction":{"ready":False,"role":"advisory"},"paper_prediction_role":"advisory",
       "technical_bull":0,"technical_bear":0,"technical_evidence":[],
