@@ -75,7 +75,10 @@ def score(address,a,persist=True):
     c=metrics(a); rec=hist.get(key,{})
     # Keep the sample before the latest scanner observation separately.
     # Dashboard reads are read-only and must not erase impulse history.
-    p=rec.get("prev") or rec.get("last",{})
+    last=rec.get("last") or {}
+    prev=rec.get("prev") or {}
+    same_last=bool(last) and all(abs(n(c.get(k))-n(last.get(k)))<1e-9 for k in ("price","m1","m15","m4","flow","flow15","vol","trades"))
+    p=(prev if same_last else last) if not persist else last
     d1=max(0,c["m1"]-n(p.get("m1"))); d15=max(0,c["m15"]-n(p.get("m15")))
     df=c["flow"]-n(p.get("flow")); dv=max(0,c["vol"]-n(p.get("vol")))
     # Quality rewards early momentum, fresh flow and real activity, not absolute 1h spike alone.
@@ -148,7 +151,9 @@ def decision(address,a,ws=None,persist=True):
         c["buy_ratio"]>=1.15 and ratio>=0.25
     )
     fresh_hist=load_state().get("history",{}).get(str(address).lower(),{})
-    p=fresh_hist.get("prev") or fresh_hist.get("last") or {}
+    last=fresh_hist.get("last") or {}
+    same_last=bool(last) and all(abs(n(c.get(k))-n(last.get(k)))<1e-9 for k in ("price","m1","m15","m4","flow","flow15","vol","trades"))
+    p=(fresh_hist.get("prev") or {}) if (persist or same_last) else last
     d1=max(0,c["m1"]-n(p.get("m1")))
     d15=max(0,c["m15"]-n(p.get("m15")))
     df=c["flow"]-n(p.get("flow"))
@@ -301,7 +306,7 @@ def market_debug(dashboard,snapshot=None):
     for address,td in tokens.items():
         a=td.get("analysis",td) if isinstance(td,dict) else {}
         if not isinstance(a,dict) or n(a.get("price_in_sda"))<=0:continue
-        d=decision(address,a)
+        d=decision(address,a,persist=False)
         rows.append((d["pump_score"],address,d))
     rows.sort(reverse=True)
     return "\n".join([f"V30 CLEAN • loaded {len(tokens)} • ready {sum(1 for _,_,d in rows[:5] if not d['paper_buy_blocked'])}"]+
