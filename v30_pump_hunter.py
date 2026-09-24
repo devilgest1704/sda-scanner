@@ -5,7 +5,7 @@ Entry and exit logic are intentionally separated.
 import json, os
 from datetime import datetime, timezone, timedelta
 
-VERSION="V30.1"
+VERSION="V30.2"
 STATE_FILE="v30_pump_state.json"
 SL_PCT=0.025
 MAX_OPEN=5
@@ -90,8 +90,8 @@ def score(address,a,persist=True):
     price_flow_ok=not(c["m1"]>=12 and ratio<0.18)
     # Three lifecycle lanes.
     ignition=(0<c["m1"]<=8 and c["m15"]>=0.3 and c["flow15"]>=40 and ratio>=0.20)
-    confirmation=(8<c["m1"]<=18 and c["m15"]>=1.0 and c["m4"]>=-0.5 and ratio>=0.22)
-    breakout=(18<c["m1"]<=35 and c["m15"]>=2.0 and c["m4"]>=0.5 and d15>=0.3 and ratio>=0.30)
+    confirmation=(8<c["m1"]<=12 and c["m15"]>=1.5 and c["m4"]>=-0.5 and c["flow15"]>=25 and ratio>=0.25)
+    breakout=(12<c["m1"]<=35 and c["m15"]>=2.0 and c["m4"]>=0.5 and d15>=0.3 and ratio>=0.30)
     lane="IGNITION" if ignition else ("CONFIRMATION" if confirmation else ("BREAKOUT" if breakout else "NO"))
     fresh=bool(p) and (d1>=0.35 or d15>=0.15 or df>=50 or dv>0)
     # Liquidity gate: keep the hard 500 SDA baseline, but allow smaller
@@ -108,18 +108,15 @@ def score(address,a,persist=True):
       and liquidity_ok and c["buy_ratio"]>=1.10 and price_flow_ok
     )
     confirmation_buy=(
-      lane=="CONFIRMATION" and fresh and quality>=50 and impulse>=3
-      and c["flow"]>0 and c["flow15"]>=0 and c["trades"]>=5 and liquidity_ok
-      and c["buy_ratio"]>=1.10 and c["m15"]>=-0.25 and price_flow_ok
+      lane=="CONFIRMATION" and fresh and quality>=52 and impulse>=5
+      and c["flow"]>=125 and c["flow15"]>=25 and c["trades"]>=7 and liquidity_ok
+      and c["buy_ratio"]>=1.12 and c["m15"]>=1.5 and price_flow_ok
     )
-    breakout_buy=(
-      lane=="BREAKOUT" and fresh and quality>=50 and impulse>=3
-      and c["flow"]>0 and c["flow15"]>=0 and c["trades"]>=5 and liquidity_ok
-      and c["buy_ratio"]>=1.10 and c["m15"]>=-0.25 and price_flow_ok
-    )
-    buy=ignition_buy or confirmation_buy or breakout_buy
+    # BREAKOUT is a holding/management phase, never a new entry.
+    breakout_buy=False
+    buy=ignition_buy or confirmation_buy
     # Late spikes need materially stronger confirmation.
-    if c["m1"]>18 and (c["m15"]<2 or c["flow15"]<=0): buy=False
+    if c["m1"]>12: buy=False
     # Keep lifecycle phase visible even when a gate blocks the actual BUY.
     # The dashboard can then distinguish "confirmation but blocked" from
     # "not in a pump lane yet".
@@ -163,18 +160,14 @@ def decision(address,a,ws=None,persist=True):
         and liquidity_ok and c["buy_ratio"]>=1.10 and price_flow_ok
     )
     confirmation_buy=(
-        phase=="CONFIRMATION" and fresh and q>=50 and i>=3
-        and c["flow"]>0 and c["flow15"]>=0 and c["trades"]>=5
-        and liquidity_ok and c["buy_ratio"]>=1.10
-        and c["m15"]>=-0.25 and price_flow_ok
+        phase=="CONFIRMATION" and fresh and q>=52 and i>=5
+        and c["flow"]>=125 and c["flow15"]>=25 and c["trades"]>=7
+        and liquidity_ok and c["buy_ratio"]>=1.12
+        and c["m15"]>=1.5 and price_flow_ok
     )
-    breakout_buy=(
-        phase=="BREAKOUT" and fresh and q>=50 and i>=3
-        and c["flow"]>0 and c["flow15"]>=0 and c["trades"]>=5
-        and liquidity_ok and c["buy_ratio"]>=1.10
-        and c["m15"]>=-0.25 and price_flow_ok
-    )
-    buy=ignition_buy or confirmation_buy or breakout_buy
+    # BREAKOUT is a holding/management phase, never a new entry.
+    breakout_buy=False
+    buy=ignition_buy or confirmation_buy
     if c["m1"]>18 and (c["m15"]<2 or c["flow15"]<=0):
         buy=False
     blocked=(not buy) or cd or s<ENTRY_SCORE
@@ -191,7 +184,7 @@ def decision(address,a,ws=None,persist=True):
     if c["buy_ratio"]<1.10: failures.append(f"buy ratio {c['buy_ratio']:.2f}<1.10")
     if c["m15"]<-0.25: failures.append(f"M15 {c['m15']:+.2f}<-0.25%")
     if not price_flow_ok: failures.append("price/flow mismatch")
-    if c["m1"]>18 and (c["m15"]<2 or c["flow15"]<=0): failures.append("late spike confirmation")
+    if c["m1"]>12: failures.append("late entry: M1H>12%")
     if cd: failures.insert(0,"cooldown")
     reason="READY" if not blocked else f"{phase} / "+"; ".join(failures[:3])
     eff=s if not blocked else min(s,ENTRY_SCORE-1)
@@ -256,21 +249,21 @@ def patch(main_module,engine):
             pos["sl"]=stop
             weak=(s["m15"]<0 and s["net_1h"]<=0) or s["pump_score"]<38
             pos["pump_weak_count"]=int(n(pos.get("pump_weak_count"))+1) if weak else max(0,int(n(pos.get("pump_weak_count")))-1)
-            if (cur-entry)/entry*100<=-4:
-                r=engine.close(p,address,cur,"V30 EMERGENCY/HARD STOP")
+            if (cur-entry)/entry*100<=-3.5:
+                r=engine.close(p,address,cur,"V30.2 EMERGENCY/HARD STOP")
             elif cur<=stop:
-                r=engine.close(p,address,cur,"V30 TRAILING/STOP")
+                r=engine.close(p,address,cur,"V30.2 TRAILING/STOP")
             elif roi<=-2.5 and pos["pump_weak_count"]>=2:
-                r=engine.close(p,address,cur,"V30 EARLY WEAKNESS")
+                r=engine.close(p,address,cur,"V30.2 EARLY WEAKNESS")
             elif age>=3 and mfe<2 and pos["pump_weak_count"]>=4 and roi<1:
-                r=engine.close(p,address,cur,"V30 STALE")
+                r=engine.close(p,address,cur,"V30.2 STALE")
             elif roi>1 and mfe>=3 and pos["pump_weak_count"]>=4:
-                r=engine.close(p,address,cur,"V30 PUMP BREAKDOWN")
+                r=engine.close(p,address,cur,"V30.2 PUMP BREAKDOWN")
             else:r=None
             if r:
                 if "STOP" in str(r.get("close_reason","")) or "WEAK" in str(r.get("close_reason","")) or "STALE" in str(r.get("close_reason","")) or "BREAKDOWN" in str(r.get("close_reason","")):
                     st=load_state();st.setdefault("cooldowns",{})[str(address).lower()]=(datetime.now(timezone.utc)+timedelta(hours=COOLDOWN_HOURS)).isoformat();save_state(st)
-                events.append(f"V30 {r.get('close_reason','EXIT')} {r.get('label',address)} | ROI {roi:+.2f}% | MFE {mfe:+.2f}%")
+                events.append(f"V30.2 {r.get('close_reason','EXIT')}" {r.get('label',address)} | ROI {roi:+.2f}% | MFE {mfe:+.2f}%")
         return events
 
     def paper_decision(address,analysis,ws):
