@@ -79,6 +79,10 @@ def score(address,a,persist=True):
     prev=rec.get("prev") or {}
     same_last=bool(last) and all(abs(n(c.get(k))-n(last.get(k)))<1e-9 for k in ("price","m1","m15","m4","flow","flow15","vol","trades"))
     p=(prev if same_last else last) if not persist else last
+    # Repeated evaluation of the same market sample must not shift history.
+    # Reuse the scanner's result, including its impulse, for dashboard reads.
+    if same_last and "impulse" in rec:
+        return c,n(rec.get("score")),n(rec.get("quality")),n(rec.get("impulse")),rec.get("phase","NO")
     d1=max(0,c["m1"]-n(p.get("m1"))); d15=max(0,c["m15"]-n(p.get("m15")))
     df=c["flow"]-n(p.get("flow")); dv=max(0,c["vol"]-n(p.get("vol")))
     # Quality rewards early momentum, fresh flow and real activity, not absolute 1h spike alone.
@@ -128,7 +132,7 @@ def score(address,a,persist=True):
         old=hist.get(key,{})
         hist[key]={"prev":old.get("last") or old.get("prev") or {},
                    "last":c,"score":round(min(100,quality+impulse),1),"quality":round(quality,1),
-                   "impulse":round(impulse,1),"phase":phase,"updated_at":now()}
+                   "impulse":round(impulse,1),"fresh":fresh,"phase":phase,"updated_at":now()}
         st["updated_at"]=now();save_state(st)
     return c,round(min(100,quality+impulse),1),round(quality,1),round(impulse,1),phase
 
@@ -159,6 +163,8 @@ def decision(address,a,ws=None,persist=True):
     df=c["flow"]-n(p.get("flow"))
     dv=max(0,c["vol"]-n(p.get("vol")))
     fresh=bool(p) and (d1>=0.35 or d15>=0.15 or df>=50 or dv>0)
+    if same_last and "fresh" in fresh_hist:
+        fresh=bool(fresh_hist["fresh"])
     ignition_buy=(
         phase=="IGNITION" and q>=48 and i>=8
         and c["flow"]>=150 and c["trades"]>=8 and c["m15"]>=0
