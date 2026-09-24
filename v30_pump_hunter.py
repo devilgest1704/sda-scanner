@@ -92,7 +92,13 @@ def score(address,a,persist=True):
     activity=max(0,min(14,(c["trades"]/10)*7+(c["vol"]/1000)*7))
     acceleration=max(0,min(10,c["accel"]/20+5))
     quality=momentum+flow_score+pressure+activity+acceleration
-    impulse=min(20,max(0,d1*2+d15*1.5+max(0,df)/250+min(1,dv/max(n(p.get("vol"),100),100))*5))
+    raw_impulse=min(20,max(0,d1*2+d15*1.5+max(0,df)/250+min(1,dv/max(n(p.get("vol"),100),100))*5))
+    # Momentum rebound without traded liquidity is not an actionable pump.
+    # Keep raw impulse for diagnostics, but do not reward sparse/stale ticks.
+    impulse=raw_impulse if (
+        bool(p) and c["trades"]>=5 and c["vol"]>=100 and c["flow"]>0
+        and c["m1"]>0 and c["m15"]>0
+    ) else 0.0
     ratio=c["flow"]/max(c["vol"],1)
     price_flow_ok=not(c["m1"]>=12 and ratio<0.18)
     # Three lifecycle lanes.
@@ -132,7 +138,7 @@ def score(address,a,persist=True):
         old=hist.get(key,{})
         hist[key]={"prev":old.get("last") or old.get("prev") or {},
                    "last":c,"score":round(min(100,quality+impulse),1),"quality":round(quality,1),
-                   "impulse":round(impulse,1),"fresh":fresh,"phase":phase,"updated_at":now()}
+                   "impulse":round(impulse,1),"raw_impulse":round(raw_impulse,1),"fresh":fresh,"phase":phase,"updated_at":now()}
         st["updated_at"]=now();save_state(st)
     return c,round(min(100,quality+impulse),1),round(quality,1),round(impulse,1),phase
 
