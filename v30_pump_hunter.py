@@ -263,7 +263,7 @@ def patch(main_module,engine):
             if r:
                 if "STOP" in str(r.get("close_reason","")) or "WEAK" in str(r.get("close_reason","")) or "STALE" in str(r.get("close_reason","")) or "BREAKDOWN" in str(r.get("close_reason","")):
                     st=load_state();st.setdefault("cooldowns",{})[str(address).lower()]=(datetime.now(timezone.utc)+timedelta(hours=COOLDOWN_HOURS)).isoformat();save_state(st)
-                events.append(f"V30.2 {r.get('close_reason','EXIT')}" {r.get('label',address)} | ROI {roi:+.2f}% | MFE {mfe:+.2f}%")
+                events.append(f"V30.2 {r.get('close_reason','EXIT')} {r.get('label',address)} | ROI {roi:+.2f}% | MFE {mfe:+.2f}%")
         return events
 
     def paper_decision(address,analysis,ws):
