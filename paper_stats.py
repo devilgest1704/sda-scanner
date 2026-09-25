@@ -101,6 +101,13 @@ def main():
             icon = "🟢" if pnl > 0 else ("🔴" if pnl < 0 else "⚪")
             lines.append(f"{icon} {label}: {pnl:+.2f} SDA ({pct:+.2f}%)")
     lines += ["", "🎯 KPI = SDA accumulated, not USD profit."]
+    diagnostic = [x for x in closed if x.get('pump_exit_observed_at')]
+    if diagnostic:
+        lines += ['', 'RECENT EXIT DIAGNOSTICS']
+        for x in diagnostic[-5:][::-1]:
+            gap = x.get('pump_exit_observation_gap_seconds')
+            stop_gap = x.get('pump_exit_stop_gap_pct')
+            lines.append(f"{x.get('label','?')}: ROI {num(x.get('closed_roi_pct')):+.2f}% | scan gap {gap if gap is not None else '?'}s | stop gap {stop_gap if stop_gap is not None else '?'}%")
     send("\n".join(lines))
 
 
