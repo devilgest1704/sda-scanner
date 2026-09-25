@@ -250,6 +250,15 @@ def patch(main_module,engine):
             if not pos or cur<=0:continue
             entry=n(pos.get("entry_price"))
             if entry<=0:continue
+            observed=datetime.now(timezone.utc)
+            previous_observed=pos.get('pump_last_observed_at')
+            try:
+                previous_dt=datetime.fromisoformat(str(previous_observed).replace('Z','+00:00'))
+                if previous_dt.tzinfo is None: previous_dt=previous_dt.replace(tzinfo=timezone.utc)
+                gap_seconds=max(0,(observed-previous_dt).total_seconds())
+            except (TypeError,ValueError):
+                gap_seconds=None
+            pos['pump_last_observed_at']=observed.isoformat()
             s=decision(address,a,ws); roi=(cur-entry)/entry*100
             peak=max(n(pos.get("pump_peak_price"),entry),cur); pos["pump_peak_price"]=peak
             mfe=(peak-entry)/entry*100; pos["pump_mfe_pct"]=mfe
@@ -278,6 +287,10 @@ def patch(main_module,engine):
                 r=engine.close(p,address,cur,"V30.2 PUMP BREAKDOWN")
             else:r=None
             if r:
+                r['pump_exit_stop_price']=stop
+                r['pump_exit_stop_gap_pct']=round((cur/stop-1)*100,3) if stop>0 else None
+                r['pump_exit_observation_gap_seconds']=round(gap_seconds,1) if gap_seconds is not None else None
+                r['pump_exit_observed_at']=observed.isoformat()
                 if "STOP" in str(r.get("close_reason","")) or "WEAK" in str(r.get("close_reason","")) or "STALE" in str(r.get("close_reason","")) or "BREAKDOWN" in str(r.get("close_reason","")):
                     st=load_state();st.setdefault("cooldowns",{})[str(address).lower()]=(datetime.now(timezone.utc)+timedelta(hours=COOLDOWN_HOURS)).isoformat();save_state(st)
                 events.append(f"V30.2 {r.get('close_reason','EXIT')} {r.get('label',address)} | ROI {roi:+.2f}% | MFE {mfe:+.2f}%")
