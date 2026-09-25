@@ -124,7 +124,7 @@ run_one_scan() {
 }
 
 # Compile once per worker, not once per minute.
-python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py
+python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py v30_pump_hunter.py
 find . -type d -name __pycache__ -prune -exec rm -rf {} +
 
 echo "🔄 CONTINUOUS SDA SCANNER"
