@@ -239,6 +239,16 @@ def patch(main_module,engine):
                   "tp1_pct":0.99,"tp2_pct":0.99,"trail_pct":0.0,
                   "entry_pump_score":n(s.get("pump_score",s.get("confidence"))),
                   "entry_pump_change":n(s.get("pump_change")),"entry_phase":s.get("pump_phase","NO")})
+        z["pump_entry_snapshot"]={
+            "at":z.get("opened_at"),"price_sda":e,"reference_price_sda":n(an.get("price_in_sda")),
+            "score":n(s.get("pump_score",s.get("confidence"))),
+            "quality":n(s.get("pump_quality")),"impulse":n(s.get("pump_change")),
+            "phase":s.get("pump_phase"),"m1h":n(s.get("m1h")),
+            "m15":n(s.get("m15")),"m4h":n(s.get("m4h")),
+            "flow_1h":n(s.get("net_1h")),"volume_1h":n(s.get("volume_1h")),
+            "trades_1h":n(s.get("trades_1h"))}
+        z["pump_price_samples"]=[]
+        z["pump_mae_pct"]=0.0
         return z
 
     def auto_exit(p,tokens,ws):
@@ -263,6 +273,21 @@ def patch(main_module,engine):
             peak=max(n(pos.get("pump_peak_price"),entry),cur); pos["pump_peak_price"]=peak
             mfe=(peak-entry)/entry*100; pos["pump_mfe_pct"]=mfe
             pos["pump_age_scans"]=int(n(pos.get("pump_age_scans"))+1)
+            # MFE/MAE are observed at scanner cadence, not tick highs/lows.
+            pos["pump_mae_pct"]=min(n(pos.get("pump_mae_pct")),roi)
+            samples=pos.setdefault("pump_price_samples",[])
+            if not isinstance(samples,list):
+                samples=[];pos["pump_price_samples"]=samples
+            samples.append({
+                "at":observed.isoformat(),"price_sda":cur,"gross_roi_pct":round(roi,4),
+                "mfe_pct":round(mfe,4),"mae_pct":round(pos["pump_mae_pct"],4),
+                "score":n(s.get("pump_score")),"quality":n(s.get("pump_quality")),
+                "impulse":n(s.get("pump_change")),"phase":s.get("pump_phase"),
+                "m1h":n(s.get("m1h")),"m15":n(s.get("m15")),
+                "m4h":n(s.get("m4h")),"flow_1h":n(s.get("net_1h")),
+                "volume_1h":n(s.get("volume_1h")),"trades_1h":n(s.get("trades_1h"))
+            })
+            if len(samples)>96:del samples[:-96]
             age=age_hours(pos)
             # Profit protection: once positive, stop giving the trade back.
             stop=n(pos.get("sl"),entry*(1-SL_PCT))
@@ -291,6 +316,23 @@ def patch(main_module,engine):
                 r['pump_exit_stop_gap_pct']=round((cur/stop-1)*100,3) if stop>0 else None
                 r['pump_exit_observation_gap_seconds']=round(gap_seconds,1) if gap_seconds is not None else None
                 r['pump_exit_observed_at']=observed.isoformat()
+                r['pump_exit_snapshot']={
+                    "at":observed.isoformat(),"price_sda":cur,"gross_roi_pct":round(roi,4),
+                    "stop_price_sda":stop,"mfe_pct":round(mfe,4),
+                    "mae_pct":round(n(pos.get("pump_mae_pct")),4),
+                    "score":n(s.get("pump_score")),"quality":n(s.get("pump_quality")),
+                    "impulse":n(s.get("pump_change")),"phase":s.get("pump_phase"),
+                    "m15":n(s.get("m15")),"flow_1h":n(s.get("net_1h")),
+                    "observation_gap_seconds":round(gap_seconds,1) if gap_seconds is not None else None}
+                # close() appends a copy; update that copy for persistence.
+                closed=p.get("closed_trades") or []
+                if closed and closed[-1].get("address")==address:
+                    closed[-1].update({
+                        "pump_exit_stop_price":r["pump_exit_stop_price"],
+                        "pump_exit_stop_gap_pct":r["pump_exit_stop_gap_pct"],
+                        "pump_exit_observation_gap_seconds":r["pump_exit_observation_gap_seconds"],
+                        "pump_exit_observed_at":r["pump_exit_observed_at"],
+                        "pump_exit_snapshot":r["pump_exit_snapshot"]})
                 if "STOP" in str(r.get("close_reason","")) or "WEAK" in str(r.get("close_reason","")) or "STALE" in str(r.get("close_reason","")) or "BREAKDOWN" in str(r.get("close_reason","")):
                     st=load_state();st.setdefault("cooldowns",{})[str(address).lower()]=(datetime.now(timezone.utc)+timedelta(hours=COOLDOWN_HOURS)).isoformat();save_state(st)
                 events.append(f"V30.2 {r.get('close_reason','EXIT')} {r.get('label',address)} | ROI {roi:+.2f}% | MFE {mfe:+.2f}%")

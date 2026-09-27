@@ -2,12 +2,20 @@ name: V30 state audit
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'v30_pump_hunter.py'
+      - 'tools/**'
+      - 'tests/test_v30_telemetry.py'
+      - '.github/workflows/v30-state-audit.yml'
   schedule:
     - cron: '17,47 * * * *'
   push:
     branches: [main]
     paths:
-      - 'tools/audit_v30_state.py'
+      - 'tools/**'
+      - 'v30_pump_hunter.py'
+      - 'tests/test_v30_telemetry.py'
       - 'v30_pump_state.json'
       - '.github/workflows/v30-state-audit.yml'
 
@@ -29,6 +37,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Test paper telemetry
+        run: python -m unittest discover -s tests -p test_v30_telemetry.py
+      - name: Generate paper trade telemetry report
+        run: python tools/paper_telemetry_report.py positions.json > v30_paper_telemetry_report.json
       - name: Run read-only audit
         run: |
           python tools/audit_v30_state.py v30_pump_state.json > v30_audit_report.json
@@ -64,6 +76,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: v30-state-audit-${{ github.run_id }}
-          path: v30_audit_report.json
+          path: |
+            v30_audit_report.json
+            v30_paper_telemetry_report.json
           if-no-files-found: warn
           retention-days: 14
