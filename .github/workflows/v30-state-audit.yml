@@ -1,0 +1,69 @@
+name: V30 state audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17,47 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/audit_v30_state.py'
+      - 'v30_pump_state.json'
+      - '.github/workflows/v30-state-audit.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v30-state-audit
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out scanner state
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run read-only audit
+        run: |
+          python tools/audit_v30_state.py v30_pump_state.json > v30_audit_report.json
+      - name: Publish audit summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path("v30_audit_report.json")
+          if not path.exists():
+              raise SystemExit("Audit report missing: see Run read-only audit logs")
+          report = json.loads(path.read_text(encoding="utf-8"))
+          issues = report.get("issues", [])
+          lines = [
+              "## V30 state audit",
+              f"- State updated: {report.get('state_updated_at', 'unknown')}",
+              f"- Tokens: {report.get('token_count', 0)}",
+              f"- Phases: {report.get('phases', {})}",
+              f"- Fresh: {report.get('fresh_count', 0)}",
+              f"- Zero last volume: {report.get('zero_last_volume_count', 0)}",
+              f"- Severe negative acceleration with volume: {report.get('acceleration_le_minus90_with_volume', 0)}",
+              f"- Diagnostic flags: {len(issues)}",
+              "",
+              "### Flags (first 30)",
+          ]
+          lines.extend(f"- {i.get('token')}: {i.get('issue')}" for i in issues[:30])
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as output:
+              output.write("\n".join(lines) + "\n")
+          PY
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v30-state-audit-${{ github.run_id }}
+          path: v30_audit_report.json
+          if-no-files-found: warn
+          retention-days: 14
