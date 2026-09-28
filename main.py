@@ -15,5 +15,34 @@ _paper.MAX_OPEN_POSITIONS=_v30.MAX_OPEN
 _paper.MAX_NEW_BUYS_PER_RUN=_v30.MAX_BUYS_PER_RUN
 _paper.SL_PCT=_v30.SL_PCT
 engine=_paper
+
+def _run_with_paper_telemetry():
+    """Generate diagnostics from the SAME runtime ledger the paper engine uses."""
+    try:
+        return engine.main()
+    finally:
+        # Report generation must never mutate or replace the trading ledger.
+        try:
+            from pathlib import Path
+            import json
+            from datetime import datetime, timezone
+            from tools.paper_telemetry_report import report
+            ledger = Path(engine.POSITIONS_FILE)
+            result = report(ledger)
+            result["generated_at"] = datetime.now(timezone.utc).isoformat()
+            result["source"] = str(ledger.resolve())
+            output = Path("v30_paper_telemetry_report.json")
+            temp = output.with_suffix(".json.tmp")
+            temp.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+            temp.replace(output)
+            print("V30 PAPER TELEMETRY:", result["status"],
+                  "closed:", result.get("closed_count", 0),
+                  "annotated:", result.get("annotated_closed_count", 0),
+                  "open:", result.get("open_count", 0))
+            if result["status"] != "ok":
+                print("::warning::V30 paper telemetry ledger unavailable or empty")
+        except Exception as exc:
+            print("::warning::V30 paper telemetry report failed:", repr(exc))
+
 if __name__=="__main__":
-    engine.main()
+    _run_with_paper_telemetry()
