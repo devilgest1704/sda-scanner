@@ -6,7 +6,7 @@ on:
     paths:
       - 'v30_pump_hunter.py'
       - 'tools/**'
-      - 'tests/test_v30_telemetry.py'
+      - 'tests/test_*telemetry.py'
       - '.github/workflows/v30-state-audit.yml'
   schedule:
     - cron: '17,47 * * * *'
@@ -15,7 +15,7 @@ on:
     paths:
       - 'tools/**'
       - 'v30_pump_hunter.py'
-      - 'tests/test_v30_telemetry.py'
+      - 'tests/test_*telemetry.py'
       - 'v30_pump_state.json'
       - '.github/workflows/v30-state-audit.yml'
 
@@ -38,7 +38,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Test paper telemetry
-        run: python -m unittest discover -s tests -p test_v30_telemetry.py
+        run: python -m unittest discover -s tests -p 'test_*telemetry.py'
       - name: Generate paper trade telemetry report
         id: telemetry
         continue-on-error: true
