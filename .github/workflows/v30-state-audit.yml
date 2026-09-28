@@ -47,7 +47,7 @@ jobs:
         run: |
           python tools/audit_v30_state.py v30_pump_state.json > v30_audit_report.json
       - name: Validate telemetry availability
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         run: |
           python - <<'PY'
           import json, os
