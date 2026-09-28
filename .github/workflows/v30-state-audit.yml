@@ -40,10 +40,28 @@ jobs:
       - name: Test paper telemetry
         run: python -m unittest discover -s tests -p test_v30_telemetry.py
       - name: Generate paper trade telemetry report
+        id: telemetry
+        continue-on-error: true
         run: python tools/paper_telemetry_report.py positions.json > v30_paper_telemetry_report.json
       - name: Run read-only audit
         run: |
           python tools/audit_v30_state.py v30_pump_state.json > v30_audit_report.json
+      - name: Validate telemetry availability
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path('v30_paper_telemetry_report.json')
+          report=json.loads(p.read_text(encoding='utf-8')) if p.exists() else {'status':'report_missing'}
+          status=report.get('status')
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as out:
+              out.write(f'## Paper telemetry: {status}\\n')
+              if status!='ok':out.write('WARNING: No actual trade records in this GitHub checkout.\\n')
+          if status!='ok':
+              print('::error::Paper telemetry missing: scanner positions.json is not synchronized into this checkout')
+              raise SystemExit(1)
+          PY
       - name: Publish audit summary
         if: always()
         run: |

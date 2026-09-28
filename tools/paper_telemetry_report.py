@@ -7,7 +7,7 @@ from pathlib import Path
 def report(path):
     p=Path(path)
     if not p.is_file() or not p.stat().st_size:
-        return {"status":"no_persisted_positions_file","note":"No history available in this checkout."}
+        return {"status":"no_persisted_positions_file","source":str(p),"note":"No history available in this checkout; audit must not be reported as collecting trades."}
     data=json.loads(p.read_text(encoding="utf-8"))
     if not isinstance(data,dict):
         raise ValueError("positions root must be an object")
@@ -20,6 +20,8 @@ def report(path):
     def number(v):
         try:return float(v)
         except (ValueError,TypeError):return 0.0
+    if not closed and not open_positions:
+        return {"status":"empty_positions","source":str(p),"note":"No trade records; verify scanner state synchronization."}
     return {
         "status":"ok","closed_count":len(closed),"open_count":len(open_positions),
         "annotated_closed_count":len(annotated),
@@ -42,4 +44,9 @@ if __name__=="__main__":
     parser=argparse.ArgumentParser()
     parser.add_argument("positions",nargs="?",default="positions.json")
     args=parser.parse_args()
-    print(json.dumps(report(args.positions),ensure_ascii=False,indent=2))
+    import sys
+    result=report(args.positions)
+    print(json.dumps(result,ensure_ascii=False,indent=2))
+    if result["status"]!="ok":
+        print("TELEMETRY NOT COLLECTED: positions data missing or empty",file=sys.stderr)
+        sys.exit(2)
