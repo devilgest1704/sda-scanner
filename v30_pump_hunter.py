@@ -136,11 +136,22 @@ def score(address,a,persist=True):
     # "not in a pump lane yet".
     early_watch=(impulse>=4 and c["m1"]>0 and c["m15"]>0 and c["flow"]>0 and c["trades"]>=3)
     phase=lane if lane!="NO" else ("WATCH" if early_watch or (quality>=40 and c["flow"]>0) else "NO")
+    # Diagnostic-only sample status; never changes BUY/SELL eligibility.
+    if same_last:
+        sample_status="STALE"
+    elif impulse>=4:
+        sample_status="IMPULSE"
+    elif (c["m1"]>=8 or c["m15"]>=5 or c["flow"]>=500) and not fresh:
+        sample_status="MATURE"
+    elif fresh:
+        sample_status="FRESH"
+    else:
+        sample_status="UNKNOWN"
     if persist:
         old=hist.get(key,{})
         hist[key]={"prev":old.get("last") or old.get("prev") or {},
                    "last":c,"score":round(min(100,quality+impulse),1),"quality":round(quality,1),
-                   "impulse":round(impulse,1),"raw_impulse":round(raw_impulse,1),"fresh":fresh,"phase":phase,"updated_at":now()}
+                   "impulse":round(impulse,1),"raw_impulse":round(raw_impulse,1),"fresh":fresh,"sample_status":sample_status,"phase":phase,"updated_at":now()}
         st["updated_at"]=now();save_state(st)
     return c,round(min(100,quality+impulse),1),round(quality,1),round(impulse,1),phase
 
