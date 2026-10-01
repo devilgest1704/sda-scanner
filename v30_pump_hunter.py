@@ -81,8 +81,7 @@ def score(address,a,persist=True):
     p=(prev if same_last else last) if not persist else last
     # Repeated evaluation of the same market sample must not shift history.
     # Reuse the scanner's result, including its impulse, for dashboard reads.
-    if same_last and "impulse" in rec:
-        return c,n(rec.get("score")),n(rec.get("quality")),n(rec.get("impulse")),rec.get("phase","NO")
+    # Dashboard reads (persist=False) must recompute impulse from the\n    # persisted prev -> last pair. Otherwise a fresh scan reuses the cached\n    # zero impulse and the dashboard can never see the new move.\n    if same_last and "impulse" in rec and persist:\n        return c,n(rec.get("score")),n(rec.get("quality")),n(rec.get("impulse")),rec.get("phase","NO")
     d1=max(0,c["m1"]-n(p.get("m1"))); d15=max(0,c["m15"]-n(p.get("m15")))
     df=c["flow"]-n(p.get("flow")); dv=max(0,c["vol"]-n(p.get("vol")))
     # Quality rewards early momentum, fresh flow and real activity, not absolute 1h spike alone.
