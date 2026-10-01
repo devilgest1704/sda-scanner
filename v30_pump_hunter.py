@@ -134,7 +134,8 @@ def score(address,a,persist=True):
     # Keep lifecycle phase visible even when a gate blocks the actual BUY.
     # The dashboard can then distinguish "confirmation but blocked" from
     # "not in a pump lane yet".
-    early_watch=(impulse>=4 and c["m1"]>0 and c["m15"]>0 and c["flow"]>0 and c["trades"]>=3)\n    phase=lane if lane!="NO" else ("WATCH" if early_watch or (quality>=40 and c["flow"]>0) else "NO")
+    early_watch=(impulse>=4 and c["m1"]>0 and c["m15"]>0 and c["flow"]>0 and c["trades"]>=3)
+    phase=lane if lane!="NO" else ("WATCH" if early_watch or (quality>=40 and c["flow"]>0) else "NO")
     if persist:
         old=hist.get(key,{})
         hist[key]={"prev":old.get("last") or old.get("prev") or {},
