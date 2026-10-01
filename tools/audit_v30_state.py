@@ -25,6 +25,7 @@ def audit(path, stale_minutes=15):
     issues = []
     phases = Counter()
     fresh = zero_volume = severe_negative_accel = 0
+    sample_statuses = Counter()
     for token, row in history.items():
         if not isinstance(row, dict):
             issues.append({"token": token, "issue": "invalid_row"})
@@ -33,6 +34,7 @@ def audit(path, stale_minutes=15):
         phases[phase] += 1
         is_fresh = row.get("fresh") is True
         fresh += is_fresh
+        sample_statuses[str(row.get("sample_status", "UNKNOWN"))] += 1
         last = row.get("last", {})
         if not isinstance(last, dict):
             issues.append({"token": token, "issue": "invalid_last"})
@@ -59,6 +61,7 @@ def audit(path, stale_minutes=15):
         "token_count": len(history),
         "phases": dict(phases),
         "fresh_count": fresh,
+        "sample_statuses": dict(sample_statuses),
         "zero_last_volume_count": zero_volume,
         "acceleration_le_minus90_with_volume": severe_negative_accel,
         "issues": issues,
