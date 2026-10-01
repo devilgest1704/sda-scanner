@@ -5,15 +5,15 @@ Entry and exit logic are intentionally separated.
 import json, os
 from datetime import datetime, timezone, timedelta
 
-VERSION="V30.2"
+VERSION="V30.3"
 STATE_FILE="v30_pump_state.json"
 SL_PCT=0.025
-MAX_OPEN=5
+MAX_OPEN=4
 MAX_BUYS_PER_RUN=1
-ENTRY_SCORE=62.0
-MIN_QUALITY=45.0
-MIN_IMPULSE=3.0
-COOLDOWN_HOURS=4.0
+ENTRY_SCORE=68.0
+MIN_QUALITY=52.0
+MIN_IMPULSE=8.0
+COOLDOWN_HOURS=6.0
 
 def n(v,d=0.0):
     try:return d if v is None else float(v)
@@ -102,8 +102,8 @@ def score(address,a,persist=True):
     ratio=c["flow"]/max(c["vol"],1)
     price_flow_ok=not(c["m1"]>=12 and ratio<0.18)
     # Three lifecycle lanes.
-    ignition=(0<c["m1"]<=8 and c["m15"]>=0.3 and c["flow15"]>=40 and ratio>=0.20)
-    confirmation=(8<c["m1"]<=12 and c["m15"]>=1.5 and c["m4"]>=-0.5 and c["flow15"]>=25 and ratio>=0.25)
+    ignition=(0<c["m1"]<=8 and c["m15"]>=0.8 and c["flow15"]>=60 and c["m4"]>=-0.25 and ratio>=0.25)
+    confirmation=(8<c["m1"]<=12 and c["m15"]>=1.5 and c["m4"]>=-0.25 and c["flow15"]>=40 and ratio>=0.25)
     breakout=(12<c["m1"]<=35 and c["m15"]>=2.0 and c["m4"]>=0.5 and d15>=0.3 and ratio>=0.30)
     lane="IGNITION" if ignition else ("CONFIRMATION" if confirmation else ("BREAKOUT" if breakout else "NO"))
     fresh=bool(p) and (d1>=0.35 or d15>=0.15 or df>=50 or dv>0)
@@ -172,20 +172,20 @@ def decision(address,a,ws=None,persist=True):
     if same_last and "fresh" in fresh_hist:
         fresh=bool(fresh_hist["fresh"])
     ignition_buy=(
-        phase=="IGNITION" and q>=48 and i>=8
-        and c["flow"]>=150 and c["trades"]>=8 and c["m15"]>=0
+        phase=="IGNITION" and q>=52 and i>=8
+        and c["flow"]>=180 and c["flow15"]>=60 and c["trades"]>=10 and c["m15"]>=0.8
         and liquidity_ok and c["buy_ratio"]>=1.10 and price_flow_ok
     )
     confirmation_buy=(
-        phase=="CONFIRMATION" and fresh and q>=52 and i>=5
-        and c["flow"]>=125 and c["flow15"]>=25 and c["trades"]>=7
+        phase=="CONFIRMATION" and fresh and q>=55 and i>=6
+        and c["flow"]>=150 and c["flow15"]>=40 and c["trades"]>=8
         and liquidity_ok and c["buy_ratio"]>=1.12
         and c["m15"]>=1.5 and price_flow_ok
     )
     # BREAKOUT is a holding/management phase, never a new entry.
     breakout_buy=False
     buy=ignition_buy or confirmation_buy
-    if c["m1"]>18 and (c["m15"]<2 or c["flow15"]<=0):
+    if c["m1"]>12 and (c["m15"]<2 or c["flow15"]<=0):
         buy=False
     blocked=(not buy) or cd or s<ENTRY_SCORE
     failures=[]
@@ -233,7 +233,7 @@ def patch(main_module,engine):
     def create(a,an,s,meta,liq,investment=None):
         z=original_create(a,an,s,meta,liq,investment) if callable(original_create) else {}
         e=n(z.get("entry_price"),n(an.get("price_in_sda")))
-        z.update({"v30_mode":"CLEAN-PUMP-HUNTER","pump_peak_price":e,"pump_mfe_pct":0.0,
+        z.update({"v30_mode":"CLEAN-PUMP-HUNTER-V30.3","pump_peak_price":e,"pump_mfe_pct":0.0,
                   "pump_weak_count":0,"pump_age_scans":0,"sl_pct":SL_PCT,
                   "sl":e*(1-SL_PCT),"initial_sl":e*(1-SL_PCT),
                   "tp1_pct":0.99,"tp2_pct":0.99,"trail_pct":0.0,
@@ -291,8 +291,8 @@ def patch(main_module,engine):
             age=age_hours(pos)
             # Profit protection: once positive, stop giving the trade back.
             stop=n(pos.get("sl"),entry*(1-SL_PCT))
-            if mfe>=3: stop=max(stop,entry*1.005)
-            if mfe>=5: stop=max(stop,peak*0.97)
+            if mfe>=2.5: stop=max(stop,entry*1.002)
+            if mfe>=4: stop=max(stop,peak*0.975)
             if mfe>=10: stop=max(stop,peak*0.95)
             if mfe>=20: stop=max(stop,peak*0.92)
             if mfe>=40: stop=max(stop,peak*0.90)
@@ -300,16 +300,16 @@ def patch(main_module,engine):
             pos["sl"]=stop
             weak=(s["m15"]<0 and s["net_1h"]<=0) or s["pump_score"]<38
             pos["pump_weak_count"]=int(n(pos.get("pump_weak_count"))+1) if weak else max(0,int(n(pos.get("pump_weak_count")))-1)
-            if (cur-entry)/entry*100<=-3.5:
-                r=engine.close(p,address,cur,"V30.2 EMERGENCY/HARD STOP")
+            if (cur-entry)/entry*100<=-3.0:
+                r=engine.close(p,address,cur,"V30.3 EMERGENCY/HARD STOP")
             elif cur<=stop:
-                r=engine.close(p,address,cur,"V30.2 TRAILING/STOP")
-            elif roi<=-2.5 and pos["pump_weak_count"]>=2:
-                r=engine.close(p,address,cur,"V30.2 EARLY WEAKNESS")
-            elif age>=3 and mfe<2 and pos["pump_weak_count"]>=4 and roi<1:
-                r=engine.close(p,address,cur,"V30.2 STALE")
-            elif roi>1 and mfe>=3 and pos["pump_weak_count"]>=4:
-                r=engine.close(p,address,cur,"V30.2 PUMP BREAKDOWN")
+                r=engine.close(p,address,cur,"V30.3 TRAILING/STOP")
+            elif roi<=-1.75 and pos["pump_weak_count"]>=2:
+                r=engine.close(p,address,cur,"V30.3 EARLY WEAKNESS")
+            elif age>=2 and mfe<2 and pos["pump_weak_count"]>=3 and roi<0.5:
+                r=engine.close(p,address,cur,"V30.3 STALE")
+            elif roi>0.5 and mfe>=2.5 and pos["pump_weak_count"]>=3:
+                r=engine.close(p,address,cur,"V30.3 PUMP BREAKDOWN")
             else:r=None
             if r:
                 r['pump_exit_stop_price']=stop
@@ -335,7 +335,7 @@ def patch(main_module,engine):
                         "pump_exit_snapshot":r["pump_exit_snapshot"]})
                 if "STOP" in str(r.get("close_reason","")) or "WEAK" in str(r.get("close_reason","")) or "STALE" in str(r.get("close_reason","")) or "BREAKDOWN" in str(r.get("close_reason","")):
                     st=load_state();st.setdefault("cooldowns",{})[str(address).lower()]=(datetime.now(timezone.utc)+timedelta(hours=COOLDOWN_HOURS)).isoformat();save_state(st)
-                events.append(f"V30.2 {r.get('close_reason','EXIT')} {r.get('label',address)} | ROI {roi:+.2f}% | MFE {mfe:+.2f}%")
+                events.append(f"V30.3 {r.get('close_reason','EXIT')} {r.get('label',address)} | ROI {roi:+.2f}% | MFE {mfe:+.2f}%")
         return events
 
     def paper_decision(address,analysis,ws):
