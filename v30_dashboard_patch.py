@@ -3,6 +3,7 @@
 Keeps the Telegram dashboard on the same decision engine as paper trading.
 Read-only: never submits real orders.
 """
+import os
 import v30_pump_hunter as v30
 import v26_dashboard_patch as v26
 
@@ -35,6 +36,19 @@ def _label(dashboard,address,meta):
 
 def _merged_market(dashboard,md):
     if not isinstance(md,dict):md={"tokens":{}}
+    # Vercel has a frozen checkout of JSON state. The scanner checkpoints live
+    # market_data.json to GitHub, so dashboard candidate evaluation must read
+    # the live checkpoint instead of the deployment snapshot.
+    if os.environ.get("VERCEL") == "1":
+        try:
+            import urllib.request, json
+            url="https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/market_data.json"
+            with urllib.request.urlopen(url,timeout=4) as r:
+                live=json.loads(r.read().decode("utf-8"))
+            if isinstance(live,dict) and isinstance(live.get("tokens"),dict):
+                md=live
+        except Exception:
+            pass
     base=md.get("tokens") if isinstance(md.get("tokens"),dict) else {}
     try: compact=dashboard.load("market_analysis.json",{"tokens":{}})
     except Exception: compact={}
