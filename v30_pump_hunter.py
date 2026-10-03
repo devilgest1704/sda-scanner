@@ -14,6 +14,8 @@ ENTRY_SCORE=68.0
 MIN_QUALITY=52.0
 MIN_IMPULSE=8.0
 COOLDOWN_HOURS=6.0
+MAX_ENTRY_DATA_AGE_SEC=300.0
+MAX_EXIT_DATA_AGE_SEC=900.0
 
 def n(v,d=0.0):
     try:return d if v is None else float(v)
@@ -190,6 +192,8 @@ def cooldown_active(address):
 def decision(address,a,ws=None,persist=True):
     c,s,q,i,phase=score(address,a,persist=persist)
     cd=cooldown_active(address)
+    data_age=c.get("data_age_sec")
+    data_fresh_for_entry=isinstance(data_age,(int,float)) and data_age<=MAX_ENTRY_DATA_AGE_SEC
     # Re-evaluate the same BUY gates here so dashboard and paper engine have
     # one source of truth. Do not reference local variables from score().
     ratio=c["flow"]/max(c["vol"],1)
@@ -226,7 +230,7 @@ def decision(address,a,ws=None,persist=True):
     buy=ignition_buy or confirmation_buy
     if c["m1"]>12 and (c["m15"]<2 or c["flow15"]<=0):
         buy=False
-    blocked=(not buy) or cd or s<ENTRY_SCORE
+    blocked=(not buy) or cd or s<ENTRY_SCORE or not data_fresh_for_entry
     failures=[]
     if not lane_ok: failures.append("no lifecycle lane")
     if not fresh: failures.append("no fresh impulse")
@@ -241,6 +245,7 @@ def decision(address,a,ws=None,persist=True):
     if c["m15"]<-0.25: failures.append(f"M15 {c['m15']:+.2f}<-0.25%")
     if not price_flow_ok: failures.append("price/flow mismatch")
     if c["m1"]>12: failures.append("late entry: M1H>12%")
+    if not data_fresh_for_entry: failures.insert(0,f"stale market data {data_age:.0f}s" if isinstance(data_age,(int,float)) else "missing market data age")
     if cd: failures.insert(0,"cooldown")
     reason="READY" if not blocked else f"{phase} / "+"; ".join(failures[:3])
     eff=s if not blocked else min(s,ENTRY_SCORE-1)
@@ -250,11 +255,12 @@ def decision(address,a,ws=None,persist=True):
       "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":i,"pump_phase":phase,
       "paper_buy_blocked":blocked,"paper_buy_block_reason":reason,
       "paper_prediction":{"ready":False,"role":"advisory"},"paper_prediction_role":"advisory",
+      "data_age_sec":data_age,"data_fresh_for_entry":data_fresh_for_entry,
       "technical_bull":0,"technical_bear":0,"technical_evidence":[],
       "buy_score_components":{"momentum":round(c["m1"],1),"flow":round(c["flow"],1),"activity":round(c["trades"],1),
                               "prediction":0.0,"liquidity":0.0},
       "v30":{"version":VERSION,"entry_score":ENTRY_SCORE,"sl_pct":SL_PCT,"max_open":MAX_OPEN,
-             "max_buys":MAX_BUYS_PER_RUN,"phase":phase}}
+             "max_buys":MAX_BUYS_PER_RUN,"phase":phase,"max_entry_data_age_sec":MAX_ENTRY_DATA_AGE_SEC}}
 
 def age_hours(pos):
     raw=str(pos.get("opened_at") or "")
@@ -284,6 +290,7 @@ def patch(main_module,engine):
             "quality":n(s.get("pump_quality")),"impulse":n(s.get("pump_change")),
             "phase":s.get("pump_phase"),"m1h":n(s.get("m1h")),
             "m15":n(s.get("m15")),"m4h":n(s.get("m4h")),
+            "data_age_sec":n(s.get("data_age_sec")),
             "flow_1h":n(s.get("net_1h")),"volume_1h":n(s.get("volume_1h")),
             "trades_1h":n(s.get("trades_1h"))}
         z["pump_price_samples"]=[]
@@ -309,6 +316,8 @@ def patch(main_module,engine):
                 gap_seconds=None
             pos['pump_last_observed_at']=observed.isoformat()
             s=decision(address,a,ws); roi=(cur-entry)/entry*100
+            data_age=c.get("data_age_sec")
+            data_fresh_for_exit=isinstance(data_age,(int,float)) and data_age<=MAX_EXIT_DATA_AGE_SEC
             peak=max(n(pos.get("pump_peak_price"),entry),cur); pos["pump_peak_price"]=peak
             mfe=(peak-entry)/entry*100; pos["pump_mfe_pct"]=mfe
             pos["pump_age_scans"]=int(n(pos.get("pump_age_scans"))+1)
@@ -339,7 +348,9 @@ def patch(main_module,engine):
             pos["sl"]=stop
             weak=(s["m15"]<0 and s["net_1h"]<=0) or s["pump_score"]<38
             pos["pump_weak_count"]=int(n(pos.get("pump_weak_count"))+1) if weak else max(0,int(n(pos.get("pump_weak_count")))-1)
-            if (cur-entry)/entry*100<=-3.0:
+            if not data_fresh_for_exit:
+                r=None
+            elif (cur-entry)/entry*100<=-3.0:
                 r=engine.close(p,address,cur,"V30.3 EMERGENCY/HARD STOP")
             elif cur<=stop:
                 r=engine.close(p,address,cur,"V30.3 TRAILING/STOP")
