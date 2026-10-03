@@ -21,6 +21,16 @@ def n(v,d=0.0):
 
 def now(): return datetime.now(timezone.utc).isoformat()
 
+def data_age_seconds(value):
+    if not value:
+        return None
+    try:
+        dt=datetime.fromisoformat(str(value).replace("Z","+00:00"))
+        if dt.tzinfo is None: dt=dt.replace(tzinfo=timezone.utc)
+        return max(0.0,(datetime.now(timezone.utc)-dt).total_seconds())
+    except Exception:
+        return None
+
 _RUNTIME=None
 def load_state():
     global _RUNTIME
@@ -79,7 +89,9 @@ def metrics(a):
       "m1":n(m.get("1h_pct")),"m15":n(m.get("15m_pct")),"m4":n(m.get("4h_pct")),
       "flow":n(f.get("net_flow")),"flow15":n(f15.get("net_flow")),
       "vol":bv+sv,"trades":bc+sc,"buy_ratio":bv/max(sv,1.0),
-      "trade_ratio":bc/max(sc,1.0),"accel":n(a.get("volume_acceleration_15m_pct"))
+      "trade_ratio":bc/max(sc,1.0),"accel":n(a.get("volume_acceleration_15m_pct")),
+      "last_transaction":a.get("last_transaction"),
+      "data_age_sec":data_age_seconds(a.get("last_transaction"))
     }
 
 def score(address,a,persist=True):
@@ -163,7 +175,9 @@ def score(address,a,persist=True):
         old=hist.get(key,{})
         hist[key]={"prev":old.get("last") or old.get("prev") or {},
                    "last":c,"score":round(min(100,quality+impulse),1),"quality":round(quality,1),
-                   "impulse":round(impulse,1),"raw_impulse":round(raw_impulse,1),"fresh":fresh,"sample_status":sample_status,"phase":phase,"updated_at":now()}
+                   "impulse":round(impulse,1),"raw_impulse":round(raw_impulse,1),"fresh":fresh,"sample_status":sample_status,"phase":phase,
+                   "last_transaction":c.get("last_transaction"),"data_age_sec":c.get("data_age_sec"),
+                   "updated_at":now()}
         st["updated_at"]=now();save_state(st)
     return c,round(min(100,quality+impulse),1),round(quality,1),round(impulse,1),phase
 
