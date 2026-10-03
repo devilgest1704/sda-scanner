@@ -26,6 +26,7 @@ def audit(path, stale_minutes=15):
     phases = Counter()
     fresh = zero_volume = severe_negative_accel = 0
     sample_statuses = Counter()
+    data_age_buckets = Counter()
     for token, row in history.items():
         if not isinstance(row, dict):
             issues.append({"token": token, "issue": "invalid_row"})
@@ -35,6 +36,15 @@ def audit(path, stale_minutes=15):
         is_fresh = row.get("fresh") is True
         fresh += is_fresh
         sample_statuses[str(row.get("sample_status", "UNKNOWN"))] += 1
+        age = row.get("data_age_sec")
+        if isinstance(age, (int, float)) and math.isfinite(age):
+            if age <= 120: bucket = "<=2m"
+            elif age <= 300: bucket = "2-5m"
+            elif age <= 900: bucket = "5-15m"
+            else: bucket = ">15m"
+            data_age_buckets[bucket] += 1
+        else:
+            data_age_buckets["UNKNOWN"] += 1
         last = row.get("last", {})
         if not isinstance(last, dict):
             issues.append({"token": token, "issue": "invalid_last"})
@@ -62,6 +72,7 @@ def audit(path, stale_minutes=15):
         "phases": dict(phases),
         "fresh_count": fresh,
         "sample_statuses": dict(sample_statuses),
+        "data_age_buckets": dict(data_age_buckets),
         "zero_last_volume_count": zero_volume,
         "acceleration_le_minus90_with_volume": severe_negative_accel,
         "issues": issues,
