@@ -27,7 +27,7 @@ class PaperTelemetryTests(unittest.TestCase):
             "pump_score": 70, "pump_quality": 60, "pump_change": 10,
             "pump_phase": "IGNITION", "m1h": 2, "m15": 1,
             "m4h": 1, "net_1h": 200, "volume_1h": 700,
-            "trades_1h": 12,
+            "trades_1h": 12, "data_age_sec": 60,
         }
         with patch.object(v30, "decision", return_value=signal), patch.object(v30, "save_state"), patch.object(v30, "load_state", return_value={"cooldowns": {}}):
             v30.patch(main_module, engine)
