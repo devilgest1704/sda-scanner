@@ -316,7 +316,7 @@ def patch(main_module,engine):
                 gap_seconds=None
             pos['pump_last_observed_at']=observed.isoformat()
             s=decision(address,a,ws); roi=(cur-entry)/entry*100
-            data_age=c.get("data_age_sec")
+            data_age=s.get("data_age_sec")
             data_fresh_for_exit=isinstance(data_age,(int,float)) and data_age<=MAX_EXIT_DATA_AGE_SEC
             peak=max(n(pos.get("pump_peak_price"),entry),cur); pos["pump_peak_price"]=peak
             mfe=(peak-entry)/entry*100; pos["pump_mfe_pct"]=mfe
