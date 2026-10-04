@@ -16,6 +16,7 @@ MIN_IMPULSE=8.0
 COOLDOWN_HOURS=6.0
 MAX_ENTRY_DATA_AGE_SEC=900.0
 MAX_EXIT_DATA_AGE_SEC=900.0
+EXECUTION_STATE_FILE="v30_execution_state.json"
 
 def n(v,d=0.0):
     try:return d if v is None else float(v)
@@ -408,6 +409,43 @@ def patch(main_module,engine):
         target.MAX_NEW_BUYS_PER_RUN=MAX_BUYS_PER_RUN
         target.SL_PCT=SL_PCT
         target._auto_exit=auto_exit
+    def execution_hook(event,address,analysis,s,meta):
+        try:
+            from datetime import datetime, timezone
+            import json
+            from pathlib import Path
+            p=Path(EXECUTION_STATE_FILE)
+            state={}
+            try:
+                state=json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                state={}
+            events=state.get("events",[]) if isinstance(state,dict) else []
+            label=(analysis.get("symbol") if isinstance(analysis,dict) else None) or str(address)[:10]
+            events.append({
+                "at":datetime.now(timezone.utc).isoformat(),
+                "event":str(event),
+                "address":str(address).lower(),
+                "label":str(label),
+                "score":n(s.get("pump_score",s.get("confidence"))),
+                "quality":n(s.get("pump_quality")),
+                "impulse":n(s.get("pump_change")),
+                "phase":s.get("pump_phase"),
+                "data_age_sec":n(s.get("data_age_sec")),
+                "meta":meta if isinstance(meta,dict) else {}
+            })
+            state={"version":VERSION,"paper_only":True,"events":events[-100:]}
+            tmp=p.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(state,indent=2,ensure_ascii=False),encoding="utf-8")
+            tmp.replace(p)
+            print(f"V30 EXECUTION • {label} • {event}")
+        except Exception as exc:
+            print("V30 EXECUTION TELEMETRY ERROR:",repr(exc))
+
+    # Hook the real engine_legacy BUY->create path. Telemetry only; it never changes eligibility.
+    for target in targets:
+        target.PAPER_EXECUTION_HOOK=execution_hook
+    main_module.paper_execution_hook=execution_hook
     main_module.paper_decision=paper_decision
     if callable(original_main):
         def wrapped_main(*args,**kwargs):
