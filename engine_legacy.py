@@ -11,7 +11,7 @@ INVESTMENT_MIN_SDA=50.0; INVESTMENT_MAX_SDA=100.0; BUY_THRESHOLD=75
 MIN_1H_VOLUME_SDA=0.0; MIN_TRADES_1H=3
 TP1_PCT=.05; TP2_PCT=.10; SL_PCT=.04; FEE_RATE=.01; SLIPPAGE_RATE=.001
 MAX_OPEN_POSITIONS=5; MAX_NEW_BUYS_PER_RUN=1; MAX_PORTFOLIO_TXS=5000
-WALLET_ADDRESS=os.environ.get("WATCH_WALLET","0x0a7415b28d0f3641fd202ced0c4d3a70619e6230").lower()
+# Optional paper-execution telemetry hook installed by V30. Never places real orders.\nPAPER_EXECUTION_HOOK=None\nWALLET_ADDRESS=os.environ.get("WATCH_WALLET","0x0a7415b28d0f3641fd202ced0c4d3a70619e6230").lower()
 EXPLORER_API="https://ledger.sidrachain.com/api/v2"
 PINET_SUPABASE_URL="https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/token_transactions"
 PINET_SUPABASE_HEADERS={"apikey":"sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z","accept-profile":"public"}
@@ -324,7 +324,23 @@ def main():
     for i,(c,a,an,s,tr) in enumerate(ranks[:5],1):lines += [f"{i}. {'🟢 BUY' if c>=BUY_THRESHOLD and tr>=MIN_TRADES_1H else ('🟡 WATCH' if c>=55 else '⚪ WEAK')} {lbl(a,meta)} — {c}/100",f"   1h {s['m1h']:+.2f}% | flow {s['net_1h']:+.0f} SDA | trades {int(tr)} | whale 1h {s['whale_net']:+.0f}",f"   {liquidity_text(liquidity_for(a,ld))}"]
     slots=max(0,MAX_OPEN_POSITIONS-len(p["positions"]))
     for _,a,an,s in cands[:min(slots,MAX_NEW_BUYS_PER_RUN)]:
-        inv=_investment_for_score(s["confidence"]);pos=create(a,an,s,meta,liquidity_for(a,ld),inv);p["positions"][a]=pos;events.append(f"🟢 AUTO BUY {pos['label']}\n\nInvested: {inv:.0f} SDA\nEntry: {price(pos['entry_price'])} SDA\nTP1: {price(pos['tp1'])} SDA\nTP2: {price(pos['tp2'])} SDA\nSL: {price(pos['sl'])} SDA\nScore: {s['confidence']}/100\nMode: PAPER AUTO")
+        inv=_investment_for_score(s["confidence"])
+        hook=globals().get("PAPER_EXECUTION_HOOK")
+        if callable(hook):
+            try: hook("READY",a,an,s,{"slots":slots,"max_buys":MAX_NEW_BUYS_PER_RUN,"investment":inv})
+            except Exception: pass
+        try:
+            pos=create(a,an,s,meta,liquidity_for(a,ld),inv)
+            p["positions"][a]=pos
+            if callable(hook):
+                try: hook("CREATED",a,an,s,{"investment":inv,"entry_price":pos.get("entry_price")})
+                except Exception: pass
+            events.append(f"🟢 AUTO BUY {pos['label']}\n\nInvested: {inv:.0f} SDA\nEntry: {price(pos['entry_price'])} SDA\nTP1: {price(pos['tp1'])} SDA\nTP2: {price(pos['tp2'])} SDA\nSL: {price(pos['sl'])}\nScore: {s['confidence']}/100\nMode: PAPER AUTO")
+        except Exception as exc:
+            if callable(hook):
+                try: hook("CREATE_ERROR",a,an,s,{"error":repr(exc)})
+                except Exception: pass
+            raise
     opens=["📊 OPEN PAPER POSITIONS",""]
     if not p["positions"]:opens.append("No open paper positions.")
     else:
