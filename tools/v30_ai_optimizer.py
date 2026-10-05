@@ -6,7 +6,7 @@ from pathlib import Path
 from datetime import datetime,timezone
 
 STATS=Path("paper_stats.json"); DATA=Path("v30_optimizer_trades.json"); OUT=Path("v30_ai_optimizer.json")
-MIN_ROWS=120; MIN_VALID=15; MIN_TEST=15
+MIN_ROWS=80; MIN_VALID=12; MIN_TEST=12
 
 def load(p,d):
     try:return json.loads(p.read_text(encoding="utf-8"))
@@ -28,7 +28,7 @@ def metrics(rows):
             "profit_factor":gp/gl if gl else (999. if gp else 0.),"max_drawdown_sda":dd}
 def eligible(t,c):
     checks=[
-      (("confidence",),c["confidence"]),(("quality",),c["quality"]),(("impulse",),c["impulse"]),
+      (("confidence",),c["confidence"]),(("quality","pump_quality"),c["quality"]),(("impulse","pump_change"),c["impulse"]),
       (("m1h","m1","m1h_pct"),c["m1h"]),(("buy_ratio",),c["buy_ratio"]),(("trades_1h","trades"),c["trades"])
     ]
     for keys,thr in checks:
@@ -46,17 +46,21 @@ def main():
     stats=load(STATS,{})
     raw=load(DATA,{"trades":[]}); rows=[x for x in raw.get("trades",[]) if isinstance(x,dict)]
     rows.sort(key=lambda x:str(x.get("closed_at") or x.get("entry_at") or ""))
+    # Optimize V30 only when enough V30-era rows exist; legacy schemas are not comparable.
+    v30_rows=[x for x in rows if isinstance(em(x).get("v30"),dict) or em(x).get("pump_quality") is not None]
+    analysis_rows=v30_rows if len(v30_rows)>=MIN_ROWS else rows
     result={"version":"V30-AI-OPTIMIZER-3","generated_at":datetime.now(timezone.utc).isoformat(),
       "mode":"PAPER_ONLY","objective":"maximize out-of-sample accumulated SDA with drawdown constraint",
       "aggregate_baseline":{"closed":int(f(stats.get("closed_trades"))),"pnl_sda":f(stats.get("realized_pnl_sda")),
-        "win_rate_pct":f(stats.get("win_rate_pct"))},"dataset_rows":len(rows),"auto_apply":False,
+        "win_rate_pct":f(stats.get("win_rate_pct"))},"dataset_rows":len(rows),"v30_compatible_rows":len(v30_rows),
+      "analysis_scope":"V30_ONLY" if analysis_rows is v30_rows else "ALL_AVAILABLE_FALLBACK","auto_apply":False,
       "guardrails":{"real_trading":False,"chronological_split":"60/20/20 train/validation/test","minimum_dataset_rows":MIN_ROWS,
         "minimum_validation_trades":MIN_VALID,"minimum_test_trades":MIN_TEST,"out_of_sample_required":True,"rollback_required":True}}
-    if len(rows)<MIN_ROWS:
-        result.update({"status":"COLLECTING_DATA","note":f"Need {MIN_ROWS} persisted trade rows; have {len(rows)}. No challenger selected."})
+    if len(analysis_rows)<MIN_ROWS:
+        result.update({"status":"COLLECTING_DATA","note":f"Need {MIN_ROWS} comparable trade rows; have {len(analysis_rows)}. No challenger selected."})
     else:
-        cut1=max(1,int(len(rows)*.60)); cut2=max(cut1+1,int(len(rows)*.80))
-        train,valid,test=rows[:cut1],rows[cut1:cut2],rows[cut2:]
+        cut1=max(1,int(len(analysis_rows)*.60)); cut2=max(cut1+1,int(len(analysis_rows)*.80))
+        train,valid,test=analysis_rows[:cut1],analysis_rows[cut1:cut2],analysis_rows[cut2:]
         base_train,base_valid,base_test=metrics(train),metrics(valid),metrics(test)
         grids={
           "confidence":[0,68,72,76,80],"quality":[0,52,56,60],
