@@ -70,8 +70,12 @@ def _top_buy(dashboard,md,ws,meta,rows=None,snapshot=None):
         ranked.append((d,str(address)))
     ranked.sort(key=lambda x:(_n(x[0].get("pump_score")),_n(x[0].get("pump_change"))),reverse=True)
 
+    champion_ready=sum(1 for d,_ in ranked if not d.get("paper_buy_blocked"))
+    shadow_ready=sum(1 for d,_ in ranked if d.get("shadow_confirmation_ready"))
     lines=[
-        "🔥 TOP BUY CANDIDATES • V30 CLEAN PUMP-HUNTER","",
+        "🔥 TOP BUY • V30.4 CHAMPION + SHADOW","",
+        f"🟢 Champion BUY-ready: {champion_ready}",
+        f"🧪 Shadow READY: {shadow_ready}",
         f"BUY ≥ {v30.ENTRY_SCORE:.0f} • WATCH ≥ 40 • fresh impulse + flow confirmation",
         "────────────────────────"
     ]
@@ -97,9 +101,12 @@ def _top_buy(dashboard,md,ws,meta,rows=None,snapshot=None):
                 f"Trades {_n(d.get('trades_1h')):.0f} • Buy ratio {_n(d.get('buy_ratio')):.2f}x"
             )
             if blocked:
-                lines.append(f"   ⏳ {d.get('paper_buy_block_reason','waiting for confirmation')}")
+                lines.append(f"   ⏳ Champion NO • {d.get('paper_buy_block_reason','waiting for confirmation')}")
             else:
-                lines.append(f"   🚀 V30 ready • quality {_n(d.get('pump_quality')):.0f} • impulse +{_n(d.get('pump_change')):.1f}")
+                lines.append(f"   🚀 Champion READY • quality {_n(d.get('pump_quality')):.0f} • impulse +{_n(d.get('pump_change')):.1f}")
+            shadow_status="READY" if d.get("shadow_confirmation_ready") else "NO"
+            shadow_icon="🧪" if shadow_status=="READY" else "▫️"
+            lines.append(f"   {shadow_icon} Shadow {shadow_status} • snapshot impulse +{_n(d.get('shadow_snapshot_impulse')):.1f}")
     try:
         lines.extend(v26._position_action_section(dashboard,md,ws,meta))
     except Exception:
