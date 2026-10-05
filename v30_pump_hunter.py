@@ -214,6 +214,11 @@ def decision(address,a,ws=None,persist=True):
     cd=cooldown_active(address)
     data_age=c.get("data_age_sec")
     data_fresh_for_entry=isinstance(data_age,(int,float)) and data_age<=MAX_ENTRY_DATA_AGE_SEC
+    snapshot_impulse=min(20,max(0,
+        max(0,c["m1"])*0.8 + max(0,c["m15"])*0.8 +
+        max(0,c["flow15"])/100 + min(4,c["trades"]/5) +
+        min(4,c["vol"]/250)
+    )) if data_fresh_for_entry else 0.0
     # Re-evaluate the same BUY gates here so dashboard and paper engine have
     # one source of truth. Do not reference local variables from score().
     ratio=c["flow"]/max(c["vol"],1)
