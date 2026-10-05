@@ -54,9 +54,19 @@ def _merged_market(dashboard,md):
     except Exception: compact={}
     extra=compact.get("tokens",{}) if isinstance(compact,dict) else {}
     if not isinstance(extra,dict) or not extra:return md
-    merged=dict(md); tokens=dict(base); tokens.update(extra); merged["tokens"]=tokens
-    for k,v in compact.items():
-        if k!="tokens":merged[k]=v
+    # Never let an older compact snapshot overwrite fresher live data.
+    merged=dict(md); tokens=dict(base)
+    def _tx_ts(x):
+        if not isinstance(x,dict): return ""
+        a=x.get("analysis") if isinstance(x.get("analysis"),dict) else x
+        return str(a.get("last_transaction") or "")
+    for address,analysis in extra.items():
+        current=tokens.get(address)
+        if current is None or _tx_ts(analysis)>_tx_ts(current):
+            tokens[address]=analysis
+    merged["tokens"]=tokens
+    if str(compact.get("updated_at") or "")>str(merged.get("updated_at") or ""):
+        merged["updated_at"]=compact.get("updated_at")
     return merged
 
 
