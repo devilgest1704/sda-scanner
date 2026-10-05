@@ -121,6 +121,18 @@ def score(address,a,persist=True):
     acceleration=max(0,min(10,c["accel"]/20+5))
     quality=momentum+flow_score+pressure+activity+acceleration
     raw_impulse=min(20,max(0,d1*2+d15*1.5+max(0,df)/250+min(1,dv/max(n(p.get("vol"),100),100))*5))
+    # Bootstrap a first observation after a worker restart. Without a prior
+    # persisted sample, delta-based impulse is mathematically zero even when
+    # the current market snapshot is already showing a real, liquid pump.
+    # This remains subject to all normal lifecycle, quality, flow, liquidity,
+    # buy-ratio and score gates.
+    if not p:
+        bootstrap=min(20,max(0,
+            c["m1"]*1.2 + max(0,c["m15"])*0.8 +
+            max(0,c["flow"])/250 + min(5,c["vol"]/250) +
+            max(0,c["buy_ratio"]-1)*2
+        ))
+        raw_impulse=max(raw_impulse,bootstrap)
     # Momentum rebound without traded liquidity is not an actionable pump.
     # Keep raw impulse for diagnostics, but do not reward sparse/stale ticks.
     impulse=raw_impulse if (
