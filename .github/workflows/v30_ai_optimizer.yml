@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: v30-ai-optimizer
@@ -58,3 +59,33 @@ jobs:
             sleep 2
           done
           exit 1
+
+
+      - name: Restart SDA Scanner on current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          echo "Restarting long-lived paper scanner after successful optimizer run."
+
+          # Cancel all active/pending SDA Scanner V18 runs so no old checkout
+          # keeps running after optimizer/code updates.
+          run_ids="$(gh api "repos/$REPO/actions/workflows/scanner_v18.yml/runs?per_page=100" \
+            --jq '.workflow_runs[] | select(.status=="in_progress" or .status=="queued" or .status=="pending" or .status=="waiting" or .status=="requested") | .id')"
+
+          for id in $run_ids; do
+            echo "Cancelling scanner run $id"
+            gh api --method POST "repos/$REPO/actions/runs/$id/cancel" || true
+          done
+
+          # Wait briefly for the concurrency slot to be released.
+          for i in $(seq 1 30); do
+            active="$(gh api "repos/$REPO/actions/workflows/scanner_v18.yml/runs?per_page=20" \
+              --jq '[.workflow_runs[] | select(.status=="in_progress" or .status=="queued" or .status=="pending" or .status=="waiting" or .status=="requested")] | length')"
+            [ "$active" = "0" ] && break
+            sleep 2
+          done
+
+          echo "Dispatching fresh SDA Scanner V18 from main"
+          gh workflow run scanner_v18.yml --repo "$REPO" --ref main
