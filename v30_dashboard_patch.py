@@ -124,10 +124,12 @@ def patch_dashboard(dashboard):
             ranked.append((_decision(dashboard,address,an,ws),str(address)))
         ranked.sort(key=lambda x:(_n(x[0].get("pump_score")),_n(x[0].get("pump_change"))),reverse=True)
         ready=sum(1 for d,_ in ranked if not d.get("paper_buy_blocked"))
+        shadow_ready=sum(1 for d,_ in ranked if d.get("shadow_confirmation_ready"))
         lines=[
-            "🐞 MARKET DEBUG • V30 CLEAN PUMP-HUNTER","",
+            "🐞 MARKET DEBUG • V30.4 CHAMPION + SHADOW","",
             f"Tokens analyzed: {len(ranked)}",
-            f"🟢 BUY-ready: {ready}",
+            f"🟢 Champion BUY-ready: {ready}",
+            f"🧪 Shadow READY: {shadow_ready}",
             f"Entry score: {v30.ENTRY_SCORE:.0f}",
             "────────────────────────"
         ]
@@ -137,6 +139,9 @@ def patch_dashboard(dashboard):
             lines.append(f"{i}. {_label(dashboard,address,meta)} • {status} • score {_n(d.get('pump_score')):.0f} • phase {phase} • Δ +{_n(d.get('pump_change')):.1f}")
             lines.append(f"   M15/M1H/M4H {_n(d.get('m15')):+.2f}/{_n(d.get('m1h')):+.2f}/{_n(d.get('m4h')):+.2f}% | flow {_n(d.get('net_1h')):+.0f} | vol {_n(d.get('volume_1h')):.0f} | trades {_n(d.get('trades_1h')):.0f}")
             lines.append(f"   buy ratio {_n(d.get('buy_ratio')):.2f}x | quality {_n(d.get('pump_quality')):.0f} | impulse +{_n(d.get('pump_change')):.1f} | {d.get('paper_buy_block_reason','ready')}")
+            shadow_status="READY" if d.get("shadow_confirmation_ready") else "NO"
+            shadow_icon="🧪" if shadow_status=="READY" else "▫️"
+            lines.append(f"   {shadow_icon} Shadow {shadow_status} | snapshot impulse +{_n(d.get('shadow_snapshot_impulse')):.1f}")
         return "\n".join(lines)
 
     dashboard.market_debug_report=market_debug_report
