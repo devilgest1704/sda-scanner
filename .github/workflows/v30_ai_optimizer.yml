@@ -1,0 +1,60 @@
+name: V30 AI Optimizer
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: v30-ai-optimizer
+  cancel-in-progress: true
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    env:
+      REAL_TRADING_ENABLED: "false"
+      REAL_TRADING_DRY_RUN: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify paper-only optimizer
+        run: |
+          python -m py_compile tools/v30_ai_optimizer.py
+          python tools/v30_ai_optimizer.py
+          python - <<'PY'
+          import json
+          x=json.load(open("v30_ai_optimizer.json",encoding="utf-8"))
+          assert x["mode"]=="PAPER_ONLY"
+          assert x["guardrails"]["real_trading"] is False
+          assert x["auto_apply"] is False
+          print("Optimizer guardrails OK")
+          PY
+
+      - name: Persist optimizer report
+        run: |
+          git config user.name 'sda-scanner-bot'
+          git config user.email 'scanner@github.local'
+          git add v30_ai_optimizer.json
+          if git diff --staged --quiet; then
+            echo "No optimizer report change."
+            exit 0
+          fi
+          git commit -m 'Update V30 AI optimizer report'
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then exit 0; fi
+            git fetch origin main
+            git rebase origin/main || { git rebase --abort || true; exit 1; }
+            sleep 2
+          done
+          exit 1
