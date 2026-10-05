@@ -11,7 +11,9 @@ INVESTMENT_MIN_SDA=50.0; INVESTMENT_MAX_SDA=100.0; BUY_THRESHOLD=75
 MIN_1H_VOLUME_SDA=0.0; MIN_TRADES_1H=3
 TP1_PCT=.05; TP2_PCT=.10; SL_PCT=.04; FEE_RATE=.01; SLIPPAGE_RATE=.001
 MAX_OPEN_POSITIONS=5; MAX_NEW_BUYS_PER_RUN=1; MAX_PORTFOLIO_TXS=5000
-# Optional paper-execution telemetry hook installed by V30. Never places real orders.\nPAPER_EXECUTION_HOOK=None\nWALLET_ADDRESS=os.environ.get("WATCH_WALLET","0x0a7415b28d0f3641fd202ced0c4d3a70619e6230").lower()
+# Optional paper-execution telemetry hook installed by V30. Never places real orders.
+PAPER_EXECUTION_HOOK=None
+WALLET_ADDRESS=os.environ.get("WATCH_WALLET","0x0a7415b28d0f3641fd202ced0c4d3a70619e6230").lower()
 EXPLORER_API="https://ledger.sidrachain.com/api/v2"
 PINET_SUPABASE_URL="https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/token_transactions"
 PINET_SUPABASE_HEADERS={"apikey":"sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z","accept-profile":"public"}
