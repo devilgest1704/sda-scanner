@@ -500,6 +500,46 @@ def patch(main_module,engine):
         engine.main=wrapped_main
     main_module._v30_patched=True
 
+def write_scan_funnel(market_file="market_analysis.json"):
+    """Persist one paper-only V30 decision funnel snapshot for diagnostics."""
+    try:
+        import json
+        from pathlib import Path
+        from datetime import datetime, timezone
+        src=Path(market_file)
+        data=json.loads(src.read_text(encoding="utf-8")) if src.exists() else {}
+        tokens=data.get("tokens",{}) if isinstance(data,dict) else {}
+        total=fresh=champion=shadow=0
+        for address,td in tokens.items():
+            an=td.get("analysis") if isinstance(td,dict) and isinstance(td.get("analysis"),dict) else td
+            if not isinstance(an,dict) or n(an.get("price_in_sda"))<=0:
+                continue
+            total+=1
+            d=decision(address,an,None,persist=False)
+            fresh+=int(bool(d.get("data_fresh_for_entry")))
+            champion+=int(bool(d.get("eligible_for_buy")))
+            shadow+=int(bool(d.get("shadow_confirmation_ready")))
+        p=Path(EXECUTION_STATE_FILE)
+        try: state=json.loads(p.read_text(encoding="utf-8"))
+        except Exception: state={}
+        if not isinstance(state,dict): state={}
+        events=state.get("events",[]) if isinstance(state.get("events"),list) else []
+        funnels=state.get("funnels",[]) if isinstance(state.get("funnels"),list) else []
+        funnels.append({
+            "at":datetime.now(timezone.utc).isoformat(),
+            "tokens":total,"fresh":fresh,
+            "champion_ready":champion,"shadow_ready":shadow,
+            "ready_hook_events":sum(1 for e in events if str(e.get("event")).upper()=="READY"),
+            "created_hook_events":sum(1 for e in events if str(e.get("event")).upper()=="CREATED")
+        })
+        state.update({"version":VERSION,"paper_only":True,"events":events[-100:],"funnels":funnels[-100:]})
+        tmp=p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(state,indent=2,ensure_ascii=False),encoding="utf-8")
+        tmp.replace(p)
+        print(f"V30 FUNNEL • tokens {total} • fresh {fresh} • champion {champion} • shadow {shadow}")
+    except Exception as exc:
+        print("V30 FUNNEL TELEMETRY ERROR:",repr(exc))
+
 def market_debug(dashboard,snapshot=None):
     md=dashboard.load("market_data.json",{"tokens":{}}) if snapshot is None else snapshot.get("md",{})
     tokens=md.get("tokens",{}) if isinstance(md,dict) else {}
