@@ -5,7 +5,7 @@ Entry and exit logic are intentionally separated.
 import json, os
 from datetime import datetime, timezone, timedelta
 
-VERSION="V30.3"
+VERSION="V30.4-SHADOW"
 STATE_FILE="v30_pump_state.json"
 SL_PCT=0.025
 MAX_OPEN=4
@@ -121,6 +121,13 @@ def score(address,a,persist=True):
     acceleration=max(0,min(10,c["accel"]/20+5))
     quality=momentum+flow_score+pressure+activity+acceleration
     raw_impulse=min(20,max(0,d1*2+d15*1.5+max(0,df)/250+min(1,dv/max(n(p.get("vol"),100),100))*5))
+    # Shadow snapshot impulse: diagnostic forward signal only. It fixes the
+    # delta=0 observability blind spot without changing Champion BUY eligibility.
+    snapshot_impulse=min(20,max(0,
+        max(0,c["m1"])*0.8 + max(0,c["m15"])*0.8 +
+        max(0,c["flow15"])/100 + min(4,c["trades"]/5) +
+        min(4,c["vol"]/250)
+    )) if isinstance(c.get("data_age_sec"),(int,float)) and c["data_age_sec"]<=MAX_ENTRY_DATA_AGE_SEC else 0.0
     # Bootstrap a first observation after a worker restart. Without a prior
     # persisted sample, delta-based impulse is mathematically zero even when
     # the current market snapshot is already showing a real, liquid pump.
@@ -267,6 +274,12 @@ def decision(address,a,ws=None,persist=True):
       "trades_1h":c["trades"],"volume_1h":c["vol"],"buy_ratio":c["buy_ratio"],"trade_ratio":c["trade_ratio"],
       "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":i,"pump_phase":phase,
       "paper_buy_blocked":blocked,"paper_buy_block_reason":reason,
+      "shadow_snapshot_impulse":round(snapshot_impulse,1),
+      "shadow_confirmation_ready":bool(
+          phase=="CONFIRMATION" and data_fresh_for_entry and q>=55 and snapshot_impulse>=6
+          and c["flow"]>=150 and c["flow15"]>=40 and c["trades"]>=8
+          and liquidity_ok and c["buy_ratio"]>=1.12 and c["m15"]>=1.5 and price_flow_ok
+      ),
       "paper_prediction":{"ready":False,"role":"advisory"},"paper_prediction_role":"advisory",
       "data_age_sec":data_age,"data_fresh_for_entry":data_fresh_for_entry,
       "technical_bull":0,"technical_bear":0,"technical_evidence":[],
