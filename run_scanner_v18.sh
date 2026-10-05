@@ -115,6 +115,7 @@ run_one_scan() {
 
   TELEGRAM_TOKEN="" python paper_engine_v19.py
   TELEGRAM_TOKEN="" python paper_stats.py
+  python -c 'import v30_pump_hunter as v30; v30.write_scan_funnel()'
   python tools/v30_collect_training_data.py
 
   ensure_json_state
