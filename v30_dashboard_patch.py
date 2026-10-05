@@ -68,7 +68,16 @@ def _top_buy(dashboard,md,ws,meta,rows=None,snapshot=None):
         if not an or _n(an.get("price_in_sda"))<=0:continue
         d=_decision(dashboard,address,an,ws)
         ranked.append((d,str(address)))
-    ranked.sort(key=lambda x:(_n(x[0].get("pump_score")),_n(x[0].get("pump_change"))),reverse=True)
+    # Surface actionable live data first. A stale token with a large historical
+    # pump score must not hide a fresh candidate from TOP BUY.
+    ranked.sort(key=lambda x:(
+        1 if x[0].get("shadow_confirmation_ready") else 0,
+        1 if not x[0].get("paper_buy_blocked") else 0,
+        1 if x[0].get("data_fresh_for_entry") else 0,
+        _n(x[0].get("pump_score")),
+        _n(x[0].get("shadow_snapshot_impulse")),
+        _n(x[0].get("pump_change"))
+    ),reverse=True)
 
     champion_ready=sum(1 for d,_ in ranked if not d.get("paper_buy_blocked"))
     shadow_ready=sum(1 for d,_ in ranked if d.get("shadow_confirmation_ready"))
