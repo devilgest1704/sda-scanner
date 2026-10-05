@@ -273,6 +273,25 @@ def decision(address,a,ws=None,persist=True):
     if not data_fresh_for_entry: failures.insert(0,f"stale market data {data_age:.0f}s" if isinstance(data_age,(int,float)) else "missing market data age")
     if cd: failures.insert(0,"cooldown")
     reason="READY" if not blocked else f"{phase} / "+"; ".join(failures[:3])
+
+    # V30.4 Shadow diagnostics: explain every failed confirmation gate.
+    # Diagnostic only; this does not alter Champion or Shadow eligibility.
+    shadow_failures=[]
+    if phase!="CONFIRMATION": shadow_failures.append(f"phase {phase} (requires CONFIRMATION)")
+    if not data_fresh_for_entry:
+        shadow_failures.append(f"stale data {data_age:.0f}s" if isinstance(data_age,(int,float)) else "missing data age")
+    if q<55: shadow_failures.append(f"quality {q:.0f}<55")
+    if snapshot_impulse<6: shadow_failures.append(f"snapshot impulse +{snapshot_impulse:.1f}<6.0")
+    if c["flow"]<150: shadow_failures.append(f"flow {c['flow']:.0f}<150")
+    if c["flow15"]<40: shadow_failures.append(f"flow15 {c['flow15']:.0f}<40")
+    if c["trades"]<8: shadow_failures.append(f"trades {c['trades']:.0f}<8")
+    if not liquidity_ok: shadow_failures.append(f"low liquidity vol {c['vol']:.0f}, flow {c['flow']:.0f}")
+    if c["buy_ratio"]<1.12: shadow_failures.append(f"buy ratio {c['buy_ratio']:.2f}<1.12")
+    if c["m15"]<1.5: shadow_failures.append(f"M15 {c['m15']:+.2f}<+1.50%")
+    if not price_flow_ok: shadow_failures.append("price/flow mismatch")
+    shadow_ready=not shadow_failures
+    shadow_reason="READY" if shadow_ready else "; ".join(shadow_failures[:4])
+
     eff=s if not blocked else min(s,ENTRY_SCORE-1)
     return {"score":eff,"confidence":eff,"buy_score":eff,"market_score":eff,
       "m1h":c["m1"],"m15":c["m15"],"m4h":c["m4"],"net_1h":c["flow"],"whale_net":c["flow"],
@@ -280,11 +299,8 @@ def decision(address,a,ws=None,persist=True):
       "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":i,"pump_phase":phase,
       "paper_buy_blocked":blocked,"paper_buy_block_reason":reason,
       "shadow_snapshot_impulse":round(snapshot_impulse,1),
-      "shadow_confirmation_ready":bool(
-          phase=="CONFIRMATION" and data_fresh_for_entry and q>=55 and snapshot_impulse>=6
-          and c["flow"]>=150 and c["flow15"]>=40 and c["trades"]>=8
-          and liquidity_ok and c["buy_ratio"]>=1.12 and c["m15"]>=1.5 and price_flow_ok
-      ),
+      "shadow_confirmation_ready":shadow_ready,
+      "shadow_block_reason":shadow_reason,
       "paper_prediction":{"ready":False,"role":"advisory"},"paper_prediction_role":"advisory",
       "data_age_sec":data_age,"data_fresh_for_entry":data_fresh_for_entry,
       "technical_bull":0,"technical_bear":0,"technical_evidence":[],
