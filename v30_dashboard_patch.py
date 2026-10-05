@@ -107,6 +107,8 @@ def _top_buy(dashboard,md,ws,meta,rows=None,snapshot=None):
             shadow_status="READY" if d.get("shadow_confirmation_ready") else "NO"
             shadow_icon="🧪" if shadow_status=="READY" else "▫️"
             lines.append(f"   {shadow_icon} Shadow {shadow_status} • snapshot impulse +{_n(d.get('shadow_snapshot_impulse')):.1f}")
+            if shadow_status!="READY":
+                lines.append(f"      blocked: {d.get('shadow_block_reason','unknown shadow gate')}")
     try:
         lines.extend(v26._position_action_section(dashboard,md,ws,meta))
     except Exception:
@@ -149,6 +151,8 @@ def patch_dashboard(dashboard):
             shadow_status="READY" if d.get("shadow_confirmation_ready") else "NO"
             shadow_icon="🧪" if shadow_status=="READY" else "▫️"
             lines.append(f"   {shadow_icon} Shadow {shadow_status} | snapshot impulse +{_n(d.get('shadow_snapshot_impulse')):.1f}")
+            if shadow_status!="READY":
+                lines.append(f"      blocked: {d.get('shadow_block_reason','unknown shadow gate')}")
         return "\n".join(lines)
 
     dashboard.market_debug_report=market_debug_report
