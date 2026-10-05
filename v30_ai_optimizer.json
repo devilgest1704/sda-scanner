@@ -1,6 +1,6 @@
 {
-  "version": "V30-AI-OPTIMIZER-2",
-  "generated_at": "2026-10-05T10:02:46.493122+00:00",
+  "version": "V30-AI-OPTIMIZER-3",
+  "generated_at": "2026-10-05T10:12:41.890424+00:00",
   "mode": "PAPER_ONLY",
   "objective": "maximize out-of-sample accumulated SDA with drawdown constraint",
   "aggregate_baseline": {
@@ -8,16 +8,78 @@
     "pnl_sda": -1146.682513139147,
     "win_rate_pct": 17.444717444717444
   },
-  "dataset_rows": 0,
+  "dataset_rows": 407,
+  "v30_compatible_rows": 104,
+  "analysis_scope": "V30_ONLY",
   "auto_apply": false,
   "guardrails": {
     "real_trading": false,
-    "chronological_train_test_split": "70/30",
+    "chronological_split": "60/20/20 train/validation/test",
     "minimum_dataset_rows": 80,
-    "minimum_test_trades": 20,
+    "minimum_validation_trades": 12,
+    "minimum_test_trades": 12,
     "out_of_sample_required": true,
     "rollback_required": true
   },
-  "status": "COLLECTING_DATA",
-  "note": "Need 80 persisted trade rows; have 0. No challenger selected."
+  "status": "READY",
+  "train_rows": 62,
+  "validation_rows": 21,
+  "test_rows": 21,
+  "champion": {
+    "train": {
+      "closed": 62,
+      "pnl_sda": -31.40161686701049,
+      "win_rate_pct": 24.193548387096776,
+      "profit_factor": 0.7895026919470032,
+      "max_drawdown_sda": 96.00547075295619
+    },
+    "validation": {
+      "closed": 21,
+      "pnl_sda": -63.16495367228133,
+      "win_rate_pct": 9.523809523809524,
+      "profit_factor": 0.03567561908896304,
+      "max_drawdown_sda": 63.16495367228133
+    },
+    "test": {
+      "closed": 21,
+      "pnl_sda": -52.79576387026541,
+      "win_rate_pct": 9.523809523809524,
+      "profit_factor": 0.050508811354931855,
+      "max_drawdown_sda": 52.79576387026541
+    }
+  },
+  "candidates_tested": 18000,
+  "challenger": {
+    "filters": {
+      "confidence": 72,
+      "quality": 60,
+      "impulse": 0,
+      "m1h": 0,
+      "buy_ratio": 0,
+      "trades": 10
+    },
+    "train": {
+      "closed": 39,
+      "pnl_sda": -9.028409563086257,
+      "win_rate_pct": 28.205128205128204,
+      "profit_factor": 0.9069342794915956,
+      "max_drawdown_sda": 50.58465541339808
+    },
+    "validation": {
+      "closed": 12,
+      "pnl_sda": -37.25388198699488,
+      "win_rate_pct": 8.333333333333334,
+      "profit_factor": 0.05714648513246797,
+      "max_drawdown_sda": 37.25388198699488
+    },
+    "test": {
+      "closed": 11,
+      "pnl_sda": -35.19414687224973,
+      "win_rate_pct": 0.0,
+      "profit_factor": 0.0,
+      "max_drawdown_sda": 35.19414687224973
+    },
+    "objective_validation": -44.41892595873151,
+    "recommend_promotion": false
+  }
 }
