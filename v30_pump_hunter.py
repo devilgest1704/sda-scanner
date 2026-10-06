@@ -5,7 +5,7 @@ Entry and exit logic are intentionally separated.
 import json, os
 from datetime import datetime, timezone, timedelta
 
-VERSION="V30.4-SHADOW"
+VERSION="V30.5-PAPER-IMPULSE"
 STATE_FILE="v30_pump_state.json"
 SL_PCT=0.025
 MAX_OPEN=4
@@ -219,6 +219,14 @@ def decision(address,a,ws=None,persist=True):
         max(0,c["flow15"])/100 + min(4,c["trades"]/5) +
         min(4,c["vol"]/250)
     )) if data_fresh_for_entry else 0.0
+    # V30.5 paper-only impulse fix:
+    # Champion's persisted delta impulse can legitimately be 0 when the current
+    # fresh market sample is identical to the last persisted scanner sample.
+    # Shadow already proved that the same fresh snapshot contains actionable
+    # momentum. Preserve the MIN_IMPULSE protection, but let paper entry use
+    # the stronger of delta impulse and fresh snapshot impulse. score() and
+    # persisted history stay untouched, so this cannot contaminate scanner state.
+    entry_impulse=max(i,snapshot_impulse) if data_fresh_for_entry else i
     # Re-evaluate the same BUY gates here so dashboard and paper engine have
     # one source of truth. Do not reference local variables from score().
     ratio=c["flow"]/max(c["vol"],1)
@@ -240,12 +248,12 @@ def decision(address,a,ws=None,persist=True):
     if same_last and "fresh" in fresh_hist:
         fresh=bool(fresh_hist["fresh"])
     ignition_buy=(
-        phase=="IGNITION" and q>=52 and i>=8
+        phase=="IGNITION" and q>=52 and entry_impulse>=8
         and c["flow"]>=180 and c["flow15"]>=60 and c["trades"]>=10 and c["m15"]>=0.8
         and liquidity_ok and c["buy_ratio"]>=1.10 and price_flow_ok
     )
     confirmation_buy=(
-        phase=="CONFIRMATION" and fresh and q>=55 and i>=6
+        phase=="CONFIRMATION" and fresh and q>=55 and entry_impulse>=6
         and c["flow"]>=150 and c["flow15"]>=40 and c["trades"]>=8
         and liquidity_ok and c["buy_ratio"]>=1.12
         and c["m15"]>=1.5 and price_flow_ok
@@ -261,7 +269,7 @@ def decision(address,a,ws=None,persist=True):
     if not fresh: failures.append("no fresh impulse")
     if s<ENTRY_SCORE: failures.append(f"score {s:.0f}<{ENTRY_SCORE:.0f}")
     if q<MIN_QUALITY: failures.append(f"quality {q:.0f}<{MIN_QUALITY:.0f}")
-    if i<MIN_IMPULSE: failures.append(f"impulse +{i:.1f}<{MIN_IMPULSE:.1f}")
+    if entry_impulse<MIN_IMPULSE: failures.append(f"impulse +{entry_impulse:.1f}<{MIN_IMPULSE:.1f}")
     if c["flow"]<=0: failures.append("flow<=0")
     if c["flow15"]<0: failures.append("15m flow<0")
     if c["trades"]<5: failures.append(f"trades {c['trades']:.0f}<5")
@@ -315,7 +323,7 @@ def decision(address,a,ws=None,persist=True):
     return {"score":eff,"confidence":eff,"buy_score":eff,"market_score":eff,
       "m1h":c["m1"],"m15":c["m15"],"m4h":c["m4"],"net_1h":c["flow"],"whale_net":c["flow"],
       "trades_1h":c["trades"],"volume_1h":c["vol"],"buy_ratio":c["buy_ratio"],"trade_ratio":c["trade_ratio"],
-      "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":i,"pump_phase":phase,
+      "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":entry_impulse,"pump_delta_impulse":i,"pump_phase":phase,
       "paper_buy_blocked":blocked,"paper_buy_block_reason":reason,
       "shadow_snapshot_impulse":round(snapshot_impulse,1),
       "shadow_confirmation_ready":shadow_ready,
