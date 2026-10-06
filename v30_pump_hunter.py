@@ -292,6 +292,25 @@ def decision(address,a,ws=None,persist=True):
     shadow_ready=not shadow_failures
     shadow_reason="READY" if shadow_ready else "; ".join(shadow_failures[:4])
 
+    # V30.4 EARLY shadow lane: measure strong WATCH setups before the strict
+    # confirmation lifecycle. Diagnostic only -- never feeds Champion BUY.
+    early_shadow_failures=[]
+    if phase!="WATCH": early_shadow_failures.append(f"phase {phase} (requires WATCH)")
+    if not data_fresh_for_entry: early_shadow_failures.append("stale data")
+    if q<55: early_shadow_failures.append(f"quality {q:.0f}<55")
+    if snapshot_impulse<8: early_shadow_failures.append(f"snapshot impulse +{snapshot_impulse:.1f}<8.0")
+    if c["flow"]<180: early_shadow_failures.append(f"flow {c['flow']:.0f}<180")
+    if c["flow15"]<40: early_shadow_failures.append(f"flow15 {c['flow15']:.0f}<40")
+    if c["trades"]<8: early_shadow_failures.append(f"trades {c['trades']:.0f}<8")
+    if not liquidity_ok: early_shadow_failures.append("low liquidity")
+    if c["buy_ratio"]<1.12: early_shadow_failures.append(f"buy ratio {c['buy_ratio']:.2f}<1.12")
+    if c["m15"]<=0: early_shadow_failures.append(f"M15 {c['m15']:+.2f}<=0")
+    if c["m1"]<=0: early_shadow_failures.append(f"M1H {c['m1']:+.2f}<=0")
+    if c["m1"]>12: early_shadow_failures.append(f"late M1H {c['m1']:+.2f}>+12%")
+    if not price_flow_ok: early_shadow_failures.append("price/flow mismatch")
+    shadow_early_ready=not early_shadow_failures
+    shadow_early_reason="READY" if shadow_early_ready else "; ".join(early_shadow_failures[:4])
+
     eff=s if not blocked else min(s,ENTRY_SCORE-1)
     return {"score":eff,"confidence":eff,"buy_score":eff,"market_score":eff,
       "m1h":c["m1"],"m15":c["m15"],"m4h":c["m4"],"net_1h":c["flow"],"whale_net":c["flow"],
@@ -301,6 +320,8 @@ def decision(address,a,ws=None,persist=True):
       "shadow_snapshot_impulse":round(snapshot_impulse,1),
       "shadow_confirmation_ready":shadow_ready,
       "shadow_block_reason":shadow_reason,
+      "shadow_early_ready":shadow_early_ready,
+      "shadow_early_reason":shadow_early_reason,
       "paper_prediction":{"ready":False,"role":"advisory"},"paper_prediction_role":"advisory",
       "data_age_sec":data_age,"data_fresh_for_entry":data_fresh_for_entry,
       "technical_bull":0,"technical_bear":0,"technical_evidence":[],
@@ -521,7 +542,7 @@ def write_scan_funnel(market_file="market_analysis.json"):
             is_fresh=bool(d.get("data_fresh_for_entry"))
             fresh+=int(is_fresh)
             champion+=int(bool(d.get("eligible_for_buy")))
-            shadow+=int(bool(d.get("shadow_confirmation_ready")))
+            shadow+=int(bool(d.get("shadow_confirmation_ready") or d.get("shadow_early_ready")))
             if is_fresh and not d.get("eligible_for_buy"):
                 reason=str(d.get("paper_buy_block_reason") or "")
                 # Normalize detailed values into stable gate categories.
