@@ -510,15 +510,53 @@ def write_scan_funnel(market_file="market_analysis.json"):
         data=json.loads(src.read_text(encoding="utf-8")) if src.exists() else {}
         tokens=data.get("tokens",{}) if isinstance(data,dict) else {}
         total=fresh=champion=shadow=0
+        fresh_gate_counts={}
+        near_ready=[]
         for address,td in tokens.items():
             an=td.get("analysis") if isinstance(td,dict) and isinstance(td.get("analysis"),dict) else td
             if not isinstance(an,dict) or n(an.get("price_in_sda"))<=0:
                 continue
             total+=1
             d=decision(address,an,None,persist=False)
-            fresh+=int(bool(d.get("data_fresh_for_entry")))
+            is_fresh=bool(d.get("data_fresh_for_entry"))
+            fresh+=int(is_fresh)
             champion+=int(bool(d.get("eligible_for_buy")))
             shadow+=int(bool(d.get("shadow_confirmation_ready")))
+            if is_fresh and not d.get("eligible_for_buy"):
+                reason=str(d.get("paper_buy_block_reason") or "")
+                # Normalize detailed values into stable gate categories.
+                gates=[]
+                checks=(
+                    ("lifecycle","no lifecycle lane"),
+                    ("impulse","no fresh impulse"),
+                    ("score","score "),
+                    ("quality","quality "),
+                    ("flow","flow<=0"),
+                    ("flow15","15m flow<0"),
+                    ("trades","trades "),
+                    ("liquidity","liquidity "),
+                    ("buy_ratio","buy ratio "),
+                    ("m15","M15 "),
+                    ("price_flow","price/flow mismatch"),
+                    ("late_entry","late entry"),
+                    ("cooldown","cooldown"),
+                )
+                for gate,marker in checks:
+                    if marker in reason:
+                        gates.append(gate)
+                        fresh_gate_counts[gate]=fresh_gate_counts.get(gate,0)+1
+                near_ready.append({
+                    "address":str(address).lower(),
+                    "symbol":str(an.get("symbol") or "")[:20],
+                    "score":round(n(d.get("pump_score")),1),
+                    "quality":round(n(d.get("pump_quality")),1),
+                    "impulse":round(n(d.get("pump_change")),1),
+                    "phase":d.get("pump_phase"),
+                    "data_age_sec":round(n(d.get("data_age_sec")),1),
+                    "gates":gates,
+                    "reason":reason,
+                })
+        near_ready.sort(key=lambda x:(len(x["gates"]),-x["score"],-x["quality"]))
         p=Path(EXECUTION_STATE_FILE)
         try: state=json.loads(p.read_text(encoding="utf-8"))
         except Exception: state={}
@@ -529,6 +567,8 @@ def write_scan_funnel(market_file="market_analysis.json"):
             "at":datetime.now(timezone.utc).isoformat(),
             "tokens":total,"fresh":fresh,
             "champion_ready":champion,"shadow_ready":shadow,
+            "fresh_gate_counts":dict(sorted(fresh_gate_counts.items(),key=lambda kv:(-kv[1],kv[0]))),
+            "near_ready":near_ready[:5],
             "ready_hook_events":sum(1 for e in events if str(e.get("event")).upper()=="READY"),
             "created_hook_events":sum(1 for e in events if str(e.get("event")).upper()=="CREATED")
         })
@@ -536,7 +576,7 @@ def write_scan_funnel(market_file="market_analysis.json"):
         tmp=p.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(state,indent=2,ensure_ascii=False),encoding="utf-8")
         tmp.replace(p)
-        print(f"V30 FUNNEL • tokens {total} • fresh {fresh} • champion {champion} • shadow {shadow}")
+        print(f"V30 FUNNEL • tokens {total} • fresh {fresh} • champion {champion} • shadow {shadow} • gates {fresh_gate_counts}")
     except Exception as exc:
         print("V30 FUNNEL TELEMETRY ERROR:",repr(exc))
 
