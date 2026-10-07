@@ -5,8 +5,8 @@ import json,itertools
 from pathlib import Path
 from datetime import datetime,timezone
 
-STATS=Path("paper_stats.json"); DATA=Path("v30_optimizer_trades.json"); OUT=Path("v30_ai_optimizer.json")
-MIN_ROWS=80; MIN_VALID=12; MIN_TEST=12
+STATS=Path("paper_stats.json"); DATA=Path("v30_optimizer_trades.json"); OUT=Path("v30_ai_optimizer.json"); CONFIG=Path("v30_agent_config.json")
+MIN_ROWS=80; MIN_VALID=12; MIN_TEST=12\nBASELINE={"entry_score":68.0,"quality":52.0,"impulse":8.0,"buy_ratio":1.10,"trades":5}
 
 def load(p,d):
     try:return json.loads(p.read_text(encoding="utf-8"))
@@ -53,7 +53,7 @@ def main():
       "mode":"PAPER_ONLY","objective":"maximize out-of-sample accumulated SDA with drawdown constraint",
       "aggregate_baseline":{"closed":int(f(stats.get("closed_trades"))),"pnl_sda":f(stats.get("realized_pnl_sda")),
         "win_rate_pct":f(stats.get("win_rate_pct"))},"dataset_rows":len(rows),"v30_compatible_rows":len(v30_rows),
-      "analysis_scope":"V30_ONLY" if analysis_rows is v30_rows else "ALL_AVAILABLE_FALLBACK","auto_apply":False,
+      "analysis_scope":"V30_ONLY" if analysis_rows is v30_rows else "ALL_AVAILABLE_FALLBACK","auto_apply":True,"active_config":current,
       "guardrails":{"real_trading":False,"chronological_split":"60/20/20 train/validation/test","minimum_dataset_rows":MIN_ROWS,
         "minimum_validation_trades":MIN_VALID,"minimum_test_trades":MIN_TEST,"out_of_sample_required":True,"rollback_required":True}}
     if len(analysis_rows)<MIN_ROWS:
@@ -81,7 +81,8 @@ def main():
             promote=(len(test_filtered)>=MIN_TEST and
                      me["pnl_sda"]>base_test["pnl_sda"] and
                      me["max_drawdown_sda"]<=base_test["max_drawdown_sda"]*1.10 and
-                     me["profit_factor"]>base_test["profit_factor"])
+                     me["profit_factor"]>base_test["profit_factor"] and
+                     me["pnl_sda"]>0 and me["profit_factor"]>1.05 and mv["pnl_sda"]>0)
             result["challenger"]={"filters":c,"train":mt,"validation":mv,"test":me,
               "objective_validation":obj,"recommend_promotion":promote}
         else: result["challenger"]=None
