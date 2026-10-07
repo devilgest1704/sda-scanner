@@ -83,9 +83,44 @@ def main():
                      me["max_drawdown_sda"]<=base_test["max_drawdown_sda"]*1.10 and
                      me["profit_factor"]>base_test["profit_factor"] and
                      me["pnl_sda"]>0 and me["profit_factor"]>1.05 and mv["pnl_sda"]>0)
-            result["challenger"]={"filters":c,"train":mt,"validation":mv,"test":me,
-              "objective_validation":obj,"recommend_promotion":promote}
+            safe_filters={
+              "entry_score":max(BASELINE["entry_score"],c["confidence"] or BASELINE["entry_score"]),
+              "quality":max(BASELINE["quality"],c["quality"] or BASELINE["quality"]),
+              "impulse":max(BASELINE["impulse"],c["impulse"] or BASELINE["impulse"]),
+              "buy_ratio":max(BASELINE["buy_ratio"],c["buy_ratio"] or BASELINE["buy_ratio"]),
+              "trades":max(BASELINE["trades"],c["trades"] or BASELINE["trades"])
+            }
+            changed=any(abs(f(safe_filters[k])-f(current.get(k)))>1e-9 for k in safe_filters)
+            result["challenger"]={"filters":c,"safe_runtime_filters":safe_filters,"train":mt,"validation":mv,"test":me,
+              "objective_validation":obj,"recommend_promotion":promote and changed}
+            if promote and changed:
+                ts=datetime.now(timezone.utc).isoformat()
+                cfg={"version":"V30-AUTO-CONFIG-1","generation":int(f(cfg.get("generation")))+1,
+                     "updated_at":ts,"source":"AI_OUT_OF_SAMPLE_PROMOTION","filters":safe_filters,
+                     "previous_filters":current,"promotion":{"at":ts,"dataset_rows":len(rows),
+                     "v30_rows":len(v30_rows),"test":me,"baseline_test":base_test}}
+                CONFIG.write_text(json.dumps(cfg,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
+                result["promotion_applied"]=True; result["active_config"]=safe_filters
+            else: result["promotion_applied"]=False
         else: result["challenger"]=None
+
+    # Roll back an automatically promoted Champion after enough new live paper
+    # trades if it loses SDA or breaches 125% of its promotion-test drawdown.
+    promo=cfg.get("promotion") if isinstance(cfg,dict) else None
+    prev=cfg.get("previous_filters") if isinstance(cfg,dict) else None
+    if promo and prev and promo.get("at"):
+        post=[x for x in analysis_rows if str(x.get("closed_at") or "")>str(promo["at"])]
+        if len(post)>=MIN_TEST:
+            pm=metrics(post); limit=max(1.0,f((promo.get("test") or {}).get("max_drawdown_sda"))*1.25)
+            if pm["pnl_sda"]<0 or pm["max_drawdown_sda"]>limit:
+                ts=datetime.now(timezone.utc).isoformat()
+                cfg={"version":"V30-AUTO-CONFIG-1","generation":int(f(cfg.get("generation")))+1,
+                     "updated_at":ts,"source":"AUTO_ROLLBACK","filters":prev,
+                     "previous_filters":None,"promotion":None}
+                CONFIG.write_text(json.dumps(cfg,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
+                result["rollback_applied"]=True; result["rollback_metrics"]=pm; result["active_config"]=prev
+            else:
+                result["rollback_applied"]=False; result["post_promotion_metrics"]=pm
     OUT.write_text(json.dumps(result,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
     print(json.dumps(result,indent=2,ensure_ascii=False))
 if __name__=="__main__":main()
