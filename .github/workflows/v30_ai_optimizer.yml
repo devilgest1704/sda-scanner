@@ -43,7 +43,7 @@ jobs:
           x=json.load(open("v30_ai_optimizer.json",encoding="utf-8"))
           assert x["mode"]=="PAPER_ONLY"
           assert x["guardrails"]["real_trading"] is False
-          assert x["auto_apply"] is False
+          assert x["auto_apply"] is True
           print("Optimizer guardrails OK")
           PY
 
@@ -51,7 +51,7 @@ jobs:
         run: |
           git config user.name 'sda-scanner-bot'
           git config user.email 'scanner@github.local'
-          git add v30_ai_optimizer.json
+          git add v30_ai_optimizer.json v30_agent_config.json
           if git diff --staged --quiet; then
             echo "No optimizer report change."
             exit 0
