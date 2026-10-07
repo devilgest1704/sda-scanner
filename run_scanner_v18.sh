@@ -56,6 +56,8 @@ checkpoint_state() {
   git config user.email 'scanner@github.local'
 
   git add $STATE_FILES
+  # Never let a large local market_data blob leak into the checkpoint via a prior index state.
+  git reset -q HEAD -- market_data.json 2>/dev/null || true
   if git diff --staged --quiet; then
     return 0
   fi
@@ -69,8 +71,9 @@ checkpoint_state() {
     fi
 
     if [ "$attempt" = "5" ]; then
-      echo "STATE CHECKPOINT: push failed after 5 attempts." >&2
-      return 1
+      echo "STATE CHECKPOINT: push failed after 5 attempts; keeping scanner alive for next checkpoint." >&2
+      git reset -q HEAD -- market_data.json 2>/dev/null || true
+      return 0
     fi
 
     git fetch origin main
