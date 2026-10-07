@@ -5,7 +5,7 @@ Entry and exit logic are intentionally separated.
 import json, os
 from datetime import datetime, timezone, timedelta
 
-VERSION="V30.7-AUTO-AGENT"
+VERSION="V30.8-UNIFIED-GATES"
 STATE_FILE="v30_pump_state.json"
 SL_PCT=0.025
 MAX_OPEN=4
@@ -220,6 +220,33 @@ def cooldown_active(address):
     try:return datetime.fromisoformat(x.replace("Z","+00:00"))>datetime.now(timezone.utc)
     except:return False
 
+def entry_gate(c,phase,quality,delta_impulse,snapshot_impulse,fresh,agent_cfg,data_fresh_for_entry):
+    """Single source of truth for Champion paper-entry eligibility."""
+    min_quality=agent_cfg["quality"]; min_impulse=agent_cfg["impulse"]
+    min_buy_ratio=agent_cfg["buy_ratio"]; min_trades=agent_cfg["trades"]
+    ratio=c["flow"]/max(c["vol"],1)
+    price_flow_ok=not(c["m1"]>=12 and ratio<0.18)
+    liquidity_ok=(c["vol"]>=500) or (
+        c["vol"]>=300 and c["trades"]>=10 and c["flow"]>=100 and
+        c["buy_ratio"]>=1.15 and ratio>=0.25
+    )
+    entry_impulse=max(delta_impulse,snapshot_impulse) if data_fresh_for_entry and phase=="CONFIRMATION" else delta_impulse
+    ignition=(
+        phase=="IGNITION" and quality>=min_quality and entry_impulse>=min_impulse
+        and c["flow"]>=180 and c["flow15"]>=60 and c["trades"]>=max(10,min_trades) and c["m15"]>=0.8
+        and liquidity_ok and c["buy_ratio"]>=max(1.10,min_buy_ratio) and price_flow_ok
+    )
+    confirmation=(
+        phase=="CONFIRMATION" and fresh and quality>=max(55,min_quality) and entry_impulse>=max(6,min_impulse)
+        and c["flow"]>=150 and c["flow15"]>=40 and c["trades"]>=max(8,min_trades)
+        and liquidity_ok and c["buy_ratio"]>=max(1.12,min_buy_ratio)
+        and c["m15"]>=1.5 and price_flow_ok
+    )
+    buy=(ignition or confirmation) and data_fresh_for_entry
+    if c["m1"]>12 and (c["m15"]<2 or c["flow15"]<=0): buy=False
+    return {"buy":buy,"entry_impulse":entry_impulse,"liquidity_ok":liquidity_ok,
+            "price_flow_ok":price_flow_ok,"ratio":ratio}
+
 def decision(address,a,ws=None,persist=True):
     c,s,q,i,phase=score(address,a,persist=persist)
     cd=cooldown_active(address)
@@ -245,47 +272,13 @@ def decision(address,a,ws=None,persist=True):
     # lifecycle has reached CONFIRMATION. This prevents a saturated snapshot
     # impulse from turning a one-tick burst into a new IGNITION entry.
     delta_impulse=i
-    entry_impulse=(
-        max(delta_impulse,snapshot_impulse)
-        if data_fresh_for_entry and phase=="CONFIRMATION"
-        else delta_impulse
-    )
-    # Re-evaluate the same BUY gates here so dashboard and paper engine have
-    # one source of truth. Do not reference local variables from score().
-    ratio=c["flow"]/max(c["vol"],1)
-    price_flow_ok=not(c["m1"]>=12 and ratio<0.18)
+    gate=entry_gate(c,phase,q,delta_impulse,snapshot_impulse,fresh,agent_cfg,data_fresh_for_entry)
+    entry_impulse=gate["entry_impulse"]
+    liquidity_ok=gate["liquidity_ok"]
+    price_flow_ok=gate["price_flow_ok"]
+    ratio=gate["ratio"]
     lane_ok=phase in ("IGNITION","CONFIRMATION","BREAKOUT")
-    liquidity_ok=(c["vol"]>=500) or (
-        c["vol"]>=300 and c["trades"]>=10 and c["flow"]>=100 and
-        c["buy_ratio"]>=1.15 and ratio>=0.25
-    )
-    fresh_hist=load_state().get("history",{}).get(str(address).lower(),{})
-    last=fresh_hist.get("last") or {}
-    same_last=bool(last) and all(abs(n(c.get(k))-n(last.get(k)))<1e-9 for k in ("price","m1","m15","m4","flow","flow15","vol","trades"))
-    p=(fresh_hist.get("prev") or {}) if (persist or same_last) else last
-    d1=max(0,c["m1"]-n(p.get("m1")))
-    d15=max(0,c["m15"]-n(p.get("m15")))
-    df=c["flow"]-n(p.get("flow"))
-    dv=max(0,c["vol"]-n(p.get("vol")))
-    fresh=bool(p) and (d1>=0.35 or d15>=0.15 or df>=50 or dv>0)
-    if same_last and "fresh" in fresh_hist:
-        fresh=bool(fresh_hist["fresh"])
-    ignition_buy=(
-        phase=="IGNITION" and q>=min_quality and entry_impulse>=min_impulse
-        and c["flow"]>=180 and c["flow15"]>=60 and c["trades"]>=max(10,min_trades) and c["m15"]>=0.8
-        and liquidity_ok and c["buy_ratio"]>=1.10 and price_flow_ok
-    )
-    confirmation_buy=(
-        phase=="CONFIRMATION" and fresh and q>=max(55,min_quality) and entry_impulse>=max(6,min_impulse)
-        and c["flow"]>=150 and c["flow15"]>=40 and c["trades"]>=max(8,min_trades)
-        and liquidity_ok and c["buy_ratio"]>=max(1.12,min_buy_ratio)
-        and c["m15"]>=1.5 and price_flow_ok
-    )
-    # BREAKOUT is a holding/management phase, never a new entry.
-    breakout_buy=False
-    buy=ignition_buy or confirmation_buy
-    if c["m1"]>12 and (c["m15"]<2 or c["flow15"]<=0):
-        buy=False
+    buy=gate["buy"]
     blocked=(not buy) or cd or s<entry_score or not data_fresh_for_entry
     failures=[]
     if not lane_ok: failures.append("no lifecycle lane")
