@@ -30,7 +30,7 @@ def metrics(rows):
 def eligible(t,c):
     checks=[
       (("confidence",),c["confidence"]),(("quality","pump_quality"),c["quality"]),(("impulse","pump_change"),c["impulse"]),
-      (("m1h","m1","m1h_pct"),c["m1h"]),(("buy_ratio",),c["buy_ratio"]),(("trades_1h","trades"),c["trades"])
+      (("buy_ratio",),c["buy_ratio"]),(("trades_1h","trades"),c["trades"])
     ]
     for keys,thr in checks:
         x=val(t,*keys)
@@ -52,8 +52,8 @@ def main():
     # Optimize V30 only when enough V30-era rows exist; legacy schemas are not comparable.
     v30_rows=[x for x in rows if isinstance(em(x).get("v30"),dict) or em(x).get("pump_quality") is not None]
     analysis_rows=v30_rows if len(v30_rows)>=MIN_ROWS else rows
-    result={"version":"V30-AI-OPTIMIZER-3","generated_at":datetime.now(timezone.utc).isoformat(),
-      "mode":"PAPER_ONLY","objective":"maximize out-of-sample accumulated SDA with drawdown constraint",
+    result={"version":"V30-AI-OPTIMIZER-4","generated_at":datetime.now(timezone.utc).isoformat(),
+      "mode":"PAPER_ONLY","runtime_gate_model":"V30.8 shared Champion gates; optimizer tunes only deployable runtime filters","objective":"maximize out-of-sample accumulated SDA with drawdown constraint",
       "aggregate_baseline":{"closed":int(f(stats.get("closed_trades"))),"pnl_sda":f(stats.get("realized_pnl_sda")),
         "win_rate_pct":f(stats.get("win_rate_pct"))},"dataset_rows":len(rows),"v30_compatible_rows":len(v30_rows),
       "analysis_scope":"V30_ONLY" if analysis_rows is v30_rows else "ALL_AVAILABLE_FALLBACK","auto_apply":True,"active_config":current,
@@ -67,7 +67,7 @@ def main():
         base_train,base_valid,base_test=metrics(train),metrics(valid),metrics(test)
         grids={
           "confidence":[0,68,72,76,80],"quality":[0,52,56,60],
-          "impulse":[0,6,8,10,12],"m1h":[0,3,6,10,15,25],
+          "impulse":[0,6,8,10,12],
           "buy_ratio":[0,1.1,1.25,1.5,2,3],"trades":[0,5,8,10,15]
         }
         best=None; tested=0
