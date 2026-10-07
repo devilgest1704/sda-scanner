@@ -176,7 +176,7 @@ def score(address,a,persist=True):
     ignition_buy=(
       lane=="IGNITION" and quality>=48 and impulse>=8
       and c["flow"]>=150 and c["trades"]>=8 and c["m15"]>=0
-      and liquidity_ok and c["buy_ratio"]>=min_buy_ratio and price_flow_ok
+      and liquidity_ok and c["buy_ratio"]>=1.10 and price_flow_ok
     )
     confirmation_buy=(
       lane=="CONFIRMATION" and fresh and quality>=52 and impulse>=5
