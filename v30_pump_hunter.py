@@ -272,6 +272,17 @@ def decision(address,a,ws=None,persist=True):
     # lifecycle has reached CONFIRMATION. This prevents a saturated snapshot
     # impulse from turning a one-tick burst into a new IGNITION entry.
     delta_impulse=i
+    fresh_hist=load_state().get("history",{}).get(str(address).lower(),{})
+    last=fresh_hist.get("last") or {}
+    same_last=bool(last) and all(abs(n(c.get(k))-n(last.get(k)))<1e-9 for k in ("price","m1","m15","m4","flow","flow15","vol","trades"))
+    p=(fresh_hist.get("prev") or {}) if (persist or same_last) else last
+    d1=max(0,c["m1"]-n(p.get("m1")))
+    d15=max(0,c["m15"]-n(p.get("m15")))
+    df=c["flow"]-n(p.get("flow"))
+    dv=max(0,c["vol"]-n(p.get("vol")))
+    fresh=bool(p) and (d1>=0.35 or d15>=0.15 or df>=50 or dv>0)
+    if same_last and "fresh" in fresh_hist:
+        fresh=bool(fresh_hist["fresh"])
     gate=entry_gate(c,phase,q,delta_impulse,snapshot_impulse,fresh,agent_cfg,data_fresh_for_entry)
     entry_impulse=gate["entry_impulse"]
     liquidity_ok=gate["liquidity_ok"]
