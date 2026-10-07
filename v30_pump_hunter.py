@@ -5,7 +5,7 @@ Entry and exit logic are intentionally separated.
 import json, os
 from datetime import datetime, timezone, timedelta
 
-VERSION="V30.5-PAPER-IMPULSE"
+VERSION="V30.6-SELECTIVE-IMPULSE"
 STATE_FILE="v30_pump_state.json"
 SL_PCT=0.025
 MAX_OPEN=4
@@ -226,7 +226,16 @@ def decision(address,a,ws=None,persist=True):
     # momentum. Preserve the MIN_IMPULSE protection, but let paper entry use
     # the stronger of delta impulse and fresh snapshot impulse. score() and
     # persisted history stay untouched, so this cannot contaminate scanner state.
-    entry_impulse=max(i,snapshot_impulse) if data_fresh_for_entry else i
+    # V30.6 selective impulse: IGNITION must prove a real move between
+    # persisted samples; snapshot-only momentum is allowed only after the
+    # lifecycle has reached CONFIRMATION. This prevents a saturated snapshot
+    # impulse from turning a one-tick burst into a new IGNITION entry.
+    delta_impulse=i
+    entry_impulse=(
+        max(delta_impulse,snapshot_impulse)
+        if data_fresh_for_entry and phase=="CONFIRMATION"
+        else delta_impulse
+    )
     # Re-evaluate the same BUY gates here so dashboard and paper engine have
     # one source of truth. Do not reference local variables from score().
     ratio=c["flow"]/max(c["vol"],1)
@@ -266,7 +275,10 @@ def decision(address,a,ws=None,persist=True):
     blocked=(not buy) or cd or s<ENTRY_SCORE or not data_fresh_for_entry
     failures=[]
     if not lane_ok: failures.append("no lifecycle lane")
-    if not fresh: failures.append("no fresh impulse")
+    if phase=="IGNITION" and delta_impulse<MIN_IMPULSE:
+        failures.append(f"no delta impulse +{delta_impulse:.1f}<{MIN_IMPULSE:.1f}")
+    elif phase=="CONFIRMATION" and not fresh and entry_impulse<MIN_IMPULSE:
+        failures.append("no fresh impulse")
     if s<ENTRY_SCORE: failures.append(f"score {s:.0f}<{ENTRY_SCORE:.0f}")
     if q<MIN_QUALITY: failures.append(f"quality {q:.0f}<{MIN_QUALITY:.0f}")
     if entry_impulse<MIN_IMPULSE: failures.append(f"impulse +{entry_impulse:.1f}<{MIN_IMPULSE:.1f}")
@@ -323,7 +335,7 @@ def decision(address,a,ws=None,persist=True):
     return {"score":eff,"confidence":eff,"buy_score":eff,"market_score":eff,
       "m1h":c["m1"],"m15":c["m15"],"m4h":c["m4"],"net_1h":c["flow"],"whale_net":c["flow"],
       "trades_1h":c["trades"],"volume_1h":c["vol"],"buy_ratio":c["buy_ratio"],"trade_ratio":c["trade_ratio"],
-      "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":entry_impulse,"pump_delta_impulse":i,"pump_phase":phase,
+      "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":entry_impulse,"pump_delta_impulse":delta_impulse,"pump_phase":phase,
       "paper_buy_blocked":blocked,"paper_buy_block_reason":reason,
       "shadow_snapshot_impulse":round(snapshot_impulse,1),
       "shadow_confirmation_ready":shadow_ready,
