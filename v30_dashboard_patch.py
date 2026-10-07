@@ -42,7 +42,7 @@ def _merged_market(dashboard,md):
     if os.environ.get("VERCEL") == "1":
         try:
             import urllib.request, json
-            url="https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/market_data.json"
+            url="https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/market_analysis.json"
             with urllib.request.urlopen(url,timeout=4) as r:
                 live=json.loads(r.read().decode("utf-8"))
             if isinstance(live,dict) and isinstance(live.get("tokens"),dict):
@@ -92,7 +92,7 @@ def _top_buy(dashboard,md,ws,meta,rows=None,snapshot=None):
     champion_ready=sum(1 for d,_ in ranked if not d.get("paper_buy_blocked"))
     shadow_ready=sum(1 for d,_ in ranked if d.get("shadow_confirmation_ready"))
     lines=[
-        "🔥 TOP BUY • V30.4 CHAMPION + SHADOW","",
+        f"🔥 TOP BUY • {v30.VERSION} • CHAMPION + SHADOW","",
         f"🟢 Champion BUY-ready: {champion_ready}",
         f"🧪 Shadow READY: {shadow_ready}",
         f"BUY ≥ {v30.ENTRY_SCORE:.0f} • WATCH ≥ 40 • fresh impulse + flow confirmation",
@@ -154,7 +154,7 @@ def patch_dashboard(dashboard):
         ready=sum(1 for d,_ in ranked if not d.get("paper_buy_blocked"))
         shadow_ready=sum(1 for d,_ in ranked if d.get("shadow_confirmation_ready"))
         lines=[
-            "🐞 MARKET DEBUG • V30.4 CHAMPION + SHADOW","",
+            f"🐞 MARKET DEBUG • {v30.VERSION} • CHAMPION + SHADOW","",
             f"Tokens analyzed: {len(ranked)}",
             f"🟢 Champion BUY-ready: {ready}",
             f"🧪 Shadow READY: {shadow_ready}",
