@@ -5,7 +5,7 @@ Entry and exit logic are intentionally separated.
 import json, os
 from datetime import datetime, timezone, timedelta
 
-VERSION="V30.6-SELECTIVE-IMPULSE"
+VERSION="V30.7-AUTO-AGENT"
 STATE_FILE="v30_pump_state.json"
 SL_PCT=0.025
 MAX_OPEN=4
@@ -17,6 +17,17 @@ COOLDOWN_HOURS=6.0
 MAX_ENTRY_DATA_AGE_SEC=900.0
 MAX_EXIT_DATA_AGE_SEC=900.0
 EXECUTION_STATE_FILE="v30_execution_state.json"
+AGENT_CONFIG_FILE="v30_agent_config.json"
+
+def load_agent_config():
+    defaults={"entry_score":ENTRY_SCORE,"quality":MIN_QUALITY,"impulse":MIN_IMPULSE,"buy_ratio":1.10,"trades":5}
+    try:
+        with open(AGENT_CONFIG_FILE,encoding="utf-8") as f:
+            x=json.load(f)
+        cfg=x.get("filters",{}) if isinstance(x,dict) else {}
+        return {k:n(cfg.get(k),v) for k,v in defaults.items()}
+    except Exception:
+        return defaults
 
 def n(v,d=0.0):
     try:return d if v is None else float(v)
@@ -165,7 +176,7 @@ def score(address,a,persist=True):
     ignition_buy=(
       lane=="IGNITION" and quality>=48 and impulse>=8
       and c["flow"]>=150 and c["trades"]>=8 and c["m15"]>=0
-      and liquidity_ok and c["buy_ratio"]>=1.10 and price_flow_ok
+      and liquidity_ok and c["buy_ratio"]>=min_buy_ratio and price_flow_ok
     )
     confirmation_buy=(
       lane=="CONFIRMATION" and fresh and quality>=52 and impulse>=5
@@ -212,6 +223,9 @@ def cooldown_active(address):
 def decision(address,a,ws=None,persist=True):
     c,s,q,i,phase=score(address,a,persist=persist)
     cd=cooldown_active(address)
+    agent_cfg=load_agent_config()
+    entry_score=agent_cfg["entry_score"]; min_quality=agent_cfg["quality"]; min_impulse=agent_cfg["impulse"]
+    min_buy_ratio=agent_cfg["buy_ratio"]; min_trades=agent_cfg["trades"]
     data_age=c.get("data_age_sec")
     data_fresh_for_entry=isinstance(data_age,(int,float)) and data_age<=MAX_ENTRY_DATA_AGE_SEC
     snapshot_impulse=min(20,max(0,
@@ -257,14 +271,14 @@ def decision(address,a,ws=None,persist=True):
     if same_last and "fresh" in fresh_hist:
         fresh=bool(fresh_hist["fresh"])
     ignition_buy=(
-        phase=="IGNITION" and q>=52 and entry_impulse>=8
-        and c["flow"]>=180 and c["flow15"]>=60 and c["trades"]>=10 and c["m15"]>=0.8
+        phase=="IGNITION" and q>=min_quality and entry_impulse>=min_impulse
+        and c["flow"]>=180 and c["flow15"]>=60 and c["trades"]>=max(10,min_trades) and c["m15"]>=0.8
         and liquidity_ok and c["buy_ratio"]>=1.10 and price_flow_ok
     )
     confirmation_buy=(
-        phase=="CONFIRMATION" and fresh and q>=55 and entry_impulse>=6
-        and c["flow"]>=150 and c["flow15"]>=40 and c["trades"]>=8
-        and liquidity_ok and c["buy_ratio"]>=1.12
+        phase=="CONFIRMATION" and fresh and q>=max(55,min_quality) and entry_impulse>=max(6,min_impulse)
+        and c["flow"]>=150 and c["flow15"]>=40 and c["trades"]>=max(8,min_trades)
+        and liquidity_ok and c["buy_ratio"]>=max(1.12,min_buy_ratio)
         and c["m15"]>=1.5 and price_flow_ok
     )
     # BREAKOUT is a holding/management phase, never a new entry.
@@ -272,21 +286,21 @@ def decision(address,a,ws=None,persist=True):
     buy=ignition_buy or confirmation_buy
     if c["m1"]>12 and (c["m15"]<2 or c["flow15"]<=0):
         buy=False
-    blocked=(not buy) or cd or s<ENTRY_SCORE or not data_fresh_for_entry
+    blocked=(not buy) or cd or s<entry_score or not data_fresh_for_entry
     failures=[]
     if not lane_ok: failures.append("no lifecycle lane")
-    if phase=="IGNITION" and delta_impulse<MIN_IMPULSE:
-        failures.append(f"no delta impulse +{delta_impulse:.1f}<{MIN_IMPULSE:.1f}")
-    elif phase=="CONFIRMATION" and not fresh and entry_impulse<MIN_IMPULSE:
+    if phase=="IGNITION" and delta_impulse<min_impulse:
+        failures.append(f"no delta impulse +{delta_impulse:.1f}<{min_impulse:.1f}")
+    elif phase=="CONFIRMATION" and not fresh and entry_impulse<min_impulse:
         failures.append("no fresh impulse")
-    if s<ENTRY_SCORE: failures.append(f"score {s:.0f}<{ENTRY_SCORE:.0f}")
-    if q<MIN_QUALITY: failures.append(f"quality {q:.0f}<{MIN_QUALITY:.0f}")
+    if s<entry_score: failures.append(f"score {s:.0f}<{entry_score:.0f}")
+    if q<min_quality: failures.append(f"quality {q:.0f}<{min_quality:.0f}")
     if entry_impulse<MIN_IMPULSE: failures.append(f"impulse +{entry_impulse:.1f}<{MIN_IMPULSE:.1f}")
     if c["flow"]<=0: failures.append("flow<=0")
     if c["flow15"]<0: failures.append("15m flow<0")
-    if c["trades"]<5: failures.append(f"trades {c['trades']:.0f}<5")
+    if c["trades"]<min_trades: failures.append(f"trades {c['trades']:.0f}<{min_trades:.0f}")
     if not liquidity_ok: failures.append(f"liquidity vol {c['vol']:.0f}, flow {c['flow']:.0f}")
-    if c["buy_ratio"]<1.10: failures.append(f"buy ratio {c['buy_ratio']:.2f}<1.10")
+    if c["buy_ratio"]<min_buy_ratio: failures.append(f"buy ratio {c['buy_ratio']:.2f}<{min_buy_ratio:.2f}")
     if c["m15"]<-0.25: failures.append(f"M15 {c['m15']:+.2f}<-0.25%")
     if not price_flow_ok: failures.append("price/flow mismatch")
     if c["m1"]>12: failures.append("late entry: M1H>12%")
@@ -347,7 +361,7 @@ def decision(address,a,ws=None,persist=True):
       "technical_bull":0,"technical_bear":0,"technical_evidence":[],
       "buy_score_components":{"momentum":round(c["m1"],1),"flow":round(c["flow"],1),"activity":round(c["trades"],1),
                               "prediction":0.0,"liquidity":0.0},
-      "v30":{"version":VERSION,"entry_score":ENTRY_SCORE,"sl_pct":SL_PCT,"max_open":MAX_OPEN,
+      "v30":{"version":VERSION,"entry_score":entry_score,"agent_config":agent_cfg,"sl_pct":SL_PCT,"max_open":MAX_OPEN,
              "max_buys":MAX_BUYS_PER_RUN,"phase":phase,"max_entry_data_age_sec":MAX_ENTRY_DATA_AGE_SEC}}
 
 def age_hours(pos):
