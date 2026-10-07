@@ -45,6 +45,8 @@ def score_candidate(train,valid,c):
     return objective,mt,mv
 def main():
     stats=load(STATS,{})
+    cfg=load(CONFIG,{"version":"V30-AUTO-CONFIG-1","generation":0,"filters":BASELINE.copy(),"previous_filters":None,"promotion":None})
+    current=cfg.get("filters") if isinstance(cfg.get("filters"),dict) else BASELINE.copy()
     raw=load(DATA,{"trades":[]}); rows=[x for x in raw.get("trades",[]) if isinstance(x,dict)]
     rows.sort(key=lambda x:str(x.get("closed_at") or x.get("entry_at") or ""))
     # Optimize V30 only when enough V30-era rows exist; legacy schemas are not comparable.
