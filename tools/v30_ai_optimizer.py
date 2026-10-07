@@ -100,8 +100,7 @@ def main():
                      "updated_at":ts,"source":"AI_OUT_OF_SAMPLE_PROMOTION","filters":safe_filters,
                      "previous_filters":current,"promotion":{"at":ts,"dataset_rows":len(rows),
                      "v30_rows":len(v30_rows),"test":me,"baseline_test":base_test}}
-                CONFIG.write_text(json.dumps(cfg,indent=2,ensure_ascii=False)+"
-",encoding="utf-8")
+                CONFIG.write_text(json.dumps(cfg,indent=2,ensure_ascii=False)+chr(10),encoding="utf-8")
                 result["promotion_applied"]=True; result["active_config"]=safe_filters
             else: result["promotion_applied"]=False
         else: result["challenger"]=None
@@ -119,12 +118,10 @@ def main():
                 cfg={"version":"V30-AUTO-CONFIG-1","generation":int(f(cfg.get("generation")))+1,
                      "updated_at":ts,"source":"AUTO_ROLLBACK","filters":prev,
                      "previous_filters":None,"promotion":None}
-                CONFIG.write_text(json.dumps(cfg,indent=2,ensure_ascii=False)+"
-",encoding="utf-8")
+                CONFIG.write_text(json.dumps(cfg,indent=2,ensure_ascii=False)+chr(10),encoding="utf-8")
                 result["rollback_applied"]=True; result["rollback_metrics"]=pm; result["active_config"]=prev
             else:
                 result["rollback_applied"]=False; result["post_promotion_metrics"]=pm
-    OUT.write_text(json.dumps(result,indent=2,ensure_ascii=False)+"
-",encoding="utf-8")
+    OUT.write_text(json.dumps(result,indent=2,ensure_ascii=False)+chr(10),encoding="utf-8")
     print(json.dumps(result,indent=2,ensure_ascii=False))
 if __name__=="__main__":main()
