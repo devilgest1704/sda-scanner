@@ -22,8 +22,45 @@ def report(path):
         except (ValueError,TypeError):return 0.0
     if not closed and not open_positions:
         return {"status":"empty_positions","source":str(p),"note":"No trade records; verify scanner state synchronization."}
+    # Compare recent entries without changing Champion execution or filters.
+    recent=[x for x in closed[-100:] if isinstance(x,dict)]
+    def breakdown(rows, key):
+        groups={}
+        for x in rows:
+            name=str(key(x) or "UNKNOWN")
+            g=groups.setdefault(name,{"trades":0,"wins":0,"pnl_sda":0.0})
+            pnl=number(x.get("closed_profit_sda"))
+            g["trades"]+=1
+            g["wins"]+=int(pnl>0)
+            g["pnl_sda"]+=pnl
+        for g in groups.values():
+            g["pnl_sda"]=round(g["pnl_sda"],4)
+            g["win_rate_pct"]=round(100*g["wins"]/g["trades"],2)
+        return groups
+    def band(value, thresholds):
+        if value is None:return "UNKNOWN"
+        try:v=float(value)
+        except (ValueError,TypeError):return "UNKNOWN"
+        for limit in thresholds:
+            if v<limit:return f"<{limit}"
+        return f">={thresholds[-1]}"
+    def entry(x, name):
+        snap=x.get("pump_entry_snapshot") or {}
+        metrics=x.get("entry_metrics") or {}
+        return snap.get(name,metrics.get(name))
+    entry_analysis={
+        "scope":"last_100_closed_mixed_versions",
+        "note":"Observational, mixed V30 versions; no causal or promotion decision.",
+        "by_phase":breakdown(recent,lambda x:x.get("entry_phase")),
+        "by_score":breakdown(recent,lambda x:band(entry(x,"score") or x.get("entry_confidence"),[60,70,80,90])),
+        "by_quality":breakdown(recent,lambda x:band(entry(x,"quality") or (x.get("entry_metrics") or {}).get("pump_quality"),[50,60,70,80])),
+        "by_impulse":breakdown(recent,lambda x:band(entry(x,"impulse") or (x.get("entry_metrics") or {}).get("pump_delta_impulse"),[4,8,12,20])),
+        "by_volume":breakdown(recent,lambda x:band(entry(x,"volume_1h") or (x.get("entry_metrics") or {}).get("volume_1h"),[300,500,1000,3000])),
+        "by_exit_reason":breakdown(recent,lambda x:x.get("close_reason")),
+    }
     return {
         "status":"ok","closed_count":len(closed),"open_count":len(open_positions),
+        "entry_analysis":entry_analysis,
         "annotated_closed_count":len(annotated),
         "annotated_realized_pnl_sda":round(sum(number(x.get("closed_profit_sda")) for x in annotated),4),
         "annotated_exit_reasons":dict(exit_reasons),
