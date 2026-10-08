@@ -294,7 +294,7 @@ def decision(address,a,ws=None,persist=True):
     buy=gate["buy"]
     blocked=(not buy) or cd or s<entry_score or not data_fresh_for_entry
     failures=[]
-    if not lane_ok: failures.append("no lifecycle lane")
+    if phase not in ("IGNITION","CONFIRMATION"): failures.append("no eligible entry lane")
     if phase=="IGNITION" and delta_impulse<min_impulse:
         failures.append(f"no delta impulse +{delta_impulse:.1f}<{min_impulse:.1f}")
     elif phase=="CONFIRMATION" and not fresh and entry_impulse<min_impulse:
@@ -315,7 +315,7 @@ def decision(address,a,ws=None,persist=True):
     # Diagnostic-only: report every active gate, including impulse. Do not
     # change eligibility or thresholds when adding observability.
     gate_failures=[]
-    if not lane_ok: gate_failures.append("lifecycle")
+    if phase not in ("IGNITION","CONFIRMATION"): gate_failures.append("lifecycle")
     if phase=="IGNITION" and delta_impulse<min_impulse: gate_failures.append("impulse")
     elif phase=="CONFIRMATION" and (not fresh or entry_impulse<max(6,min_impulse)): gate_failures.append("impulse")
     if s<entry_score: gate_failures.append("score")
