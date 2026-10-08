@@ -312,6 +312,20 @@ def decision(address,a,ws=None,persist=True):
     if c["m1"]>12: failures.append("late entry: M1H>12%")
     if not data_fresh_for_entry: failures.insert(0,f"stale market data {data_age:.0f}s" if isinstance(data_age,(int,float)) else "missing market data age")
     if cd: failures.insert(0,"cooldown")
+    # Diagnostic-only: report every active gate, including impulse. Do not
+    # change eligibility or thresholds when adding observability.
+    gate_failures=[]
+    if not lane_ok: gate_failures.append("lifecycle")
+    if phase=="IGNITION" and delta_impulse<min_impulse: gate_failures.append("impulse")
+    elif phase=="CONFIRMATION" and (not fresh or entry_impulse<max(6,min_impulse)): gate_failures.append("impulse")
+    if s<entry_score: gate_failures.append("score")
+    if q<min_quality: gate_failures.append("quality")
+    if not liquidity_ok: gate_failures.append("liquidity")
+    if c["buy_ratio"]<min_buy_ratio: gate_failures.append("buy_ratio")
+    if c["trades"]<min_trades: gate_failures.append("trades")
+    if not price_flow_ok: gate_failures.append("price_flow")
+    if not data_fresh_for_entry: gate_failures.append("stale_data")
+    if cd: gate_failures.append("cooldown")
     reason="READY" if not blocked else f"{phase} / "+"; ".join(failures[:3])
 
     # V30.4 Shadow diagnostics: explain every failed confirmation gate.
@@ -356,7 +370,7 @@ def decision(address,a,ws=None,persist=True):
       "m1h":c["m1"],"m15":c["m15"],"m4h":c["m4"],"net_1h":c["flow"],"whale_net":c["flow"],
       "trades_1h":c["trades"],"volume_1h":c["vol"],"buy_ratio":c["buy_ratio"],"trade_ratio":c["trade_ratio"],
       "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":entry_impulse,"pump_delta_impulse":delta_impulse,"pump_phase":phase,
-      "paper_buy_blocked":blocked,"paper_buy_block_reason":reason,
+      "paper_buy_blocked":blocked,"paper_buy_block_reason":reason,"paper_buy_gate_failures":gate_failures,
       "shadow_snapshot_impulse":round(snapshot_impulse,1),
       "shadow_confirmation_ready":shadow_ready,
       "shadow_block_reason":shadow_reason,
