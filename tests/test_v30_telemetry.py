@@ -46,6 +46,23 @@ class PaperTelemetryTests(unittest.TestCase):
             self.assertIn("pump_exit_snapshot", closed)
             self.assertEqual(closed["pump_exit_snapshot"]["price_sda"], 90)
 
+    def test_buy_gate_diagnostics_include_impulse_without_changing_decision(self):
+        metrics = {"price": 1.0, "m1": 2.94, "m15": 2.96, "m4": 3.92,
+                   "flow": 3274.0, "flow15": 2100.0, "vol": 5322.0,
+                   "trades": 29, "buy_ratio": 2.0, "trade_ratio": 2.0,
+                   "data_age_sec": 150.0}
+        config = {"entry_score": 68.0, "quality": 52.0, "impulse": 8.0,
+                  "buy_ratio": 1.10, "trades": 5}
+        history = {"0xtest": {"last": dict(metrics), "prev": dict(metrics), "fresh": True}}
+        with patch.object(v30, "score", return_value=(metrics, 69.9, 68.2, 1.7, "IGNITION")), \
+             patch.object(v30, "cooldown_active", return_value=False), \
+             patch.object(v30, "load_agent_config", return_value=config), \
+             patch.object(v30, "load_state", return_value={"history": history}):
+            result = v30.decision("0xtest", {}, persist=False)
+        self.assertTrue(result["paper_buy_blocked"])
+        self.assertFalse(result["eligible_for_buy"])
+        self.assertIn("impulse", result["paper_buy_gate_failures"])
+        self.assertNotIn("score", result["paper_buy_gate_failures"])
 
 if __name__ == "__main__":
     unittest.main()
