@@ -599,27 +599,11 @@ def write_scan_funnel(market_file="market_analysis.json"):
             shadow+=int(bool(d.get("shadow_confirmation_ready") or d.get("shadow_early_ready")))
             if is_fresh and not d.get("eligible_for_buy"):
                 reason=str(d.get("paper_buy_block_reason") or "")
-                # Normalize detailed values into stable gate categories.
-                gates=[]
-                checks=(
-                    ("lifecycle","no lifecycle lane"),
-                    ("impulse","no fresh impulse"),
-                    ("score","score "),
-                    ("quality","quality "),
-                    ("flow","flow<=0"),
-                    ("flow15","15m flow<0"),
-                    ("trades","trades "),
-                    ("liquidity","liquidity "),
-                    ("buy_ratio","buy ratio "),
-                    ("m15","M15 "),
-                    ("price_flow","price/flow mismatch"),
-                    ("late_entry","late entry"),
-                    ("cooldown","cooldown"),
-                )
-                for gate,marker in checks:
-                    if marker in reason:
-                        gates.append(gate)
-                        fresh_gate_counts[gate]=fresh_gate_counts.get(gate,0)+1
+                # Consume structured decision gates; reason text is truncated and
+                # cannot reliably represent all active blocking conditions.
+                gates=list(dict.fromkeys(d.get("paper_buy_gate_failures") or []))
+                for gate in gates:
+                    fresh_gate_counts[gate]=fresh_gate_counts.get(gate,0)+1
                 near_ready.append({
                     "address":str(address).lower(),
                     "symbol":str(an.get("symbol") or "")[:20],
