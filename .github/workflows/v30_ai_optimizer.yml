@@ -66,31 +66,21 @@ jobs:
           exit 1
 
 
-      - name: Restart SDA Scanner on current main
+      # Optimizer must never cancel the active paper worker: this can leave
+      # open positions without stop evaluation and may interrupt checkpoints.
+      # Configuration updates take effect on the next safe worker start.
+      - name: Verify scanner continuity (non-disruptive)
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          echo "Restarting long-lived paper scanner after successful optimizer run."
-
-          # Cancel all active/pending SDA Scanner V18 runs so no old checkout
-          # keeps running after optimizer/code updates.
-          run_ids="$(gh api "repos/$REPO/actions/workflows/scanner_v18.yml/runs?per_page=100" \
-            --jq '.workflow_runs[] | select(.status=="in_progress" or .status=="queued" or .status=="pending" or .status=="waiting" or .status=="requested") | .id')"
-
-          for id in $run_ids; do
-            echo "Cancelling scanner run $id"
-            gh api --method POST "repos/$REPO/actions/runs/$id/cancel" || true
-          done
-
-          # Wait briefly for the concurrency slot to be released.
-          for i in $(seq 1 30); do
-            active="$(gh api "repos/$REPO/actions/workflows/scanner_v18.yml/runs?per_page=20" \
-              --jq '[.workflow_runs[] | select(.status=="in_progress" or .status=="queued" or .status=="pending" or .status=="waiting" or .status=="requested")] | length')"
-            [ "$active" = "0" ] && break
-            sleep 2
-          done
-
-          echo "Dispatching fresh SDA Scanner V18 from main"
-          gh workflow run scanner_v18.yml --repo "$REPO" --ref main
+          active="$(gh api "repos/$REPO/actions/workflows/scanner_v18.yml/runs?per_page=30" \
+            --jq '[.workflow_runs[] | select(.status=="in_progress" or .status=="queued" or .status=="pending" or .status=="waiting" or .status=="requested")] | length')"
+          echo "Active/pending scanner runs: $active"
+          if [ "$active" -eq 0 ]; then
+            echo "::warning::No active scanner. Dispatching recovery watchdog; do not cancel any worker."
+            gh workflow run scanner_watchdog.yml --repo "$REPO" --ref main
+          else
+            echo "Scanner continuity OK. Optimizer will not restart the paper worker."
+          fi
