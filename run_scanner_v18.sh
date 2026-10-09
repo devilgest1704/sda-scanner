@@ -106,8 +106,12 @@ run_one_scan() {
   # retries those internally; if they still fail, skip this whole scan and
   # keep the long-lived worker alive for the next cadence.
   set +e
+  local whale_started whale_elapsed
+  whale_started="$(date +%s)"
   python whale_scanner.py
   local whale_rc=$?
+  whale_elapsed=$(( $(date +%s) - whale_started ))
+  echo "⏱️ SCAN STAGE whale_scanner: ${whale_elapsed}s (exit=${whale_rc})"
   set -e
   if [ "$whale_rc" -eq 75 ]; then
     echo "⚠️ WHALE SCAN SKIPPED: transient Supabase failure; worker remains alive."
@@ -117,22 +121,40 @@ run_one_scan() {
     return "$whale_rc"
   fi
 
-  python market_scanner.py
-  python technical_analysis.py
-  python market_analysis_export.py
-  python token_metadata.py
-  python liquidity_scanner.py
+  # Keep a single writer for positions.json. Do not launch a parallel exit worker.
+  # Stage durations expose delays before the paper stop-loss evaluation.
+  run_timed_stage() {
+    local stage="$1"
+    shift
+    local stage_started stage_elapsed
+    stage_started="$(date +%s)"
+    "$@"
+    stage_elapsed=$(( $(date +%s) - stage_started ))
+    echo "⏱️ SCAN STAGE ${stage}: ${stage_elapsed}s"
+    if [ "$stage_elapsed" -gt 120 ]; then
+      echo "⚠️ SCAN STAGE SLOW: ${stage} took ${stage_elapsed}s (>120s)." >&2
+    fi
+  }
 
-  TELEGRAM_TOKEN="" python paper_engine_v19.py
-  TELEGRAM_TOKEN="" python paper_stats.py
-  python -c 'import v30_pump_hunter as v30; v30.write_scan_funnel()'
-  python tools/v30_collect_training_data.py
+  run_timed_stage market_scanner python market_scanner.py
+  run_timed_stage technical_analysis python technical_analysis.py
+  run_timed_stage market_analysis_export python market_analysis_export.py
+  run_timed_stage token_metadata python token_metadata.py
+  run_timed_stage liquidity_scanner python liquidity_scanner.py
+
+  run_timed_stage paper_engine env TELEGRAM_TOKEN="" python paper_engine_v19.py
+  run_timed_stage paper_stats env TELEGRAM_TOKEN="" python paper_stats.py
+  run_timed_stage scan_funnel python -c 'import v30_pump_hunter as v30; v30.write_scan_funnel()'
+  run_timed_stage training_data python tools/v30_collect_training_data.py
 
   ensure_json_state
 
   ended="$(date +%s)"
   elapsed=$((ended - started))
   echo "⏱️ SDA SCAN COMPLETE: ${elapsed}s"
+  if [ "$elapsed" -gt 120 ]; then
+    echo "⚠️ PAPER RISK: scan duration ${elapsed}s exceeded 120s; paper stops were not evaluated continuously." >&2
+  fi
 }
 
 # Compile once per worker, not once per minute.
