@@ -299,11 +299,17 @@ def decision(address,a,ws=None,persist=True):
                 and math.isfinite(data_age) and 0<=data_age<=300)
     v31_trades_ok=(isinstance(c.get("trades"),(int,float))
                    and math.isfinite(c["trades"]) and c["trades"]>=12)
-    v31_buy_ok=v31_age_ok and v31_trades_ok
+    # Paper-only controlled expansion: exceptionally fresh, liquid early pump.
+    # All existing lifecycle, score, impulse, cooldown and exit gates remain.
+    v31_early_ok=(v31_age_ok and isinstance(c.get("trades"),(int,float))
+                  and math.isfinite(c["trades"]) and 8<=c["trades"]<12
+                  and c["vol"]>=500 and c["flow"]>=200 and c["flow15"]>=60
+                  and c["buy_ratio"]>=1.3 and c["m1"]>0 and c["m15"]>=1.5)
+    v31_buy_ok=(v31_age_ok and v31_trades_ok) or v31_early_ok
     blocked=(not buy) or cd or s<entry_score or not data_fresh_for_entry or not v31_buy_ok
     failures=[]
     if not v31_age_ok: failures.append("V31 BUY gate: data age missing or >300s")
-    if not v31_trades_ok: failures.append("V31 BUY gate: trades 1h <12")
+    if not (v31_trades_ok or v31_early_ok): failures.append("V31 BUY gate: trades 1h <12 (no early exception)")
     if phase not in ("IGNITION","CONFIRMATION"): failures.append("no eligible entry lane")
     if phase=="IGNITION" and delta_impulse<min_impulse:
         failures.append(f"no delta impulse +{delta_impulse:.1f}<{min_impulse:.1f}")
@@ -326,7 +332,7 @@ def decision(address,a,ws=None,persist=True):
     # change eligibility or thresholds when adding observability.
     gate_failures=[]
     if not v31_age_ok: gate_failures.append("v31_age")
-    if not v31_trades_ok: gate_failures.append("v31_activity")
+    if not (v31_trades_ok or v31_early_ok): gate_failures.append("v31_activity")
     if phase not in ("IGNITION","CONFIRMATION"): gate_failures.append("lifecycle")
     if phase=="IGNITION" and delta_impulse<min_impulse: gate_failures.append("impulse")
     elif phase=="CONFIRMATION" and (not fresh or entry_impulse<max(6,min_impulse)): gate_failures.append("impulse")
@@ -381,7 +387,7 @@ def decision(address,a,ws=None,persist=True):
     return {"score":eff,"confidence":eff,"buy_score":eff,"market_score":eff,
       "m1h":c["m1"],"m15":c["m15"],"m4h":c["m4"],"net_1h":c["flow"],"whale_net":c["flow"],
       "trades_1h":c["trades"],"volume_1h":c["vol"],"buy_ratio":c["buy_ratio"],"trade_ratio":c["trade_ratio"],
-      "v31_buy_gate_passed":v31_buy_ok,"v31_buy_gate_age_passed":v31_age_ok,"v31_buy_gate_trades_passed":v31_trades_ok,
+      "v31_buy_gate_passed":v31_buy_ok,"v31_early_exception_passed":v31_early_ok,"v31_buy_gate_age_passed":v31_age_ok,"v31_buy_gate_trades_passed":v31_trades_ok,
       "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":entry_impulse,"pump_delta_impulse":delta_impulse,"pump_phase":phase,
       "paper_buy_blocked":blocked,"paper_buy_block_reason":reason,"paper_buy_gate_failures":gate_failures,
       "shadow_snapshot_impulse":round(snapshot_impulse,1),
