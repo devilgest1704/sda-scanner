@@ -292,8 +292,18 @@ def decision(address,a,ws=None,persist=True):
     ratio=gate["ratio"]
     lane_ok=phase in ("IGNITION","CONFIRMATION","BREAKOUT")
     buy=gate["buy"]
-    blocked=(not buy) or cd or s<entry_score or not data_fresh_for_entry
+    # V31 profit-first BUY-only gate (paper trading). Preserve every V30 exit.
+    # Missing, nonfinite or negative age fails closed.
+    import math
+    v31_age_ok=(isinstance(data_age,(int,float)) and not isinstance(data_age,bool)
+                and math.isfinite(data_age) and 0<=data_age<=300)
+    v31_trades_ok=(isinstance(c.get("trades"),(int,float))
+                   and math.isfinite(c["trades"]) and c["trades"]>=12)
+    v31_buy_ok=v31_age_ok and v31_trades_ok
+    blocked=(not buy) or cd or s<entry_score or not data_fresh_for_entry or not v31_buy_ok
     failures=[]
+    if not v31_age_ok: failures.append("V31 BUY gate: data age missing or >300s")
+    if not v31_trades_ok: failures.append("V31 BUY gate: trades 1h <12")
     if phase not in ("IGNITION","CONFIRMATION"): failures.append("no eligible entry lane")
     if phase=="IGNITION" and delta_impulse<min_impulse:
         failures.append(f"no delta impulse +{delta_impulse:.1f}<{min_impulse:.1f}")
@@ -315,6 +325,8 @@ def decision(address,a,ws=None,persist=True):
     # Diagnostic-only: report every active gate, including impulse. Do not
     # change eligibility or thresholds when adding observability.
     gate_failures=[]
+    if not v31_age_ok: gate_failures.append("v31_age")
+    if not v31_trades_ok: gate_failures.append("v31_activity")
     if phase not in ("IGNITION","CONFIRMATION"): gate_failures.append("lifecycle")
     if phase=="IGNITION" and delta_impulse<min_impulse: gate_failures.append("impulse")
     elif phase=="CONFIRMATION" and (not fresh or entry_impulse<max(6,min_impulse)): gate_failures.append("impulse")
@@ -369,6 +381,7 @@ def decision(address,a,ws=None,persist=True):
     return {"score":eff,"confidence":eff,"buy_score":eff,"market_score":eff,
       "m1h":c["m1"],"m15":c["m15"],"m4h":c["m4"],"net_1h":c["flow"],"whale_net":c["flow"],
       "trades_1h":c["trades"],"volume_1h":c["vol"],"buy_ratio":c["buy_ratio"],"trade_ratio":c["trade_ratio"],
+      "v31_buy_gate_passed":v31_buy_ok,"v31_buy_gate_age_passed":v31_age_ok,"v31_buy_gate_trades_passed":v31_trades_ok,
       "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":entry_impulse,"pump_delta_impulse":delta_impulse,"pump_phase":phase,
       "paper_buy_blocked":blocked,"paper_buy_block_reason":reason,"paper_buy_gate_failures":gate_failures,
       "shadow_snapshot_impulse":round(snapshot_impulse,1),
