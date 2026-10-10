@@ -64,7 +64,7 @@ jobs:
             exit 0
           fi
           if ! gh run list --workflow telegram_hourly.yml --repo "$GITHUB_REPOSITORY" --limit 30 \
-               --json databaseId,createdAt,status,conclusion > /tmp/hourly-runs.json; then
+               --json databaseId,createdAt,status,conclusion,event > /tmp/hourly-runs.json; then
             echo "::warning::Cannot check previous reports; attempting delivery rather than skipping."
             exit 0
           fi
@@ -74,6 +74,7 @@ jobs:
           runs=json.load(open('/tmp/hourly-runs.json',encoding='utf-8'))
           hour=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:')
           previous=next((r for r in runs if str(r.get('databaseId'))!=os.environ.get('GITHUB_RUN_ID')
+              and r.get('event')!='push'\
               and r.get('status')=='completed' and r.get('conclusion')=='success'
               and str(r.get('createdAt') or '').startswith(hour)),None)
           if previous:
