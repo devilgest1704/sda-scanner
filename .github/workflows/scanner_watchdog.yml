@@ -15,11 +15,12 @@ permissions:
 
 concurrency:
   group: sda-scanner-watchdog
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   dispatch-scanner:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - name: Checkout current main
         uses: actions/checkout@v4
@@ -36,7 +37,7 @@ jobs:
           # only a recovery mechanism for the case where that worker ended.
           # Do not create queued/pending scanner runs while one is already
           # active (or another dispatch is waiting for the concurrency slot).
-          active_or_pending="$(gh run list \
+          active_or_pending="$(timeout 30s gh run list \
             --workflow scanner_v18.yml \
             --repo "${{ github.repository }}" \
             --branch main \
@@ -50,7 +51,7 @@ jobs:
           # v30_pump_hunter.py changed, restart an older worker after a grace
           # period so new diagnostics/bug fixes actually take effect.
           # Do not cancel fresh workers or workers already shutting down.
-          active_run="$(gh run list --workflow scanner_v18.yml \
+          active_run="$(timeout 30s gh run list --workflow scanner_v18.yml \
             --repo "${{ github.repository }}" --branch main --limit 20 \
             --json databaseId,status,headSha,createdAt \
             --jq '[.[] | select(.status == "in_progress")] | .[0] // empty')"
@@ -60,15 +61,20 @@ jobs:
             run_created="$(echo "$active_run" | jq -r '.createdAt')"
             run_age=$(( $(date -u +%s) - $(date -u -d "$run_created" +%s) ))
             if [ "$run_age" -ge 1200 ]; then
-              git fetch -q origin "$run_sha" || true
-              current_sources="$(git rev-parse HEAD:main.py HEAD:v30_pump_hunter.py HEAD:run_scanner_v18.sh HEAD:tools/candidate_price_tracker.py)"
-              worker_sources="$(git rev-parse "$run_sha:main.py" "$run_sha:v30_pump_hunter.py" "$run_sha:run_scanner_v18.sh" "$run_sha:tools/candidate_price_tracker.py" 2>/dev/null || true)"
-              if [ -n "$worker_sources" ] && [ "$current_sources" != "$worker_sources" ]; then
-                echo "Worker $run_id runs outdated scanner source; requesting graceful replacement."
-                gh run cancel "$run_id" --repo "${{ github.repository }}"
-                # Next scheduled watchdog run dispatches the replacement after
-                # GitHub marks this worker cancelled. Never overlap workers.
-                exit 0
+              # Shallow partial fetch avoids downloading many megabytes of
+              # historical paper-state blobs on each watchdog run.
+              if timeout 45s git fetch -q --filter=blob:none --depth=1 origin "$run_sha"; then
+                current_sources="$(git rev-parse HEAD:main.py HEAD:v30_pump_hunter.py HEAD:run_scanner_v18.sh HEAD:tools/candidate_price_tracker.py)"
+                worker_sources="$(git rev-parse "$run_sha:main.py" "$run_sha:v30_pump_hunter.py" "$run_sha:run_scanner_v18.sh" "$run_sha:tools/candidate_price_tracker.py" 2>/dev/null || true)"
+                if [ -n "$worker_sources" ] && [ "$current_sources" != "$worker_sources" ]; then
+                  echo "Worker $run_id has outdated source; requesting controlled replacement."
+                  timeout 30s gh run cancel "$run_id" --repo "${{ github.repository }}"
+                  # The next watchdog checks that the old worker stopped
+                  # before dispatching. It must never overlap paper writers.
+                  exit 0
+                fi
+              else
+                echo "::warning::Could not inspect old scanner source within 45s; will retry later."
               fi
             fi
           fi
@@ -80,7 +86,7 @@ jobs:
 
           for attempt in 1 2 3; do
             echo "Dispatch attempt ${attempt}/3"
-            if gh workflow run scanner_v18.yml \
+            if timeout 30s gh workflow run scanner_v18.yml \
               --repo "${{ github.repository }}" \
               --ref main \
               -f run_reason=watchdog; then
