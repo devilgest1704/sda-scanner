@@ -23,12 +23,11 @@ def _dispatch() -> tuple[bool, str]:
     token = os.environ.get("GITHUB_DISPATCH_TOKEN", "")
     if not token:
         return False, "missing GITHUB_DISPATCH_TOKEN"
-    url = "https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/scanner_v18.yml/dispatches"
+    url = "https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/telegram_hourly.yml/dispatches"
     payload = json.dumps({
         "ref": "main",
         "inputs": {
             "run_reason": "Cronjob hourly",
-            "send_report": "true",
         },
     }).encode()
     req = urllib.request.Request(
