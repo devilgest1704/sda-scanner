@@ -40,6 +40,10 @@ jobs:
       - name: Test forward-only learning, holdout selection and risk rollback
         run: python -m unittest discover -s tests -p 'test_forward_*.py' -v
 
+      - name: Verify forward collector against actual scanner checkpoint
+        # Read-only integration check: /tmp state is NEVER committed.
+        run: python -m tools.forward_shadow_agent --state /tmp/forward_shadow_smoke.json
+
       - name: Check forward learning state and safely optimize PAPER only
         run: |
           python -m tools.forward_shadow_optimizer
