@@ -1,9 +1,11 @@
 name: SDA Telegram Hourly Report
 
 on:
-  # Self-contained hourly fallback; external cronjob.org can also dispatch.
+  # Four opportunities per hour protect against missed or delayed GitHub cron.
+  # The dedupe step sends at most one successful scheduled report per UTC hour;
+  # external cronjob.org may also dispatch the same classic report.
   schedule:
-    - cron: '37 * * * *'
+    - cron: '7,22,37,52 * * * *'
   # Run one end-to-end verification when this workflow is repaired.
   push:
     branches: [main]
@@ -82,5 +84,6 @@ jobs:
           PY
 
       - name: Send hourly Telegram dashboard
-        if: steps.dedupe.outputs.skip != 'true'
+        # A workflow source update runs tests only; don't send extra Telegram posts.
+        if: steps.dedupe.outputs.skip != 'true' && github.event_name != 'push'
         run: python send_telegram_hourly.py
