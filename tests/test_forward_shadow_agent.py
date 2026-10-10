@@ -36,6 +36,20 @@ class ForwardPaperTests(unittest.TestCase):
             self.assertEqual(len(st["trades"]), 0)
         self.assertEqual(step(state, market(T0), funnel(T0))["status"], "already_processed")
 
+    def test_diagnostics_explain_empty_entry_lanes_and_missing_quotes(self):
+        state = default_state()
+        snapshot = funnel(T0, phase="WATCH", snapshot_impulse=0,
+                          score=55, trades_1h=5, gates=["lifecycle", "trades"])
+        snapshot["all_candidate_phases"] = {"WATCH": 90, "IGNITION": 0}
+        result = step(state, market(T0), snapshot)
+        self.assertEqual(result["opened"], 0)
+        diagnostic = state["last_diagnostic"]
+        self.assertEqual(diagnostic["all_candidate_phases"]["WATCH"], 90)
+        self.assertEqual(diagnostic["sampled_candidate_phases"]["WATCH"], 1)
+        self.assertEqual(diagnostic["policy_qualified"]["baseline"], 0)
+        self.assertEqual(diagnostic["most_common_rejection_gates"]["lifecycle"], 1)
+        self.assertEqual(len(state["diagnostic_history"]), 1)
+
     def test_future_quote_exit_and_cost_deducted(self):
         state = default_state()
         step(state, market(T0), funnel(T0))
