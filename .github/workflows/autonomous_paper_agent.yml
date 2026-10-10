@@ -1,0 +1,107 @@
+name: Autonomous SDA Paper Agent
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/autonomous_paper_agent.yml'
+      - 'tools/forward_shadow_agent.py'
+      - 'tools/forward_shadow_optimizer.py'
+      - 'tools/forward_agent_telegram.py'
+      - 'tests/test_forward_shadow_agent.py'
+      - 'tests/test_forward_shadow_optimizer.py'
+  schedule:
+    - cron: '42 */6 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: autonomous-sda-paper-agent
+  cancel-in-progress: false
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      REAL_TRADING_ENABLED: "false"
+      REAL_TRADING_DRY_RUN: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Test forward-only learning, holdout selection and risk rollback
+        run: python -m unittest discover -s tests -p 'test_forward_*.py' -v
+
+      - name: Check forward learning state and safely optimize PAPER only
+        run: |
+          python -m tools.forward_shadow_optimizer
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          x=json.loads(Path('strategy_lab/autonomous_agent_report.json').read_text())
+          assert x['mode']=='PAPER_ONLY'
+          assert x['real_trading'] is False
+          assert x['paper_config_automatic'] is True
+          config=json.loads(Path('v30_agent_config.json').read_text())
+          assert config['version']=='V30-AUTO-CONFIG-1'
+          if x['promotion_applied'] or x['rollback_applied']:
+              assert config['source'].startswith('FORWARD_AGENT_')
+              assert config['generation']>0
+          print('AUTONOMOUS PAPER EVIDENCE GATE:',x['status'])
+          PY
+
+      - name: Persist research report and only evidence-gated PAPER settings
+        run: |
+          set -euo pipefail
+          git config user.name 'sda-scanner-bot'
+          git config user.email 'scanner@github.local'
+          git add -f strategy_lab/autonomous_agent_report.json v30_agent_config.json
+          if git diff --staged --quiet; then
+            echo 'No new paper research evidence to commit.'
+            exit 0
+          fi
+          git commit -m 'Update forward SDA paper learning report'
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              echo "Forward agent persisted on attempt $attempt"
+              exit 0
+            fi
+            git fetch origin main
+            if ! git rebase origin/main; then
+              echo "::error::Forward paper state push conflict; not overwriting Champion"
+              git rebase --abort || true
+              exit 1
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Draw and send graphical paper-agent status to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python -m pip install 'Pillow>=10,<13'
+          python -m tools.forward_agent_telegram
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: forward-sda-paper-agent
+          path: |
+            strategy_lab/autonomous_agent_report.json
+            strategy_lab/autonomous_agent_status.png
+            v30_agent_config.json
+          retention-days: 30
