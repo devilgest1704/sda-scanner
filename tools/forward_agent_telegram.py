@@ -33,14 +33,14 @@ def plot(report, destination=PNG):
     mid = 580
     scale = 400 / max_abs
     d.line((mid, 230, mid, 594), fill="#7C91A9", width=2)
-    for i,(name,pnl,count) in enumerate(baseline[:6]):
-        y = 232 + i*58
-        d.text((50, y), f"{name}  ({count} exits)", fill="#D5DFE9", font=font(18))
+    for i,(name,pnl,count) in enumerate(baseline[:8]):
+        y = 232 + i*46
+        d.text((50, y), f"{name}  ({count} exits)", fill="#D5DFE9", font=font(16))
         x2 = mid + pnl*scale
         color = "#64CF98" if pnl > 0 else "#EF7878"
         if pnl:
             d.rectangle((min(mid,x2), y+4, max(mid,x2), y+24), fill=color)
-        d.text((990, y), f"{pnl:+.1f} SDA", fill=color, font=font(16, True), anchor="ra")
+        d.text((1030, y), f"{pnl:+.1f} SDA", fill=color, font=font(16, True), anchor="ra")
     d.text((48, 613), "CHAMPION CONFIG CHANGES ONLY AFTER TRAIN + HOLDOUT + RISK GATES", fill="#B1C5DE", font=font(17))
     reason = str(report.get("reason") or "")
     d.text((48, 651), reason[:96], fill="#A5B3C7", font=font(16))
