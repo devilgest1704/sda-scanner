@@ -216,7 +216,13 @@ def main():
 
     dashboard.main_dashboard = _safe_main_dashboard
 
-    dashboard.send(dashboard.main_dashboard(), dashboard.menu_keyboard())
+    from tools.telegram_delivery import send_report
+    send_report(
+        dashboard.api,
+        dashboard.main_dashboard(),
+        dashboard.menu_keyboard(),
+        dashboard.os.environ.get("CHAT_ID"),
+    )
 
 
 if __name__ == "__main__": main()
