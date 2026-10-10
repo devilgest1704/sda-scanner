@@ -458,7 +458,29 @@ def patch(main_module,engine):
             pos['pump_last_observed_at']=observed.isoformat()
             s=decision(address,a,ws); roi=(cur-entry)/entry*100
             data_age=s.get("data_age_sec")
-            data_fresh_for_exit=isinstance(data_age,(int,float)) and data_age<=MAX_EXIT_DATA_AGE_SEC
+            import math
+            data_fresh_for_exit=(isinstance(data_age,(int,float)) and not isinstance(data_age,bool)
+                                 and math.isfinite(data_age) and 0<=data_age<=MAX_EXIT_DATA_AGE_SEC)
+            # Never execute an exit or advance trailing-stop/weakness state using
+            # a stale price. Emit a throttled warning and retain the position
+            # until a new transaction gives us an observable execution price.
+            if not data_fresh_for_exit:
+                pos["pump_exit_data_stale"]=True
+                pos["pump_exit_data_age_sec"]=data_age
+                last_alert=pos.get("pump_stale_alert_at")
+                try:
+                    alert_dt=datetime.fromisoformat(str(last_alert).replace("Z","+00:00"))
+                    if alert_dt.tzinfo is None: alert_dt=alert_dt.replace(tzinfo=timezone.utc)
+                    alert_due=(observed-alert_dt).total_seconds()>=900
+                except (TypeError,ValueError):
+                    alert_due=True
+                if alert_due:
+                    pos["pump_stale_alert_at"]=observed.isoformat()
+                    age_label=f"{data_age:.0f}s" if isinstance(data_age,(int,float)) and math.isfinite(data_age) else "unknown"
+                    events.append(f"⚠️ PAPER EXIT DATA STALE {pos.get('label',address)} | age {age_label} | no simulated fill")
+                continue
+            pos["pump_exit_data_stale"]=False
+            pos["pump_exit_data_age_sec"]=data_age
             peak=max(n(pos.get("pump_peak_price"),entry),cur); pos["pump_peak_price"]=peak
             mfe=(peak-entry)/entry*100; pos["pump_mfe_pct"]=mfe
             pos["pump_age_scans"]=int(n(pos.get("pump_age_scans"))+1)
