@@ -148,7 +148,8 @@ def report(state, config, real_ledger, now=None):
         if name == "baseline":
             baseline_train = train_stats
             baseline_holdout = holdout
-        if (name != "baseline" and train_stats["closed"] >= MIN_TRAIN
+        if (name != "baseline" and not name.startswith("research_watch")
+                and train_stats["closed"] >= MIN_TRAIN
                 and train_stats["unique_tokens"] >= MIN_UNIQUE
                 and train_stats["net_sda"] > 0
                 and train_stats["profit_factor"] > 1.05):
