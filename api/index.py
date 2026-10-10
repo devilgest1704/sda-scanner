@@ -239,7 +239,7 @@ def _dispatch_hourly_report(run_reason="Telegram hourly report"):
 @app.get("/api/hourly", response_class=PlainTextResponse)
 async def hourly(request: Request):
     if not _cron_authorized(request): return PlainTextResponse("Unauthorized", status_code=401)
-    ok, message = _dispatch_scanner()
+    ok, message = _dispatch_hourly_report("Cronjob hourly")
     return PlainTextResponse(message, status_code=200 if ok else 502)
 
 @app.get("/api/watchdog", response_class=PlainTextResponse)
