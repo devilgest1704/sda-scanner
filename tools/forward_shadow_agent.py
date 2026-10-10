@@ -170,6 +170,12 @@ def step(data, market, funnel):
         raise ValueError("Missing candidate snapshots")
     ranked = sorted((x for x in candidates if isinstance(x, dict)),
                     key=lambda x: finite(x.get("score")) or 0, reverse=True)
+    # Diagnostics distinguish "no signal" from missing telemetry fields.
+    activity_fields = ("trades_1h", "buy_ratio", "flow_1h", "volume_1h", "m15", "m1h")
+    feature_complete = sum(all(finite(row.get(k)) is not None for k in activity_fields)
+                           for row in ranked)
+    entry_lanes = sum(row.get("phase") in ("IGNITION", "CONFIRMATION") for row in ranked)
+    watch_lanes = sum(row.get("phase") == "WATCH" for row in ranked)
     opened = closed = 0
     for name, filters in POLICIES.items():
         strategy = data["strategies"][name]
@@ -272,7 +278,10 @@ def step(data, market, funnel):
     data["updated_at"] = ts.isoformat()
     data["runs"] = int(data.get("runs", 0)) + 1
     return {"status": "processed", "at": ts.isoformat(), "opened": opened, "closed": closed,
-            "quotes": len(quotes), "policies": len(POLICIES)}
+            "quotes": len(quotes), "candidates": len(ranked),
+            "complete_feature_rows": feature_complete,
+            "entry_lane_rows": entry_lanes, "watch_lane_rows": watch_lanes,
+            "policies": len(POLICIES)}
 
 
 def main():
