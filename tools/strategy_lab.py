@@ -72,6 +72,61 @@ def analyze(stats,execution,config,previous=None):
                 "net_pnl_change_sda":round(pnl-oldp,4)}
     return result
 
+
+def attach_research_evidence(report,research,outcomes):
+    """Annotate a paper-only proposal with verifiable evidence coverage.
+
+    Score proposals use TRAIN-only cohort search, never the holdout or
+    mark-to-market candidate outcomes to promote a live strategy.
+    """
+    if isinstance(research,dict):
+        threshold=research.get("recommended_entry_score")
+        report["cohort_evidence"]={
+            "observed_trades":research.get("sample_count",0),
+            "train_trades":research.get("train_sample_count",0),
+            "holdout_trades":research.get("holdout_sample_count",0),
+            "holdout_retained_trades":research.get("holdout_observed_retained_trades"),
+            "train_observed_difference_sda":research.get("train_observed_difference_sda"),
+            "holdout_observed_difference_sda":research.get("holdout_observed_difference_sda"),
+            "method":"observed_incumbent_trade_cohort_NOT_backtest",
+            "validates_new_strategy":False
+        }
+        if (research.get("sufficient_sample") is True and finite(threshold)
+                and 68<=threshold<=85):
+            filters=dict(report["baseline"]["filters"])
+            filters["entry_score"]=float(threshold)
+            report["challenger"]={
+                "filters":filters,"status":"UNVALIDATED",
+                "changed_filter":"entry_score",
+                "hypothesis":"TRAIN-selected observed cohort; holdout is diagnostic only"
+            }
+            report["reason"]="Retrospective score-filter cohort; no counterfactual execution replay. Holdout cannot authorize promotion."
+    if isinstance(outcomes,dict):
+        rows=outcomes.get("observations",[])
+        if not isinstance(rows,list): rows=[]
+        def parse_stamp(value):
+            if not isinstance(value,str):return None
+            try:
+                d=datetime.fromisoformat(value.replace("Z","+00:00"))
+                return d.astimezone(timezone.utc) if d.tzinfo else None
+            except ValueError:return None
+        now=parse_stamp(outcomes.get("updated_at"))
+        def mature(row,minutes):
+            at=parse_stamp(row.get("at"))
+            return now is not None and at is not None and 0<=(now-at).total_seconds()/60 and (now-at).total_seconds()>=60*minutes
+        report["candidate_evidence"]={
+            "candidate_snapshots":len(rows),
+            "distinct_tokens":len({str(r.get("address")).lower() for r in rows if isinstance(r,dict) and r.get("address")}),
+            "entry_eligible_snapshots":sum(r.get("eligible") is True for r in rows if isinstance(r,dict)),
+            "matured_15m":sum(mature(r,15) for r in rows if isinstance(r,dict)),
+            "observed_15m":sum("15m" in (r.get("outcomes") or {}) for r in rows if isinstance(r,dict)),
+            "matured_60m":sum(mature(r,60) for r in rows if isinstance(r,dict)),
+            "observed_60m":sum("60m" in (r.get("outcomes") or {}) for r in rows if isinstance(r,dict)),
+            "method":"hypothetical_future_quotes_NOT_executable_SDA_PNL",
+            "promotion_eligible":False
+        }
+    return report
+
 def render_png(report,path):
     from PIL import Image,ImageDraw,ImageFont
     im=Image.new("RGB",(1000,610),"#101827")
@@ -102,6 +157,13 @@ def render_png(report,path):
         coords=[(560+i*385/(len(vals)-1),425-(v-low)/span*95) for i,v in enumerate(vals)]
         d.line(coords,fill="#70D6A0" if vals[-1]>=0 else "#F47E82",width=4)
         d.text((570,323),"RECENT CLOSED-TRADE P/L",fill="#A8BDD4",font=f(17))
+    ev=report.get("candidate_evidence") or {}
+    cohort=report.get("cohort_evidence") or {}
+    if ev:
+        d.text((565,470),f"PRICE DATA: {ev.get('observed_15m',0)}/{ev.get('candidate_snapshots',0)} have 15m quote",fill="#B7C9DD",font=f(16))
+        d.text((565,494),f"BUY-ready: {ev.get('entry_eligible_snapshots',0)} | matured: {ev.get('matured_15m',0)}",fill="#B7C9DD",font=f(16))
+    if cohort:
+        d.text((565,519),f"Cohort: {cohort.get('observed_trades',0)} trades / NOT a backtest",fill="#F4B96A",font=f(16))
     d.text((52,561),"Auto-report active. No live filter changes.",fill="#AAB8C9",font=f(19))
     im.save(path,"PNG")
 
@@ -124,6 +186,9 @@ def telegram(report,png):
         f"Net P/L: {report['baseline']['cumulative_pnl_sda']:+.2f} SDA\n"
         f"Challenger: {report['challenger']['changed_filter']} "
         f"= {report['challenger']['filters'][report['challenger']['changed_filter']]}\n"
+        f"Price 15m observations: {report.get('candidate_evidence',{}).get('observed_15m',0)}/"
+        f"{report.get('candidate_evidence',{}).get('candidate_snapshots',0)} snapshots\\n"
+        f"Cohort trades: {report.get('cohort_evidence',{}).get('observed_trades',0)} (NOT a backtest)\\n"
         "NOT VALIDATED / NOT PROMOTED")
     body=(field("chat_id",chat.encode())+field("caption",caption.encode())+
           field("photo",Path(png).read_bytes(),"strategy_lab.png","image/png")+
@@ -158,6 +223,11 @@ def main():
                 equity.append(round(equity[-1]+row["closed_profit_sda"],4))
             report["equity_curve_sda"]=equity if len(equity)>1 else []
             report["archived_closed_trades"]=len(rows)
+    research_path=Path("strategy_lab/research.json")
+    candidate_path=Path("strategy_lab/candidate_outcomes.json")
+    research=load(research_path) if research_path.exists() else None
+    candidate_data=load(candidate_path) if candidate_path.exists() else None
+    attach_research_evidence(report,research,candidate_data)
     for p in (args.output,args.png): Path(p).parent.mkdir(parents=True,exist_ok=True)
     Path(args.output).write_text(json.dumps(report,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
     render_png(report,args.png)
