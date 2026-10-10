@@ -180,13 +180,28 @@ def step(data, market, funnel):
         # opening quote as a future exit, and cannot use unseen future prices.
         for address, position in list(positions.items()):
             quote = quotes.get(address)
-            if quote is None:
-                continue
-            stamp, price = quote
             last = when(position.get("last_quote_at"))
             start = when(position.get("opened_at"))
-            if start is None or last is None or stamp <= last or stamp <= start:
+            if start is None or last is None:
+                raise ValueError("Corrupt forward position time")
+            if quote is None or quote[0] <= last or quote[0] <= start:
+                # Never allow stale/unquoted token positions to permanently
+                # occupy the research portfolio. This is NOT an observed fill.
+                if (ts - start).total_seconds() >= 8*3600:
+                    trades.append({
+                        "strategy": name, "address": address,
+                        "opened_at": position["opened_at"], "closed_at": ts.isoformat(),
+                        "entry_price_sda": position["entry_price_sda"],
+                        "exit_price_sda": None, "pnl_sda": -SIZE_SDA,
+                        "roi_pct": -100.0, "reason": "STALE_TIMEOUT",
+                        "quote_gap_minutes": round((ts-last).total_seconds()/60,2),
+                        "valid_for_learning": False, "notional_sda": SIZE_SDA,
+                        "model": "conservative_risk_writeoff_no_observed_fill"
+                    })
+                    del positions[address]
+                    closed += 1
                 continue
+            stamp, price = quote
             gap = (stamp - last).total_seconds() / 60
             duration = (stamp - start).total_seconds() / 3600
             entry = positive(position.get("entry_price_sda"))
@@ -205,7 +220,8 @@ def step(data, market, funnel):
             net = round(exit_profit(entry, price), 6)
             # Gapped or delayed observed prices are recorded but excluded from
             # trustworthy model selection.
-            valid = gap <= MAX_QUOTE_GAP_MIN and duration <= MAX_HOURS + 0.5
+            valid = (gap <= MAX_QUOTE_GAP_MIN and duration <= MAX_HOURS + 0.5
+                     and 0.2 <= price/entry <= 4.0)
             trades.append({
                 "strategy": name, "address": address,
                 "opened_at": position["opened_at"], "closed_at": stamp.isoformat(),
