@@ -233,9 +233,15 @@ def entry_gate(c,phase,quality,delta_impulse,snapshot_impulse,fresh,agent_cfg,da
         c["buy_ratio"]>=1.15 and ratio>=0.25
     )
     entry_impulse=max(delta_impulse,snapshot_impulse) if data_fresh_for_entry and phase=="CONFIRMATION" else delta_impulse
+    # Selective 8-9 trade ignition; ordinary entries remain unchanged.
+    early_ignition=(8<=c["trades"]<10 and quality>=60
+        and c["vol"]>=650 and c["flow"]>=300 and c["flow15"]>=100
+        and c["buy_ratio"]>=1.5 and c["m1"]>0 and 1.5<=c["m15"]<=8)
     ignition=(
         phase=="IGNITION" and quality>=min_quality and entry_impulse>=min_impulse
-        and c["flow"]>=180 and c["flow15"]>=60 and c["trades"]>=max(10,min_trades) and c["m15"]>=0.8
+        and c["flow"]>=180 and c["flow15"]>=60
+        and (c["trades"]>=max(10,min_trades) or early_ignition)
+        and c["m15"]>=0.8
         and liquidity_ok and c["buy_ratio"]>=max(1.10,min_buy_ratio) and price_flow_ok
     )
     confirmation=(
@@ -306,7 +312,10 @@ def decision(address,a,ws=None,persist=True):
                   and c["vol"]>=500 and c["flow"]>=200 and c["flow15"]>=60
                   and c["buy_ratio"]>=1.3 and c["m1"]>0 and c["m15"]>=1.5)
     v31_buy_ok=(v31_age_ok and v31_trades_ok) or v31_early_ok
-    blocked=(not buy) or cd or s<entry_score or not data_fresh_for_entry or not v31_buy_ok
+    thin_activity=c["trades"]<10
+    entry_score_required=max(entry_score,74) if thin_activity else entry_score
+    late_spike=c["m1"]>12
+    blocked=(not buy) or cd or s<entry_score_required or not data_fresh_for_entry or not v31_buy_ok or late_spike
     failures=[]
     if not v31_age_ok: failures.append("V31 BUY gate: data age missing or >300s")
     if not (v31_trades_ok or v31_early_ok): failures.append("V31 BUY gate: trades 1h <12 (no early exception)")
@@ -315,7 +324,8 @@ def decision(address,a,ws=None,persist=True):
         failures.append(f"no delta impulse +{delta_impulse:.1f}<{min_impulse:.1f}")
     elif phase=="CONFIRMATION" and not fresh and entry_impulse<min_impulse:
         failures.append("no fresh impulse")
-    if s<entry_score: failures.append(f"score {s:.0f}<{entry_score:.0f}")
+    if s<entry_score_required: failures.append(f"score {s:.0f}<{entry_score_required:.0f}")
+    if late_spike: failures.append("late entry: M1H>12%")
     if q<min_quality: failures.append(f"quality {q:.0f}<{min_quality:.0f}")
     if entry_impulse<MIN_IMPULSE: failures.append(f"impulse +{entry_impulse:.1f}<{MIN_IMPULSE:.1f}")
     if c["flow"]<=0: failures.append("flow<=0")
@@ -336,7 +346,8 @@ def decision(address,a,ws=None,persist=True):
     if phase not in ("IGNITION","CONFIRMATION"): gate_failures.append("lifecycle")
     if phase=="IGNITION" and delta_impulse<min_impulse: gate_failures.append("impulse")
     elif phase=="CONFIRMATION" and (not fresh or entry_impulse<max(6,min_impulse)): gate_failures.append("impulse")
-    if s<entry_score: gate_failures.append("score")
+    if s<entry_score_required: gate_failures.append("score")
+    if late_spike: gate_failures.append("late_spike")
     if q<min_quality: gate_failures.append("quality")
     if not liquidity_ok: gate_failures.append("liquidity")
     if c["buy_ratio"]<min_buy_ratio: gate_failures.append("buy_ratio")
