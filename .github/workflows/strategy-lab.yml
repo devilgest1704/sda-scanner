@@ -5,6 +5,9 @@ on:
     - cron: '17 3 * * *'
 permissions:
   contents: read
+concurrency:
+  group: strategy-lab-paper-shadow
+  cancel-in-progress: false
 jobs:
   evidence-gate:
     runs-on: ubuntu-latest
@@ -14,8 +17,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Run read-only strategy analysis
-        run: python tools/strategy_lab.py --output strategy_lab/report.json
+      - name: Install chart dependency
+        run: python -m pip install 'Pillow>=10,<13'
+      - name: Generate paper-only shadow candidate and Telegram status
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python tools/strategy_lab.py --telegram --output strategy_lab/report.json --png strategy_lab/status.png
       - name: Validate never promotes
         run: |
           python - <<'PY'
@@ -30,5 +40,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: strategy-lab-report
-          path: strategy_lab/report.json
+          path: |
+            strategy_lab/report.json
+            strategy_lab/status.png
           retention-days: 30
