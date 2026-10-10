@@ -176,6 +176,40 @@ def step(data, market, funnel):
                            for row in ranked)
     entry_lanes = sum(row.get("phase") in ("IGNITION", "CONFIRMATION") for row in ranked)
     watch_lanes = sum(row.get("phase") == "WATCH" for row in ranked)
+    # Explain why the learner has no trades rather than silently saying
+    # "collecting". Counts are strictly observational and never override gates.
+    phase_counts = {}
+    for row in ranked:
+        phase = str(row.get("phase") or "UNKNOWN")
+        phase_counts[phase] = phase_counts.get(phase, 0) + 1
+    policy_qualified = {}
+    policy_quote_ready = {}
+    def same_time_quote(c):
+        addr = str(c.get("address") or "").lower()
+        q = quotes.get(addr)
+        price = positive(c.get("price_sda"))
+        return (q is not None and price is not None and q[0] <= ts
+                and 0 <= (ts - q[0]).total_seconds() <= 300
+                and abs(q[1]/price - 1) <= 0.015)
+    for name, filters in POLICIES.items():
+        matches = [c for c in ranked if eligible(c, filters, name.startswith("research_watch"))]
+        policy_qualified[name] = len(matches)
+        policy_quote_ready[name] = sum(same_time_quote(c) for c in matches)
+    rejected_gates = {}
+    for c in ranked:
+        for gate in c.get("gates", []):
+            name = str(gate)
+            rejected_gates[name] = rejected_gates.get(name, 0) + 1
+    diagnostic = {
+        "at": ts.isoformat(), "market_tokens_with_quote": len(quotes),
+        "sampled_candidates": len(ranked),
+        "all_candidate_phases": funnel.get("all_candidate_phases", {}),
+        "sampled_candidate_phases": phase_counts,
+        "policy_qualified": policy_qualified,
+        "policy_quote_ready": policy_quote_ready,
+        "most_common_rejection_gates": dict(sorted(
+            rejected_gates.items(), key=lambda kv: (-kv[1], kv[0]))[:8]),
+    }
     opened = closed = 0
     for name, filters in POLICIES.items():
         strategy = data["strategies"][name]
@@ -277,7 +311,16 @@ def step(data, market, funnel):
     data["last_snapshot_at"] = ts.isoformat()
     data["updated_at"] = ts.isoformat()
     data["runs"] = int(data.get("runs", 0)) + 1
+    data["last_diagnostic"] = diagnostic
+    # Rolling counts show whether a lane was temporarily empty or persistently
+    # blocked; history is bounded for small durable checkpoint files.
+    history = data.get("diagnostic_history", [])
+    if not isinstance(history, list):
+        history = []
+    history.append(diagnostic)
+    data["diagnostic_history"] = history[-72:]
     return {"status": "processed", "at": ts.isoformat(), "opened": opened, "closed": closed,
+            "qualified": policy_qualified, "quote_ready": policy_quote_ready,
             "quotes": len(quotes), "candidates": len(ranked),
             "complete_feature_rows": feature_complete,
             "entry_lane_rows": entry_lanes, "watch_lane_rows": watch_lanes,
