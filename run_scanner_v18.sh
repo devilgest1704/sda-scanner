@@ -36,6 +36,18 @@ files = '''state.json whale_state.json whale_data.json whale_history.json portfo
 
 for name in files:
     p = Path(name)
+    if name == 'positions.json':
+        # A missing/corrupt ledger is not an empty portfolio. Never silently
+        # replace it with {}, which could erase open paper positions/history.
+        if not p.exists() or not p.stat().st_size:
+            raise RuntimeError('positions.json missing/empty: recovery required; refusing paper trading')
+        try:
+            state=json.loads(p.read_text(encoding='utf-8'))
+            if not isinstance(state,dict) or not isinstance(state.get('positions'),dict) or not isinstance(state.get('closed_trades'),list):
+                raise ValueError('missing positions/closed_trades')
+        except (ValueError,TypeError) as exc:
+            raise RuntimeError('positions.json invalid: refusing paper trading until recovered') from exc
+        continue
     if not p.exists() or p.stat().st_size == 0:
         p.write_text('{}\n', encoding='utf-8')
         continue
