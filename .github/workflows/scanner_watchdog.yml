@@ -65,8 +65,8 @@ jobs:
               # Shallow partial fetch avoids downloading many megabytes of
               # historical paper-state blobs on each watchdog run.
               if timeout 45s git fetch -q --filter=blob:none --depth=1 origin "$run_sha"; then
-                current_sources="$(git rev-parse HEAD:main.py HEAD:v30_pump_hunter.py HEAD:run_scanner_v18.sh HEAD:tools/candidate_price_tracker.py HEAD:v30_agent_config.json)"
-                worker_sources="$(git rev-parse "$run_sha:main.py" "$run_sha:v30_pump_hunter.py" "$run_sha:run_scanner_v18.sh" "$run_sha:tools/candidate_price_tracker.py" "$run_sha:v30_agent_config.json" 2>/dev/null || true)"
+                current_sources="$(git rev-parse HEAD:main.py HEAD:v30_pump_hunter.py HEAD:run_scanner_v18.sh HEAD:tools/candidate_price_tracker.py HEAD:tools/forward_shadow_agent.py HEAD:v30_agent_config.json)"
+                worker_sources="$(git rev-parse "$run_sha:main.py" "$run_sha:v30_pump_hunter.py" "$run_sha:run_scanner_v18.sh" "$run_sha:tools/candidate_price_tracker.py" "$run_sha:tools/forward_shadow_agent.py" "$run_sha:v30_agent_config.json" 2>/dev/null || true)"
                 if [ -n "$worker_sources" ] && [ "$current_sources" != "$worker_sources" ]; then
                   echo "Worker $run_id has outdated source; requesting controlled replacement."
                   timeout 30s gh run cancel "$run_id" --repo "${{ github.repository }}"
