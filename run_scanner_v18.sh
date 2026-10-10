@@ -25,7 +25,7 @@ if ! [[ "$CHECKPOINT" =~ ^[0-9]+$ ]] || [ "$CHECKPOINT" -lt 30 ]; then
   exit 1
 fi
 
-STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json"
+STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json strategy_lab/candidate_outcomes.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json"
 
 ensure_json_state() {
   python - <<'PY'
@@ -164,6 +164,12 @@ except Exception as exc:
     print("::warning::V30 candidate telemetry state invalid:", repr(exc))
 PY
   run_timed_stage training_data python tools/v30_collect_training_data.py
+  # Research-only: join this cycle's fresh market quotes to prior candidate
+  # decisions, and persist the archive with the scanner checkpoint.
+  # Failure must not interrupt paper exits or the next scan.
+  if ! python tools/candidate_price_tracker.py; then
+    echo "::warning::Candidate outcome tracking failed; scanner continues."
+  fi
 
   ensure_json_state
 
