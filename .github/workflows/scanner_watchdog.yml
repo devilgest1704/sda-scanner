@@ -61,8 +61,8 @@ jobs:
             run_age=$(( $(date -u +%s) - $(date -u -d "$run_created" +%s) ))
             if [ "$run_age" -ge 1200 ]; then
               git fetch -q origin "$run_sha" || true
-              current_sources="$(git rev-parse HEAD:main.py HEAD:v30_pump_hunter.py)"
-              worker_sources="$(git rev-parse "$run_sha:main.py" "$run_sha:v30_pump_hunter.py" 2>/dev/null || true)"
+              current_sources="$(git rev-parse HEAD:main.py HEAD:v30_pump_hunter.py HEAD:run_scanner_v18.sh HEAD:tools/candidate_price_tracker.py)"
+              worker_sources="$(git rev-parse "$run_sha:main.py" "$run_sha:v30_pump_hunter.py" "$run_sha:run_scanner_v18.sh" "$run_sha:tools/candidate_price_tracker.py" 2>/dev/null || true)"
               if [ -n "$worker_sources" ] && [ "$current_sources" != "$worker_sources" ]; then
                 echo "Worker $run_id runs outdated scanner source; requesting graceful replacement."
                 gh run cancel "$run_id" --repo "${{ github.repository }}"
