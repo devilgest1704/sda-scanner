@@ -56,7 +56,7 @@ def main():
       "mode":"PAPER_ONLY","runtime_gate_model":"V30.8 shared Champion gates; optimizer tunes only deployable runtime filters","objective":"maximize out-of-sample accumulated SDA with drawdown constraint",
       "aggregate_baseline":{"closed":int(f(stats.get("closed_trades"))),"pnl_sda":f(stats.get("realized_pnl_sda")),
         "win_rate_pct":f(stats.get("win_rate_pct"))},"dataset_rows":len(rows),"v30_compatible_rows":len(v30_rows),
-      "analysis_scope":"V30_ONLY" if analysis_rows is v30_rows else "ALL_AVAILABLE_FALLBACK","auto_apply":True,"active_config":current,
+      "analysis_scope":"V30_ONLY" if analysis_rows is v30_rows else "ALL_AVAILABLE_FALLBACK","auto_apply":False,"legacy_optimizer_research_only":True,"active_config":current,
       "guardrails":{"real_trading":False,"chronological_split":"60/20/20 train/validation/test","minimum_dataset_rows":MIN_ROWS,
         "minimum_validation_trades":MIN_VALID,"minimum_test_trades":MIN_TEST,"out_of_sample_required":True,"rollback_required":True}}
     if len(analysis_rows)<MIN_ROWS:
@@ -96,7 +96,7 @@ def main():
             changed=any(abs(f(safe_filters[k])-f(current.get(k)))>1e-9 for k in safe_filters)
             result["challenger"]={"filters":c,"safe_runtime_filters":safe_filters,"train":mt,"validation":mv,"test":me,
               "objective_validation":obj,"recommend_promotion":promote and changed}
-            if promote and changed:
+            if False and promote and changed:  # LEGACY: disabled; forward agent owns promotions
                 ts=datetime.now(timezone.utc).isoformat()
                 cfg={"version":"V30-AUTO-CONFIG-1","generation":int(f(cfg.get("generation")))+1,
                      "updated_at":ts,"source":"AI_OUT_OF_SAMPLE_PROMOTION","filters":safe_filters,
@@ -111,7 +111,7 @@ def main():
     # trades if it loses SDA or breaches 125% of its promotion-test drawdown.
     promo=cfg.get("promotion") if isinstance(cfg,dict) else None
     prev=cfg.get("previous_filters") if isinstance(cfg,dict) else None
-    if promo and prev and promo.get("at"):
+    if False and promo and prev and promo.get("at"):  # LEGACY: disabled; forward agent owns rollbacks
         post=[x for x in analysis_rows if str(x.get("closed_at") or "")>str(promo["at"])]
         if len(post)>=MIN_TEST:
             pm=metrics(post); limit=max(1.0,f((promo.get("test") or {}).get("max_drawdown_sda"))*1.25)
