@@ -187,8 +187,8 @@ def telegram(report,png):
         f"Challenger: {report['challenger']['changed_filter']} "
         f"= {report['challenger']['filters'][report['challenger']['changed_filter']]}\n"
         f"Price 15m observations: {report.get('candidate_evidence',{}).get('observed_15m',0)}/"
-        f"{report.get('candidate_evidence',{}).get('candidate_snapshots',0)} snapshots\\n"
-        f"Cohort trades: {report.get('cohort_evidence',{}).get('observed_trades',0)} (NOT a backtest)\\n"
+        f"{report.get('candidate_evidence',{}).get('candidate_snapshots',0)} snapshots\n"
+        f"Cohort trades: {report.get('cohort_evidence',{}).get('observed_trades',0)} (NOT a backtest)\n"
         "NOT VALIDATED / NOT PROMOTED")
     body=(field("chat_id",chat.encode())+field("caption",caption.encode())+
           field("photo",Path(png).read_bytes(),"strategy_lab.png","image/png")+
