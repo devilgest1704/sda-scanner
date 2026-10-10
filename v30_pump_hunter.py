@@ -607,7 +607,7 @@ def patch(main_module,engine):
                 "data_age_sec":n(s.get("data_age_sec")),
                 "meta":meta if isinstance(meta,dict) else {}
             })
-            state={"version":VERSION,"paper_only":True,"events":events[-100:]}
+            # Preserve funnel history; replacing the whole state erased it on BUY events.\n            state.update({"version":VERSION,"paper_only":True,"events":events[-100:]})
             tmp=p.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(state,indent=2,ensure_ascii=False),encoding="utf-8")
             tmp.replace(p)
@@ -639,12 +639,27 @@ def write_scan_funnel(market_file="market_analysis.json"):
         total=fresh=champion=shadow=0
         fresh_gate_counts={}
         near_ready=[]
+        candidates=[]
+        scan_at=datetime.now(timezone.utc).isoformat()
         for address,td in tokens.items():
             an=td.get("analysis") if isinstance(td,dict) and isinstance(td.get("analysis"),dict) else td
             if not isinstance(an,dict) or n(an.get("price_in_sda"))<=0:
                 continue
             total+=1
             d=decision(address,an,None,persist=False)
+            # Record eligible AND rejected candidates with contemporaneous
+            # decision features. Research-only; no BUY/SELL decisions changed.
+            candidates.append({
+                "at":scan_at,"address":str(address).lower(),
+                "score":round(n(d.get("pump_score")),2),
+                "quality":round(n(d.get("pump_quality")),2),
+                "impulse":round(n(d.get("pump_change")),2),
+                "phase":d.get("pump_phase"),
+                "price_sda":n(an.get("price_in_sda")),
+                "data_age_sec":round(n(d.get("data_age_sec")),1),
+                "eligible":bool(d.get("eligible_for_buy")),
+                "gates":list(dict.fromkeys(d.get("paper_buy_gate_failures") or []))
+            })
             is_fresh=bool(d.get("data_fresh_for_entry"))
             fresh+=int(is_fresh)
             champion+=int(bool(d.get("eligible_for_buy")))
@@ -668,6 +683,7 @@ def write_scan_funnel(market_file="market_analysis.json"):
                     "reason":reason,
                 })
         near_ready.sort(key=lambda x:(len(x["gates"]),-x["score"],-x["quality"]))
+        candidates.sort(key=lambda x:-x["score"])
         p=Path(EXECUTION_STATE_FILE)
         try: state=json.loads(p.read_text(encoding="utf-8"))
         except Exception: state={}
@@ -680,6 +696,7 @@ def write_scan_funnel(market_file="market_analysis.json"):
             "champion_ready":champion,"shadow_ready":shadow,
             "fresh_gate_counts":dict(sorted(fresh_gate_counts.items(),key=lambda kv:(-kv[1],kv[0]))),
             "near_ready":near_ready[:5],
+            "candidate_snapshots":candidates[:50],
             "ready_hook_events":sum(1 for e in events if str(e.get("event")).upper()=="READY"),
             "created_hook_events":sum(1 for e in events if str(e.get("event")).upper()=="CREATED")
         })
