@@ -58,6 +58,26 @@ class ForwardOptimizerTests(unittest.TestCase):
         result, _ = report(state, copy.deepcopy(BASE), {"closed_trades": []}, NOW)
         self.assertNotEqual(result["status"], "PROMOTED_PAPER")
 
+    def test_low_quote_coverage_blocks_paper_promotion(self):
+        state = samples()
+        for row in state["strategies"]["quality"]["trades"][:12]:
+            row["valid_for_learning"] = False
+        result, conf = report(state, copy.deepcopy(BASE), {"closed_trades": []}, NOW)
+        self.assertFalse(result["promotion_applied"])
+        self.assertLess(result["quote_coverage_pct"]["quality"], 90.0)
+        self.assertEqual(conf["generation"], 0)
+
+    def test_research_watch_cannot_become_champion(self):
+        state = samples()
+        state["strategies"]["research_watch"]["trades"] = [
+            {**r, "pnl_sda": 100.0} for r in state["strategies"]["quality"]["trades"]
+        ]
+        for row in state["strategies"]["quality"]["trades"]:
+            row["pnl_sda"] = -2.0
+        result, conf = report(state, copy.deepcopy(BASE), {"closed_trades": []}, NOW)
+        self.assertFalse(result["promotion_applied"])
+        self.assertEqual(conf["generation"], 0)
+
     def test_stale_scanner_refuses_promotion(self):
         state = samples()
         state["updated_at"] = (NOW - timedelta(hours=1)).isoformat()
