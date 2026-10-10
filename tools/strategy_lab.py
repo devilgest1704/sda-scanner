@@ -164,7 +164,7 @@ def main():
     if args.telegram:
         delivered=telegram(report,args.png)
         report["telegram_delivery"]="sent" if delivered else "not_configured"
-        Path(args.output).write_text(json.dumps(report,indent=2,ensure_ascii=False)+"\\n".replace("\\\\n","\\n"),encoding="utf-8")
+        Path(args.output).write_text(json.dumps(report,indent=2,ensure_ascii=False)+chr(10),encoding="utf-8")
     print(json.dumps({"mode":report["mode"],"promotion_eligible":False,
         "challenger":report["challenger"],"telegram_requested":args.telegram}))
 if __name__=="__main__": main()
