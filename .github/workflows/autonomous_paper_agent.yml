@@ -10,8 +10,15 @@ on:
       - 'tools/forward_shadow_optimizer.py'
       - 'tests/test_forward_shadow_agent.py'
       - 'tests/test_forward_shadow_optimizer.py'
+  pull_request:
+    paths:
+      - '.github/workflows/autonomous_paper_agent.yml'
+      - 'tools/forward_shadow_agent.py'
+      - 'tools/forward_shadow_optimizer.py'
+      - 'tests/test_forward_shadow_agent.py'
+      - 'tests/test_forward_shadow_optimizer.py'
   schedule:
-    - cron: '42 */6 * * *'
+    - cron: '42 * * * *'
 
 permissions:
   contents: write
@@ -64,7 +71,7 @@ jobs:
       - name: Persist research report and only evidence-gated PAPER settings
         # Source-change checks are diagnostic only and must not publish stale
         # reports or race an active checkpoint. Scheduled/manual runs own writes.
-        if: github.event_name != 'push'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: |
           set -euo pipefail
           git config user.name 'sda-scanner-bot'
