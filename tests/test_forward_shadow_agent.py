@@ -75,6 +75,28 @@ class ForwardPaperTests(unittest.TestCase):
         self.assertFalse(eligible(watch, POLICIES["baseline"]))
         self.assertFalse(eligible(watch, POLICIES["research_watch"]))
 
+    def test_watch_research_only_opens_virtual_positions(self):
+        state = default_state()
+        candidate = funnel(T0, phase="WATCH", snapshot_impulse=13)
+        outcome = step(state, market(T0), candidate)
+        self.assertEqual(outcome["opened"], 2)
+        self.assertEqual(len(state["strategies"]["baseline"]["positions"]), 0)
+        self.assertEqual(len(state["strategies"]["research_watch"]["positions"]), 1)
+
+    def test_stale_position_timeout_is_recorded_but_excluded_from_learning(self):
+        state = default_state()
+        step(state, market(T0), funnel(T0))
+        later = T0 + timedelta(hours=9)
+        # Market snapshot is recent, but the token itself has not traded.
+        outcome = step(state, market(later, price=1.0, txn=T0), funnel(later))
+        self.assertEqual(outcome["closed"], 6)
+        for name, st in state["strategies"].items():
+            if name.startswith("research_watch"):
+                continue
+            self.assertFalse(st["positions"])
+            self.assertEqual(st["trades"][0]["reason"], "STALE_TIMEOUT")
+            self.assertFalse(st["trades"][0]["valid_for_learning"])
+
     def test_future_market_timestamp_is_rejected(self):
         state = default_state()
         with self.assertRaises(ValueError):
