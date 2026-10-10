@@ -120,6 +120,22 @@ def report(state, config, real_ledger, now=None):
             model["reason"] = "Waiting for forward paper validation before another change"
             return model, config
 
+    # Compare against the CURRENT paper Champion, not always the original
+    # baseline. Otherwise a second promotion can be worse than the active
+    # strategy while appearing better than an obsolete baseline.
+    incumbent_name = next(
+        (name for name, policy in POLICIES.items()
+         if not name.startswith("research_watch")
+         and all(abs(float(current[key]) - float(value)) <= 1e-8
+                 for key, value in policy.items())),
+        None,
+    )
+    if incumbent_name is None:
+        model["status"] = "UNKNOWN_INCUMBENT_POLICY"
+        model["reason"] = "Active paper filters have no matching forward shadow journal"
+        return model, config
+    model["incumbent_policy"] = incumbent_name
+
     strategies = state.get("strategies", {})
     if not isinstance(strategies, dict) or any(name not in strategies for name in POLICIES):
         raise ValueError("Incomplete forward strategy journals")
@@ -141,7 +157,7 @@ def report(state, config, real_ledger, now=None):
 
     boundary = unique_times[int(len(unique_times)*0.7)]
     candidates = []
-    baseline_train = baseline_holdout = None
+    incumbent_holdout = None
     for name, rows in all_rows.items():
         train = [r for r in rows if r["closed_at"] < boundary]
         holdout = [r for r in rows if r["closed_at"] >= boundary]
@@ -151,10 +167,9 @@ def report(state, config, real_ledger, now=None):
             "holdout_sample_count": len(holdout),
             # No holdout P/L evaluated before selecting a winner.
         }
-        if name == "baseline":
-            baseline_train = train_stats
-            baseline_holdout = holdout
-        if (name != "baseline" and not name.startswith("research_watch")
+        if name == incumbent_name:
+            incumbent_holdout = holdout
+        if (name != incumbent_name and not name.startswith("research_watch")
                 and coverage[name] >= 90.0
                 and train_stats["closed"] >= MIN_TRAIN
                 and train_stats["unique_tokens"] >= MIN_UNIQUE
@@ -173,7 +188,7 @@ def report(state, config, real_ledger, now=None):
     name = candidates[0][1]
     selected = [r for r in all_rows[name] if r["closed_at"] >= boundary]
     challenger = summary(selected)
-    incumbent = summary(baseline_holdout)
+    incumbent = summary(incumbent_holdout)
     proposal = POLICIES[name]
     model["selected_challenger"] = {"name": name, "filters": proposal,
                                     "train_score": round(candidates[0][0], 4),

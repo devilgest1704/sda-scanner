@@ -104,6 +104,35 @@ class ForwardOptimizerTests(unittest.TestCase):
         self.assertEqual(new["filters"], BASE["filters"])
         self.assertEqual(new["generation"], 2)
 
+    def test_challenger_must_beat_current_champion_not_obsolete_baseline(self):
+        state = samples()
+        quality = state["strategies"]["quality"]["trades"]
+        for row in quality:
+            row["pnl_sda"] = 6.0
+        state["strategies"]["score"]["trades"] = [
+            {**r, "pnl_sda": 4.0} for r in quality
+        ]
+        state["strategies"]["baseline"]["trades"] = [
+            {**r, "pnl_sda": -3.0} for r in quality
+        ]
+        config = copy.deepcopy(BASE)
+        config["filters"] = state["strategies"]["quality"]["filters"].copy()
+        result, updated = report(state, config, {"closed_trades": []}, NOW)
+        self.assertEqual(result["incumbent_policy"], "quality")
+        self.assertEqual(result["selected_challenger"]["name"], "score")
+        self.assertEqual(result["status"], "HOLDOUT_REJECTED")
+        self.assertFalse(result["promotion_applied"])
+        self.assertEqual(updated["filters"], config["filters"])
+
+    def test_unrecognized_current_champion_fails_closed(self):
+        state = samples()
+        config = copy.deepcopy(BASE)
+        config["filters"]["entry_score"] = 71
+        result, updated = report(state, config, {"closed_trades": []}, NOW)
+        self.assertEqual(result["status"], "UNKNOWN_INCUMBENT_POLICY")
+        self.assertFalse(result["promotion_applied"])
+        self.assertEqual(updated, config)
+
     def test_insufficient_events_no_autopromotion(self):
         state = default_state()
         state["updated_at"] = NOW.isoformat()
