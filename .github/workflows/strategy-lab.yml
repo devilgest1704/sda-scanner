@@ -24,7 +24,24 @@ jobs:
       - name: Test chronological research safeguards
         run: python -m unittest discover -s tests -p 'test_trade_cohort_research.py' -v
       - name: Update durable closed-trade archive
-        run: python tools/export_paper_trades.py --positions positions.json --archive strategy_lab/closed_trades.json
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from tools.export_paper_trades import export
+          source=Path('positions.json')
+          archive=Path('strategy_lab/closed_trades.json')
+          try:
+              state=json.loads(source.read_text(encoding='utf-8'))
+              if not isinstance(state,dict) or not isinstance(state.get('closed_trades'),list):
+                  raise ValueError('No closed_trades list')
+          except (OSError,ValueError) as exc:
+              print('Skipping trade archive export: invalid/empty positions state:',exc)
+              archive.parent.mkdir(parents=True,exist_ok=True)
+              if not archive.exists(): archive.write_text('[]\\n',encoding='utf-8')
+          else:
+              print('Archive trade counts:',export(source,archive))
+          PY
       - name: Join candidate decisions to later SDA quotes (research only)
         run: python tools/candidate_price_tracker.py
       - name: Analyze observed closed-trade cohorts (research only)
