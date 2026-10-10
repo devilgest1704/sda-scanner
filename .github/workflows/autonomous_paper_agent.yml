@@ -8,7 +8,6 @@ on:
       - '.github/workflows/autonomous_paper_agent.yml'
       - 'tools/forward_shadow_agent.py'
       - 'tools/forward_shadow_optimizer.py'
-      - 'tools/forward_agent_telegram.py'
       - 'tests/test_forward_shadow_agent.py'
       - 'tests/test_forward_shadow_optimizer.py'
   schedule:
@@ -88,27 +87,11 @@ jobs:
           done
           exit 1
 
-      - name: Draw and send graphical paper-agent status to Telegram
-        # Frequent source commits run tests, not an avalanche of user alerts.
-        # Scheduled six-hour and manually requested runs send the PNG.
-        if: github.event_name != 'push'
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: |
-          python -m pip install 'Pillow>=10,<13'
-          python -m tools.forward_agent_telegram
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: forward-sda-paper-agent
           path: |
             strategy_lab/autonomous_agent_report.json
-            strategy_lab/autonomous_agent_status.png
             v30_agent_config.json
           retention-days: 30
