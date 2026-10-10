@@ -83,6 +83,14 @@ def render_png(report,path):
     c=report["challenger"]
     d.text((52,451),f"CHALLENGER: {c['changed_filter']}",fill="#8BC5F6",font=f(25,True))
     d.text((52,490),f"Proposed: {c['filters'][c['changed_filter']]}  |  UNVALIDATED",fill="#E5EBF4",font=f(22))
+    series=report.get("equity_curve_sda") or []
+    if len(series)>=2:
+        vals=[float(v) for v in series]
+        low=min(0,min(vals)); high=max(0,max(vals))
+        span=max(1,high-low)
+        coords=[(560+i*385/(len(vals)-1),425-(v-low)/span*95) for i,v in enumerate(vals)]
+        d.line(coords,fill="#70D6A0" if vals[-1]>=0 else "#F47E82",width=4)
+        d.text((570,323),"RECENT CLOSED-TRADE P/L",fill="#A8BDD4",font=f(17))
     d.text((52,561),"Auto-report active. No live filter changes.",fill="#AAB8C9",font=f(19))
     im.save(path,"PNG")
 
@@ -128,6 +136,17 @@ def main():
     args=ap.parse_args()
     previous=load(args.previous) if args.previous and Path(args.previous).exists() else None
     report=analyze(load(args.stats),load(args.execution),load(args.config),previous)
+    archive=Path("strategy_lab/closed_trades.json")
+    if archive.exists():
+        rows=load(archive)
+        if isinstance(rows,list):
+            rows=sorted((r for r in rows if isinstance(r,dict) and finite(r.get("closed_profit_sda"))),
+                key=lambda r:str(r.get("closed_at","")))
+            equity=[0.0]
+            for row in rows[-100:]:
+                equity.append(round(equity[-1]+row["closed_profit_sda"],4))
+            report["equity_curve_sda"]=equity if len(equity)>1 else []
+            report["archived_closed_trades"]=len(rows)
     for p in (args.output,args.png): Path(p).parent.mkdir(parents=True,exist_ok=True)
     Path(args.output).write_text(json.dumps(report,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
     render_png(report,args.png)
