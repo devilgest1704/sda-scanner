@@ -158,7 +158,16 @@ def patch(engine):
     def save(path, data):
         if path == engine.POSITIONS_FILE and isinstance(data, dict):
             _migrate(data)
-        return original_save(path, data)
+        result = original_save(path, data)
+        # Research archive is best-effort and never allowed to interrupt paper
+        # execution. Export only AFTER the canonical positions state is saved.
+        if path == engine.POSITIONS_FILE and isinstance(data, dict):
+            try:
+                from tools.export_paper_trades import export
+                export(path, "strategy_lab/closed_trades.json")
+            except Exception as exc:
+                print("Strategy Lab paper archive warning:", repr(exc))
+        return result
 
     engine.load = load
     engine.save = save
