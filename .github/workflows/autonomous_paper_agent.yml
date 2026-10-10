@@ -62,6 +62,9 @@ jobs:
           PY
 
       - name: Persist research report and only evidence-gated PAPER settings
+        # Source-change checks are diagnostic only and must not publish stale
+        # reports or race an active checkpoint. Scheduled/manual runs own writes.
+        if: github.event_name != 'push'
         run: |
           set -euo pipefail
           git config user.name 'sda-scanner-bot'
@@ -71,6 +74,12 @@ jobs:
             echo 'No new paper research evidence to commit.'
             exit 0
           fi
+
+          config_changed=false
+          if ! git diff --staged --quiet -- v30_agent_config.json; then
+            config_changed=true
+          fi
+          base_config_blob="$(git rev-parse HEAD:v30_agent_config.json)"
           git commit -m 'Update forward SDA paper learning report'
           for attempt in 1 2 3 4 5; do
             if git push origin HEAD:main; then
@@ -78,14 +87,35 @@ jobs:
               exit 0
             fi
             git fetch origin main
+
+            if [ "$config_changed" = "true" ]; then
+              # A simultaneous Champion change must NEVER be overwritten.
+              remote_config_blob="$(git rev-parse origin/main:v30_agent_config.json)"
+              if [ "$remote_config_blob" != "$base_config_blob" ]; then
+                echo "::error::Champion changed concurrently; refusing stale promotion/rollback."
+                exit 1
+              fi
+            fi
+
             if ! git rebase origin/main; then
-              echo "::error::Forward paper state push conflict; not overwriting Champion"
               git rebase --abort || true
-              exit 1
+              if [ "$config_changed" = "true" ]; then
+                echo "::error::Champion promotion/rollback could not be reconciled safely."
+                exit 1
+              fi
+              # Report-only conflicts are common when source, scanner and
+              # researcher publish concurrently. Keep artifacts; don't
+              # clobber a newer analysis on main.
+              echo "::warning::Newer report exists on main; skipping stale research-only commit."
+              exit 0
             fi
             sleep 2
           done
-          exit 1
+          if [ "$config_changed" = "true" ]; then
+            echo "::error::Could not persist verified paper Champion update."
+            exit 1
+          fi
+          echo "::warning::Research report could not be published; archived as run artifact."
 
       - uses: actions/upload-artifact@v4
         if: always()
