@@ -59,8 +59,12 @@ jobs:
         run: |
           set -euo pipefail
           echo "skip=false" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "push" ]; then
+            echo "Workflow update: delivery tests only; no extra Telegram post."
+            exit 0
+          fi
           if [ "$EVENT_NAME" != "schedule" ] && [ "$REPORT_REASON" != "Cronjob hourly" ]; then
-            echo "Manual or verification run: sending requested report."
+            echo "Manual Telegram report requested."
             exit 0
           fi
           if ! gh run list --workflow telegram_hourly.yml --repo "$GITHUB_REPOSITORY" --limit 30 \
@@ -74,7 +78,7 @@ jobs:
           runs=json.load(open('/tmp/hourly-runs.json',encoding='utf-8'))
           hour=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:')
           previous=next((r for r in runs if str(r.get('databaseId'))!=os.environ.get('GITHUB_RUN_ID')
-              and r.get('event')!='push'\
+              and r.get('event')!='push'
               and r.get('status')=='completed' and r.get('conclusion')=='success'
               and str(r.get('createdAt') or '').startswith(hour)),None)
           if previous:
