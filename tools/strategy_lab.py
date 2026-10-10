@@ -86,6 +86,9 @@ def attach_research_evidence(report,research,outcomes):
             "train_trades":research.get("train_sample_count",0),
             "holdout_trades":research.get("holdout_sample_count",0),
             "holdout_retained_trades":research.get("holdout_observed_retained_trades"),
+            "holdout_retained_pnl_sda":(research.get("holdout") or {}).get("retained_pnl_sda"),
+            "holdout_baseline_pnl_sda":(research.get("holdout") or {}).get("observed_baseline_pnl_sda"),
+            "holdout_profitable_on_observed_trades":((research.get("holdout") or {}).get("retained_pnl_sda") or 0)>0,
             "train_observed_difference_sda":research.get("train_observed_difference_sda"),
             "holdout_observed_difference_sda":research.get("holdout_observed_difference_sda"),
             "method":"observed_incumbent_trade_cohort_NOT_backtest",
@@ -163,7 +166,11 @@ def render_png(report,path):
         d.text((565,470),f"PRICE DATA: {ev.get('observed_15m',0)}/{ev.get('candidate_snapshots',0)} have 15m quote",fill="#B7C9DD",font=f(16))
         d.text((565,494),f"BUY-ready: {ev.get('entry_eligible_snapshots',0)} | matured: {ev.get('matured_15m',0)}",fill="#B7C9DD",font=f(16))
     if cohort:
-        d.text((565,519),f"Cohort: {cohort.get('observed_trades',0)} trades / NOT a backtest",fill="#F4B96A",font=f(16))
+        retained=cohort.get("holdout_retained_pnl_sda")
+        if finite(retained):
+            d.text((565,519),f"Holdout retained: {retained:+.2f} SDA",fill="#70D6A0" if retained>0 else "#F47E82",font=f(17,True))
+        else:
+            d.text((565,519),"Holdout P/L: not available",fill="#F4B96A",font=f(16))
     d.text((52,561),"Auto-report active. No live filter changes.",fill="#AAB8C9",font=f(19))
     im.save(path,"PNG")
 
@@ -188,7 +195,7 @@ def telegram(report,png):
         f"= {report['challenger']['filters'][report['challenger']['changed_filter']]}\n"
         f"Price 15m observations: {report.get('candidate_evidence',{}).get('observed_15m',0)}/"
         f"{report.get('candidate_evidence',{}).get('candidate_snapshots',0)} snapshots\n"
-        f"Cohort trades: {report.get('cohort_evidence',{}).get('observed_trades',0)} (NOT a backtest)\n"
+        f"Cohort trades: {report.get('cohort_evidence',{}).get('observed_trades',0)} (NOT a backtest)\n"        f"Observed holdout filtered P/L: {report.get('cohort_evidence',{}).get('holdout_retained_pnl_sda')} SDA\n"
         "NOT VALIDATED / NOT PROMOTED")
     body=(field("chat_id",chat.encode())+field("caption",caption.encode())+
           field("photo",Path(png).read_bytes(),"strategy_lab.png","image/png")+
