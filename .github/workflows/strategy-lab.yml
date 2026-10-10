@@ -38,7 +38,7 @@ jobs:
           except (OSError,ValueError) as exc:
               print('Skipping trade archive export: invalid/empty positions state:',exc)
               archive.parent.mkdir(parents=True,exist_ok=True)
-              if not archive.exists(): archive.write_text('[]\\n',encoding='utf-8')
+              if not archive.exists(): archive.write_text(json.dumps([]),encoding='utf-8')
           else:
               print('Archive trade counts:',export(source,archive))
           PY
