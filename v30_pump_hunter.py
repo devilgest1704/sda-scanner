@@ -693,7 +693,30 @@ def write_scan_funnel(market_file="market_analysis.json"):
                     "reason":reason,
                 })
         near_ready.sort(key=lambda x:(len(x["gates"]),-x["score"],-x["quality"]))
-        candidates.sort(key=lambda x:-x["score"])
+        # Forward-learning needs all entry lanes, not just the globally
+        # highest-score WATCH tokens. Keep a bounded, deterministic stratified
+        # sample so rare IGNITION / CONFIRMATION events aren't discarded.
+        # This changes telemetry only: actual BUY/SELL decisions stay intact.
+        candidates.sort(key=lambda x:(-x["score"],x["address"]))
+        all_phase_counts={}
+        for row in candidates:
+            ph=str(row.get("phase") or "UNKNOWN")
+            all_phase_counts[ph]=all_phase_counts.get(ph,0)+1
+        def group(phase_set,limit):
+            return [row for row in candidates if row.get("phase") in phase_set][:limit]
+        selected=[]
+        seen=set()
+        for batch in (group({"IGNITION","CONFIRMATION","BREAKOUT"},60),
+                      group({"WATCH"},35),candidates[:40]):
+            for row in batch:
+                if row["address"] in seen or len(selected)>=120:
+                    continue
+                seen.add(row["address"])
+                selected.append(row)
+        selected_phase_counts={}
+        for row in selected:
+            ph=str(row.get("phase") or "UNKNOWN")
+            selected_phase_counts[ph]=selected_phase_counts.get(ph,0)+1
         p=Path(EXECUTION_STATE_FILE)
         try: state=json.loads(p.read_text(encoding="utf-8"))
         except Exception: state={}
@@ -706,7 +729,11 @@ def write_scan_funnel(market_file="market_analysis.json"):
             "champion_ready":champion,"shadow_ready":shadow,
             "fresh_gate_counts":dict(sorted(fresh_gate_counts.items(),key=lambda kv:(-kv[1],kv[0]))),
             "near_ready":near_ready[:5],
-            "candidate_snapshots":candidates[:50],
+            "candidate_snapshots":selected,
+            "all_candidate_phases":all_phase_counts,
+            "selected_candidate_phases":selected_phase_counts,
+            "candidate_total":len(candidates),
+            "candidate_sample_count":len(selected),
             "ready_hook_events":sum(1 for e in events if str(e.get("event")).upper()=="READY"),
             "created_hook_events":sum(1 for e in events if str(e.get("event")).upper()=="CREATED")
         })
