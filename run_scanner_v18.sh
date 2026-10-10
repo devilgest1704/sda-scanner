@@ -145,6 +145,24 @@ run_one_scan() {
   run_timed_stage paper_engine env TELEGRAM_TOKEN="" python paper_engine_v19.py
   run_timed_stage paper_stats env TELEGRAM_TOKEN="" python paper_stats.py
   run_timed_stage scan_funnel python -c 'import v30_pump_hunter as v30; v30.write_scan_funnel()'
+  # Make silent telemetry failures visible in Actions logs. This is a
+  # diagnostic warning only; it must not stop paper risk/exit processing.
+  python - <<'PY'
+import json
+from pathlib import Path
+try:
+    data = json.loads(Path("v30_execution_state.json").read_text(encoding="utf-8"))
+    latest = (data.get("funnels") or [])[-1]
+    snapshots = latest.get("candidate_snapshots")
+    tokens = latest.get("tokens", 0)
+    print(f"CANDIDATE TELEMETRY: tokens={tokens} snapshots={len(snapshots) if isinstance(snapshots,list) else 'MISSING'} at={latest.get('at')}")
+    if tokens and not isinstance(snapshots, list):
+        print("::warning::V30 candidate snapshots missing from latest funnel")
+    elif tokens and not snapshots:
+        print("::warning::V30 funnel saw tokens but saved no candidate snapshots")
+except Exception as exc:
+    print("::warning::V30 candidate telemetry state invalid:", repr(exc))
+PY
   run_timed_stage training_data python tools/v30_collect_training_data.py
 
   ensure_json_state
