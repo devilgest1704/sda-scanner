@@ -46,6 +46,33 @@ jobs:
 
           echo "Scanner active/pending runs: ${active_or_pending}"
 
+          # A long-lived worker checks out source only once. If main.py or
+          # v30_pump_hunter.py changed, restart an older worker after a grace
+          # period so new diagnostics/bug fixes actually take effect.
+          # Do not cancel fresh workers or workers already shutting down.
+          active_run="$(gh run list --workflow scanner_v18.yml \
+            --repo "${{ github.repository }}" --branch main --limit 20 \
+            --json databaseId,status,headSha,createdAt \
+            --jq '[.[] | select(.status == "in_progress")] | .[0] // empty')"
+          if [ -n "$active_run" ]; then
+            run_id="$(echo "$active_run" | jq -r '.databaseId')"
+            run_sha="$(echo "$active_run" | jq -r '.headSha')"
+            run_created="$(echo "$active_run" | jq -r '.createdAt')"
+            run_age=$(( $(date -u +%s) - $(date -u -d "$run_created" +%s) ))
+            if [ "$run_age" -ge 1200 ]; then
+              git fetch -q origin "$run_sha" || true
+              current_sources="$(git rev-parse HEAD:main.py HEAD:v30_pump_hunter.py)"
+              worker_sources="$(git rev-parse "$run_sha:main.py" "$run_sha:v30_pump_hunter.py" 2>/dev/null || true)"
+              if [ -n "$worker_sources" ] && [ "$current_sources" != "$worker_sources" ]; then
+                echo "Worker $run_id runs outdated scanner source; requesting graceful replacement."
+                gh run cancel "$run_id" --repo "${{ github.repository }}"
+                # Next scheduled watchdog run dispatches the replacement after
+                # GitHub marks this worker cancelled. Never overlap workers.
+                exit 0
+              fi
+            fi
+          fi
+
           if [ "${active_or_pending}" -gt 0 ]; then
             echo 'Scanner worker already active/pending; watchdog will not dispatch another run.'
             exit 0
