@@ -125,6 +125,12 @@ def report(state, config, real_ledger, now=None):
         raise ValueError("Incomplete forward strategy journals")
 
     all_rows = {name: forward_rows(strategies[name]) for name in POLICIES}
+    coverage = {}
+    for name in POLICIES:
+        all_records = strategies[name].get("trades") or []
+        valid = len(all_rows[name])
+        coverage[name] = round(100 * valid / len(all_records), 2) if all_records else 0.0
+    model["quote_coverage_pct"] = coverage
     unique_times = sorted({r["closed_at"] for rows in all_rows.values() for r in rows})
     if len(unique_times) < MIN_TRAIN + MIN_HOLDOUT:
         model["status"] = "COLLECTING_FORWARD_TRADES"
@@ -149,6 +155,7 @@ def report(state, config, real_ledger, now=None):
             baseline_train = train_stats
             baseline_holdout = holdout
         if (name != "baseline" and not name.startswith("research_watch")
+                and coverage[name] >= 90.0
                 and train_stats["closed"] >= MIN_TRAIN
                 and train_stats["unique_tokens"] >= MIN_UNIQUE
                 and train_stats["net_sda"] > 0
