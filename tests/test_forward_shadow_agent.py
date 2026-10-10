@@ -85,7 +85,10 @@ class ForwardPaperTests(unittest.TestCase):
         step(state, market(T0), funnel(T0))
         late = T0 + timedelta(hours=2)
         step(state, market(late, 0.90), funnel(late, price_sda=0.90))
-        for st in state["strategies"].values():
+        for name, st in state["strategies"].items():
+            if name.startswith("research_watch"):
+                self.assertEqual(len(st["trades"]), 0)
+                continue
             self.assertEqual(len(st["trades"]), 1)
             self.assertFalse(st["trades"][0]["valid_for_learning"])
 
