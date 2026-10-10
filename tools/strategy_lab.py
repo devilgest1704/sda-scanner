@@ -35,8 +35,18 @@ def analyze(stats,execution,config,previous=None):
     lo,hi,step=BOUNDS[key]
     candidate=dict(base)
     candidate[key]=round(min(hi,max(lo,base[key]+step)),3)
+    now=datetime.now(timezone.utc)
+    stamp=stats.get("updated_at")
+    try:
+        parsed=datetime.fromisoformat(str(stamp).replace("Z","+00:00"))
+        age=(now-parsed).total_seconds() if parsed.tzinfo else None
+    except (ValueError,TypeError):
+        age=None
+    stats_fresh=age is not None and 0<=age<=7200
     result={
-      "generated_at":datetime.now(timezone.utc).isoformat(),
+      "generated_at":now.isoformat(),
+      "data_fresh":stats_fresh,
+      "stats_age_minutes":round(age/60,1) if age is not None else None,
       "mode":"paper_shadow_proposal_only",
       "production_mutated":False,
       "promotion_eligible":False,
@@ -73,7 +83,8 @@ def render_png(report,path):
     except OSError:
         f=lambda n,b=False:ImageFont.load_default()
     d.text((48,32),"SDA  |  AI STRATEGY LAB",fill="#F3F6FA",font=f(37,True))
-    d.text((50,95),"PAPER ONLY  /  SHADOW  /  NOT PROMOTED",fill="#8DA9C7",font=f(21))
+    status="DATA FRESH" if report["data_fresh"] else "STALE DATA - CHECK SCANNER"
+    d.text((50,95),"PAPER SHADOW / "+status,fill="#8DA9C7" if report["data_fresh"] else "#F4B96A",font=f(19))
     pnl=report["baseline"]["cumulative_pnl_sda"]
     d.rounded_rectangle((45,145,955,310),radius=18,fill="#1D2B40")
     d.text((72,165),"CUMULATIVE NET P/L",fill="#B7C9DD",font=f(20))
@@ -150,7 +161,10 @@ def main():
     for p in (args.output,args.png): Path(p).parent.mkdir(parents=True,exist_ok=True)
     Path(args.output).write_text(json.dumps(report,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
     render_png(report,args.png)
-    if args.telegram: telegram(report,args.png)
+    if args.telegram:
+        delivered=telegram(report,args.png)
+        report["telegram_delivery"]="sent" if delivered else "not_configured"
+        Path(args.output).write_text(json.dumps(report,indent=2,ensure_ascii=False)+"\\n".replace("\\\\n","\\n"),encoding="utf-8")
     print(json.dumps({"mode":report["mode"],"promotion_eligible":False,
         "challenger":report["challenger"],"telegram_requested":args.telegram}))
 if __name__=="__main__": main()
