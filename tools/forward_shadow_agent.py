@@ -26,11 +26,14 @@ MAX_HISTORY = 5000
 # Only entry-gate parameters actually supported by V30 runtime are varied.
 POLICIES = {
     "baseline": {"entry_score": 68, "quality": 52, "impulse": 8, "buy_ratio": 1.10, "trades": 5},
-    "quality": {"entry_score": 72, "quality": 56, "impulse": 8, "buy_ratio": 1.20, "trades": 8},
-    "momentum": {"entry_score": 76, "quality": 58, "impulse": 10, "buy_ratio": 1.25, "trades": 10},
-    "selective": {"entry_score": 80, "quality": 62, "impulse": 12, "buy_ratio": 1.35, "trades": 12},
-    "score": {"entry_score": 84, "quality": 52, "impulse": 8, "buy_ratio": 1.10, "trades": 5},
-    "quality_plus": {"entry_score": 68, "quality": 62, "impulse": 8, "buy_ratio": 1.15, "trades": 8},
+    "quality": {"entry_score": 72, "quality": 56, "impulse": 8, "buy_ratio": 1.20, "trades": 12},
+    "momentum": {"entry_score": 76, "quality": 58, "impulse": 10, "buy_ratio": 1.25, "trades": 14},
+    "selective": {"entry_score": 80, "quality": 62, "impulse": 12, "buy_ratio": 1.35, "trades": 18},
+    "score": {"entry_score": 84, "quality": 52, "impulse": 8, "buy_ratio": 1.10, "trades": 12},
+    "quality_plus": {"entry_score": 68, "quality": 62, "impulse": 8, "buy_ratio": 1.15, "trades": 12},
+    # Observational only: WATCH research is NOT a deployable Champion lane.
+    "research_watch": {"entry_score": 68, "quality": 55, "impulse": 8, "buy_ratio": 1.20, "trades": 8},
+    "research_watch_strict": {"entry_score": 76, "quality": 65, "impulse": 12, "buy_ratio": 1.45, "trades": 12},
 }
 
 
@@ -105,16 +108,19 @@ def quote_map(market, now):
     return result
 
 
-def eligible(c, filters):
+def eligible(c, filters, research_watch=False):
     if not isinstance(c, dict):
         return False
     phase = c.get("phase")
-    if phase not in ("IGNITION", "CONFIRMATION"):
+    if research_watch:
+        if phase != "WATCH":
+            return False
+    elif phase not in ("IGNITION", "CONFIRMATION"):
         return False
     age = finite(c.get("data_age_sec"))
     score = finite(c.get("score"))
     quality = finite(c.get("quality"))
-    impulse = finite(c.get("impulse"))
+    impulse = finite(c.get("snapshot_impulse") if research_watch else c.get("impulse"))
     trades = finite(c.get("trades_1h"))
     ratio = finite(c.get("buy_ratio"))
     volume = finite(c.get("volume_1h"))
@@ -124,17 +130,23 @@ def eligible(c, filters):
     values = (age, score, quality, impulse, trades, ratio, volume, flow, m15, m1h)
     if any(v is None for v in values):
         return False
-    if not (0 <= age <= 300 and 0 <= m1h <= 12):
-        return False
-    # Common hard safety checks are never optimized away.
-    if not (volume >= 500 and flow >= 150 and m15 >= (1.5 if phase == "CONFIRMATION" else 0.8)):
-        return False
-    if trades < 12:  # V31 activity gate; early exception is intentionally not modelled
-        return False
+    if research_watch:
+        # Collect error/missed-opportunity evidence with stricter data safety.
+        # These WATCH experiments are never eligible for automatic promotion.
+        if not (0 <= age <= 180 and 0 < m1h <= 8 and m15 >= 0.8
+                and volume >= 600 and flow >= 250 and trades >= 8):
+            return False
+    else:
+        if not (0 <= age <= 300 and 0 <= m1h <= 12):
+            return False
+        # Common hard V31 safety checks cannot be tuned away.
+        if not (volume >= 500 and flow >= 150
+                and m15 >= (1.5 if phase == "CONFIRMATION" else 0.8)
+                and trades >= 12):
+            return False
     return (score >= filters["entry_score"] and quality >= filters["quality"]
             and impulse >= filters["impulse"] and ratio >= filters["buy_ratio"]
             and trades >= filters["trades"])
-
 
 def exit_profit(entry, price):
     # Notional paper net result after modelled entry/exit friction, in SDA.
@@ -210,7 +222,7 @@ def step(data, market, funnel):
         if len(positions) < MAX_POSITIONS:
             for c in ranked:
                 address = str(c.get("address") or "").lower()
-                if not address or address in positions or not eligible(c, filters):
+                if not address or address in positions or not eligible(c, filters, name.startswith('research_watch')):
                     continue
                 quote = quotes.get(address)
                 entry = positive(c.get("price_sda"))
