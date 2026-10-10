@@ -23,7 +23,19 @@ def positive(v):
 def update(state,market,max_observations=5000):
     if not isinstance(state,dict) or not isinstance(market,dict):raise ValueError("state and market must be objects")
     now=parse_time(market.get("updated_at"))
-    if now is None:raise ValueError("market snapshot has no valid timestamp")
+    if now is None:
+        # The scanner may emit a market snapshot without a top-level
+        # timestamp. Use the newest token quote only when it is parseable;
+        # never substitute wall-clock time for an unverified market quote.
+        quote_times=[]
+        for td in (market.get("tokens",{}) or {}).values():
+            if not isinstance(td,dict):continue
+            a=td.get("analysis",td)
+            if not isinstance(a,dict):continue
+            t=parse_time(a.get("last_transaction") or td.get("last_transaction"))
+            if t is not None:quote_times.append(t)
+        now=max(quote_times) if quote_times else None
+    if now is None:raise ValueError("market snapshot has no valid quote timestamp")
     tokens=market.get("tokens",{})
     if not isinstance(tokens,dict):raise ValueError("tokens must be object")
     existing=state.get("observations",[])
