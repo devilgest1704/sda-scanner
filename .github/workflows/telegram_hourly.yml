@@ -1,10 +1,14 @@
 name: SDA Telegram Hourly Report
 
 on:
-  # Intentionally no schedule here.
-  # The hourly report is triggered only by the external cronjob.org timer.
-  # Telegram REFRESH is handled directly by the Vercel webhook and does not
-  # dispatch this workflow.
+  # Self-contained hourly fallback; external cronjob.org can also dispatch.
+  schedule:
+    - cron: '37 * * * *'
+  # Run one end-to-end verification when this workflow is repaired.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/telegram_hourly.yml'
   workflow_dispatch:
     inputs:
       run_reason:
@@ -15,10 +19,11 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: sda-telegram-hourly
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   report:
@@ -40,5 +45,42 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Test Telegram delivery helpers
+        run: python -m unittest discover -s tests -p 'test_telegram_delivery.py' -v
+
+      - name: Avoid duplicate automatic reports within a UTC hour
+        id: dedupe
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPORT_REASON: ${{ inputs.run_reason }}
+        run: |
+          set -euo pipefail
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" != "schedule" ] && [ "$REPORT_REASON" != "Cronjob hourly" ]; then
+            echo "Manual or verification run: sending requested report."
+            exit 0
+          fi
+          if ! gh run list --workflow telegram_hourly.yml --repo "$GITHUB_REPOSITORY" --limit 30 \
+               --json databaseId,createdAt,status,conclusion > /tmp/hourly-runs.json; then
+            echo "::warning::Cannot check previous reports; attempting delivery rather than skipping."
+            exit 0
+          fi
+          python - <<'PY'
+          import json,os
+          from datetime import datetime, timezone
+          runs=json.load(open('/tmp/hourly-runs.json',encoding='utf-8'))
+          hour=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:')
+          previous=next((r for r in runs if str(r.get('databaseId'))!=os.environ.get('GITHUB_RUN_ID')
+              and r.get('status')=='completed' and r.get('conclusion')=='success'
+              and str(r.get('createdAt') or '').startswith(hour)),None)
+          if previous:
+              with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as f:f.write('skip=true\n')
+              print(f"Hourly Telegram report already succeeded this UTC hour (run {previous['databaseId']}); skip duplicate.")
+          else:
+              print('No successful hourly report this UTC hour; send now.')
+          PY
+
       - name: Send hourly Telegram dashboard
+        if: steps.dedupe.outputs.skip != 'true'
         run: python send_telegram_hourly.py
