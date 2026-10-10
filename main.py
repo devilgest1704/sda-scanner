@@ -21,6 +21,12 @@ def _run_with_paper_telemetry():
     try:
         return engine.main()
     finally:
+        # Persist scored eligible AND rejected candidate snapshots after each
+        # scanner cycle. Diagnostics are paper-only and never block trading.
+        try:
+            _v30.write_scan_funnel("market_analysis.json")
+        except Exception as exc:
+            print("::warning::V30 candidate telemetry failed:", repr(exc))
         # Report generation must never mutate or replace the trading ledger.
         try:
             from pathlib import Path
