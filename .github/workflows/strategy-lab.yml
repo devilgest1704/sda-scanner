@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: '17 3 * * *'
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: strategy-lab-paper-shadow
   cancel-in-progress: false
@@ -23,6 +23,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_strategy_lab.py' -v
       - name: Test chronological research safeguards
         run: python -m unittest discover -s tests -p 'test_trade_cohort_research.py' -v
+      - name: Update durable closed-trade archive
+        run: python tools/export_paper_trades.py --positions positions.json --archive strategy_lab/closed_trades.json
       - name: Join candidate decisions to later SDA quotes (research only)
         run: python tools/candidate_price_tracker.py
       - name: Analyze observed closed-trade cohorts (research only)
@@ -47,6 +49,19 @@ jobs:
           assert x['challenger']['status']=='UNVALIDATED'
           print('Paper-only evidence gate OK')
           PY
+      - name: Persist research archives to repository
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f strategy_lab/closed_trades.json strategy_lab/candidate_outcomes.json
+          if git diff --cached --quiet; then
+            echo 'No research archive changes'
+          else
+            git commit -m 'chore: persist paper research archives [skip ci]'
+            git push origin HEAD:main
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: strategy-lab-report
