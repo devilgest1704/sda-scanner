@@ -87,10 +87,10 @@ def render_png(report,path):
     im.save(path,"PNG")
 
 def telegram(report,png):
-    token=os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TG_BOT_TOKEN")
-    chat=os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("TG_CHAT_ID")
+    token=os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TG_BOT_TOKEN") or os.environ.get("TELEGRAM_TOKEN")
+    chat=os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("TG_CHAT_ID") or os.environ.get("CHAT_ID")
     if not token or not chat:
-        print("Telegram skipped: TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not configured")
+        print("Telegram skipped: bot token or chat id not configured")
         return False
     # Telegram Bot API sendPhoto multipart/form-data, no extra dependencies.
     import uuid
