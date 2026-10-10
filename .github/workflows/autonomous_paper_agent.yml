@@ -85,6 +85,9 @@ jobs:
           exit 1
 
       - name: Draw and send graphical paper-agent status to Telegram
+        # Frequent source commits run tests, not an avalanche of user alerts.
+        # Scheduled six-hour and manually requested runs send the PNG.
+        if: github.event_name != 'push'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
