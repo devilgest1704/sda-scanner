@@ -5,6 +5,11 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/strategy-lab.yml'
+      - 'tools/strategy_lab.py'
+      - 'tools/trade_cohort_research.py'
+      - 'tools/candidate_price_tracker.py'
+      - 'tests/test_strategy_lab.py'
+      - 'tests/test_trade_cohort_research.py'
   schedule:
     - cron: '17 3 * * *'
 permissions:
@@ -46,7 +51,9 @@ jobs:
               if isinstance(data,dict):
                   closed=data.get('closed_trades',[])
                   positions=data.get('positions',{})
-                  print(f'LEDGER AUDIT {name}: VALID size={size} closed={len(closed) if isinstance(closed,list) else "INVALID"} open={len(positions) if isinstance(positions,dict) else "INVALID"} keys={list(data)[:15]}')
+                  trades=data.get('trades')
+                  optimizer_count=len(trades) if isinstance(trades,(dict,list)) else 'N/A'
+                  print(f'LEDGER AUDIT {name}: VALID size={size} closed={len(closed) if isinstance(closed,list) else "INVALID"} open={len(positions) if isinstance(positions,dict) else "INVALID"} optimizer_trades={optimizer_count} keys={list(data)[:15]}')
               elif isinstance(data,list):
                   print(f'LEDGER AUDIT {name}: VALID size={size} rows={len(data)}')
               else:
@@ -93,7 +100,11 @@ jobs:
           assert x['production_mutated'] is False
           assert x['promotion_eligible'] is False
           assert x['challenger']['status']=='UNVALIDATED'
-          print('Paper-only evidence gate OK')
+          assert x['cohort_evidence']['validates_new_strategy'] is False
+          assert x['candidate_evidence']['promotion_eligible'] is False
+          assert x['candidate_evidence']['observed_15m'] <= x['candidate_evidence']['candidate_snapshots']
+          assert x['candidate_evidence']['observed_60m'] <= x['candidate_evidence']['candidate_snapshots']
+          print('Paper-only evidence gate OK:', x['cohort_evidence'], x['candidate_evidence'])
           PY
       - name: Persist research archives to repository
         if: github.ref == 'refs/heads/main'
