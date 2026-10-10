@@ -29,10 +29,10 @@ class ForwardPaperTests(unittest.TestCase):
     def test_shadow_entries_do_not_execute_or_use_current_quote_as_exit(self):
         state = default_state()
         result = step(state, market(T0), funnel(T0))
-        self.assertEqual(result["opened"], len(POLICIES))
+        self.assertEqual(result["opened"], len([n for n in POLICIES if not n.startswith("research_watch")]))
         self.assertEqual(result["closed"], 0)
-        for st in state["strategies"].values():
-            self.assertEqual(len(st["positions"]), 1)
+        for name,st in state["strategies"].items():
+            self.assertEqual(len(st["positions"]), 0 if name.startswith("research_watch") else 1)
             self.assertEqual(len(st["trades"]), 0)
         self.assertEqual(step(state, market(T0), funnel(T0))["status"], "already_processed")
 
@@ -41,8 +41,9 @@ class ForwardPaperTests(unittest.TestCase):
         step(state, market(T0), funnel(T0))
         t1 = T0 + timedelta(minutes=5)
         result = step(state, market(t1, 0.965), funnel(t1, price_sda=0.965))
-        self.assertEqual(result["closed"], len(POLICIES))
-        for st in state["strategies"].values():
+        self.assertEqual(result["closed"], len([n for n in POLICIES if not n.startswith("research_watch")]))
+        for name,st in state["strategies"].items():
+            if name.startswith("research_watch"): continue
             self.assertEqual(len(st["trades"]), 1)
             trade = st["trades"][0]
             self.assertEqual(trade["reason"], "STOP")
@@ -69,6 +70,10 @@ class ForwardPaperTests(unittest.TestCase):
         self.assertFalse(eligible({**base, "phase": "WATCH"}, POLICIES["baseline"]))
         self.assertFalse(eligible({**base, "trades_1h": 8}, POLICIES["baseline"]))
         self.assertFalse(eligible({**base, "quality": 50}, POLICIES["baseline"]))
+        watch = {**base, "phase": "WATCH", "snapshot_impulse": 13}
+        self.assertTrue(eligible(watch, POLICIES["research_watch"], research_watch=True))
+        self.assertFalse(eligible(watch, POLICIES["baseline"]))
+        self.assertFalse(eligible(watch, POLICIES["research_watch"]))
 
     def test_future_market_timestamp_is_rejected(self):
         state = default_state()
