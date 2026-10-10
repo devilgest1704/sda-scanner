@@ -43,7 +43,9 @@ jobs:
           x=json.load(open("v30_ai_optimizer.json",encoding="utf-8"))
           assert x["mode"]=="PAPER_ONLY"
           assert x["guardrails"]["real_trading"] is False
-          assert x["auto_apply"] is True
+          assert x["auto_apply"] is False
+          assert x["legacy_optimizer_research_only"] is True
+          assert x.get("promotion_applied") is not True
           print("Optimizer guardrails OK")
           PY
 
