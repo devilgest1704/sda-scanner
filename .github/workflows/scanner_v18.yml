@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: sda-scanner-paper
@@ -110,5 +111,8 @@ jobs:
           PY
 
       - name: Run SDA Scanner V18 continuously
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SCANNER_OPTIMIZER_INTERVAL_SECONDS: '3600'
         run: bash run_scanner_v18.sh
 
