@@ -110,11 +110,6 @@ maybe_dispatch_optimizer() {
   fi
   local now last_run last_epoch age
   now="$(date +%s)"
-  # Check at most once every 15 minutes to avoid unnecessary Actions API calls.
-  if [ $((now - last_optimizer_probe)) -lt 900 ]; then
-    return 0
-  fi
-  last_optimizer_probe="$now"
   if [ -z "${GH_TOKEN:-}" ] || [ -z "${GITHUB_REPOSITORY:-}" ]; then
     echo "::warning::AUTONOMOUS OPTIMIZER: missing Actions token or repository; schedule remains fallback."
     return 0
@@ -279,6 +274,11 @@ while true; do
   if [ $((now - last_checkpoint)) -ge "$CHECKPOINT" ]; then
     checkpoint_state
     last_checkpoint="$now"
-    maybe_dispatch_optimizer
+    if [ $((now - last_optimizer_probe)) -ge 900 ]; then
+      last_optimizer_probe="$now"
+      # Network API calls run in the background: never delay the next paper
+      # scan or risk/stop processing while checking the optimizer cadence.
+      maybe_dispatch_optimizer &
+    fi
   fi
 done
