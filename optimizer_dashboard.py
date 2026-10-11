@@ -11,7 +11,8 @@ import json
 import os
 import time
 
-import requests
+import urllib.error
+import urllib.request
 
 BASE = "https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/"
 AUTO = "strategy_lab/autonomous_agent_report.json"
@@ -40,14 +41,17 @@ def load_report(path):
         raise ValueError("Unexpected optimizer report path")
     if os.environ.get("SDA_REMOTE_STATE") == "1":
         try:
-            response = requests.get(
-                BASE + path, params={"ts": int(time.time())},
-                headers={"Cache-Control": "no-cache"}, timeout=(2, 6),
-            )
-            response.raise_for_status()
-            result = response.json()
+            url = BASE + path + "?ts=" + str(int(time.time()))
+            req = urllib.request.Request(url, headers={"Cache-Control": "no-cache",
+                                                      "User-Agent": "SDA-Optimizer-Dashboard"})
+            with urllib.request.urlopen(req, timeout=7) as response:
+                # Read-only reports are small; bound the payload to 256 KiB.
+                raw = response.read(262145)
+                if len(raw) > 262144:
+                    raise ValueError("Optimizer report exceeds safe size")
+            result = json.loads(raw.decode("utf-8"))
             return result if isinstance(result, dict) else None
-        except (requests.RequestException, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             print(f"Optimizer report unavailable {path}: {type(exc).__name__}")
             return None
     try:
