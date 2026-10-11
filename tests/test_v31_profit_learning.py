@@ -75,7 +75,7 @@ class V31ProfitLearningTests(unittest.TestCase):
         self.assertEqual(quote_path(observed_trade(t))[1], "paper_fee_alignment_failed")
 
     def test_cohorts_include_score_exit_and_giveback(self):
-        src = [trade(0), trade(1, (1, 1.04, 1.01)),
+        src = [trade(0), trade(1, (1, 1.04, 1.04)),
                trade(2, (1, .98, .96))]
         report = analyze(src)
         self.assertEqual(report["historical_observed"]["overall"]["closed"], 3)
