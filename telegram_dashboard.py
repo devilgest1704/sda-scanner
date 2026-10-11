@@ -65,8 +65,10 @@ def answer_callback(callback_id,text=None):
         if text:payload["text"]=text
         api("answerCallbackQuery",payload)
 
-def menu_keyboard():return {"inline_keyboard":[[{"text":"🔄 Refresh","callback_data":"REFRESH"}],[{"text":"📐 Technical Analysis","callback_data":"TECH"}],[{"text":"🤖 Paper Trading","callback_data":"PAPER"}],[{"text":"👛 Real Wallet & Positions","callback_data":"REAL"}],[{"text":"📊 Market Momentum","callback_data":"MOMENTUM"}],[{"text":"🐞 Market Debug","callback_data":"DEBUG"}]]}
+def menu_keyboard():return {"inline_keyboard":[[{"text":"🔄 Refresh","callback_data":"REFRESH"}],[{"text":"📐 Technical Analysis","callback_data":"TECH"}],[{"text":"🤖 Paper Trading","callback_data":"PAPER"}],[{"text":"🧠 AI Optimizer","callback_data":"OPTIMIZER"}],[{"text":"👛 Real Wallet & Positions","callback_data":"REAL"}],[{"text":"📊 Market Momentum","callback_data":"MOMENTUM"}],[{"text":"🐞 Market Debug","callback_data":"DEBUG"}]]}
 def paper_menu_keyboard():return {"inline_keyboard":[[{"text":"📊 Statistics","callback_data":"PAPER_STATS"}],[{"text":"⬅️ Main dashboard","callback_data":"MAIN"}]]}
+def optimizer_menu_keyboard():return {"inline_keyboard":[[{"text":"📊 Stav & Champion","callback_data":"OPTIMIZER"}],[{"text":"🧪 Testované strategie","callback_data":"OPTIMIZER_STRATEGIES"}],[{"text":"📈 V30 Research","callback_data":"OPTIMIZER_V30"}],[{"text":"⬅️ Main dashboard","callback_data":"MAIN"}]]}
+
 def real_menu_keyboard():return {"inline_keyboard":[[{"text":"📈 Real Statistics","callback_data":"REAL_STATS"}],[{"text":"⬅️ Main dashboard","callback_data":"MAIN"}]]}
 def back_keyboard():return {"inline_keyboard":[[{"text":"⬅️ Main dashboard","callback_data":"MAIN"}]]}
 
@@ -77,6 +79,19 @@ def _analysis(td):
 def market_momentum_report():return "📊 MARKET MOMENTUM\n\nRead-only diagnostic"
 def technical_report():return "📐 TECHNICAL ANALYSIS\n\nRead-only diagnostic"
 def paper_statistics_report():return "📊 PAPER TRADING • STATISTICS\n\nRead-only"
+
+def optimizer_overview_report():
+    from optimizer_dashboard import current_overview
+    return current_overview()
+
+def optimizer_strategies_report():
+    from optimizer_dashboard import current_strategies
+    return current_strategies()
+
+def optimizer_research_report():
+    from optimizer_dashboard import current_research
+    return current_research()
+
 
 def main_dashboard():
     try:

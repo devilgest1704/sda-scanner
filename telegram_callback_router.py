@@ -51,12 +51,27 @@ def patch_dashboard(dashboard):
         except Exception as exc:return False,str(exc)
     def handle_update(update,state=None):
         cb=(update or {}).get("callback_query") or {};data=str(cb.get("data") or "")
-        if data not in ("MAIN","REAL","REAL_STATS","REFRESH","DEBUG"):
+        if data not in ("MAIN","REAL","REAL_STATS","REFRESH","DEBUG","OPTIMIZER","OPTIMIZER_STRATEGIES","OPTIMIZER_V30"):
             return original_handle(update,state)
         state=state if state is not None else {"offset":0};state["offset"]=max(int(state.get("offset",0)),int((update or {}).get("update_id",0))+1)
         msg=cb.get("message") or {};chat_id=(msg.get("chat") or {}).get("id");message_id=msg.get("message_id")
         if not _authorized(chat_id):dashboard.answer_callback(cb.get("id"),"Unauthorized");return state
         dashboard.answer_callback(cb.get("id"))
+        if data in ("OPTIMIZER", "OPTIMIZER_STRATEGIES", "OPTIMIZER_V30"):
+            try:
+                name = {
+                    "OPTIMIZER": "optimizer_overview_report",
+                    "OPTIMIZER_STRATEGIES": "optimizer_strategies_report",
+                    "OPTIMIZER_V30": "optimizer_research_report",
+                }[data]
+                report_fn = getattr(dashboard, name, None)
+                text = report_fn() if callable(report_fn) else "⚠️ Statistiky optimizeru nejsou dostupné."
+            except Exception as exc:
+                print(f"Optimizer menu error: {type(exc).__name__}: {exc}")
+                text = "⚠️ Statistiky optimizeru nelze právě načíst."
+            keyboard = dashboard.optimizer_menu_keyboard()
+            _safe_edit(chat_id, message_id, text, keyboard)
+            return state
         if data=="MAIN":
             try:text=dashboard.main_dashboard();keyboard=dashboard.menu_keyboard();_safe_edit(chat_id,message_id,text,keyboard)
             except Exception as exc:_safe_edit(chat_id,message_id,f"⚠️ Main dashboard error: {type(exc).__name__}: {exc}",dashboard.menu_keyboard())
