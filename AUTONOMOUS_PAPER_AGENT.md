@@ -12,7 +12,7 @@ rewriting arbitrary source code.
 2. `tools.forward_shadow_agent` consumes the latest snapshot with subsequent
    per-token transaction timestamps. It journals **separate** paper positions
    for each strategy. No wallet/private-key API is called.
-3. Every six hours, the `Autonomous SDA Paper Agent` workflow evaluates
+3. Every hour, the `Autonomous SDA Paper Agent` workflow evaluates
    forward-only closed virtual trades; chronological **training** chooses one
    challenger and **holdout** judges it. Unvalidated WATCH observations remain
    research-only and cannot be promoted.
@@ -23,7 +23,8 @@ rewriting arbitrary source code.
 5. Watchdog restarts an older scanner after its grace period to pick up the
    new Champion filters. A promoted Champion is rolled back automatically
    if enough subsequent **actual paper-trade** results breach limits.
-6. Every scheduled optimizer run generates a Telegram PNG with status and
+6. The running scanner checks recent optimizer runs after state checkpoints (at most once every 15 minutes) and dispatches a replacement only if the last scheduled/manual run is at least one hour old. GitHub schedule remains enabled as a fallback. This does not run or interrupt paper exits.
+7. Every scheduled optimizer run generates a Telegram PNG with status and
    per-strategy outcomes. Source-commit test runs suppress Telegram spam.
 
 ## Research policies
@@ -76,9 +77,10 @@ support WATCH entries.
 Sources: `strategy_lab/forward_shadow_state.json`,
 `strategy_lab/autonomous_agent_report.json`,
 `v30_agent_config.json`, `paper_stats.json`.
+Exclusion reasons for virtual trades now distinguish stale-timeout, quote gaps, too-long observation, and implausible jumps. `learning_data_quality` in the agent report counts excluded records per policy. Excluded outcomes remain excluded; neither the observed-quote guard nor training sample minimums are loosened.
+
 The scanner state checkpoint is authoritative. Do not reset it to `{}`
 or populate historic forward results from present-day quotes.
 
 Run unit/integration checks using the GitHub Actions workflow
-`Autonomous SDA Paper Agent`; the scheduled job runs at minute 42 every
-six hours UTC.
+`Autonomous SDA Paper Agent`; the scheduled job runs at minute 42 of every hour UTC, with scanner-driven dispatch recovery if an hourly schedule is missed.
