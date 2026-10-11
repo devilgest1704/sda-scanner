@@ -4,8 +4,16 @@ on:
   push:
     branches:
       - main
+  # Recover immediately when the long-running scanner finishes, times out,
+  # or is cancelled for a source/config refresh. Scheduled jobs can be delayed
+  # or missed, so polling must not be our only automatic recovery trigger.
+  workflow_run:
+    workflows:
+      - SDA Scanner V18
+    types:
+      - completed
   schedule:
-    # Run off the top of the hour to reduce GitHub scheduler congestion.
+    # Secondary safety net for missed workflow_run events or unstarted workers.
     - cron: '2-59/5 * * * *'
   workflow_dispatch:
 
@@ -33,8 +41,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The scanner itself is now a long-lived 60s worker. The watchdog is
-          # only a recovery mechanism for the case where that worker ended.
+          # The scanner itself is a long-lived 60s worker. This watchdog
+          # recovers a stopped worker after completion events and via cron.
           # Do not create queued/pending scanner runs while one is already
           # active (or another dispatch is waiting for the concurrency slot).
           active_or_pending="$(timeout 30s gh run list \
