@@ -6,6 +6,10 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/autonomous_paper_agent.yml'
+      - 'optimizer_dashboard.py'
+      - 'telegram_dashboard.py'
+      - 'telegram_callback_router.py'
+      - 'tests/test_optimizer_dashboard.py'
       - 'tools/forward_shadow_agent.py'
       - 'tools/forward_shadow_optimizer.py'
       - 'run_scanner_v18.sh'
@@ -15,6 +19,10 @@ on:
   pull_request:
     paths:
       - '.github/workflows/autonomous_paper_agent.yml'
+      - 'optimizer_dashboard.py'
+      - 'telegram_dashboard.py'
+      - 'telegram_callback_router.py'
+      - 'tests/test_optimizer_dashboard.py'
       - 'tools/forward_shadow_agent.py'
       - 'tools/forward_shadow_optimizer.py'
       - 'run_scanner_v18.sh'
@@ -49,6 +57,11 @@ jobs:
 
       - name: Verify scanner heartbeat script syntax
         run: bash -n run_scanner_v18.sh
+
+      - name: Test optimizer Telegram menu without network access
+        run: |
+          python -m py_compile optimizer_dashboard.py telegram_dashboard.py telegram_callback_router.py
+          python -m unittest discover -s tests -p 'test_optimizer_dashboard.py' -v
 
       - name: Test forward-only learning, holdout selection and risk rollback
         run: python -m unittest discover -s tests -p 'test_forward_*.py' -v
