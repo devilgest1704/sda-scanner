@@ -110,6 +110,8 @@ class ForwardPaperTests(unittest.TestCase):
             self.assertFalse(st["positions"])
             self.assertEqual(st["trades"][0]["reason"], "STALE_TIMEOUT")
             self.assertFalse(st["trades"][0]["valid_for_learning"])
+            self.assertEqual(st["trades"][0]["learning_exclusion_reasons"],
+                             ["stale_timeout_no_observed_exit_quote"])
 
     def test_future_market_timestamp_is_rejected(self):
         state = default_state()
@@ -127,6 +129,8 @@ class ForwardPaperTests(unittest.TestCase):
                 continue
             self.assertEqual(len(st["trades"]), 1)
             self.assertFalse(st["trades"][0]["valid_for_learning"])
+            self.assertIn("quote_gap_over_30m",
+                          st["trades"][0]["learning_exclusion_reasons"])
 
 
 if __name__ == "__main__":

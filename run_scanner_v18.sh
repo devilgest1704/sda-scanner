@@ -15,6 +15,7 @@ set -euo pipefail
 INTERVAL="${SCANNER_INTERVAL_SECONDS:-60}"
 CHECKPOINT="${SCANNER_STATE_CHECKPOINT_SECONDS:-300}"
 CONTINUOUS="${SCANNER_CONTINUOUS:-true}"
+OPTIMIZER_INTERVAL="${SCANNER_OPTIMIZER_INTERVAL_SECONDS:-3600}"
 
 if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]] || [ "$INTERVAL" -lt 1 ]; then
   echo "Invalid SCANNER_INTERVAL_SECONDS=$INTERVAL" >&2
@@ -22,6 +23,11 @@ if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]] || [ "$INTERVAL" -lt 1 ]; then
 fi
 if ! [[ "$CHECKPOINT" =~ ^[0-9]+$ ]] || [ "$CHECKPOINT" -lt 30 ]; then
   echo "Invalid SCANNER_STATE_CHECKPOINT_SECONDS=$CHECKPOINT" >&2
+  exit 1
+fi
+
+if ! [[ "$OPTIMIZER_INTERVAL" =~ ^[0-9]+$ ]] || [ "$OPTIMIZER_INTERVAL" -lt 900 ]; then
+  echo "Invalid SCANNER_OPTIMIZER_INTERVAL_SECONDS=$OPTIMIZER_INTERVAL" >&2
   exit 1
 fi
 
@@ -91,6 +97,49 @@ checkpoint_state() {
     git reset -q HEAD -- market_data.json 2>/dev/null || true
     sleep 2
   done
+}
+
+# Scanner checkpoint is the reliable heartbeat. GitHub scheduled workflows
+# may be delayed or skipped. Dispatch the independent optimizer after a
+# successful scan checkpoint; never run the optimizer in this paper writer,
+# never block paper exits, and never dispatch more often than its cadence.
+last_optimizer_probe=0
+maybe_dispatch_optimizer() {
+  if [ -z "${GITHUB_ACTIONS:-}" ] || [ "$CONTINUOUS" != "true" ]; then
+    return 0
+  fi
+  local now last_run last_epoch age
+  now="$(date +%s)"
+  if [ -z "${GH_TOKEN:-}" ] || [ -z "${GITHUB_REPOSITORY:-}" ]; then
+    echo "::warning::AUTONOMOUS OPTIMIZER: missing Actions token or repository; schedule remains fallback."
+    return 0
+  fi
+  if ! last_run="$(timeout 30s gh run list \
+    --workflow autonomous_paper_agent.yml \
+    --repo "$GITHUB_REPOSITORY" --branch main --limit 30 \
+    --json createdAt,event \
+    --jq '[.[] | select(.event == "schedule" or .event == "workflow_dispatch") | .createdAt] | first // empty')"; then
+    echo "::warning::AUTONOMOUS OPTIMIZER: unable to query recent runs; retry next probe."
+    return 0
+  fi
+  if [ -n "$last_run" ]; then
+    if ! last_epoch="$(date -u -d "$last_run" +%s)"; then
+      echo "::warning::AUTONOMOUS OPTIMIZER: invalid last run timestamp; retry next probe."
+      return 0
+    fi
+    age=$((now - last_epoch))
+    if [ "$age" -ge 0 ] && [ "$age" -lt "$OPTIMIZER_INTERVAL" ]; then
+      echo "AUTONOMOUS OPTIMIZER: last scheduled/manual run ${age}s ago; next check later."
+      return 0
+    fi
+  fi
+  if timeout 30s gh workflow run autonomous_paper_agent.yml \
+      --repo "$GITHUB_REPOSITORY" --ref main; then
+    echo "AUTONOMOUS OPTIMIZER: hourly recovery run dispatched."
+  else
+    echo "::warning::AUTONOMOUS OPTIMIZER: dispatch failed; retry next probe."
+  fi
+  return 0
 }
 
 run_one_scan() {
@@ -225,5 +274,11 @@ while true; do
   if [ $((now - last_checkpoint)) -ge "$CHECKPOINT" ]; then
     checkpoint_state
     last_checkpoint="$now"
+    if [ $((now - last_optimizer_probe)) -ge 900 ]; then
+      last_optimizer_probe="$now"
+      # Network API calls run in the background: never delay the next paper
+      # scan or risk/stop processing while checking the optimizer cadence.
+      maybe_dispatch_optimizer &
+    fi
   fi
 done

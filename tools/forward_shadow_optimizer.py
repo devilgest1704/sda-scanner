@@ -147,6 +147,32 @@ def report(state, config, real_ledger, now=None):
         valid = len(all_rows[name])
         coverage[name] = round(100 * valid / len(all_records), 2) if all_records else 0.0
     model["quote_coverage_pct"] = coverage
+    # Explain why a strategy lacks usable forward evidence. Do not infer
+    # missing prices and do not weaken the observed-quote promotion gate.
+    model["learning_data_quality"] = {}
+    for name, strategy in strategies.items():
+        if name not in POLICIES:
+            continue
+        journal = strategy.get("trades") or []
+        invalid = [r for r in journal if isinstance(r, dict)
+                   and r.get("valid_for_learning") is not True]
+        breakdown = {}
+        for trade in invalid:
+            reasons = trade.get("learning_exclusion_reasons") or []
+            if not reasons:
+                # Older checkpoints may predate explicit exclusion codes.
+                reasons = (["stale_timeout_no_observed_exit_quote"]
+                           if trade.get("reason") == "STALE_TIMEOUT"
+                           else ["legacy_unknown_quote_quality"])
+            for reason in set(reasons):
+                breakdown[str(reason)] = breakdown.get(str(reason), 0) + 1
+        model["learning_data_quality"][name] = {
+            "total_closed": len(journal),
+            "valid_closed": len(all_rows[name]),
+            "excluded_closed": len(invalid),
+            "excluded_by_reason": breakdown,
+            "open_virtual_positions": len(strategy.get("positions") or {}),
+        }
     unique_times = sorted({r["closed_at"] for rows in all_rows.values() for r in rows})
     if len(unique_times) < MIN_TRAIN + MIN_HOLDOUT:
         model["status"] = "COLLECTING_FORWARD_TRADES"

@@ -133,6 +133,28 @@ class ForwardOptimizerTests(unittest.TestCase):
         self.assertFalse(result["promotion_applied"])
         self.assertEqual(updated, config)
 
+    def test_diagnostics_explain_excluded_forward_evidence(self):
+        state = default_state()
+        state["updated_at"] = NOW.isoformat()
+        state["strategies"]["baseline"]["trades"] = [
+            {"valid_for_learning": False, "learning_exclusion_reasons":
+             ["quote_gap_over_30m", "holding_time_over_4_5h"]},
+            {"valid_for_learning": False, "reason": "STALE_TIMEOUT"},
+            {"valid_for_learning": False},
+        ]
+        result, unchanged = report(state, copy.deepcopy(BASE),
+                                   {"closed_trades": []}, NOW)
+        self.assertEqual(result["status"], "COLLECTING_FORWARD_TRADES")
+        q = result["learning_data_quality"]["baseline"]
+        self.assertEqual(q["total_closed"], 3)
+        self.assertEqual(q["excluded_closed"], 3)
+        self.assertEqual(q["excluded_by_reason"]["quote_gap_over_30m"], 1)
+        self.assertEqual(q["excluded_by_reason"]["holding_time_over_4_5h"], 1)
+        self.assertEqual(q["excluded_by_reason"]["stale_timeout_no_observed_exit_quote"], 1)
+        self.assertEqual(q["excluded_by_reason"]["legacy_unknown_quote_quality"], 1)
+        self.assertFalse(result["promotion_applied"])
+        self.assertEqual(unchanged["generation"], 0)
+
     def test_insufficient_events_no_autopromotion(self):
         state = default_state()
         state["updated_at"] = NOW.isoformat()

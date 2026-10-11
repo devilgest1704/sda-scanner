@@ -235,7 +235,9 @@ def step(data, market, funnel):
                         "exit_price_sda": None, "pnl_sda": -SIZE_SDA,
                         "roi_pct": -100.0, "reason": "STALE_TIMEOUT",
                         "quote_gap_minutes": round((ts-last).total_seconds()/60,2),
-                        "valid_for_learning": False, "notional_sda": SIZE_SDA,
+                        "valid_for_learning": False,
+                        "learning_exclusion_reasons": ["stale_timeout_no_observed_exit_quote"],
+                        "notional_sda": SIZE_SDA,
                         "model": "conservative_risk_writeoff_no_observed_fill"
                     })
                     del positions[address]
@@ -260,15 +262,23 @@ def step(data, market, funnel):
             net = round(exit_profit(entry, price), 6)
             # Gapped or delayed observed prices are recorded but excluded from
             # trustworthy model selection.
-            valid = (gap <= MAX_QUOTE_GAP_MIN and duration <= MAX_HOURS + 0.5
-                     and 0.2 <= price/entry <= 4.0)
+            exclusion_reasons = []
+            if gap > MAX_QUOTE_GAP_MIN:
+                exclusion_reasons.append("quote_gap_over_30m")
+            if duration > MAX_HOURS + 0.5:
+                exclusion_reasons.append("holding_time_over_4_5h")
+            if not (0.2 <= price/entry <= 4.0):
+                exclusion_reasons.append("implausible_quote_jump")
+            valid = not exclusion_reasons
             trades.append({
                 "strategy": name, "address": address,
                 "opened_at": position["opened_at"], "closed_at": stamp.isoformat(),
                 "entry_price_sda": entry, "exit_price_sda": price,
                 "pnl_sda": net, "roi_pct": round(net / SIZE_SDA * 100, 5),
                 "reason": reason, "quote_gap_minutes": round(gap, 2),
-                "valid_for_learning": valid, "notional_sda": SIZE_SDA,
+                "valid_for_learning": valid,
+                "learning_exclusion_reasons": exclusion_reasons,
+                "notional_sda": SIZE_SDA,
                 "model": "observed_quote_paper_not_executable_fill"
             })
             del positions[address]
