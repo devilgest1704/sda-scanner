@@ -502,6 +502,10 @@ def patch(main_module,engine):
                 samples=[];pos["pump_price_samples"]=samples
             samples.append({
                 "at":observed.isoformat(),"price_sda":cur,"gross_roi_pct":round(roi,4),
+                # Preserve the timestamp evidence required for safe future
+                # earlier-only exit research. No stop/exit decision changes.
+                "quote_at":a.get("last_transaction"),
+                "quote_age_seconds":round(float(data_age),1),
                 "mfe_pct":round(mfe,4),"mae_pct":round(pos["pump_mae_pct"],4),
                 "score":n(s.get("pump_score")),"quality":n(s.get("pump_quality")),
                 "impulse":n(s.get("pump_change")),"phase":s.get("pump_phase"),
