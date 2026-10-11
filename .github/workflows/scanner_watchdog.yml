@@ -78,9 +78,31 @@ jobs:
                 if [ -n "$worker_sources" ] && [ "$current_sources" != "$worker_sources" ]; then
                   echo "Worker $run_id has outdated source; requesting controlled replacement."
                   timeout 30s gh run cancel "$run_id" --repo "${{ github.repository }}"
-                  # The next watchdog checks that the old worker stopped
-                  # before dispatching. It must never overlap paper writers.
-                  exit 0
+                  # Wait for GitHub to confirm that the prior paper writer
+                  # has stopped before dispatching. Leaving immediately here
+                  # created multi-hour gaps when scheduled workflows stalled.
+                  old_status=""
+                  for poll in 1 2 3 4 5 6 7 8 9 10 11 12; do
+                    sleep 4
+                    old_status="$(timeout 15s gh run view "$run_id" \
+                      --repo "${{ github.repository }}" --json status --jq '.status' || true)"
+                    echo "Old scanner $run_id: ${old_status:-unknown} (check $poll/12)"
+                    if [ "$old_status" = "completed" ]; then
+                      break
+                    fi
+                  done
+                  if [ "$old_status" != "completed" ]; then
+                    echo "::warning::Old scanner has not stopped; refusing overlapping writers."
+                    exit 0
+                  fi
+                  # Recheck any new worker that may have been dispatched by
+                  # the workflow_run recovery event while we were waiting.
+                  active_or_pending="$(timeout 30s gh run list \
+                    --workflow scanner_v18.yml --repo "${{ github.repository }}" \
+                    --branch main --limit 20 --json status \
+                    --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending" or .status == "waiting" or .status == "requested")] | length')"
+                  echo "After stopping old worker: active/pending runs = ${active_or_pending}"
+                  # Fall through to the normal dispatch block if it is zero.
                 fi
               else
                 echo "::warning::Could not inspect old scanner source within 45s; will retry later."
