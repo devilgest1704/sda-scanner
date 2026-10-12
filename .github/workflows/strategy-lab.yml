@@ -14,12 +14,16 @@ on:
       - 'tests/test_paper_trade_lessons.py'
       - 'tools/v31_profit_learning.py'
       - 'tests/test_v31_profit_learning.py'
+      - 'tools/v30_exit_parity.py'
+      - 'tests/test_v30_exit_parity.py'
       - 'v30_pump_hunter.py'
   pull_request:
     paths:
       - '.github/workflows/strategy-lab.yml'
       - 'tools/v31_profit_learning.py'
       - 'tests/test_v31_profit_learning.py'
+      - 'tools/v30_exit_parity.py'
+      - 'tests/test_v30_exit_parity.py'
       - 'v30_pump_hunter.py'
   schedule:
     - cron: '17 3 * * *'
@@ -47,9 +51,10 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_paper_trade_lessons.py' -v
       - name: Test V31 profit-learning and V30 exit telemetry
         run: |
-          python -m py_compile v30_pump_hunter.py tools/v31_profit_learning.py
+          python -m py_compile v30_pump_hunter.py tools/v31_profit_learning.py tools/v30_exit_parity.py
           python -m unittest discover -s tests -p 'test_v31_profit_learning.py' -v
           python -m unittest discover -s tests -p 'test_v30_telemetry.py' -v
+          python -m unittest discover -s tests -p 'test_v30_exit_parity.py' -v
       - name: Verify large paper ledger and archive without truncation
         run: |
           python - <<'PY'
@@ -111,6 +116,13 @@ jobs:
           assert r['promotion_eligible'] is False
           assert r['automatically_applied'] is False
           assert r['exit_research']['selection_uses_train_only'] is True
+          assert r['v30_exit_parity']['can_unlock_paper_autopromotion'] is False
+          assert r['v30_exit_parity']['runtime_entry_exit_parity_verified'] is False
+          assert (r['v30_exit_parity']['matched'] +
+                  r['v30_exit_parity']['mismatched'] +
+                  r['v30_exit_parity']['excluded']
+                  == r['v30_exit_parity']['audited'])
+          print('V30 exit replay evidence:', r['v30_exit_parity'])
           print('V31 read-only evidence:',r['data_quality'])
           PY
       - name: Join candidate decisions to later SDA quotes (research only)
