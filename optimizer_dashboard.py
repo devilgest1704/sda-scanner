@@ -32,6 +32,7 @@ STATUSES = {
     "WAITING_FOR_NEW_EVIDENCE": "Čeká na nové obchody",
     "CHAMPION_ALREADY_SELECTED": "Champion se nemění",
     "UNKNOWN_INCUMBENT_POLICY": "Aktivní strategii nelze bezpečně ověřit",
+    "RUNTIME_PARITY_UNVERIFIED": "Výstupy Shadow a V30 nejsou dosud srovnatelné",
 }
 
 
