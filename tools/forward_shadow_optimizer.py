@@ -94,6 +94,14 @@ def report(state, config, real_ledger, now=None):
             "live_buy_rules_modified": False,
             "caveat": "MACD arms use observed-quote Shadow exits, not V30 execution; no verified profit yet",
         },
+        "v32_breakout": {
+            "mode": "RESEARCH_ONLY",
+            "policies": ["research_breakout_volume_trend"],
+            "may_promote_champion": False,
+            "live_buy_rules_modified": False,
+            "trade_model": "Independent WATCH/IGNITION breakout volume trend shadow portfolio",
+            "caveat": "Transaction-based signals and observed quotes; no execution parity or profitable forward holdout proved",
+        },
         "runtime_parity": {
             "verified": RUNTIME_EXECUTION_PARITY_VERIFIED,
             "shadow_exits": "fixed 2.5% stop, +8% take, -3.5% trailing, 4h timeout",

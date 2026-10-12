@@ -53,6 +53,18 @@ class OptimizerDashboardTests(unittest.TestCase):
         self.assertIn("vyřazeno 4", result)
         self.assertLess(len(result), 3900)
 
+    def test_breakout_strategy_is_labeled_research_only(self):
+        from copy import deepcopy
+        data = deepcopy(AUTO)
+        data["strategies"]["research_breakout_volume_trend"] = {
+            "all": {"closed": 2, "net_sda": 3.21, "win_rate_pct": 50,
+                    "profit_factor": 1.4}
+        }
+        txt = od.strategies_report(data)
+        self.assertIn("research_breakout_volume_trend (V32 Breakout výzkum)", txt)
+        self.assertIn("automaticky nenasazují", txt)
+        self.assertIn("+3.21 SDA", txt)
+
     def test_macd_shadow_variants_are_labeled_research_only(self):
         from copy import deepcopy
         data = deepcopy(AUTO)

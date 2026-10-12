@@ -12,6 +12,8 @@ import math
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tools.v32_breakout import research_signal_from_analysis, breakout_research_eligible
+
 STATE = Path("strategy_lab/forward_shadow_state.json")
 SIZE_SDA = 50.0
 FEE_AND_SLIPPAGE = 0.011  # each side; conservative 2.2% round-trip
@@ -38,7 +40,13 @@ POLICIES = {
     # Identical numerical entry gates to baseline; MACD is the sole addition.
     "research_macd_antipump": {"entry_score": 68, "quality": 52, "impulse": 8, "buy_ratio": 1.10, "trades": 5},
     "research_macd_confirmation": {"entry_score": 68, "quality": 52, "impulse": 8, "buy_ratio": 1.10, "trades": 5},
+    # Independent early-trend research may evaluate WATCH as well as IGNITION.
+    "research_breakout_volume_trend": {
+        "entry_score": 55, "quality": 48, "impulse": 4,
+        "buy_ratio": 1.15, "trades": 8,
+    },
 }
+BREAKOUT_RESEARCH_MODE = "research_breakout_volume_trend"
 MACD_RESEARCH_MODES = frozenset(("research_macd_antipump", "research_macd_confirmation"))
 MACD_BAR_SECONDS = {"5m": 300, "15m": 900}
 MIN_MACD_CLOSED_BARS = 35
@@ -172,6 +180,8 @@ def macd_research_decision(row, name):
 def eligible(c, filters, research_watch=False, macd_mode=None):
     if not isinstance(c, dict):
         return False
+    if macd_mode == BREAKOUT_RESEARCH_MODE:
+        return breakout_research_eligible(c, filters)
     phase = c.get("phase")
     if research_watch:
         if phase != "WATCH":
@@ -244,6 +254,10 @@ def step(data, market, funnel):
              for frame in MACD_BAR_SECONDS}
             if market_ts <= ts else None
         )
+        candidate["v32_breakout"] = (
+            research_signal_from_analysis(info, ts, market_ts)
+            if market_ts <= ts else None
+        )
     # Diagnostics distinguish "no signal" from missing telemetry fields.
     activity_fields = ("trades_1h", "buy_ratio", "flow_1h", "volume_1h", "m15", "m1h")
     feature_complete = sum(all(finite(row.get(k)) is not None for k in activity_fields)
@@ -258,6 +272,11 @@ def step(data, market, funnel):
         phase_counts[phase] = phase_counts.get(phase, 0) + 1
     policy_qualified = {}
     policy_quote_ready = {}
+    breakout_records = [c for c in ranked if isinstance(c.get("v32_breakout"), dict)]
+    breakout_rejections = {}
+    for c in breakout_records:
+        for reason in set(c["v32_breakout"].get("rejection_reasons") or []):
+            breakout_rejections[str(reason)] = breakout_rejections.get(str(reason), 0) + 1
     def same_time_quote(c):
         addr = str(c.get("address") or "").lower()
         q = quotes.get(addr)
@@ -287,6 +306,22 @@ def step(data, market, funnel):
                       and isinstance(c["v32_macd"].get("5m"), dict) for c in ranked),
             "15m": sum(isinstance(c.get("v32_macd"), dict)
                        and isinstance(c["v32_macd"].get("15m"), dict) for c in ranked),
+        },
+        "breakout_research": {
+            "measured": len(breakout_records),
+            "eligible_from_transactions": sum(
+                c["v32_breakout"].get("eligible") is True for c in breakout_records),
+            "eligible_after_shadow_gates": policy_qualified.get(BREAKOUT_RESEARCH_MODE, 0),
+            "rejection_reasons": dict(sorted(
+                breakout_rejections.items(), key=lambda kv: (-kv[1], kv[0]))[:8]),
+            "qualified_samples": [
+                {"address": c.get("address"),
+                 "phase": c.get("phase"),
+                 "breakout_pct": c["v32_breakout"].get("breakout_pct"),
+                 "volume_multiple": c["v32_breakout"].get("volume_multiple"),
+                 "reason": c["v32_breakout"].get("reason")}
+                for c in breakout_records if c["v32_breakout"].get("eligible") is True
+            ][:5],
         },
         "most_common_rejection_gates": dict(sorted(
             rejected_gates.items(), key=lambda kv: (-kv[1], kv[0]))[:8]),
@@ -319,7 +354,9 @@ def step(data, market, funnel):
                         "valid_for_learning": False,
                         "learning_exclusion_reasons": ["stale_timeout_no_observed_exit_quote"],
                         "notional_sda": SIZE_SDA,
-                        "model": "conservative_risk_writeoff_no_observed_fill"
+                        "model": "conservative_risk_writeoff_no_observed_fill",
+                        **({"v32_breakout_at_entry": position.get("v32_breakout_at_entry")}
+                           if name == BREAKOUT_RESEARCH_MODE else {}),
                     })
                     del positions[address]
                     closed += 1
@@ -363,13 +400,26 @@ def step(data, market, funnel):
                 "model": "observed_quote_paper_not_executable_fill",
                 **({"v32_macd_at_entry": position.get("v32_macd_at_entry")}
                    if name in MACD_RESEARCH_MODES else {}),
+                **({"v32_breakout_at_entry": position.get("v32_breakout_at_entry")}
+                   if name == BREAKOUT_RESEARCH_MODE else {}),
             })
             del positions[address]
             closed += 1
         # Refractory period prevents a volatile token from producing an
         # artificial stream of repeated simulated entries.
         if len(positions) < MAX_POSITIONS:
-            for c in ranked:
+            # Rank only this research lane toward the *earlier* breakouts.
+            # All existing paper/Shadow policies retain their score ordering.
+            choices = (sorted(
+                ranked, key=lambda c: (
+                    not (isinstance(c.get("v32_breakout"), dict)
+                         and c["v32_breakout"].get("eligible") is True),
+                    abs((finite((c.get("v32_breakout") or {}).get("breakout_pct")) or 0)-2.0),
+                    -(finite((c.get("v32_breakout") or {}).get("volume_multiple")) or 0),
+                    -(finite(c.get("score")) or 0),
+                ))
+                if name == BREAKOUT_RESEARCH_MODE else ranked)
+            for c in choices:
                 address = str(c.get("address") or "").lower()
                 if not address or address in positions or not eligible(
                         c, filters, name.startswith('research_watch'), name):
@@ -393,6 +443,8 @@ def step(data, market, funnel):
                     "last_quote_at": stamp.isoformat(), "peak_price_sda": entry,
                     **({"v32_macd_at_entry": c.get("v32_macd")}
                        if name in MACD_RESEARCH_MODES else {}),
+                    **({"v32_breakout_at_entry": c.get("v32_breakout")}
+                       if name == BREAKOUT_RESEARCH_MODE else {}),
                 }
                 last_entry[address] = ts.isoformat()
                 opened += 1
@@ -421,7 +473,8 @@ def step(data, market, funnel):
             "complete_feature_rows": feature_complete,
             "entry_lane_rows": entry_lanes, "watch_lane_rows": watch_lanes,
             "policies": len(POLICIES),
-            "macd_research_paper_only": True}
+            "macd_research_paper_only": True,
+            "breakout_research_paper_only": True}
 
 
 def main():
