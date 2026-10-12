@@ -29,10 +29,10 @@ class ForwardPaperTests(unittest.TestCase):
     def test_shadow_entries_do_not_execute_or_use_current_quote_as_exit(self):
         state = default_state()
         result = step(state, market(T0), funnel(T0))
-        self.assertEqual(result["opened"], len([n for n in POLICIES if not n.startswith("research_watch")]))
+        self.assertEqual(result["opened"], len([n for n in POLICIES if not n.startswith("research_")]))
         self.assertEqual(result["closed"], 0)
         for name,st in state["strategies"].items():
-            self.assertEqual(len(st["positions"]), 0 if name.startswith("research_watch") else 1)
+            self.assertEqual(len(st["positions"]), 0 if name.startswith("research_") else 1)
             self.assertEqual(len(st["trades"]), 0)
         self.assertEqual(step(state, market(T0), funnel(T0))["status"], "already_processed")
 
@@ -55,9 +55,9 @@ class ForwardPaperTests(unittest.TestCase):
         step(state, market(T0), funnel(T0))
         t1 = T0 + timedelta(minutes=5)
         result = step(state, market(t1, 0.965), funnel(t1, price_sda=0.965))
-        self.assertEqual(result["closed"], len([n for n in POLICIES if not n.startswith("research_watch")]))
+        self.assertEqual(result["closed"], len([n for n in POLICIES if not n.startswith("research_")]))
         for name,st in state["strategies"].items():
-            if name.startswith("research_watch"): continue
+            if name.startswith("research_"): continue
             self.assertEqual(len(st["trades"]), 1)
             trade = st["trades"][0]
             self.assertEqual(trade["reason"], "STOP")
@@ -105,7 +105,7 @@ class ForwardPaperTests(unittest.TestCase):
         outcome = step(state, market(later, price=1.0, txn=T0), funnel(later))
         self.assertEqual(outcome["closed"], 6)
         for name, st in state["strategies"].items():
-            if name.startswith("research_watch"):
+            if name.startswith("research_"):
                 continue
             self.assertFalse(st["positions"])
             self.assertEqual(st["trades"][0]["reason"], "STALE_TIMEOUT")
@@ -124,7 +124,7 @@ class ForwardPaperTests(unittest.TestCase):
         late = T0 + timedelta(hours=2)
         step(state, market(late, 0.90), funnel(late, price_sda=0.90))
         for name, st in state["strategies"].items():
-            if name.startswith("research_watch"):
+            if name.startswith("research_"):
                 self.assertEqual(len(st["trades"]), 0)
                 continue
             self.assertEqual(len(st["trades"]), 1)

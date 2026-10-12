@@ -79,6 +79,29 @@ class ForwardOptimizerTests(unittest.TestCase):
         self.assertLess(result["quote_coverage_pct"]["quality"], 90.0)
         self.assertEqual(conf["generation"], 0)
 
+    def test_v32_macd_arms_cannot_be_promoted_even_if_highly_profitable(self):
+        state = samples()
+        for arm in ("research_macd_antipump", "research_macd_confirmation"):
+            state["strategies"][arm]["trades"] = [
+                {**r, "pnl_sda": 999.0}
+                for r in state["strategies"]["quality"]["trades"]
+            ]
+        with patch("tools.forward_shadow_optimizer.RUNTIME_EXECUTION_PARITY_VERIFIED", True):
+            result, conf = report(state, copy.deepcopy(BASE), {"closed_trades": []}, NOW)
+        self.assertEqual(result["selected_challenger"]["name"], "quality")
+        self.assertNotIn("research_macd", result["selected_challenger"]["name"])
+        self.assertFalse(result["real_trading"])
+
+    def test_new_research_arms_can_be_added_to_old_journal(self):
+        state = samples()
+        state["strategies"].pop("research_macd_antipump")
+        state["strategies"].pop("research_macd_confirmation")
+        result, _ = report(state, copy.deepcopy(BASE),
+                           {"closed_trades": []}, NOW)
+        self.assertIn("research_macd_antipump", state["strategies"])
+        self.assertIn("research_macd_confirmation", state["strategies"])
+        self.assertEqual(result["v32_macd"]["mode"], "RESEARCH_ONLY")
+
     def test_research_watch_cannot_become_champion(self):
         state = samples()
         state["strategies"]["research_watch"]["trades"] = [

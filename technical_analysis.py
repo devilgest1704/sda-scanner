@@ -14,6 +14,9 @@ from pathlib import Path
 
 MARKET_FILE = "market_data.json"
 TIMEFRAMES = {"1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800}
+INTRADAY_MACD_FRAMES = {"5m": 300, "15m": 900}
+MIN_INTRADAY_TRADED_BARS = 21  # 60% of the 35 closed bars
+MAX_INTRADAY_EMPTY_STREAK = 3
 MIN_RSI_POINTS = 15
 MIN_MACD_POINTS = 35
 MIN_TREND_POINTS = 20
@@ -216,9 +219,104 @@ def timeframe_analysis(candles):
     return result
 
 
-def analyze_token(token_data):
+
+def intraday_macd_analysis(history, seconds, as_of):
+    """Continuous-time, completed-candle MACD, research only.
+
+    The old general-purpose candle builder omits intervals without transactions,
+    incorrectly compressing time for short indicators. Here missing intervals
+    carry the LAST actually observed trade close, are counted as imputed, and
+    reject too sparse histories. The current incomplete candle is ALWAYS
+    excluded; no future transactions are used. Unavailable means NO signal,
+    never zero or bullish.
+    """
+    base = {
+        "available": False, "macd": None,
+        "last_completed_at": None, "reason": "insufficient_history",
+        "completed_bars": 0, "traded_bars": 0, "carried_bars": 0,
+        "max_empty_streak": None, "quote_age_seconds": None,
+        "method": "completed_fixed_interval_last_trade_close_with_bounded_carry",
+    }
+    if as_of is None or as_of.tzinfo is None or seconds <= 0:
+        return {**base, "reason": "invalid_as_of"}
+    as_of = as_of.astimezone(timezone.utc)
+    current_start = bucket_ts(as_of, seconds)
+    last_start = current_start - seconds
+    first_start = last_start - (MIN_MACD_POINTS - 1) * seconds
+    base["last_completed_at"] = datetime.fromtimestamp(current_start, timezone.utc).isoformat()
+    records = []
+    for tx in history if isinstance(history, list) else []:
+        if not isinstance(tx, dict):
+            continue
+        dt = parse_ts(tx.get("timestamp"))
+        p = num(tx.get("price"))
+        if (dt is None or dt > as_of or p is None or
+                not math.isfinite(p) or p <= 0):
+            continue
+        # Transaction order from external APIs is not guaranteed.
+        records.append((dt, p))
+    records.sort(key=lambda x: x[0])
+    latest_by_bucket = {}
+    prior_price = None
+    for dt, p in records:
+        key = bucket_ts(dt, seconds)
+        if key < first_start:
+            prior_price = p
+        elif first_start <= key <= last_start:
+            latest_by_bucket[key] = (dt, p)
+        # Ignore current, incomplete interval even if its price is known.
+    closes = []
+    last_quote_at = None
+    empty_streak = max_empty = traded = 0
+    for key in range(first_start, current_start, seconds):
+        hit = latest_by_bucket.get(key)
+        if hit is not None:
+            last_quote_at, prior_price = hit
+            traded += 1
+            empty_streak = 0
+        else:
+            empty_streak += 1
+            max_empty = max(max_empty, empty_streak)
+        if prior_price is None:
+            return {**base, "reason": "missing_initial_price"}
+        closes.append(prior_price)
+    quote_age = (as_of-last_quote_at).total_seconds() if last_quote_at else None
+    base.update({"completed_bars": len(closes), "traded_bars": traded,
+                 "carried_bars": len(closes)-traded,
+                 "max_empty_streak": max_empty, "quote_age_seconds": quote_age})
+    if traded < MIN_INTRADAY_TRADED_BARS:
+        return {**base, "reason": "insufficient_traded_bars"}
+    if max_empty > MAX_INTRADAY_EMPTY_STREAK:
+        return {**base, "reason": "too_many_consecutive_missing_bars"}
+    if quote_age is None or quote_age > max(600, 2*seconds):
+        return {**base, "reason": "last_completed_price_too_old"}
+    macd_value = macd(closes)
+    if macd_value is None:
+        return {**base, "reason": "insufficient_macd_bars"}
+    fast = ema(closes, 12)
+    slow = ema(closes, 26)
+    line = [f-s for f,s in zip(fast,slow)]
+    sig = ema(line, 9)
+    h = [a-b for a,b in zip(line,sig)]
+    # Express histograms as a percentage of the last *observed* close.
+    # Raw histograms cannot be compared across differently priced SDA tokens.
+    last = closes[-1]
+    macd_value.update({
+        "histogram_pct": round(100*h[-1]/last, 8),
+        "histogram_delta_pct": round(100*(h[-1]-h[-2])/last, 8),
+        "histogram_fading_2": h[-1] > 0 and h[-1] < h[-2] < h[-3],
+    })
+    return {**base, "available": True, "reason": "ok", "macd": macd_value}
+
+
+def analyze_token(token_data, as_of=None):
     history = token_data.get("transactions", []) if isinstance(token_data, dict) else []
-    return {name: timeframe_analysis(build_candles(history, seconds)) for name, seconds in TIMEFRAMES.items()}
+    results = {name: timeframe_analysis(build_candles(history, seconds))
+               for name, seconds in TIMEFRAMES.items()}
+    at = as_of or datetime.now(timezone.utc)
+    results.update({name: intraday_macd_analysis(history, seconds, at)
+                    for name, seconds in INTRADAY_MACD_FRAMES.items()})
+    return results
 
 
 def main():
@@ -234,24 +332,27 @@ def main():
         return
 
     analyzed = 0
+    as_of = parse_ts(market.get("updated_at")) or datetime.now(timezone.utc)
     for token_data in tokens.values():
         if not isinstance(token_data, dict):
             continue
         analysis = token_data.get("analysis")
         if not isinstance(analysis, dict):
             continue
-        analysis["technical"] = analyze_token(token_data)
+        analysis["technical"] = analyze_token(token_data, as_of)
         analyzed += 1
 
     market["technical_analysis"] = {
-        "version": 2,
+        "version": 3,
         "mode": "analysis_only",
         "updated_at": datetime.now(timezone.utc).isoformat(),
-        "timeframes": list(TIMEFRAMES.keys()),
+        "timeframes": list(TIMEFRAMES.keys()) + list(INTRADAY_MACD_FRAMES.keys()),
         "indicators": ["RSI14", "EMA20", "EMA50", "MACD12_26_9", "ATR14", "SUPPORT20", "RESISTANCE20"],
         "tokens_analyzed": analyzed,
         "history_source": "market_scanner transaction history",
         "history_expanded": True,
+        "intraday_macd": "research_only_closed_bars_no_future_price",
+        "intraday_missing_bars": "bounded_carry_forward_unavailable_if_sparse",
     }
     tmp = str(path) + ".tmp"
     Path(tmp).write_text(json.dumps(market, indent=2, ensure_ascii=False), encoding="utf-8")
