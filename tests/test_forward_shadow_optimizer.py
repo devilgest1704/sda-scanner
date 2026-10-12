@@ -1,6 +1,7 @@
 import copy
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 from tools.forward_shadow_agent import default_state
 from tools.forward_shadow_optimizer import report
 
@@ -36,7 +37,10 @@ def samples(positive=True):
 
 class ForwardOptimizerTests(unittest.TestCase):
     def test_can_promote_after_positive_forward_holdout(self):
-        result, conf = report(samples(), copy.deepcopy(BASE), {"closed_trades": []}, NOW)
+        # A validated parity fixture proves the optimizer math can still
+        # promote in isolation. Production does NOT have parity approval.
+        with patch("tools.forward_shadow_optimizer.RUNTIME_EXECUTION_PARITY_VERIFIED", True):
+            result, conf = report(samples(), copy.deepcopy(BASE), {"closed_trades": []}, NOW)
         self.assertEqual(result["status"], "PROMOTED_PAPER")
         self.assertTrue(result["promotion_applied"])
         self.assertEqual(conf["generation"], 1)
@@ -44,6 +48,14 @@ class ForwardOptimizerTests(unittest.TestCase):
         self.assertEqual(conf["previous_filters"], BASE["filters"])
         self.assertEqual(result["selected_challenger"]["name"], "quality")
         self.assertFalse(result["real_trading"])
+
+    def test_positive_shadow_results_cannot_promote_unmatched_runtime(self):
+        result, conf = report(samples(), copy.deepcopy(BASE), {"closed_trades": []}, NOW)
+        self.assertEqual(result["status"], "RUNTIME_PARITY_UNVERIFIED")
+        self.assertFalse(result["promotion_applied"])
+        self.assertFalse(result["runtime_parity"]["verified"])
+        self.assertEqual(conf, BASE)
+        self.assertEqual(result["selected_challenger"]["name"], "quality")
 
     def test_bad_holdout_rejects_challenger(self):
         result, conf = report(samples(positive=False), copy.deepcopy(BASE), {"closed_trades": []}, NOW)

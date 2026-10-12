@@ -23,6 +23,11 @@ MIN_TRAIN = 30
 MIN_HOLDOUT = 15
 MIN_UNIQUE = 6
 MIN_HOLDOUT_PNL = 10.0
+# Virtual exits currently use STOP -2.5%, TAKE +8%, TRAIL -3.5%, TIME 4h.
+# The real V30 has adaptive stop, EARLY WEAKNESS and PUMP BREAKDOWN.
+# Until independent parity testing covers entry AND exit models, forward
+# results are research evidence ONLY and cannot authorize a paper promotion.
+RUNTIME_EXECUTION_PARITY_VERIFIED = False
 COOLDOWN_HOURS = 24
 
 
@@ -82,6 +87,12 @@ def report(state, config, real_ledger, now=None):
         "objective": "maximize accumulated net SDA subject to observed quote risk",
         "real_trading": False, "paper_config_automatic": True,
         "shadow_method": "forward observed quote fills, estimated friction, NOT real market execution",
+        "runtime_parity": {
+            "verified": RUNTIME_EXECUTION_PARITY_VERIFIED,
+            "shadow_exits": "fixed 2.5% stop, +8% take, -3.5% trailing, 4h timeout",
+            "paper_exits": "V30 emergency stop, adaptive trailing, early weakness, pump breakdown and stale",
+            "warning": "Unmatched exit models cannot validate promotion until independent parity tests pass",
+        },
         "source_last_scan_at": state.get("updated_at"),
         "strategies": {},
         "champion": {"generation": config.get("generation", 0), "filters": current},
@@ -242,6 +253,13 @@ def report(state, config, real_ledger, now=None):
             model["status"] = "WAITING_FOR_NEW_EVIDENCE"
             model["reason"] = "Need 30 new challenger trades after previous promotion"
             return model, config
+    if not RUNTIME_EXECUTION_PARITY_VERIFIED:
+        model["status"] = "RUNTIME_PARITY_UNVERIFIED"
+        model["reason"] = ("Challenger passed numerical tests, but shadow entry/exit "
+                           "execution has not been proven identical to V30 paper. "
+                           "Automatic paper promotion blocked; research continues.")
+        return model, config
+
     next_config = {
         "version": "V30-AUTO-CONFIG-1",
         "generation": int(config.get("generation", 0)) + 1,

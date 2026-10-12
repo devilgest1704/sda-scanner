@@ -125,6 +125,62 @@ def _cohorts(rows, grouping):
     return {k: summary(v) for k, v in sorted(groups.items())}
 
 
+
+def cohort_expectancy(rows):
+    """Observed realized economics, never a probability forecast."""
+    pnl = [r["pnl_sda"] for r in rows]
+    win = [x for x in pnl if x > 0]
+    loss = [-x for x in pnl if x < 0]
+    avg_win = sum(win)/len(win) if win else None
+    avg_loss = sum(loss)/len(loss) if loss else None
+    denominator = (avg_win or 0) + (avg_loss or 0)
+    return {
+        "closed": len(pnl),
+        "observed_mean_net_sda_per_trade": round(sum(pnl)/len(pnl),4) if pnl else None,
+        "observed_win_rate_pct": round(100*len(win)/len(pnl),2) if pnl else None,
+        "average_win_sda": round(avg_win,4) if avg_win is not None else None,
+        "average_loss_sda": round(avg_loss,4) if avg_loss is not None else None,
+        "historical_break_even_win_rate_pct":
+            round(100*(avg_loss or 0)/denominator,2) if denominator else None,
+        "unique_labels": len({r["symbol"] for r in rows}),
+    }
+
+
+def score_calibration(rows):
+    """Pre-registered score buckets, chronological holdout not used to tune.
+
+    A descriptive cohort of *executed* trades is not a replay of entry gating
+    and does not estimate the returns of trades never entered by the incumbent.
+    """
+    ordered = sorted(rows,key=lambda r:(r["time"],r["symbol"]))
+    boundary = int(len(ordered)*.7)
+    train, holdout = ordered[:boundary], ordered[boundary:]
+    labels = ("below_70", "70_to_84", "85_plus", "unknown")
+    def describe(subset, minimum):
+        out={}
+        for label in labels:
+            band=[r for r in subset if _bucket_score(r["score"])==label]
+            stats=cohort_expectancy(band)
+            stats["sufficient_sample_for_description"] = len(band)>=minimum
+            out[label]=stats
+        return out
+    return {
+        "method": "descriptive_observed_incumbent_trades_NOT_predictive_probability",
+        "selection_uses_holdout": False,
+        "automatic_threshold_change": False,
+        "gross_price_gain_needed_to_break_even_pct_from_filled_entry":
+            round(100*((1+FEE)/((1-FEE)*(1-SLIPPAGE))-1),3),
+        "train_count":len(train), "holdout_count":len(holdout),
+        "train":describe(train,20), "holdout":describe(holdout,10),
+        "notes": [
+            "Buckets were fixed in advance, not optimized on the holdout",
+            "Only actual incumbent entries and exits are observed",
+            "Score is not a calibrated win probability or a verified trading advantage",
+            "Trade size, changing regimes and selection bias may distort averages",
+        ],
+    }
+
+
 def quote_path(row):
     """Require future-only, fresh and gap-limited scanner observations.
 
@@ -237,6 +293,7 @@ def analyze(archive, stats=None, now=None):
         "counterfactual_scope": "earlier_exits_on_same_observed_trades_only",
         "historical_observed": {
             "overall": summary(rows),
+            "entry_score_calibration": score_calibration(rows),
             "by_exit": _cohorts(rows, lambda r: r["exit_reason"]),
             "by_entry_score": _cohorts(rows, lambda r: _bucket_score(r["score"])),
             "by_mfe": _cohorts(rows, lambda r: _bucket_mfe(r["mfe_pct"])),

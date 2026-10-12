@@ -103,6 +103,30 @@ class V31ProfitLearningTests(unittest.TestCase):
         self.assertFalse(a["promotion_eligible"])
         self.assertFalse(b["promotion_eligible"])
 
+    def test_profit_aware_score_calibration_is_observational(self):
+        source = [trade(i, (1.0,1.06,1.04) if i%3==0 else (1.0,0.99,0.97))
+                  for i in range(80)]
+        report = analyze(source)
+        c = report["historical_observed"]["entry_score_calibration"]
+        self.assertEqual(c["train_count"],56)
+        self.assertEqual(c["holdout_count"],24)
+        self.assertFalse(c["automatic_threshold_change"])
+        self.assertFalse(c["selection_uses_holdout"])
+        self.assertGreater(c["gross_price_gain_needed_to_break_even_pct_from_filled_entry"],2.0)
+        self.assertEqual(c["train"]["85_plus"]["closed"],28)
+        self.assertIsNotNone(c["train"]["85_plus"]["observed_mean_net_sda_per_trade"])
+        self.assertFalse(report["promotion_eligible"])
+
+    def test_calibration_holds_training_evidence_constant_when_holdout_changes(self):
+        source = [trade(i) for i in range(70)]
+        base = analyze(source)["historical_observed"]["entry_score_calibration"]
+        altered = copy.deepcopy(source)
+        for t in altered[49:]:
+            t["closed_profit_sda"] -= 50
+        changed = analyze(altered)["historical_observed"]["entry_score_calibration"]
+        self.assertEqual(base["train"],changed["train"])
+        self.assertNotEqual(base["holdout"],changed["holdout"])
+
     def test_actual_stats_mismatch_is_reported_not_hidden(self):
         source = [trade(0)]
         result = analyze(source, {"closed_trades": 999, "realized_pnl_sda": 999})
