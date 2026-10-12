@@ -85,6 +85,9 @@ class V31ProfitLearningTests(unittest.TestCase):
         self.assertEqual(report["data_quality"]["replayable_paths"], 3)
         self.assertFalse(report["production_mutated"])
         self.assertFalse(report["automatically_applied"])
+        self.assertEqual(report["v30_exit_parity"]["audited"], 3)
+        self.assertEqual(report["v30_exit_parity"]["matched"], 0)
+        self.assertFalse(report["v30_exit_parity"]["can_unlock_paper_autopromotion"])
 
     def test_train_only_candidate_selection_holdout_independence(self):
         source = [trade(i, (1, 1.05, 0.99)) for i in range(60)]
