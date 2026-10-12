@@ -141,7 +141,7 @@ def overview_report(auto, config):
     tracked = len(strategies)
     baseline = (strategies.get("baseline") or {}).get("all") or {}
     q = quality.get("baseline") or {}
-    lines += [f"Testované strategie: {tracked} (včetně WATCH výzkumu)",
+    lines += [f"Testované strategie: {tracked} (včetně WATCH/MACD výzkumu)",
               f"Baseline validních uzavření: {q.get('valid_closed', baseline.get('closed', 0))}",
               f"Vyřazená uzavření: {q.get('excluded_closed', 'N/A')}",
               f"Baseline shadow P/L: {_pnl(baseline.get('net_sda'))}",
@@ -180,12 +180,12 @@ def strategies_report(auto):
         excluded = int(_number(q.get("excluded_closed")))
         pnl = _number(d.get("net_sda"))
         icon = "⚪" if not count else ("🟢" if pnl > 0 else "🔴")
-        tag = " (výzkum)" if name.startswith("research_watch") else ""
+        tag = " (V32 MACD výzkum)" if name.startswith("research_macd") else (" (výzkum)" if name.startswith("research_") else "")
         lines += [f"{icon} {name}{tag}",
                   f"   {_pnl(pnl)} • {count} validních close • win {_number(d.get('win_rate_pct')):.1f} %",
                   f"   Celkem validních {valid} / vyřazeno {excluded} • PF {_number(d.get('profit_factor')):.2f}"]
     lines += ["", "⚠️ Malý vzorek neprokazuje ziskovost.",
-              "WATCH strategie se automaticky nenasazují."]
+              "WATCH a V32 MACD strategie se automaticky nenasazují."]
     return "\n".join(lines)
 
 
