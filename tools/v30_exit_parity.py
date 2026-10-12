@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 MAX_QUOTE_AGE_SECONDS = 900
 MAX_SAMPLE_GAP_SECONDS = 1200
@@ -120,7 +120,7 @@ def compare_closed_trade(trade):
             return {"result": "excluded", "reason": "stale_or_future_quote"}
         if abs((observed - quote_at).total_seconds() - age) > 90:
             return {"result": "excluded", "reason": "quote_timestamp_disagreement"}
-        if observed < opened or observed > closed + __import__("datetime").timedelta(seconds=5):
+        if observed < opened or observed > closed + timedelta(seconds=5):
             return {"result": "excluded", "reason": "sample_outside_trade"}
         if observed < previous or (index and observed == previous):
             return {"result": "excluded", "reason": "nonchronological_samples"}
