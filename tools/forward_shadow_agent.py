@@ -12,6 +12,8 @@ import math
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tools.v32_breakout import research_signal_from_analysis, breakout_research_eligible
+
 STATE = Path("strategy_lab/forward_shadow_state.json")
 SIZE_SDA = 50.0
 FEE_AND_SLIPPAGE = 0.011  # each side; conservative 2.2% round-trip
@@ -38,7 +40,13 @@ POLICIES = {
     # Identical numerical entry gates to baseline; MACD is the sole addition.
     "research_macd_antipump": {"entry_score": 68, "quality": 52, "impulse": 8, "buy_ratio": 1.10, "trades": 5},
     "research_macd_confirmation": {"entry_score": 68, "quality": 52, "impulse": 8, "buy_ratio": 1.10, "trades": 5},
+    # Independent early-trend research may evaluate WATCH as well as IGNITION.
+    "research_breakout_volume_trend": {
+        "entry_score": 55, "quality": 48, "impulse": 4,
+        "buy_ratio": 1.15, "trades": 8,
+    },
 }
+BREAKOUT_RESEARCH_MODE = "research_breakout_volume_trend"
 MACD_RESEARCH_MODES = frozenset(("research_macd_antipump", "research_macd_confirmation"))
 MACD_BAR_SECONDS = {"5m": 300, "15m": 900}
 MIN_MACD_CLOSED_BARS = 35
@@ -172,6 +180,8 @@ def macd_research_decision(row, name):
 def eligible(c, filters, research_watch=False, macd_mode=None):
     if not isinstance(c, dict):
         return False
+    if macd_mode == BREAKOUT_RESEARCH_MODE:
+        return breakout_research_eligible(c, filters)
     phase = c.get("phase")
     if research_watch:
         if phase != "WATCH":
@@ -242,6 +252,10 @@ def step(data, market, funnel):
         candidate["v32_macd"] = (
             {frame: observed_macd(info, ts, frame)
              for frame in MACD_BAR_SECONDS}
+            if market_ts <= ts else None
+        )
+        candidate["v32_breakout"] = (
+            research_signal_from_analysis(info, ts, market_ts)
             if market_ts <= ts else None
         )
     # Diagnostics distinguish "no signal" from missing telemetry fields.
