@@ -12,6 +12,8 @@ import math
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tools.v32_breakout import analyze_breakout
+
 MARKET_FILE = "market_data.json"
 TIMEFRAMES = {"1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800}
 INTRADAY_MACD_FRAMES = {"5m": 300, "15m": 900}
@@ -316,6 +318,9 @@ def analyze_token(token_data, as_of=None):
     at = as_of or datetime.now(timezone.utc)
     results.update({name: intraday_macd_analysis(history, seconds, at)
                     for name, seconds in INTRADAY_MACD_FRAMES.items()})
+    # Unlike MACD, breakout research can still inspect sparse but valid
+    # transaction data. Never mix its research signal into V30 BUY/SELL.
+    results["breakout_volume_trend"] = analyze_breakout(history, at)
     return results
 
 
@@ -343,7 +348,7 @@ def main():
         analyzed += 1
 
     market["technical_analysis"] = {
-        "version": 3,
+        "version": 4,
         "mode": "analysis_only",
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "timeframes": list(TIMEFRAMES.keys()) + list(INTRADAY_MACD_FRAMES.keys()),
@@ -353,6 +358,7 @@ def main():
         "history_expanded": True,
         "intraday_macd": "research_only_closed_bars_no_future_price",
         "intraday_missing_bars": "bounded_carry_forward_unavailable_if_sparse",
+        "breakout_volume_trend": "research_only_observed_transactions_excluding_future_quotes",
     }
     tmp = str(path) + ".tmp"
     Path(tmp).write_text(json.dumps(market, indent=2, ensure_ascii=False), encoding="utf-8")
