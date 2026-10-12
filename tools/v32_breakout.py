@@ -203,3 +203,83 @@ def analyze_breakout(history, as_of):
     update["reason"] = reasons[0] if reasons else "confirmed_early_breakout"
     update["rejection_reasons"] = reasons
     return update
+
+
+def research_signal_from_analysis(analysis, scanner_at, market_at):
+    """Join breakout evidence to a same-scan snapshot, fail closed on staleness."""
+    if not isinstance(analysis, dict):
+        return None
+    raw = (analysis.get("technical") or {}).get("breakout_volume_trend")
+    if not isinstance(raw, dict) or not isinstance(scanner_at, datetime) or not isinstance(market_at, datetime):
+        return None
+    measured = timestamp(raw.get("observed_at"))
+    last_tx = timestamp(raw.get("last_transaction_at"))
+    age = nonnegative(raw.get("quote_age_seconds"))
+    ref_price = positive(raw.get("reference_price_sda"))
+    current_price = positive(analysis.get("price_in_sda"))
+    if (measured is None or last_tx is None or scanner_at.tzinfo is None
+            or market_at.tzinfo is None or measured > market_at
+            or market_at > scanner_at
+            or not 0 <= (scanner_at-measured).total_seconds() <= QUOTE_MAX_AGE_SEC
+            or not 0 <= (scanner_at-last_tx).total_seconds() <= QUOTE_MAX_AGE_SEC
+            or last_tx > measured or age is None
+            or abs(age-(measured-last_tx).total_seconds()) > 10
+            or ref_price is None or current_price is None
+            or abs(ref_price/current_price-1) > .015
+            or not isinstance(raw.get("eligible"), bool)
+            or not isinstance(raw.get("rejection_reasons"), list)):
+        return None
+    fields = (
+        "version", "mode", "available", "eligible", "reason", "observed_at",
+        "last_transaction_at", "reference_price_sda", "quote_age_seconds",
+        "base_trades", "base_span_minutes", "base_range_pct",
+        "resistance_sda", "breakout_pct", "recent_15m_price_change_pct",
+        "recent_15m_volume_sda", "recent_15m_net_flow_sda",
+        "recent_15m_buy_ratio", "volume_multiple", "recent_15m_swaps",
+        "recent_15m_buys", "last_vs_recent_peak_pct", "rejection_reasons",
+    )
+    return {key: raw.get(key) for key in fields}
+
+
+def breakout_research_eligible(row, filters):
+    """Early breakout research may use WATCH, unlike production V30 gates.
+
+    This is a separate, non-promotable research gate, not an execution order.
+    The signal itself uses only observed transactions and includes additional
+    consolidation, volume, buy-pressure and price-strength requirements.
+    """
+    if not isinstance(row, dict) or row.get("phase") not in ("WATCH", "IGNITION", "CONFIRMATION"):
+        return False
+    signal = row.get("v32_breakout")
+    if not isinstance(signal, dict) or signal.get("eligible") is not True:
+        return False
+    def numeric(k):
+        x = row.get(k)
+        if isinstance(x, bool):
+            return None
+        try:
+            v = float(x)
+            return v if math.isfinite(v) else None
+        except (ValueError, TypeError, OverflowError):
+            return None
+    fields = {k: numeric(k) for k in (
+        "score", "quality", "impulse", "snapshot_impulse", "data_age_sec",
+        "m15", "m1h", "trades_1h", "buy_ratio", "volume_1h",
+        "flow_1h", "price_sda",
+    )}
+    if any(v is None for v in fields.values()):
+        return False
+    age = fields["data_age_sec"]
+    return (0 <= age <= QUOTE_MAX_AGE_SEC
+            and fields["score"] >= filters["entry_score"]
+            and fields["quality"] >= filters["quality"]
+            and max(fields["impulse"], fields["snapshot_impulse"]) >= filters["impulse"]
+            and fields["trades_1h"] >= max(8, filters["trades"])
+            and fields["buy_ratio"] >= filters["buy_ratio"]
+            and fields["volume_1h"] >= 350
+            and fields["flow_1h"] >= 150
+            and .25 <= fields["m15"] <= 8
+            and 0 <= fields["m1h"] <= 12
+            and positive(fields["price_sda"]) is not None
+            and positive(signal.get("reference_price_sda")) is not None
+            and abs(fields["price_sda"]/signal["reference_price_sda"]-1) <= .015)
