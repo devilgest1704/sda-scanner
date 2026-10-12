@@ -354,7 +354,9 @@ def step(data, market, funnel):
                         "valid_for_learning": False,
                         "learning_exclusion_reasons": ["stale_timeout_no_observed_exit_quote"],
                         "notional_sda": SIZE_SDA,
-                        "model": "conservative_risk_writeoff_no_observed_fill"
+                        "model": "conservative_risk_writeoff_no_observed_fill",
+                        **({"v32_breakout_at_entry": position.get("v32_breakout_at_entry")}
+                           if name == BREAKOUT_RESEARCH_MODE else {}),
                     })
                     del positions[address]
                     closed += 1
@@ -398,6 +400,8 @@ def step(data, market, funnel):
                 "model": "observed_quote_paper_not_executable_fill",
                 **({"v32_macd_at_entry": position.get("v32_macd_at_entry")}
                    if name in MACD_RESEARCH_MODES else {}),
+                **({"v32_breakout_at_entry": position.get("v32_breakout_at_entry")}
+                   if name == BREAKOUT_RESEARCH_MODE else {}),
             })
             del positions[address]
             closed += 1
@@ -439,6 +443,8 @@ def step(data, market, funnel):
                     "last_quote_at": stamp.isoformat(), "peak_price_sda": entry,
                     **({"v32_macd_at_entry": c.get("v32_macd")}
                        if name in MACD_RESEARCH_MODES else {}),
+                    **({"v32_breakout_at_entry": c.get("v32_breakout")}
+                       if name == BREAKOUT_RESEARCH_MODE else {}),
                 }
                 last_entry[address] = ts.isoformat()
                 opened += 1
@@ -467,7 +473,8 @@ def step(data, market, funnel):
             "complete_feature_rows": feature_complete,
             "entry_lane_rows": entry_lanes, "watch_lane_rows": watch_lanes,
             "policies": len(POLICIES),
-            "macd_research_paper_only": True}
+            "macd_research_paper_only": True,
+            "breakout_research_paper_only": True}
 
 
 def main():
