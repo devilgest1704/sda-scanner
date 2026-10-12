@@ -272,6 +272,11 @@ def step(data, market, funnel):
         phase_counts[phase] = phase_counts.get(phase, 0) + 1
     policy_qualified = {}
     policy_quote_ready = {}
+    breakout_records = [c for c in ranked if isinstance(c.get("v32_breakout"), dict)]
+    breakout_rejections = {}
+    for c in breakout_records:
+        for reason in set(c["v32_breakout"].get("rejection_reasons") or []):
+            breakout_rejections[str(reason)] = breakout_rejections.get(str(reason), 0) + 1
     def same_time_quote(c):
         addr = str(c.get("address") or "").lower()
         q = quotes.get(addr)
@@ -301,6 +306,22 @@ def step(data, market, funnel):
                       and isinstance(c["v32_macd"].get("5m"), dict) for c in ranked),
             "15m": sum(isinstance(c.get("v32_macd"), dict)
                        and isinstance(c["v32_macd"].get("15m"), dict) for c in ranked),
+        },
+        "breakout_research": {
+            "measured": len(breakout_records),
+            "eligible_from_transactions": sum(
+                c["v32_breakout"].get("eligible") is True for c in breakout_records),
+            "eligible_after_shadow_gates": policy_qualified.get(BREAKOUT_RESEARCH_MODE, 0),
+            "rejection_reasons": dict(sorted(
+                breakout_rejections.items(), key=lambda kv: (-kv[1], kv[0]))[:8]),
+            "qualified_samples": [
+                {"address": c.get("address"),
+                 "phase": c.get("phase"),
+                 "breakout_pct": c["v32_breakout"].get("breakout_pct"),
+                 "volume_multiple": c["v32_breakout"].get("volume_multiple"),
+                 "reason": c["v32_breakout"].get("reason")}
+                for c in breakout_records if c["v32_breakout"].get("eligible") is True
+            ][:5],
         },
         "most_common_rejection_gates": dict(sorted(
             rejected_gates.items(), key=lambda kv: (-kv[1], kv[0]))[:8]),
@@ -383,7 +404,18 @@ def step(data, market, funnel):
         # Refractory period prevents a volatile token from producing an
         # artificial stream of repeated simulated entries.
         if len(positions) < MAX_POSITIONS:
-            for c in ranked:
+            # Rank only this research lane toward the *earlier* breakouts.
+            # All existing paper/Shadow policies retain their score ordering.
+            choices = (sorted(
+                ranked, key=lambda c: (
+                    not (isinstance(c.get("v32_breakout"), dict)
+                         and c["v32_breakout"].get("eligible") is True),
+                    abs((finite((c.get("v32_breakout") or {}).get("breakout_pct")) or 0)-2.0),
+                    -(finite((c.get("v32_breakout") or {}).get("volume_multiple")) or 0),
+                    -(finite(c.get("score")) or 0),
+                ))
+                if name == BREAKOUT_RESEARCH_MODE else ranked)
+            for c in choices:
                 address = str(c.get("address") or "").lower()
                 if not address or address in positions or not eligible(
                         c, filters, name.startswith('research_watch'), name):
