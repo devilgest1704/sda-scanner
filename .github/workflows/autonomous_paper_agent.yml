@@ -14,6 +14,8 @@ on:
       - 'tools/forward_shadow_optimizer.py'
       - 'technical_analysis.py'
       - 'tests/test_v32_macd.py'
+      - 'tools/v32_breakout.py'
+      - 'tests/test_v32_breakout.py'
       - 'run_scanner_v18.sh'
       - 'tools/v31_schedule_guard.py'
       - 'tests/test_v31_schedule_guard.py'
@@ -31,6 +33,8 @@ on:
       - 'tools/forward_shadow_optimizer.py'
       - 'technical_analysis.py'
       - 'tests/test_v32_macd.py'
+      - 'tools/v32_breakout.py'
+      - 'tests/test_v32_breakout.py'
       - 'run_scanner_v18.sh'
       - 'tools/v31_schedule_guard.py'
       - 'tests/test_v31_schedule_guard.py'
@@ -78,6 +82,11 @@ jobs:
         run: |
           python -m py_compile technical_analysis.py tools/forward_shadow_agent.py
           python -m unittest discover -s tests -p 'test_v32_macd.py' -v
+
+      - name: Test breakout volume trend signal with full paper research evidence
+        run: |
+          python -m py_compile tools/v32_breakout.py technical_analysis.py tools/forward_shadow_agent.py
+          python -m unittest discover -s tests -p 'test_v32_breakout.py' -v
 
       - name: Test forward-only learning, holdout selection and risk rollback
         run: python -m unittest discover -s tests -p 'test_forward_*.py' -v
