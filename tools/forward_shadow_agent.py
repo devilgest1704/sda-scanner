@@ -34,7 +34,15 @@ POLICIES = {
     # Observational only: WATCH research is NOT a deployable Champion lane.
     "research_watch": {"entry_score": 68, "quality": 55, "impulse": 8, "buy_ratio": 1.20, "trades": 8},
     "research_watch_strict": {"entry_score": 76, "quality": 65, "impulse": 12, "buy_ratio": 1.45, "trades": 12},
+    # V32 MACD arms are research-only and must NEVER become a Champion.
+    # Identical numerical entry gates to baseline; MACD is the sole addition.
+    "research_macd_antipump": {"entry_score": 68, "quality": 52, "impulse": 8, "buy_ratio": 1.10, "trades": 5},
+    "research_macd_confirmation": {"entry_score": 68, "quality": 52, "impulse": 8, "buy_ratio": 1.10, "trades": 5},
 }
+MACD_RESEARCH_MODES = frozenset(("research_macd_antipump", "research_macd_confirmation"))
+MACD_BAR_SECONDS = {"5m": 300, "15m": 900}
+MIN_MACD_CLOSED_BARS = 35
+MIN_MACD_TRADED_BARS = 21
 
 
 def when(value):
@@ -108,7 +116,60 @@ def quote_map(market, now):
     return result
 
 
-def eligible(c, filters, research_watch=False):
+
+def observed_macd(analysis, ts, frame):
+    """Accept only completed, sufficiently liquid historical candle features.
+
+    The technical layer computes indicators from transactions no later than its
+    market snapshot; this guard also disallows future and expired candles.
+    Missing/bad data is NEVER read as zero or a bullish signal.
+    """
+    raw = (analysis.get("technical") or {}).get(frame) if isinstance(analysis, dict) else None
+    if not isinstance(raw, dict) or raw.get("available") is not True:
+        return None
+    end = when(raw.get("last_completed_at"))
+    age = finite(raw.get("quote_age_seconds"))
+    n_bars = finite(raw.get("completed_bars"))
+    traded = finite(raw.get("traded_bars"))
+    if (end is None or end > ts or (ts-end).total_seconds() > 2*MACD_BAR_SECONDS[frame]
+            or age is None or age < 0 or age > max(600, 2*MACD_BAR_SECONDS[frame])
+            or n_bars is None or n_bars < MIN_MACD_CLOSED_BARS
+            or traded is None or traded < MIN_MACD_TRADED_BARS):
+        return None
+    value = raw.get("macd")
+    if not isinstance(value, dict):
+        return None
+    hist = finite(value.get("histogram_pct"))
+    delta = finite(value.get("histogram_delta_pct"))
+    if (hist is None or delta is None or
+            not isinstance(value.get("histogram_rising"), bool) or
+            not isinstance(value.get("histogram_fading_2"), bool)):
+        return None
+    return {"histogram_pct": hist, "histogram_delta_pct": delta,
+            "rising": value["histogram_rising"],
+            "fading_2": value["histogram_fading_2"],
+            "last_completed_at": end.isoformat(),
+            "traded_bars": int(traded)}
+
+
+def macd_research_decision(row, name):
+    if name not in MACD_RESEARCH_MODES:
+        return True
+    m = row.get("v32_macd")
+    if not isinstance(m, dict):
+        return False
+    slow = m.get("15m")
+    if not isinstance(slow, dict):
+        return False  # Fail closed for research, not for the live strategy.
+    if name == "research_macd_antipump":
+        return not (slow["histogram_pct"] > 0 and slow["fading_2"])
+    fast = m.get("5m")
+    return (isinstance(fast, dict) and
+            slow["histogram_pct"] > 0 and slow["rising"] and
+            fast["histogram_pct"] > 0 and fast["rising"])
+
+
+def eligible(c, filters, research_watch=False, macd_mode=None):
     if not isinstance(c, dict):
         return False
     phase = c.get("phase")
@@ -146,7 +207,8 @@ def eligible(c, filters, research_watch=False):
             return False
     return (score >= filters["entry_score"] and quality >= filters["quality"]
             and impulse >= filters["impulse"] and ratio >= filters["buy_ratio"]
-            and trades >= filters["trades"])
+            and trades >= filters["trades"]
+            and macd_research_decision(c, macd_mode))
 
 def exit_profit(entry, price):
     # Notional paper net result after modelled entry/exit friction, in SDA.
@@ -168,8 +230,20 @@ def step(data, market, funnel):
     candidates = funnel.get("candidate_snapshots", [])
     if not isinstance(candidates, list):
         raise ValueError("Missing candidate snapshots")
-    ranked = sorted((x for x in candidates if isinstance(x, dict)),
+    ranked = sorted((dict(x) for x in candidates if isinstance(x, dict)),
                     key=lambda x: finite(x.get("score")) or 0, reverse=True)
+    # Research-only MACD values are joined to SAME-SCAN market data. Never
+    # rewrite the underlying V30 funnel, paper decisions, or market prices.
+    market_tokens = market.get("tokens", {})
+    for candidate in ranked:
+        address = str(candidate.get("address") or "").lower()
+        token = market_tokens.get(address, {}) if isinstance(market_tokens, dict) else {}
+        info = token.get("analysis", token) if isinstance(token, dict) else {}
+        candidate["v32_macd"] = (
+            {frame: observed_macd(info, ts, frame)
+             for frame in MACD_BAR_SECONDS}
+            if market_ts <= ts else None
+        )
     # Diagnostics distinguish "no signal" from missing telemetry fields.
     activity_fields = ("trades_1h", "buy_ratio", "flow_1h", "volume_1h", "m15", "m1h")
     feature_complete = sum(all(finite(row.get(k)) is not None for k in activity_fields)
@@ -192,7 +266,8 @@ def step(data, market, funnel):
                 and 0 <= (ts - q[0]).total_seconds() <= 300
                 and abs(q[1]/price - 1) <= 0.015)
     for name, filters in POLICIES.items():
-        matches = [c for c in ranked if eligible(c, filters, name.startswith("research_watch"))]
+        matches = [c for c in ranked if eligible(
+            c, filters, name.startswith("research_watch"), name)]
         policy_qualified[name] = len(matches)
         policy_quote_ready[name] = sum(same_time_quote(c) for c in matches)
     rejected_gates = {}
@@ -207,6 +282,12 @@ def step(data, market, funnel):
         "sampled_candidate_phases": phase_counts,
         "policy_qualified": policy_qualified,
         "policy_quote_ready": policy_quote_ready,
+        "macd_research_coverage": {
+            "5m": sum(isinstance(c.get("v32_macd"), dict)
+                      and isinstance(c["v32_macd"].get("5m"), dict) for c in ranked),
+            "15m": sum(isinstance(c.get("v32_macd"), dict)
+                       and isinstance(c["v32_macd"].get("15m"), dict) for c in ranked),
+        },
         "most_common_rejection_gates": dict(sorted(
             rejected_gates.items(), key=lambda kv: (-kv[1], kv[0]))[:8]),
     }
@@ -279,7 +360,9 @@ def step(data, market, funnel):
                 "valid_for_learning": valid,
                 "learning_exclusion_reasons": exclusion_reasons,
                 "notional_sda": SIZE_SDA,
-                "model": "observed_quote_paper_not_executable_fill"
+                "model": "observed_quote_paper_not_executable_fill",
+                **({"v32_macd_at_entry": position.get("v32_macd_at_entry")}
+                   if name in MACD_RESEARCH_MODES else {}),
             })
             del positions[address]
             closed += 1
@@ -288,7 +371,8 @@ def step(data, market, funnel):
         if len(positions) < MAX_POSITIONS:
             for c in ranked:
                 address = str(c.get("address") or "").lower()
-                if not address or address in positions or not eligible(c, filters, name.startswith('research_watch')):
+                if not address or address in positions or not eligible(
+                        c, filters, name.startswith('research_watch'), name):
                     continue
                 quote = quotes.get(address)
                 entry = positive(c.get("price_sda"))
@@ -306,7 +390,9 @@ def step(data, market, funnel):
                     continue
                 positions[address] = {
                     "opened_at": ts.isoformat(), "entry_price_sda": entry,
-                    "last_quote_at": stamp.isoformat(), "peak_price_sda": entry
+                    "last_quote_at": stamp.isoformat(), "peak_price_sda": entry,
+                    **({"v32_macd_at_entry": c.get("v32_macd")}
+                       if name in MACD_RESEARCH_MODES else {}),
                 }
                 last_entry[address] = ts.isoformat()
                 opened += 1
@@ -334,7 +420,8 @@ def step(data, market, funnel):
             "quotes": len(quotes), "candidates": len(ranked),
             "complete_feature_rows": feature_complete,
             "entry_lane_rows": entry_lanes, "watch_lane_rows": watch_lanes,
-            "policies": len(POLICIES)}
+            "policies": len(POLICIES),
+            "macd_research_paper_only": True}
 
 
 def main():
