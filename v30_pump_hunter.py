@@ -653,6 +653,9 @@ def write_scan_funnel(market_file="market_analysis.json"):
             d=decision(address,an,None,persist=False)
             # Record eligible AND rejected candidates with contemporaneous
             # decision features. Research-only; no BUY/SELL decisions changed.
+            technical = an.get("technical") if isinstance(an,dict) else {}
+            breakout = (technical or {}).get("breakout_volume_trend") if isinstance(technical,dict) else {}
+            breakout = breakout if isinstance(breakout,dict) else {}
             candidates.append({
                 "at":scan_at,"address":str(address).lower(),
                 "score":round(n(d.get("pump_score")),2),
@@ -672,7 +675,12 @@ def write_scan_funnel(market_file="market_analysis.json"):
                 "m1h":n(d.get("m1h")),
                 "data_age_sec":round(n(d.get("data_age_sec")),1),
                 "eligible":bool(d.get("eligible_for_buy")),
-                "gates":list(dict.fromkeys(d.get("paper_buy_gate_failures") or []))
+                "gates":list(dict.fromkeys(d.get("paper_buy_gate_failures") or [])),
+                # V32 research-only sampler metadata. BUY rules and V30
+                # numeric score are completely unaffected.
+                "research_breakout_ready":breakout.get("eligible") is True,
+                "research_breakout_pct":n(breakout.get("breakout_pct")),
+                "research_breakout_volume_multiple":n(breakout.get("volume_multiple")),
             })
             is_fresh=bool(d.get("data_fresh_for_entry"))
             fresh+=int(is_fresh)
@@ -708,9 +716,19 @@ def write_scan_funnel(market_file="market_analysis.json"):
             all_phase_counts[ph]=all_phase_counts.get(ph,0)+1
         def group(phase_set,limit):
             return [row for row in candidates if row.get("phase") in phase_set][:limit]
+        # Prioritize up to 40 confirmed early Breakout signals even when the
+        # WATCH score is below the usual top-35 snapshot quota. This only
+        # changes which research snapshots Shadow sees, NEVER which tokens
+        # the active paper V30 engine buys or sells.
+        breakout_candidates=sorted(
+            (row for row in candidates if row.get("research_breakout_ready")),
+            key=lambda row:(abs(n(row.get("research_breakout_pct"))-2.0),
+                            -n(row.get("research_breakout_volume_multiple")),
+                            -row["score"],row["address"]))[:40]
         selected=[]
         seen=set()
-        for batch in (group({"IGNITION","CONFIRMATION","BREAKOUT"},60),
+        for batch in (breakout_candidates,
+                      group({"IGNITION","CONFIRMATION","BREAKOUT"},60),
                       group({"WATCH"},35),candidates[:40]):
             for row in batch:
                 if row["address"] in seen or len(selected)>=120:
@@ -738,6 +756,10 @@ def write_scan_funnel(market_file="market_analysis.json"):
             "selected_candidate_phases":selected_phase_counts,
             "candidate_total":len(candidates),
             "candidate_sample_count":len(selected),
+            "breakout_research_ready_total":sum(
+                bool(c.get("research_breakout_ready")) for c in candidates),
+            "breakout_research_sampled":sum(
+                bool(c.get("research_breakout_ready")) for c in selected),
             "ready_hook_events":sum(1 for e in events if str(e.get("event")).upper()=="READY"),
             "created_hook_events":sum(1 for e in events if str(e.get("event")).upper()=="CREATED")
         })
