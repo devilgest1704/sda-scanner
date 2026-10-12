@@ -53,6 +53,20 @@ class OptimizerDashboardTests(unittest.TestCase):
         self.assertIn("vyřazeno 4", result)
         self.assertLess(len(result), 3900)
 
+    def test_macd_shadow_variants_are_labeled_research_only(self):
+        from copy import deepcopy
+        data = deepcopy(AUTO)
+        data["strategies"]["research_macd_antipump"] = {
+            "all": {"closed": 0, "net_sda": 0}
+        }
+        data["strategies"]["research_macd_confirmation"] = {
+            "all": {"closed": 2, "net_sda": -2.50, "win_rate_pct": 0}
+        }
+        report = od.strategies_report(data)
+        self.assertIn("research_macd_antipump (V32 MACD výzkum)", report)
+        self.assertIn("research_macd_confirmation (V32 MACD výzkum)", report)
+        self.assertIn("automaticky nenasazují", report)
+
     def test_research_is_labeled_non_promoting(self):
         result = od.research_report(RESEARCH)
         self.assertIn("3 000" if False else "3000", result)
