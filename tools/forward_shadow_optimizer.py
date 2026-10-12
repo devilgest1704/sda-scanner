@@ -87,6 +87,13 @@ def report(state, config, real_ledger, now=None):
         "objective": "maximize accumulated net SDA subject to observed quote risk",
         "real_trading": False, "paper_config_automatic": True,
         "shadow_method": "forward observed quote fills, estimated friction, NOT real market execution",
+        "v32_macd": {
+            "mode": "RESEARCH_ONLY",
+            "policies": ["research_macd_antipump", "research_macd_confirmation"],
+            "may_promote_champion": False,
+            "live_buy_rules_modified": False,
+            "caveat": "MACD arms use observed-quote Shadow exits, not V30 execution; no verified profit yet",
+        },
         "runtime_parity": {
             "verified": RUNTIME_EXECUTION_PARITY_VERIFIED,
             "shadow_exits": "fixed 2.5% stop, +8% take, -3.5% trailing, 4h timeout",
@@ -136,7 +143,7 @@ def report(state, config, real_ledger, now=None):
     # strategy while appearing better than an obsolete baseline.
     incumbent_name = next(
         (name for name, policy in POLICIES.items()
-         if not name.startswith("research_watch")
+         if not name.startswith("research_")
          and all(abs(float(current[key]) - float(value)) <= 1e-8
                  for key, value in policy.items())),
         None,
@@ -148,8 +155,16 @@ def report(state, config, real_ledger, now=None):
     model["incumbent_policy"] = incumbent_name
 
     strategies = state.get("strategies", {})
-    if not isinstance(strategies, dict) or any(name not in strategies for name in POLICIES):
+    if not isinstance(strategies, dict):
         raise ValueError("Incomplete forward strategy journals")
+    # An older running scanner may not yet have checkpointed the new research
+    # arms. Champion journals remain mandatory; optional research starts empty.
+    from tools.forward_shadow_agent import default_state
+    for name in POLICIES:
+        if name not in strategies and name.startswith("research_"):
+            strategies[name] = default_state()["strategies"][name]
+    if any(name not in strategies for name in POLICIES):
+        raise ValueError("Incomplete forward Champion strategy journals")
 
     all_rows = {name: forward_rows(strategies[name]) for name in POLICIES}
     coverage = {}
@@ -206,7 +221,7 @@ def report(state, config, real_ledger, now=None):
         }
         if name == incumbent_name:
             incumbent_holdout = holdout
-        if (name != incumbent_name and not name.startswith("research_watch")
+        if (name != incumbent_name and not name.startswith("research_")
                 and coverage[name] >= 90.0
                 and train_stats["closed"] >= MIN_TRAIN
                 and train_stats["unique_tokens"] >= MIN_UNIQUE
