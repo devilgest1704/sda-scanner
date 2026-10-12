@@ -17,6 +17,8 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tools.v30_exit_parity import audit_archive
+
 FEE = 0.01
 SLIPPAGE = 0.001
 NOTIONAL = 50.0
@@ -305,6 +307,9 @@ def analyze(archive, stats=None, now=None):
                 "measured_mfe_records": sum(r["mfe_pct"] is not None for r in rows),
             },
         },
+        # Separate audit: compare independent V30 exit thresholds to recorded
+        # runtime exit reasons. This cannot validate shadow portfolio fills.
+        "v30_exit_parity": audit_archive([row["source"] for row in rows]),
         "data_quality": {"archive_closed_usable": len(rows), "price_paths_checked": 0,
                          "replayable_paths": 0, "excluded_by_reason": {}},
         "exit_research": {},
