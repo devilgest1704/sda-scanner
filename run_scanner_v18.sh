@@ -142,6 +142,46 @@ maybe_dispatch_optimizer() {
   return 0
 }
 
+
+# Daily V31 research can be skipped by GitHub cron. Keep it separate from
+# the hourly optimizer. Never do research in the scanner's paper writer.
+maybe_dispatch_v31_research() {
+  if [ -z "${GITHUB_ACTIONS:-}" ] || [ "$CONTINUOUS" != "true" ]; then
+    return 0
+  fi
+  if [ -z "${GH_TOKEN:-}" ] || [ -z "${GITHUB_REPOSITORY:-}" ]; then
+    echo "::warning::V31 RESEARCH: no Actions access; relying on scheduled run."
+    return 0
+  fi
+  local runs gate_rc
+  if ! runs="$(timeout 30s gh run list \
+    --workflow strategy-lab.yml \
+    --repo "$GITHUB_REPOSITORY" --branch main --limit 30 \
+    --json createdAt,event,status,conclusion)"; then
+    echo "::warning::V31 RESEARCH: run history unavailable; retry next probe."
+    return 0
+  fi
+  gate_rc=0
+  printf '%s\n' "$runs" | python -m tools.v31_schedule_guard || gate_rc=$?
+  if [ "$gate_rc" -eq 0 ]; then
+    if timeout 30s gh workflow run strategy-lab.yml \
+        --repo "$GITHUB_REPOSITORY" --ref main; then
+      echo "V31 RESEARCH: missing daily research workflow dispatched."
+    else
+      echo "::warning::V31 RESEARCH: dispatch failed; retry after next probe."
+    fi
+  elif [ "$gate_rc" -eq 2 ]; then
+    echo "::warning::V31 RESEARCH: run data malformed; no dispatch."
+  fi
+  return 0
+}
+
+maybe_dispatch_research_and_optimizer() {
+  maybe_dispatch_optimizer
+  maybe_dispatch_v31_research
+  return 0
+}
+
 run_one_scan() {
   local started ended elapsed
   started="$(date +%s)"
@@ -278,7 +318,7 @@ while true; do
       last_optimizer_probe="$now"
       # Network API calls run in the background: never delay the next paper
       # scan or risk/stop processing while checking the optimizer cadence.
-      maybe_dispatch_optimizer &
+      maybe_dispatch_research_and_optimizer &
     fi
   fi
 done
