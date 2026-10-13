@@ -121,7 +121,8 @@ def close(p,a,current,reason,fraction=None):
         p["closed_trades"].append(z);del p["positions"][a]
     else:
         x["remaining_fraction"]=remaining-frac;x["updated_at"]=now();p["closed_trades"].append(z)
-    p["closed_trades"]=p["closed_trades"][-500:];return z
+    # Preserve all closed paper records for consistent P/L statistics.
+    return z
 
 def _unwrap_items(obj):
     if isinstance(obj,list):return obj

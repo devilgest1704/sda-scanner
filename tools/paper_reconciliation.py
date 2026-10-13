@@ -93,7 +93,7 @@ def reconcile(ledger, archive, stats, now=None):
     historic_profit = sum(amount(archive_index[k].get("closed_profit_sda")) or 0.
                         for k in historic_only)
     invalid_closed_status = sum(
-        not isinstance(r, dict) or str(r.get("status") or "").upper() != "CLOSED"
+        not isinstance(r, dict) or str(r.get("status") or "").upper() not in ("CLOSED", "PARTIAL CLOSED")
         for r in current)
     diagnostic = {
         "version": "PAPER_LEDGER_RECONCILIATION_1",

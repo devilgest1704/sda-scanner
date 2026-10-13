@@ -21,6 +21,10 @@ on:
       - 'run_scanner_v18.sh'
       - 'tools/paper_state_guard.py'
       - 'tests/test_paper_state_guard.py'
+      - 'engine_legacy.py'
+      - 'paper_stats.py'
+      - 'tools/paper_reconciliation.py'
+      - 'tests/test_paper_closed_history.py'
       - 'tools/v31_schedule_guard.py'
       - 'tests/test_v31_schedule_guard.py'
       - '.github/workflows/scanner_v18.yml'
@@ -44,6 +48,10 @@ on:
       - 'run_scanner_v18.sh'
       - 'tools/paper_state_guard.py'
       - 'tests/test_paper_state_guard.py'
+      - 'engine_legacy.py'
+      - 'paper_stats.py'
+      - 'tools/paper_reconciliation.py'
+      - 'tests/test_paper_closed_history.py'
       - 'tools/v31_schedule_guard.py'
       - 'tests/test_v31_schedule_guard.py'
       - '.github/workflows/scanner_v18.yml'
@@ -82,6 +90,12 @@ jobs:
         run: |
           python -m py_compile tools/paper_state_guard.py
           python -m unittest discover -s tests -p 'test_paper_state_guard.py' -v
+
+      - name: Verify 501+ paper closes and official SDA accounting
+        run: |
+          python -m pip install requests
+          python -m py_compile engine_legacy.py paper_stats.py tools/paper_reconciliation.py
+          python -m unittest discover -s tests -p 'test_paper_closed_history.py' -v
       - name: Test missing V31 daily run recovery guard
         run: python -m unittest discover -s tests -p 'test_v31_schedule_guard.py' -v
 
