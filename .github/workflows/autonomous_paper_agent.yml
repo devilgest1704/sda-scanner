@@ -19,6 +19,8 @@ on:
       - 'tests/test_v32_breakout_sampler.py'
       - 'v30_pump_hunter.py'
       - 'run_scanner_v18.sh'
+      - 'tools/paper_state_guard.py'
+      - 'tests/test_paper_state_guard.py'
       - 'tools/v31_schedule_guard.py'
       - 'tests/test_v31_schedule_guard.py'
       - '.github/workflows/scanner_v18.yml'
@@ -40,6 +42,8 @@ on:
       - 'tests/test_v32_breakout_sampler.py'
       - 'v30_pump_hunter.py'
       - 'run_scanner_v18.sh'
+      - 'tools/paper_state_guard.py'
+      - 'tests/test_paper_state_guard.py'
       - 'tools/v31_schedule_guard.py'
       - 'tests/test_v31_schedule_guard.py'
       - '.github/workflows/scanner_v18.yml'
@@ -73,6 +77,11 @@ jobs:
 
       - name: Verify scanner heartbeat script syntax
         run: bash -n run_scanner_v18.sh
+
+      - name: Test fail-closed protection of CURRENT paper ledger
+        run: |
+          python -m py_compile tools/paper_state_guard.py
+          python -m unittest discover -s tests -p 'test_paper_state_guard.py' -v
       - name: Test missing V31 daily run recovery guard
         run: python -m unittest discover -s tests -p 'test_v31_schedule_guard.py' -v
 
