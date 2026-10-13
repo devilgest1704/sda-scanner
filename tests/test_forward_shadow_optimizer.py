@@ -79,6 +79,20 @@ class ForwardOptimizerTests(unittest.TestCase):
         self.assertLess(result["quote_coverage_pct"]["quality"], 90.0)
         self.assertEqual(conf["generation"], 0)
 
+    def test_trend_runner_cannot_promote_even_if_exceptionally_profitable(self):
+        state = samples()
+        state["strategies"]["research_trend_runner"]["trades"] = [
+            {**row, "pnl_sda": 500.0}
+            for row in state["strategies"]["quality"]["trades"]
+        ]
+        with patch("tools.forward_shadow_optimizer.RUNTIME_EXECUTION_PARITY_VERIFIED", True):
+            result, updated = report(state, copy.deepcopy(BASE),
+                                     {"closed_trades": []}, NOW)
+        self.assertEqual(result["selected_challenger"]["name"], "quality")
+        self.assertFalse(result["v32_trend_runner"]["may_promote_champion"])
+        self.assertEqual(result["v32_trend_runner"]["mode"], "RESEARCH_ONLY")
+        self.assertFalse(result["real_trading"])
+
     def test_v32_breakout_cannot_become_champion_even_if_profitable(self):
         state = samples()
         state["strategies"]["research_breakout_volume_trend"]["trades"] = [
