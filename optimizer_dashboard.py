@@ -187,6 +187,15 @@ def strategies_report(auto):
         lines += [f"{icon} {name}{tag}",
                   f"   {_pnl(pnl)} • {count} validních close • win {_number(d.get('win_rate_pct')):.1f} %",
                   f"   Celkem validních {valid} / vyřazeno {excluded} • PF {_number(d.get('profit_factor')):.2f}"]
+    runner_meta = auto.get("v32_trend_runner")
+    paired = (runner_meta.get("paired_exit_comparison")
+              if isinstance(runner_meta, dict) else None)
+    if isinstance(paired, dict):
+        n = int(_number(paired.get("paired_closed_trades")))
+        difference = _number(paired.get("runner_minus_baseline_sda"))
+        lines += ["", f"📐 Trend Runner vs Baseline: {n} shodných vstupů",
+                  f"   Rozdíl po nákladech: {_pnl(difference)}",
+                  "   Pouze srovnání uzavřených párových Shadow obchodů."]
     lines += ["", "⚠️ Malý vzorek neprokazuje ziskovost.",
               "WATCH, V32 MACD, Breakout ani Trend Runner se automaticky nenasazují."]
     return "\n".join(lines)
