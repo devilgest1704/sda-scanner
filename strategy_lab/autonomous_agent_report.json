@@ -1,6 +1,6 @@
 {
   "version": "FORWARD-PAPER-AGENT-1",
-  "updated_at": "2026-10-13T18:14:20.425344+00:00",
+  "updated_at": "2026-10-13T19:19:17.259607+00:00",
   "mode": "PAPER_ONLY",
   "objective": "maximize accumulated net SDA subject to observed quote risk",
   "real_trading": false,
@@ -26,13 +26,39 @@
     "trade_model": "Independent WATCH/IGNITION breakout volume trend shadow portfolio",
     "caveat": "Transaction-based signals and observed quotes; no execution parity or profitable forward holdout proved"
   },
+  "v32_trend_runner": {
+    "mode": "RESEARCH_ONLY",
+    "policies": [
+      "research_trend_runner"
+    ],
+    "may_promote_champion": false,
+    "live_buy_rules_modified": false,
+    "entry_reference": "same V30 baseline Shadow entry filters",
+    "exit_reference": "take 50% at first observed >=+8% move, trail remaining 3.5% from observed peak, hard stop and max 12h after partial",
+    "cost_accounting": "one full 50 SDA entry; separate 50% exit legs charged round-trip fees only once each; aggregate ONE completed trade",
+    "caveat": "No real fills, no historical hindsight, invalid quotes excluded, no verified profit or execution parity",
+    "paired_exit_comparison": {
+      "method": "same_address_and_opened_at_valid_forward_entries_only",
+      "paired_closed_trades": 0,
+      "unique_tokens": 0,
+      "baseline_paired_net_sda": 0,
+      "runner_paired_net_sda": 0,
+      "runner_minus_baseline_sda": 0,
+      "runner_outperformed_pairs": 0,
+      "unpaired_baseline_valid": 20,
+      "unpaired_runner_valid": 0,
+      "paper_only": true,
+      "can_promote_champion": false,
+      "warning": "Descriptive paired exit comparison, not a randomized or proven-profitability test"
+    }
+  },
   "runtime_parity": {
     "verified": false,
     "shadow_exits": "fixed 2.5% stop, +8% take, -3.5% trailing, 4h timeout",
     "paper_exits": "V30 emergency stop, adaptive trailing, early weakness, pump breakdown and stale",
     "warning": "Unmatched exit models cannot validate promotion until independent parity tests pass"
   },
-  "source_last_scan_at": "2026-10-13T18:13:50.822736+00:00",
+  "source_last_scan_at": "2026-10-13T19:18:52.335403+00:00",
   "strategies": {
     "baseline": {
       "all": {
@@ -80,13 +106,13 @@
     },
     "score": {
       "all": {
-        "closed": 12,
-        "net_sda": -5.6307,
+        "closed": 13,
+        "net_sda": -2.2419,
         "max_drawdown_sda": 15.2855,
-        "win_rate_pct": 33.33,
-        "profit_factor": 0.7679,
-        "unique_tokens": 9,
-        "last_closed_at": "2026-10-12T17:10:59+00:00"
+        "win_rate_pct": 38.46,
+        "profit_factor": 0.9076,
+        "unique_tokens": 10,
+        "last_closed_at": "2026-10-13T18:20:27+00:00"
       }
     },
     "quality_plus": {
@@ -154,6 +180,17 @@
         "unique_tokens": 0,
         "last_closed_at": null
       }
+    },
+    "research_trend_runner": {
+      "all": {
+        "closed": 0,
+        "net_sda": 0,
+        "max_drawdown_sda": 0.0,
+        "win_rate_pct": 0,
+        "profit_factor": 0,
+        "unique_tokens": 0,
+        "last_closed_at": null
+      }
     }
   },
   "champion": {
@@ -174,13 +211,14 @@
     "quality": 65.52,
     "momentum": 61.9,
     "selective": 73.33,
-    "score": 66.67,
+    "score": 68.42,
     "quality_plus": 65.38,
     "research_watch": 78.57,
     "research_watch_strict": 100.0,
     "research_macd_antipump": 0.0,
     "research_macd_confirmation": 0.0,
-    "research_breakout_volume_trend": 0.0
+    "research_breakout_volume_trend": 0.0,
+    "research_trend_runner": 0.0
   },
   "learning_data_quality": {
     "baseline": {
@@ -228,8 +266,8 @@
       "open_virtual_positions": 0
     },
     "score": {
-      "total_closed": 18,
-      "valid_closed": 12,
+      "total_closed": 19,
+      "valid_closed": 13,
       "excluded_closed": 6,
       "excluded_by_reason": {
         "legacy_unknown_quote_quality": 3,
@@ -255,8 +293,8 @@
       "excluded_closed": 3,
       "excluded_by_reason": {
         "legacy_unknown_quote_quality": 1,
-        "quote_gap_over_30m": 2,
-        "holding_time_over_4_5h": 2
+        "holding_time_over_4_5h": 2,
+        "quote_gap_over_30m": 2
       },
       "open_virtual_positions": 0
     },
@@ -284,6 +322,13 @@
       "open_virtual_positions": 0
     },
     "research_breakout_volume_trend": {
+      "total_closed": 0,
+      "valid_closed": 0,
+      "excluded_closed": 0,
+      "excluded_by_reason": {},
+      "open_virtual_positions": 0
+    },
+    "research_trend_runner": {
       "total_closed": 0,
       "valid_closed": 0,
       "excluded_closed": 0,
