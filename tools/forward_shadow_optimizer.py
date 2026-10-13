@@ -59,6 +59,49 @@ def forward_rows(strategy):
             and isinstance(r.get("address"), str) and r["address"]]
 
 
+def paired_trend_runner_exit_impact(baseline_rows, runner_rows):
+    """Compare *only* equal address/opened_at entry pairs on valid close data.
+
+    Identical opening entries isolate the effect of exit policy. Each full
+    50-SDA entry is counted once; runner partial legs are never counted twice.
+    Missing or unpaired observations are excluded, not credited as missed
+    profit. Descriptive evidence only: never authorizes a promotion.
+    """
+    def distinct(rows):
+        found = {}
+        duplicates = set()
+        for row in rows:
+            key = (str(row["address"]).lower(), row["opened_at"])
+            if key in found:
+                duplicates.add(key)
+            found[key] = row
+        for key in duplicates:
+            del found[key]
+        return found
+    base = distinct(baseline_rows)
+    runner = distinct(runner_rows)
+    pairs = sorted(set(base) & set(runner))
+    total_base = sum(float(base[k]["pnl_sda"]) for k in pairs)
+    total_runner = sum(float(runner[k]["pnl_sda"]) for k in pairs)
+    difference = total_runner-total_base
+    return {
+        "method": "same_address_and_opened_at_valid_forward_entries_only",
+        "paired_closed_trades": len(pairs),
+        "unique_tokens": len({k[0] for k in pairs}),
+        "baseline_paired_net_sda": round(total_base, 4),
+        "runner_paired_net_sda": round(total_runner, 4),
+        "runner_minus_baseline_sda": round(difference, 4),
+        "runner_outperformed_pairs": sum(
+            float(runner[k]["pnl_sda"]) > float(base[k]["pnl_sda"])
+            for k in pairs),
+        "unpaired_baseline_valid": len(base)-len(pairs),
+        "unpaired_runner_valid": len(runner)-len(pairs),
+        "paper_only": True,
+        "can_promote_champion": False,
+        "warning": "Descriptive paired exit comparison, not a randomized or proven-profitability test",
+    }
+
+
 def paper_realized_since(ledger, since):
     result = []
     for row in ledger.get("closed_trades", []):
@@ -101,6 +144,16 @@ def report(state, config, real_ledger, now=None):
             "live_buy_rules_modified": False,
             "trade_model": "Independent WATCH/IGNITION breakout volume trend shadow portfolio",
             "caveat": "Transaction-based signals and observed quotes; no execution parity or profitable forward holdout proved",
+        },
+        "v32_trend_runner": {
+            "mode": "RESEARCH_ONLY",
+            "policies": ["research_trend_runner"],
+            "may_promote_champion": False,
+            "live_buy_rules_modified": False,
+            "entry_reference": "same V30 baseline Shadow entry filters",
+            "exit_reference": "take 50% at first observed >=+8% move, trail remaining 3.5% from observed peak, hard stop and max 12h after partial",
+            "cost_accounting": "one full 50 SDA entry; separate 50% exit legs charged round-trip fees only once each; aggregate ONE completed trade",
+            "caveat": "No real fills, no historical hindsight, invalid quotes excluded, no verified profit or execution parity",
         },
         "runtime_parity": {
             "verified": RUNTIME_EXECUTION_PARITY_VERIFIED,
@@ -180,6 +233,12 @@ def report(state, config, real_ledger, now=None):
         all_records = strategies[name].get("trades") or []
         valid = len(all_rows[name])
         coverage[name] = round(100 * valid / len(all_records), 2) if all_records else 0.0
+    model["v32_trend_runner"]["paired_exit_comparison"] = (
+        paired_trend_runner_exit_impact(
+            all_rows.get("baseline", []),
+            all_rows.get("research_trend_runner", []),
+        )
+    )
     model["quote_coverage_pct"] = coverage
     # Explain why a strategy lacks usable forward evidence. Do not infer
     # missing prices and do not weaken the observed-quote promotion gate.

@@ -141,7 +141,7 @@ def overview_report(auto, config):
     tracked = len(strategies)
     baseline = (strategies.get("baseline") or {}).get("all") or {}
     q = quality.get("baseline") or {}
-    lines += [f"Testované strategie: {tracked} (včetně WATCH/MACD/Breakout výzkumu)",
+    lines += [f"Testované strategie: {tracked} (včetně WATCH/MACD/Breakout/Trend Runner výzkumu)",
               f"Baseline validních uzavření: {q.get('valid_closed', baseline.get('closed', 0))}",
               f"Vyřazená uzavření: {q.get('excluded_closed', 'N/A')}",
               f"Baseline shadow P/L: {_pnl(baseline.get('net_sda'))}",
@@ -180,14 +180,24 @@ def strategies_report(auto):
         excluded = int(_number(q.get("excluded_closed")))
         pnl = _number(d.get("net_sda"))
         icon = "⚪" if not count else ("🟢" if pnl > 0 else "🔴")
-        tag = (" (V32 Breakout výzkum)" if name == "research_breakout_volume_trend"
+        tag = (" (V32 Trend Runner výzkum)" if name == "research_trend_runner"
+               else " (V32 Breakout výzkum)" if name == "research_breakout_volume_trend"
                else " (V32 MACD výzkum)" if name.startswith("research_macd")
                else " (výzkum)" if name.startswith("research_") else "")
         lines += [f"{icon} {name}{tag}",
                   f"   {_pnl(pnl)} • {count} validních close • win {_number(d.get('win_rate_pct')):.1f} %",
                   f"   Celkem validních {valid} / vyřazeno {excluded} • PF {_number(d.get('profit_factor')):.2f}"]
+    runner_meta = auto.get("v32_trend_runner")
+    paired = (runner_meta.get("paired_exit_comparison")
+              if isinstance(runner_meta, dict) else None)
+    if isinstance(paired, dict):
+        n = int(_number(paired.get("paired_closed_trades")))
+        difference = _number(paired.get("runner_minus_baseline_sda"))
+        lines += ["", f"📐 Trend Runner vs Baseline: {n} shodných vstupů",
+                  f"   Rozdíl po nákladech: {_pnl(difference)}",
+                  "   Pouze srovnání uzavřených párových Shadow obchodů."]
     lines += ["", "⚠️ Malý vzorek neprokazuje ziskovost.",
-              "WATCH, V32 MACD a Breakout strategie se automaticky nenasazují."]
+              "WATCH, V32 MACD, Breakout ani Trend Runner se automaticky nenasazují."]
     return "\n".join(lines)
 
 
