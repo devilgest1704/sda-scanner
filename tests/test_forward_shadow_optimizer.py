@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 from tools.forward_shadow_agent import default_state
-from tools.forward_shadow_optimizer import report
+from tools.forward_shadow_optimizer import report, paired_trend_runner_exit_impact
 
 
 NOW = datetime(2026, 10, 10, 18, 0, tzinfo=timezone.utc)
@@ -78,6 +78,30 @@ class ForwardOptimizerTests(unittest.TestCase):
         self.assertFalse(result["promotion_applied"])
         self.assertLess(result["quote_coverage_pct"]["quality"], 90.0)
         self.assertEqual(conf["generation"], 0)
+
+    def test_paired_trend_runner_credits_only_identical_forward_entries(self):
+        def row(symbol, opened, pnl):
+            return {"address": symbol,
+                    "opened_at": opened, "closed_at": opened,
+                    "pnl_sda": pnl, "valid_for_learning": True}
+        base = [row("0xa", "2026-10-13T07:00:00Z", 3),
+                row("0xb", "2026-10-13T08:00:00Z", -4)]
+        runner = [row("0xa", "2026-10-13T07:00:00Z", 5),
+                  row("0xb", "2026-10-13T09:00:00Z", 30)]
+        x = paired_trend_runner_exit_impact(base, runner)
+        self.assertEqual(x["paired_closed_trades"], 1)
+        self.assertEqual(x["runner_minus_baseline_sda"], 2)
+        self.assertEqual(x["unpaired_baseline_valid"], 1)
+        self.assertEqual(x["unpaired_runner_valid"], 1)
+        self.assertFalse(x["can_promote_champion"])
+
+    def test_paired_comparison_excludes_duplicate_entry_identifiers(self):
+        def r(p):
+            return {"address": "0xa", "opened_at": "2026-10-13T07:00:00Z",
+                    "pnl_sda":p}
+        x = paired_trend_runner_exit_impact([r(1), r(2)], [r(999)])
+        self.assertEqual(x["paired_closed_trades"], 0)
+        self.assertEqual(x["runner_minus_baseline_sda"], 0)
 
     def test_trend_runner_cannot_promote_even_if_exceptionally_profitable(self):
         state = samples()
