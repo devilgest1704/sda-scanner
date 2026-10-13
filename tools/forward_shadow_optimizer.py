@@ -102,6 +102,16 @@ def report(state, config, real_ledger, now=None):
             "trade_model": "Independent WATCH/IGNITION breakout volume trend shadow portfolio",
             "caveat": "Transaction-based signals and observed quotes; no execution parity or profitable forward holdout proved",
         },
+        "v32_trend_runner": {
+            "mode": "RESEARCH_ONLY",
+            "policies": ["research_trend_runner"],
+            "may_promote_champion": False,
+            "live_buy_rules_modified": False,
+            "entry_reference": "same V30 baseline Shadow entry filters",
+            "exit_reference": "take 50% at first observed >=+8% move, trail remaining 3.5% from observed peak, hard stop and max 12h after partial",
+            "cost_accounting": "one full 50 SDA entry; separate 50% exit legs charged round-trip fees only once each; aggregate ONE completed trade",
+            "caveat": "No real fills, no historical hindsight, invalid quotes excluded, no verified profit or execution parity",
+        },
         "runtime_parity": {
             "verified": RUNTIME_EXECUTION_PARITY_VERIFIED,
             "shadow_exits": "fixed 2.5% stop, +8% take, -3.5% trailing, 4h timeout",
