@@ -429,6 +429,10 @@ def step(data, market, funnel):
             if entry is None:
                 raise ValueError("Corrupted forward shadow entry price")
             if name == TREND_RUNNER_RESEARCH_MODE:
+                # Never replay an already stale/future transaction as if it
+                # could have executed at the current scanner snapshot.
+                if stamp > ts or (ts-stamp).total_seconds() > 300:
+                    continue
                 action, runner_reason = apply_observed_quote(
                     position, stamp, price, gap, SIZE_SDA, FEE_AND_SLIPPAGE
                 )
