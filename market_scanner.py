@@ -6,6 +6,8 @@ from pathlib import Path
 
 import requests
 
+from tools.market_history_integrity import append_transaction, compact_history
+
 
 # ============================================================
 # CONFIG
@@ -217,17 +219,13 @@ def normalize_transaction(tx):
 # HISTORY
 # ============================================================
 
-def add_transaction(token_data, tx):
+def add_transaction(token_data, tx, known_hashes=None):
     history = token_data.setdefault("transactions", [])
-    tx_hash = tx.get("hash")
-
-    if tx_hash:
-        for existing in history[-200:]:
-            if existing.get("hash") == tx_hash:
-                return False
-
-    history.append(tx)
-    return True
+    if known_hashes is None:
+        # Compatibility with individual callers; production supplies a cached
+        # index and avoids an O(history size) scan for each fetched transaction.
+        _, known_hashes, _ = compact_history(history, MAX_HISTORY_POINTS)
+    return append_transaction(history, tx, known_hashes)
 
 
 def get_transactions_in_window(history, current_time, minutes):
@@ -427,6 +425,20 @@ try:
     market_data = load_market_data()
     tokens = market_data.setdefault("tokens", {})
 
+    # Repair legacy hash replays before either V30 market analysis or V32
+    # research sees them. Full retained-history identity checks also prevent
+    # the same >200-old event from being appended on every fetch.
+    history_hashes = {}
+    repaired_replays = 0
+    for address, token_data in tokens.items():
+        clean, known, removed = compact_history(
+            token_data.get("transactions", []), MAX_HISTORY_POINTS
+        )
+        token_data["transactions"] = clean
+        history_hashes[address] = known
+        repaired_replays += removed
+    print(f"MARKET HISTORY INTEGRITY: removed={repaired_replays} historical hash replays")
+
     new_transactions = 0
 
     for raw_tx in transactions:
@@ -442,7 +454,8 @@ try:
         if token_address not in tokens:
             tokens[token_address] = {"transactions": []}
 
-        if add_transaction(tokens[token_address], tx):
+        if add_transaction(tokens[token_address], tx,
+                           history_hashes.setdefault(token_address, set())):
             new_transactions += 1
 
     analyzed_tokens = {}
