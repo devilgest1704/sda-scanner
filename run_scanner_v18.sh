@@ -40,6 +40,10 @@ from pathlib import Path
 
 files = '''state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json'''.split()
 
+# Never reset the accounting source-of-truth, even if a scanner stage
+# wrote corrupt JSON. The dedicated paper_state_guard fails closed below.
+files = [f for f in files if f not in ("positions.json", "paper_stats.json")]
+
 for name in files:
     p = Path(name)
     if not p.exists() or p.stat().st_size == 0:
@@ -267,6 +271,11 @@ PY
   fi
 
   ensure_json_state
+  # Each completed scan must agree with the published paper accounting and
+  # retain every earlier closed trade observed by this worker.
+  # If it doesn't, STOP the worker before any checkpoint can overwrite
+  # the last valid committed position ledger.
+  python -m tools.paper_state_guard
 
   ended="$(date +%s)"
   elapsed=$((ended - started))
@@ -275,6 +284,11 @@ PY
     echo "⚠️ PAPER RISK: scan duration ${elapsed}s exceeded 120s; paper stops were not evaluated continuously." >&2
   fi
 }
+
+# Before any scanner writer starts, check the committed paper ledger.
+# Missing/corrupt positions.json or paper_stats.json MUST never silently
+# become {}. The per-worker sentinel then protects closed-trade monotonicity.
+python -m tools.paper_state_guard
 
 # Compile once per worker, not once per minute.
 python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py v30_pump_hunter.py
