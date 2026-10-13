@@ -99,6 +99,18 @@ class TrendRunnerForwardTests(unittest.TestCase):
         self.assertEqual(len(runner["trades"]), 0)
         self.assertEqual(runner["positions"]["0xab"]["last_quote_at"], T0.isoformat())
 
+    def test_delayed_new_quote_cannot_fake_observed_earlier_partial_fill(self):
+        state = default_state()
+        sample(state, 0, 1.)
+        current = T0 + timedelta(minutes=20)
+        # Data arrived 15m after the transaction. A new price timestamp
+        # exists, but it was not actionable at this scanner snapshot.
+        delayed = T0 + timedelta(minutes=5)
+        step(state, market(current, 1.2, delayed), funnel(current, 1.2))
+        pos = state["strategies"][RUNNER]["positions"]["0xab"]
+        self.assertEqual(pos["runner_legs"], [])
+        self.assertEqual(pos["last_quote_at"], T0.isoformat())
+
     def test_long_quote_gap_excludes_final_quote_trade(self):
         state = default_state()
         sample(state, 0, 1.)
