@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tools.v30_exit_parity import audit_archive
+from tools.paper_reconciliation import reconcile
 
 FEE = 0.01
 SLIPPAGE = 0.001
@@ -371,13 +372,42 @@ def analyze(archive, stats=None, now=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--archive", default="strategy_lab/closed_trades.json")
+    ap.add_argument("--ledger", default="positions.json",
+                    help="CURRENT closed paper ledger; the only source for official P/L")
+    ap.add_argument("--archive", default="strategy_lab/closed_trades.json",
+                    help="Append-only audit history; never added to CURRENT paper P/L")
     ap.add_argument("--stats", default="paper_stats.json")
     ap.add_argument("--output", default="strategy_lab/v31_profit_learning.json")
     args = ap.parse_args()
+    ledger = json.loads(Path(args.ledger).read_text(encoding="utf-8"))
     archive = json.loads(Path(args.archive).read_text(encoding="utf-8"))
     stats = json.loads(Path(args.stats).read_text(encoding="utf-8"))
-    result = analyze(archive, stats)
+    if not isinstance(ledger, dict) or not isinstance(ledger.get("closed_trades"), list):
+        raise ValueError("Current positions ledger is not a valid source of paper trades")
+    # The historical archive is an append-only UNION and can legitimately
+    # contain trades no longer listed in the running paper ledger. Never
+    # inflate the current P/L or trade count by including archive-only rows.
+    result = analyze(ledger["closed_trades"], stats)
+    comparison = reconcile(ledger, archive, stats)
+    result["accounting_source"] = "CURRENT_positions_json_closed_trades_only"
+    result["archive_accounting_role"] = "append_only_audit_not_current_pnl"
+    result["ledger_reconciliation"] = {
+        "current_accounting_reconciled": comparison["current_accounting_reconciled"],
+        "historic_only_count": comparison["archive"]["historic_only_count"],
+        "historic_only_sum_sda": comparison["archive"]["historic_only_sum_sda"],
+        "current_only_count": comparison["archive"]["current_only_count"],
+        "same_identity_different_pnl_count":
+            comparison["archive"]["same_identity_different_pnl_count"],
+    }
+    if not comparison["current_accounting_reconciled"]:
+        result["statistics_reconciled"] = False
+        result["limitations"].append(
+            "Current positions closed trades and paper_stats disagree; investigate "
+            "the current ledger before interpreting strategy comparisons.")
+    if comparison["archive"]["historic_only_count"]:
+        result["limitations"].append(
+            "Append-only archive has historical-only trades; they are excluded "
+            "from the CURRENT paper P/L and retained only for audit.")
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     temp = output.with_suffix(".json.tmp")
