@@ -13,6 +13,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tools.v32_breakout import research_signal_from_analysis, breakout_research_eligible
+from tools.v32_trend_runner import (apply_observed_quote, close_record as runner_close_record,
+                                   stale_writeoff as runner_stale_writeoff,
+                                   AFTER_TAKE_NO_QUOTE_HOURS)
 
 STATE = Path("strategy_lab/forward_shadow_state.json")
 SIZE_SDA = 50.0
@@ -45,8 +48,13 @@ POLICIES = {
         "entry_score": 55, "quality": 48, "impulse": 4,
         "buy_ratio": 1.15, "trades": 8,
     },
+    # Same entry gates as baseline: isolates the impact of runner EXITS.
+    # Research-only; never allowed to change the V30 Champion.
+    "research_trend_runner": {"entry_score": 68, "quality": 52, "impulse": 8,
+                              "buy_ratio": 1.10, "trades": 5},
 }
 BREAKOUT_RESEARCH_MODE = "research_breakout_volume_trend"
+TREND_RUNNER_RESEARCH_MODE = "research_trend_runner"
 MACD_RESEARCH_MODES = frozenset(("research_macd_antipump", "research_macd_confirmation"))
 MACD_BAR_SECONDS = {"5m": 300, "15m": 900}
 MIN_MACD_CLOSED_BARS = 35
@@ -382,21 +390,35 @@ def step(data, market, funnel):
             if quote is None or quote[0] <= last or quote[0] <= start:
                 # Never allow stale/unquoted token positions to permanently
                 # occupy the research portfolio. This is NOT an observed fill.
-                if (ts - start).total_seconds() >= 8*3600:
-                    trades.append({
-                        "strategy": name, "address": address,
-                        "opened_at": position["opened_at"], "closed_at": ts.isoformat(),
-                        "entry_price_sda": position["entry_price_sda"],
-                        "exit_price_sda": None, "pnl_sda": -SIZE_SDA,
-                        "roi_pct": -100.0, "reason": "STALE_TIMEOUT",
-                        "quote_gap_minutes": round((ts-last).total_seconds()/60,2),
-                        "valid_for_learning": False,
-                        "learning_exclusion_reasons": ["stale_timeout_no_observed_exit_quote"],
-                        "notional_sda": SIZE_SDA,
-                        "model": "conservative_risk_writeoff_no_observed_fill",
-                        **({"v32_breakout_at_entry": position.get("v32_breakout_at_entry")}
-                           if name == BREAKOUT_RESEARCH_MODE else {}),
-                    })
+                unquoted_limit = (AFTER_TAKE_NO_QUOTE_HOURS
+                                  if name == TREND_RUNNER_RESEARCH_MODE else 8)
+                if (ts - start).total_seconds() >= unquoted_limit*3600:
+                    if name == TREND_RUNNER_RESEARCH_MODE:
+                        # Only the remaining 50% can be conservatively written
+                        # off after a documented partial take. No fake fill.
+                        stale_result = runner_stale_writeoff(position, ts, SIZE_SDA)
+                        trades.append({
+                            "strategy": name, "address": address,
+                            "opened_at": position["opened_at"], "closed_at": ts.isoformat(),
+                            "entry_price_sda": position["entry_price_sda"],
+                            "quote_gap_minutes": round((ts-last).total_seconds()/60, 2),
+                            **stale_result,
+                        })
+                    else:
+                        trades.append({
+                            "strategy": name, "address": address,
+                            "opened_at": position["opened_at"], "closed_at": ts.isoformat(),
+                            "entry_price_sda": position["entry_price_sda"],
+                            "exit_price_sda": None, "pnl_sda": -SIZE_SDA,
+                            "roi_pct": -100.0, "reason": "STALE_TIMEOUT",
+                            "quote_gap_minutes": round((ts-last).total_seconds()/60,2),
+                            "valid_for_learning": False,
+                            "learning_exclusion_reasons": ["stale_timeout_no_observed_exit_quote"],
+                            "notional_sda": SIZE_SDA,
+                            "model": "conservative_risk_writeoff_no_observed_fill",
+                            **({"v32_breakout_at_entry": position.get("v32_breakout_at_entry")}
+                               if name == BREAKOUT_RESEARCH_MODE else {}),
+                        })
                     del positions[address]
                     closed += 1
                 continue
@@ -406,6 +428,28 @@ def step(data, market, funnel):
             entry = positive(position.get("entry_price_sda"))
             if entry is None:
                 raise ValueError("Corrupted forward shadow entry price")
+            if name == TREND_RUNNER_RESEARCH_MODE:
+                action, runner_reason = apply_observed_quote(
+                    position, stamp, price, gap, SIZE_SDA, FEE_AND_SLIPPAGE
+                )
+                position["last_quote_at"] = stamp.isoformat()
+                if action in ("hold", "partial"):
+                    continue
+                if action != "close":
+                    raise ValueError("Unexpected Trend Runner action")
+                result = runner_close_record(
+                    position, stamp, price, runner_reason, gap,
+                    SIZE_SDA, FEE_AND_SLIPPAGE
+                )
+                trades.append({
+                    "strategy": name, "address": address,
+                    "opened_at": position["opened_at"],
+                    "closed_at": stamp.isoformat(),
+                    **result,
+                })
+                del positions[address]
+                closed += 1
+                continue
             position["last_quote_at"] = stamp.isoformat()
             position["peak_price_sda"] = max(price, positive(position.get("peak_price_sda")) or entry)
             move = price / entry - 1
@@ -480,6 +524,9 @@ def step(data, market, funnel):
                 positions[address] = {
                     "opened_at": ts.isoformat(), "entry_price_sda": entry,
                     "last_quote_at": stamp.isoformat(), "peak_price_sda": entry,
+                    **({"runner_legs": [], "runner_largest_quote_gap_min": 0.0,
+                        "runner_entry_reference": "baseline_shadow_entry_gates"}
+                       if name == TREND_RUNNER_RESEARCH_MODE else {}),
                     **({"v32_macd_at_entry": c.get("v32_macd")}
                        if name in MACD_RESEARCH_MODES else {}),
                     **({"v32_breakout_at_entry": c.get("v32_breakout")}
@@ -495,6 +542,18 @@ def step(data, market, funnel):
             d = when(value)
             if d and (ts - d).total_seconds() > 86400:
                 del last_entry[key]
+    runner_state = data["strategies"][TREND_RUNNER_RESEARCH_MODE]
+    diagnostic["trend_runner_research"] = {
+        "entry_reference": "same_entry_filters_as_baseline",
+        "open": len(runner_state["positions"]),
+        "open_after_first_take": sum(
+            bool(p.get("runner_legs")) for p in runner_state["positions"].values()),
+        "closed_trade_rows": len(runner_state["trades"]),
+        "valid_closed": sum(
+            t.get("valid_for_learning") is True for t in runner_state["trades"]),
+        "partial_legs_are_not_closed_trades": True,
+        "paper_only": True,
+    }
     data["last_snapshot_at"] = ts.isoformat()
     data["updated_at"] = ts.isoformat()
     data["runs"] = int(data.get("runs", 0)) + 1
@@ -513,7 +572,8 @@ def step(data, market, funnel):
             "entry_lane_rows": entry_lanes, "watch_lane_rows": watch_lanes,
             "policies": len(POLICIES),
             "macd_research_paper_only": True,
-            "breakout_research_paper_only": True}
+            "breakout_research_paper_only": True,
+            "trend_runner_research_paper_only": True}
 
 
 def main():
