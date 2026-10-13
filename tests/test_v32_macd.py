@@ -166,6 +166,38 @@ class MacdForwardShadowTests(unittest.TestCase):
         self.assertEqual(state["last_diagnostic"]["macd_research_coverage"]["15m"], 0)
         self.assertEqual(len(state["strategies"]["baseline"]["positions"]), 1)
 
+    def test_diagnostics_explain_missing_macd_without_new_trades(self):
+        t = AS_OF
+        slow = {"available":False,"reason":"insufficient_traded_bars",
+                "completed_bars":35,"traded_bars":2}
+        fast = {"available":False,"reason":"too_many_consecutive_missing_bars",
+                "completed_bars":35,"traded_bars":17}
+        state = default_state()
+        step(state, snapshot(t, slow, fast), funnel(t))
+        d = state["last_diagnostic"]["macd_research_coverage"]
+        self.assertEqual(d["market_tokens_analyzed"],1)
+        self.assertEqual(d["sampled_candidates"],1)
+        self.assertEqual(d["market_unavailability_by_reason"]["15m"]
+                         ["insufficient_traded_bars"],1)
+        self.assertEqual(d["candidate_unavailability_by_reason"]["5m"]
+                         ["too_many_consecutive_missing_bars"],1)
+        self.assertFalse(d["thresholds_modified"])
+        self.assertTrue(d["research_only"])
+        self.assertEqual(len(state["strategies"]["baseline"]["positions"]),1)
+        self.assertEqual(len(state["strategies"]["research_macd_antipump"]["positions"]),0)
+
+    def test_diagnostics_distinguish_valid_calculation_from_join_rejection(self):
+        t = AS_OF
+        future = technical_frame(t+timedelta(minutes=45),"15m")
+        state = default_state()
+        step(state, snapshot(t, future, technical_frame(t,"5m")), funnel(t))
+        d=state["last_diagnostic"]["macd_research_coverage"]
+        self.assertEqual(d["market_unavailability_by_reason"]["15m"]["calculated"],1)
+        self.assertEqual(d["candidate_unavailability_by_reason"]["15m"]
+                         ["failed_same_scan_or_age_guard"],1)
+        self.assertEqual(d["5m"],1)
+        self.assertEqual(d["15m"],0)
+
     def test_research_arm_stays_nonpromotable(self):
         for arm in ("research_macd_antipump", "research_macd_confirmation"):
             self.assertIn(arm, POLICIES)

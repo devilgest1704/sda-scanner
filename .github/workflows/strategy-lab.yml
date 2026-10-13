@@ -14,6 +14,11 @@ on:
       - 'tests/test_paper_trade_lessons.py'
       - 'tools/v31_profit_learning.py'
       - 'tests/test_v31_profit_learning.py'
+      - 'tools/paper_reconciliation.py'
+      - 'tests/test_paper_reconciliation.py'
+      - 'tests/test_paper_report_sources.py'
+      - 'tools/paper_trade_lessons.py'
+      - 'tools/export_paper_trades.py'
       - 'tools/v30_exit_parity.py'
       - 'tests/test_v30_exit_parity.py'
       - 'v30_pump_hunter.py'
@@ -22,6 +27,11 @@ on:
       - '.github/workflows/strategy-lab.yml'
       - 'tools/v31_profit_learning.py'
       - 'tests/test_v31_profit_learning.py'
+      - 'tools/paper_reconciliation.py'
+      - 'tests/test_paper_reconciliation.py'
+      - 'tests/test_paper_report_sources.py'
+      - 'tools/paper_trade_lessons.py'
+      - 'tools/export_paper_trades.py'
       - 'tools/v30_exit_parity.py'
       - 'tests/test_v30_exit_parity.py'
       - 'v30_pump_hunter.py'
@@ -49,6 +59,12 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_trade_cohort_research.py' -v
       - name: Test historical SDA paper lessons
         run: python -m unittest discover -s tests -p 'test_paper_trade_lessons.py' -v
+      - name: Test accounting identity, archive preservation and CLI report alignment
+        run: |
+          python -m py_compile tools/paper_reconciliation.py tools/paper_trade_lessons.py tools/v31_profit_learning.py
+          python -m unittest discover -s tests -p 'test_paper_reconciliation.py' -v
+          python -m unittest discover -s tests -p 'test_paper_report_sources.py' -v
+
       - name: Test V31 profit-learning and V30 exit telemetry
         run: |
           python -m py_compile v30_pump_hunter.py tools/v31_profit_learning.py tools/v30_exit_parity.py
@@ -101,6 +117,9 @@ jobs:
           else:
               print('Archive trade counts:',export(source,archive))
           PY
+      - name: Reconcile CURRENT paper P/L vs append-only historical archive
+        run: python -m tools.paper_reconciliation
+
       - name: Explain completed paper trades, including latest PINE, by exit type
         run: python -m tools.paper_trade_lessons
       - name: V31 profit-learning research – identical observed-trade cohorts only
@@ -111,6 +130,9 @@ jobs:
           import json
           r=json.load(open('strategy_lab/v31_profit_learning.json'))
           assert r['mode']=='READ_ONLY_PAPER_RESEARCH'
+          assert r['accounting_source']=='CURRENT_positions_json_closed_trades_only'
+          assert r['archive_accounting_role']=='append_only_audit_not_current_pnl'
+          assert r['ledger_reconciliation']['current_accounting_reconciled'] == r['statistics_reconciled']
           assert r['paper_only'] is True and r['real_trading'] is False
           assert r['production_mutated'] is False
           assert r['promotion_eligible'] is False
@@ -154,7 +176,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           # Keep reviewed evidence alongside the durable trade/price archives.
           # These are small, reproducible PAPER research reports, not live settings.
-          git add -f strategy_lab/closed_trades.json strategy_lab/candidate_outcomes.json strategy_lab/research.json strategy_lab/trade_lessons.json strategy_lab/v31_profit_learning.json strategy_lab/report.json
+          git add -f strategy_lab/closed_trades.json strategy_lab/candidate_outcomes.json strategy_lab/research.json strategy_lab/trade_lessons.json strategy_lab/v31_profit_learning.json strategy_lab/paper_reconciliation.json strategy_lab/report.json
           if git diff --cached --quiet; then
             echo 'No research archive changes'
           else
@@ -170,6 +192,7 @@ jobs:
             strategy_lab/research.json
             strategy_lab/trade_lessons.json
             strategy_lab/v31_profit_learning.json
+            strategy_lab/paper_reconciliation.json
             strategy_lab/candidate_outcomes.json
             strategy_lab/status.png
           retention-days: 30

@@ -98,13 +98,18 @@ def analyze(source_rows, stats=None):
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument("--archive",default="strategy_lab/closed_trades.json")
+    parser.add_argument("--ledger",default="positions.json",
+                        help="Current paper ledger only; historical union is not official P/L")
     parser.add_argument("--stats",default="paper_stats.json")
     parser.add_argument("--output",default="strategy_lab/trade_lessons.json")
     args=parser.parse_args()
-    src=json.loads(Path(args.archive).read_text(encoding="utf-8"))
+    ledger=json.loads(Path(args.ledger).read_text(encoding="utf-8"))
+    if not isinstance(ledger,dict) or not isinstance(ledger.get("closed_trades"),list):
+        raise ValueError("Current paper ledger is invalid or missing closed trades")
     stats=json.loads(Path(args.stats).read_text(encoding="utf-8"))
-    report=analyze(src,stats)
+    report=analyze(ledger["closed_trades"],stats)
+    report["accounting_source"]="CURRENT_positions_json_closed_trades_only"
+    report["historical_union_included"]=False
     dst=Path(args.output)
     dst.parent.mkdir(parents=True,exist_ok=True)
     dst.write_text(json.dumps(report,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
@@ -117,7 +122,7 @@ def main():
        "strategy_changed":False},ensure_ascii=False))
     # Ledger mismatch should be a warning, not a silent claim of clean data.
     if report.get("statistics_reconciled") is False:
-        print("::warning::Paper archive does not match paper_stats snapshot; check concurrent checkpointing")
+        print("::warning::CURRENT positions closed trades do not match paper_stats; investigate inconsistent checkpoint")
 
 
 if __name__=="__main__":

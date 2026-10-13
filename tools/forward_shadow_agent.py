@@ -289,6 +289,38 @@ def step(data, market, funnel):
             c, filters, name.startswith("research_watch"), name)]
         policy_qualified[name] = len(matches)
         policy_quote_ready[name] = sum(same_time_quote(c) for c in matches)
+    # Diagnostic only: explain *why* short-timeframe MACD is unavailable.
+    # Never convert a missing indicator to a buy recommendation.
+    macd_market_reasons = {}
+    macd_candidate_reasons = {}
+    for frame in MACD_BAR_SECONDS:
+        all_reasons = {}
+        selected_reasons = {}
+        for token in market_tokens.values() if isinstance(market_tokens, dict) else []:
+            info = token.get("analysis", token) if isinstance(token, dict) else {}
+            t = info.get("technical", {}) if isinstance(info, dict) else {}
+            raw = t.get(frame) if isinstance(t, dict) else None
+            label = (str(raw.get("reason") or "unknown")
+                     if isinstance(raw, dict) and raw.get("available") is not True
+                     else ("calculated" if isinstance(raw, dict) else "missing_analysis"))
+            all_reasons[label] = all_reasons.get(label, 0) + 1
+        for c in ranked:
+            addr = str(c.get("address") or "").lower()
+            tok = market_tokens.get(addr, {}) if isinstance(market_tokens, dict) else {}
+            info = tok.get("analysis", tok) if isinstance(tok, dict) else {}
+            technical = info.get("technical", {}) if isinstance(info, dict) else {}
+            raw = technical.get(frame) if isinstance(technical, dict) else None
+            if isinstance(c.get("v32_macd"), dict) and c["v32_macd"].get(frame):
+                label = "valid_at_candidate"
+            elif isinstance(raw, dict) and raw.get("available") is True:
+                label = "failed_same_scan_or_age_guard"
+            elif isinstance(raw, dict):
+                label = str(raw.get("reason") or "not_available")
+            else:
+                label = "missing_analysis"
+            selected_reasons[label] = selected_reasons.get(label, 0) + 1
+        macd_market_reasons[frame] = dict(sorted(all_reasons.items()))
+        macd_candidate_reasons[frame] = dict(sorted(selected_reasons.items()))
     rejected_gates = {}
     for c in ranked:
         for gate in c.get("gates", []):
@@ -306,6 +338,13 @@ def step(data, market, funnel):
                       and isinstance(c["v32_macd"].get("5m"), dict) for c in ranked),
             "15m": sum(isinstance(c.get("v32_macd"), dict)
                        and isinstance(c["v32_macd"].get("15m"), dict) for c in ranked),
+            "market_tokens_analyzed": len(market_tokens)
+                                      if isinstance(market_tokens, dict) else 0,
+            "sampled_candidates": len(ranked),
+            "market_unavailability_by_reason": macd_market_reasons,
+            "candidate_unavailability_by_reason": macd_candidate_reasons,
+            "research_only": True,
+            "thresholds_modified": False,
         },
         "breakout_research": {
             "measured": len(breakout_records),
