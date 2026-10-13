@@ -13,6 +13,9 @@ on:
       - 'tools/forward_shadow_agent.py'
       - 'tools/forward_shadow_optimizer.py'
       - 'technical_analysis.py'
+      - 'market_scanner.py'
+      - 'tools/market_history_integrity.py'
+      - 'tests/test_market_history_integrity.py'
       - 'tests/test_v32_macd.py'
       - 'tools/v32_breakout.py'
       - 'tests/test_v32_breakout.py'
@@ -42,6 +45,9 @@ on:
       - 'tools/forward_shadow_agent.py'
       - 'tools/forward_shadow_optimizer.py'
       - 'technical_analysis.py'
+      - 'market_scanner.py'
+      - 'tools/market_history_integrity.py'
+      - 'tests/test_market_history_integrity.py'
       - 'tests/test_v32_macd.py'
       - 'tools/v32_breakout.py'
       - 'tests/test_v32_breakout.py'
@@ -108,6 +114,11 @@ jobs:
         run: |
           python -m py_compile optimizer_dashboard.py telegram_dashboard.py telegram_callback_router.py
           python -m unittest discover -s tests -p 'test_optimizer_dashboard.py' -v
+
+      - name: Reject duplicate market transaction replays before trading analytics
+        run: |
+          python -m py_compile tools/market_history_integrity.py market_scanner.py
+          python -m unittest discover -s tests -p 'test_market_history_integrity.py' -v
 
       - name: Test MACD completed candles, sparse history, and forward-only V32 research
         run: |
