@@ -86,9 +86,14 @@ class OptimizerDashboardTests(unittest.TestCase):
             "all": {"closed": 2, "net_sda": 4.75, "win_rate_pct": 50,
                     "profit_factor": 1.31}
         }
+        data["v32_trend_runner"] = {"paired_exit_comparison": {
+            "paired_closed_trades": 2, "runner_minus_baseline_sda": 1.25,
+        }}
         result = od.strategies_report(data)
         self.assertIn("research_trend_runner (V32 Trend Runner výzkum)",result)
         self.assertIn("+4.75 SDA",result)
+        self.assertIn("2 shodných vstupů",result)
+        self.assertIn("+1.25 SDA",result)
         self.assertIn("se automaticky nenasazují",result)
 
     def test_research_is_labeled_non_promoting(self):
