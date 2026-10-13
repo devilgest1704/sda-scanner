@@ -79,6 +79,18 @@ class OptimizerDashboardTests(unittest.TestCase):
         self.assertIn("research_macd_confirmation (V32 MACD výzkum)", report)
         self.assertIn("automaticky nenasazují", report)
 
+    def test_trend_runner_shown_as_nonpromotable_research(self):
+        from copy import deepcopy
+        data = deepcopy(AUTO)
+        data["strategies"]["research_trend_runner"] = {
+            "all": {"closed": 2, "net_sda": 4.75, "win_rate_pct": 50,
+                    "profit_factor": 1.31}
+        }
+        result = od.strategies_report(data)
+        self.assertIn("research_trend_runner (V32 Trend Runner výzkum)",result)
+        self.assertIn("+4.75 SDA",result)
+        self.assertIn("se automaticky nenasazují",result)
+
     def test_research_is_labeled_non_promoting(self):
         result = od.research_report(RESEARCH)
         self.assertIn("3 000" if False else "3000", result)
