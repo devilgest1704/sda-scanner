@@ -16,6 +16,8 @@ on:
       - 'tests/test_v32_macd.py'
       - 'tools/v32_breakout.py'
       - 'tests/test_v32_breakout.py'
+      - 'tools/v32_trend_runner.py'
+      - 'tests/test_v32_trend_runner.py'
       - 'tests/test_v32_breakout_sampler.py'
       - 'v30_pump_hunter.py'
       - 'run_scanner_v18.sh'
@@ -43,6 +45,8 @@ on:
       - 'tests/test_v32_macd.py'
       - 'tools/v32_breakout.py'
       - 'tests/test_v32_breakout.py'
+      - 'tools/v32_trend_runner.py'
+      - 'tests/test_v32_trend_runner.py'
       - 'tests/test_v32_breakout_sampler.py'
       - 'v30_pump_hunter.py'
       - 'run_scanner_v18.sh'
@@ -114,6 +118,11 @@ jobs:
         run: |
           python -m py_compile tools/v32_breakout.py technical_analysis.py tools/forward_shadow_agent.py
           python -m unittest discover -s tests -p 'test_v32_breakout.py' -v
+
+      - name: Verify Trend Runner partial-fill accounting and quote-safety
+        run: |
+          python -m py_compile tools/v32_trend_runner.py tools/forward_shadow_agent.py
+          python -m unittest discover -s tests -p 'test_v32_trend_runner.py' -v
 
       - name: Verify breakout WATCH candidate sampling never changes V30 trading
         run: |
