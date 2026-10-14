@@ -56,7 +56,7 @@ POLICIES = {
 BREAKOUT_RESEARCH_MODE = "research_breakout_volume_trend"
 TREND_RUNNER_RESEARCH_MODE = "research_trend_runner"
 MACD_RESEARCH_MODES = frozenset(("research_macd_antipump", "research_macd_confirmation"))
-MACD_BAR_SECONDS = {"5m": 300, "15m": 900}
+MACD_BAR_SECONDS = {"5m": 300, "15m": 900, "1h_completed": 3600}
 MIN_MACD_CLOSED_BARS = 35
 MIN_MACD_TRADED_BARS = 21
 
@@ -174,15 +174,23 @@ def macd_research_decision(row, name):
     m = row.get("v32_macd")
     if not isinstance(m, dict):
         return False
-    slow = m.get("15m")
+    # Use validated 15m evidence when available; otherwise fall back to
+    # completed 1h observed candles. 5m/15m are unavailable for nearly all
+    # sparse SDA tokens, but missing data must never become fake momentum.
+    slow = m.get("15m") or m.get("1h_completed")
     if not isinstance(slow, dict):
-        return False  # Fail closed for research, not for the live strategy.
+        return False  # Fail closed in Shadow research only.
     if name == "research_macd_antipump":
-        return not (slow["histogram_pct"] > 0 and slow["fading_2"])
+        return not ((slow["histogram_pct"] < 0 and slow["histogram_delta_pct"] < 0)
+                    or (slow["histogram_pct"] > 0 and slow["fading_2"]))
     fast = m.get("5m")
-    return (isinstance(fast, dict) and
-            slow["histogram_pct"] > 0 and slow["rising"] and
-            fast["histogram_pct"] > 0 and fast["rising"])
+    if isinstance(m.get("15m"), dict):
+        return (isinstance(fast, dict) and
+                slow["histogram_pct"] > 0 and slow["rising"] and
+                fast["histogram_pct"] > 0 and fast["rising"])
+    # Only the slower 1h chart is available. Treat this as a distinct,
+    # forward-only exploratory hypothesis; no automatic promotion.
+    return slow["histogram_pct"] > 0 and slow["rising"]
 
 
 def eligible(c, filters, research_watch=False, macd_mode=None):
@@ -346,6 +354,8 @@ def step(data, market, funnel):
                       and isinstance(c["v32_macd"].get("5m"), dict) for c in ranked),
             "15m": sum(isinstance(c.get("v32_macd"), dict)
                        and isinstance(c["v32_macd"].get("15m"), dict) for c in ranked),
+            "1h_completed": sum(isinstance(c.get("v32_macd"), dict)
+                       and isinstance(c["v32_macd"].get("1h_completed"), dict) for c in ranked),
             "market_tokens_analyzed": len(market_tokens)
                                       if isinstance(market_tokens, dict) else 0,
             "sampled_candidates": len(ranked),

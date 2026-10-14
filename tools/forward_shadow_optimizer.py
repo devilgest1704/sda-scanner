@@ -135,7 +135,10 @@ def report(state, config, real_ledger, now=None):
             "policies": ["research_macd_antipump", "research_macd_confirmation"],
             "may_promote_champion": False,
             "live_buy_rules_modified": False,
-            "caveat": "MACD arms use observed-quote Shadow exits, not V30 execution; no verified profit yet",
+            "paper_buy_rules_modified": True,
+            "paper_buy_gate": "1h completed observed MACD bearish+weakening veto; missing data reported UNAVAILABLE and does not invent a bullish signal",
+            "shadow_fallback": "validated 1h_completed when sparse 5m/15m unavailable",
+            "caveat": "PAPER-only MACD entry veto is now active; benefit in SDA remains unproven until new paired forward observations",
         },
         "v32_breakout": {
             "mode": "RESEARCH_ONLY",

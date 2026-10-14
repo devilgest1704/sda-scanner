@@ -4,8 +4,9 @@ Entry and exit logic are intentionally separated.
 """
 import json, os
 from datetime import datetime, timezone, timedelta
+from tools.v32_hourly_macd import paper_macd_veto
 
-VERSION="V30.8-UNIFIED-GATES"
+VERSION="V30.9-HOURLY-MACD-PAPER-VETO"
 STATE_FILE="v30_pump_state.json"
 SL_PCT=0.025
 MAX_OPEN=4
@@ -315,8 +316,14 @@ def decision(address,a,ws=None,persist=True):
     thin_activity=c["trades"]<10
     entry_score_required=max(entry_score,74) if thin_activity else entry_score
     late_spike=c["m1"]>12
-    blocked=(not buy) or cd or s<entry_score_required or not data_fresh_for_entry or not v31_buy_ok or late_spike
+    # Evaluate a quality-verified, COMPLETED 1h MACD on PAPER BUY only.
+    # Missing or sparse MACD is explicitly UNKNOWN (not fictitiously bullish).
+    # When observed histogram is bearish AND deteriorating, veto the new
+    # paper entry, without modifying score, cooldowns or any exit path.
+    macd_gate=paper_macd_veto(a)
+    blocked=(not buy) or cd or s<entry_score_required or not data_fresh_for_entry or not v31_buy_ok or late_spike or macd_gate["blocked"]
     failures=[]
+    if macd_gate["blocked"]: failures.append("1h completed MACD bearish and weakening")
     if not v31_age_ok: failures.append("V31 BUY gate: data age missing or >300s")
     if not (v31_trades_ok or v31_early_ok): failures.append("V31 BUY gate: trades 1h <12 (no early exception)")
     if phase not in ("IGNITION","CONFIRMATION"): failures.append("no eligible entry lane")
@@ -355,6 +362,7 @@ def decision(address,a,ws=None,persist=True):
     if not price_flow_ok: gate_failures.append("price_flow")
     if not data_fresh_for_entry: gate_failures.append("stale_data")
     if cd: gate_failures.append("cooldown")
+    if macd_gate["blocked"]: gate_failures.append("macd_bearish")
     reason="READY" if not blocked else f"{phase} / "+"; ".join(failures[:3])
 
     # V30.4 Shadow diagnostics: explain every failed confirmation gate.
@@ -401,6 +409,7 @@ def decision(address,a,ws=None,persist=True):
       "v31_buy_gate_passed":v31_buy_ok,"v31_early_exception_passed":v31_early_ok,"v31_buy_gate_age_passed":v31_age_ok,"v31_buy_gate_trades_passed":v31_trades_ok,
       "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":entry_impulse,"pump_delta_impulse":delta_impulse,"pump_phase":phase,
       "paper_buy_blocked":blocked,"paper_buy_block_reason":reason,"paper_buy_gate_failures":gate_failures,
+      "paper_macd_filter":macd_gate,
       "shadow_snapshot_impulse":round(snapshot_impulse,1),
       "shadow_confirmation_ready":shadow_ready,
       "shadow_block_reason":shadow_reason,
@@ -444,7 +453,8 @@ def patch(main_module,engine):
             "m15":n(s.get("m15")),"m4h":n(s.get("m4h")),
             "data_age_sec":n(s.get("data_age_sec")),
             "flow_1h":n(s.get("net_1h")),"volume_1h":n(s.get("volume_1h")),
-            "trades_1h":n(s.get("trades_1h"))}
+            "trades_1h":n(s.get("trades_1h")),
+            "paper_macd_filter_at_entry":s.get("paper_macd_filter")}
         z["pump_price_samples"]=[]
         z["pump_mae_pct"]=0.0
         return z
