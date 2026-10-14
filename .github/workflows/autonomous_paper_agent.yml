@@ -28,6 +28,8 @@ on:
       - 'tests/test_v32_trend_runner.py'
       - 'tests/test_v32_breakout_sampler.py'
       - 'v30_pump_hunter.py'
+      - 'tools/paper_loss_circuit.py'
+      - 'tests/test_paper_loss_circuit.py'
       - 'run_scanner_v18.sh'
       - 'tools/paper_state_guard.py'
       - 'tests/test_paper_state_guard.py'
@@ -65,6 +67,8 @@ on:
       - 'tests/test_v32_trend_runner.py'
       - 'tests/test_v32_breakout_sampler.py'
       - 'v30_pump_hunter.py'
+      - 'tools/paper_loss_circuit.py'
+      - 'tests/test_paper_loss_circuit.py'
       - 'run_scanner_v18.sh'
       - 'tools/paper_state_guard.py'
       - 'tests/test_paper_state_guard.py'
@@ -129,6 +133,11 @@ jobs:
         run: |
           python -m py_compile tools/market_history_integrity.py market_scanner.py
           python -m unittest discover -s tests -p 'test_market_history_integrity.py' -v
+
+      - name: Verify PAPER 24h loss circuit changes only new entry decisions
+        run: |
+          python -m py_compile tools/paper_loss_circuit.py v30_pump_hunter.py
+          python -m unittest discover -s tests -p 'test_paper_loss_circuit.py' -v
 
       - name: Verify completed 1h MACD is an actual PAPER BUY gate
         run: |

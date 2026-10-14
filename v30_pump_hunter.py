@@ -5,8 +5,9 @@ Entry and exit logic are intentionally separated.
 import json, os
 from datetime import datetime, timezone, timedelta
 from tools.v32_hourly_macd import paper_macd_veto
+from tools.paper_loss_circuit import paper_entry_risk_gate
 
-VERSION="V30.9-HOURLY-MACD-PAPER-VETO"
+VERSION="V30.10-24H-PAPER-LOSS-CIRCUIT"
 STATE_FILE="v30_pump_state.json"
 SL_PCT=0.025
 MAX_OPEN=4
@@ -321,9 +322,11 @@ def decision(address,a,ws=None,persist=True):
     # When observed histogram is bearish AND deteriorating, veto the new
     # paper entry, without modifying score, cooldowns or any exit path.
     macd_gate=paper_macd_veto(a)
-    blocked=(not buy) or cd or s<entry_score_required or not data_fresh_for_entry or not v31_buy_ok or late_spike or macd_gate["blocked"]
+    loss_circuit=paper_entry_risk_gate()
+    blocked=(not buy) or cd or s<entry_score_required or not data_fresh_for_entry or not v31_buy_ok or late_spike or macd_gate["blocked"] or loss_circuit["blocked"]
     failures=[]
     if macd_gate["blocked"]: failures.append("1h completed MACD bearish and weakening")
+    if loss_circuit["blocked"]: failures.append("PAPER 24h loss circuit: "+str(loss_circuit["status"]))
     if not v31_age_ok: failures.append("V31 BUY gate: data age missing or >300s")
     if not (v31_trades_ok or v31_early_ok): failures.append("V31 BUY gate: trades 1h <12 (no early exception)")
     if phase not in ("IGNITION","CONFIRMATION"): failures.append("no eligible entry lane")
@@ -363,6 +366,7 @@ def decision(address,a,ws=None,persist=True):
     if not data_fresh_for_entry: gate_failures.append("stale_data")
     if cd: gate_failures.append("cooldown")
     if macd_gate["blocked"]: gate_failures.append("macd_bearish")
+    if loss_circuit["blocked"]: gate_failures.append("loss_circuit")
     reason="READY" if not blocked else f"{phase} / "+"; ".join(failures[:3])
 
     # V30.4 Shadow diagnostics: explain every failed confirmation gate.
@@ -410,6 +414,7 @@ def decision(address,a,ws=None,persist=True):
       "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":entry_impulse,"pump_delta_impulse":delta_impulse,"pump_phase":phase,
       "paper_buy_blocked":blocked,"paper_buy_block_reason":reason,"paper_buy_gate_failures":gate_failures,
       "paper_macd_filter":macd_gate,
+      "paper_loss_circuit":loss_circuit,
       "shadow_snapshot_impulse":round(snapshot_impulse,1),
       "shadow_confirmation_ready":shadow_ready,
       "shadow_block_reason":shadow_reason,
@@ -759,6 +764,7 @@ def write_scan_funnel(market_file="market_analysis.json"):
             "at":datetime.now(timezone.utc).isoformat(),
             "tokens":total,"fresh":fresh,
             "champion_ready":champion,"shadow_ready":shadow,
+            "paper_loss_circuit":paper_entry_risk_gate(),
             "fresh_gate_counts":dict(sorted(fresh_gate_counts.items(),key=lambda kv:(-kv[1],kv[0]))),
             "near_ready":near_ready[:5],
             "candidate_snapshots":selected,
