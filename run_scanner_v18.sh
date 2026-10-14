@@ -54,6 +54,14 @@ for name in files:
     except Exception:
         print(f'WARNING: resetting malformed state file: {name}')
         p.write_text('{}\n', encoding='utf-8')
+
+# A new research ledger is structurally validated and must NEVER be treated
+# as a generic {} scanner state. Create it BEFORE the first Git checkpoint.
+from tools.strategy_evolution_agent import initial_state
+evolution = Path("strategy_lab/evolution_state.json")
+if not evolution.exists():
+    evolution.parent.mkdir(parents=True,exist_ok=True)
+    evolution.write_text(json.dumps(initial_state(),indent=2)+"\n",encoding="utf-8")
 PY
 }
 
@@ -65,7 +73,14 @@ checkpoint_state() {
   git config user.name 'sda-scanner-bot'
   git config user.email 'scanner@github.local'
 
-  git add $STATE_FILES
+  # Newly introduced research files may not exist in older checkouts.
+  # Stage only existing or already tracked paths; never terminate the PAPER
+  # risk worker because an optional state file is not yet initialized.
+  for state_file in $STATE_FILES; do
+    if [ -e "$state_file" ] || git ls-files --error-unmatch "$state_file" >/dev/null 2>&1; then
+      git add -- "$state_file"
+    fi
+  done
   # Never let a large local market_data blob leak into the checkpoint via a prior index state.
   git reset -q HEAD -- market_data.json 2>/dev/null || true
   if git diff --staged --quiet; then

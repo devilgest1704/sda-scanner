@@ -14,6 +14,7 @@ on:
       - 'tools/forward_shadow_optimizer.py'
       - 'tools/strategy_evolution_agent.py'
       - 'tests/test_strategy_evolution_agent.py'
+      - 'tests/test_v33_bootstrap.py'
       - 'technical_analysis.py'
       - 'tools/v32_hourly_macd.py'
       - 'tests/test_v32_hourly_macd_paper.py'
@@ -50,6 +51,7 @@ on:
       - 'tools/forward_shadow_optimizer.py'
       - 'tools/strategy_evolution_agent.py'
       - 'tests/test_strategy_evolution_agent.py'
+      - 'tests/test_v33_bootstrap.py'
       - 'technical_analysis.py'
       - 'tools/v32_hourly_macd.py'
       - 'tests/test_v32_hourly_macd_paper.py'
@@ -152,6 +154,9 @@ jobs:
         run: |
           python -m py_compile v30_pump_hunter.py
           python -m unittest discover -s tests -p 'test_v32_breakout_sampler.py' -v
+
+      - name: Verify V33 agent journal bootstrap preserves scanner startup
+        run: python -m unittest discover -s tests -p 'test_v33_bootstrap.py' -v
 
       - name: Test strategy evolution hypotheses, no-lookahead and immutable Shadow deployment
         run: |
