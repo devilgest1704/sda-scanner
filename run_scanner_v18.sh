@@ -284,6 +284,10 @@ run_one_scan() {
 
   run_timed_stage paper_engine env TELEGRAM_TOKEN="" python paper_engine_v19.py
   run_timed_stage paper_stats env TELEGRAM_TOKEN="" python paper_stats.py
+  # Read-only risk telemetry; must never interrupt exits or checkpoint safety.
+  if ! python -m tools.paper_loss_circuit; then
+    echo "::warning::24h paper risk circuit telemetry failed; continue existing stop/exit checks." >&2
+  fi
   run_timed_stage scan_funnel python -c 'import v30_pump_hunter as v30; v30.write_scan_funnel()'
   # Make silent telemetry failures visible in Actions logs. This is a
   # diagnostic warning only; it must not stop paper risk/exit processing.
