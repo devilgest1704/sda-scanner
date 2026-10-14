@@ -28,7 +28,7 @@ concurrency:
 jobs:
   dispatch-scanner:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - name: Checkout current main
         uses: actions/checkout@v4
@@ -85,11 +85,14 @@ jobs:
                   # has stopped before dispatching. Leaving immediately here
                   # created multi-hour gaps when scheduled workflows stalled.
                   old_status=""
-                  for poll in 1 2 3 4 5 6 7 8 9 10 11 12; do
+                  # GitHub occasionally takes >60s to finish cancelling
+                  # a blocked worker. Wait up to 96s rather than exiting
+                  # just before it stops and leaving scanner downtime.
+                  for poll in $(seq 1 24); do
                     sleep 4
                     old_status="$(timeout 15s gh run view "$run_id" \
                       --repo "${{ github.repository }}" --json status --jq '.status' || true)"
-                    echo "Old scanner $run_id: ${old_status:-unknown} (check $poll/12)"
+                    echo "Old scanner $run_id: ${old_status:-unknown} (check $poll/24)"
                     if [ "$old_status" = "completed" ]; then
                       break
                     fi
