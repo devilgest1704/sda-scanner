@@ -102,7 +102,8 @@ class MissedPumpCausalTests(unittest.TestCase):
     def test_learns_from_winners_and_losers_and_validates_chronologically(self):
         x=learn(dataset())
         self.assertEqual(x["status"],"VALIDATED_FOR_FORWARD_SHADOW")
-        self.assertEqual(x["candidate"]["policy"]["learned_feature"],"flow_15m")
+        self.assertIn("flow_15m", [
+            rule["feature"] for rule in x["candidate"]["policy"]["learned_rules"]])
         self.assertGreater(x["candidate"]["train"]["net_sda_model"],0)
         self.assertGreater(x["candidate"]["validation"]["net_sda_model"],0)
         self.assertFalse(x["can_promote_champion"])
@@ -138,6 +139,28 @@ class MissedPumpCausalTests(unittest.TestCase):
         self.assertFalse(safe_missed_entry({**good,"trades_1h":2},policy))
         self.assertFalse(safe_missed_entry({**good,"phase":"NO"},policy))
         self.assertFalse(safe_missed_entry(good,{**policy,"learned_feature":"__hack__"}))
+
+    def test_two_feature_rule_is_conjunctive_and_fail_closed(self):
+        policy={
+            **BASELINE,"entry_lane":"missed_pump",
+            "learned_rules":[
+                {"feature":"flow_15m","mode":"min","bound":350},
+                {"feature":"m4h","mode":"max","bound":15},
+            ],
+        }
+        row=frozen_candidate(START)
+        self.assertTrue(safe_missed_entry(row,policy))
+        self.assertFalse(safe_missed_entry({**row,"flow_15m":150},policy))
+        self.assertFalse(safe_missed_entry({**row,"m4h":22},policy))
+        self.assertFalse(safe_missed_entry(row,{
+            **policy,"learned_rules":policy["learned_rules"]+[
+                {"feature":"m15","mode":"min","bound":1.5}]}))
+        self.assertFalse(safe_missed_entry(row,{
+            **policy,"learned_rules":[
+                policy["learned_rules"][0],policy["learned_rules"][0]]}))
+        self.assertFalse(safe_missed_entry(row,{
+            **policy,"learned_rules":[
+                {"feature":"__unsafe__","mode":"min","bound":0}]}))
 
     def test_autonomous_enrollment_and_new_forward_virtual_portfolio_only(self):
         rule=learn(dataset())
