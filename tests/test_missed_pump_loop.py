@@ -58,6 +58,7 @@ class MissedPumpAutonomousPipelineTest(unittest.TestCase):
         self.assertEqual(result["candidate_snapshots_with_60m_quote"],0)
         self.assertEqual(result["sample_count"],0)
         self.assertEqual(result["status"],"NO_VALID_MATURED_OUTCOMES")
+        self.assertEqual(result["input_quality"]["maturity_stages"]["with_strict_exit_and_full_features"],0)
         self.assertEqual(learn([])["status"],"COLLECTING")
 
     def test_legacy_row_repaired_only_from_same_original_funnel(self):
@@ -161,6 +162,8 @@ class MissedPumpAutonomousPipelineTest(unittest.TestCase):
                 missed=json.loads((lab/"missed_pump_learning.json").read_text())
                 evolution=json.loads((lab/"evolution_state.json").read_text())
                 self.assertEqual(missed["sample_count"],140)
+                self.assertEqual(missed["input_quality"]["maturity_stages"]["with_strict_exit_and_full_features"],140)
+                self.assertIsNotNone(missed["input_quality"]["latest_strict_matured_candidate_at"])
                 self.assertEqual(missed["archived_candidate_snapshots"],140)
                 self.assertEqual(missed["candidate_snapshots_with_60m_quote"],140)
                 self.assertEqual(missed["status"],"VALIDATED_FOR_FORWARD_SHADOW")
