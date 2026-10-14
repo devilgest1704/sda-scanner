@@ -21,7 +21,7 @@ from pathlib import Path
 STATE = Path("strategy_lab/evolution_state.json")
 TRADES = Path("v30_optimizer_trades.json")
 FORWARD = Path("strategy_lab/forward_shadow_state.json")
-MAX_EXPERIMENTS = 6
+MAX_EXPERIMENTS = 7  # reserve a slot for missed-pump forward research
 MAX_ACTIVE = 2
 MIN_TRAIN_MATCHES = 12
 MIN_VALID_MATCHES = 6
@@ -268,8 +268,10 @@ def experiment_policies(data):
             continue
         name=e.get("id")
         p=e.get("policy")
-        if (not isinstance(name,str) or not name.startswith("research_evo_")
+        if (not isinstance(name,str) or not name.startswith(("research_evo_","research_miss_"))
                 or not isinstance(p,dict) or any(number(p.get(k)) is None for k in BASELINE)):
+            continue
+        if name.startswith("research_miss_") and p.get("entry_lane")!="missed_pump":
             continue
         if len(result) >= MAX_EXPERIMENTS:
             break
@@ -277,7 +279,7 @@ def experiment_policies(data):
     return result
 
 
-def evolve(state, trades, shadow, now=None, llm_reviewer=limited_llm_review):
+def evolve(state, trades, shadow, now=None, llm_reviewer=limited_llm_review, missed_report=None):
     now = now or datetime.now(timezone.utc)
     if not isinstance(state,dict) or state.get("schema") != 1 or state.get("paper_only") is not True:
         raise ValueError("Invalid evolution state; refusing to reset research memory")
@@ -326,6 +328,8 @@ def evolve(state, trades, shadow, now=None, llm_reviewer=limited_llm_review):
                 "forward_net_sda":e.get("forward_net_sda",0),
                 "retired_at":e.get("retired_at"),
                 "dataset_rows_at_retirement":len(rows),
+                "missed_samples_at_retirement":e.get(
+                    "missed_sample_count_at_proposal",0),
             })
         else:
             keep.append(e)
@@ -366,6 +370,57 @@ def evolve(state, trades, shadow, now=None, llm_reviewer=limited_llm_review):
                 })
                 state["events"].append({"at":now.isoformat(),"event":"CREATED_FORWARD_EXPERIMENT",
                                         "id":ident,"hypothesis":x["hypothesis"]})
+    # Learn from previously REJECTED candidates and later observed quotes.
+    # The result changes ONLY new forward Shadow BUY hypotheses.
+    if isinstance(missed_report,dict):
+        diagnosis=state.setdefault("diagnosis",{})
+        diagnosis["missed_pump"]={
+            "status":missed_report.get("status"),
+            "observed_candidates":missed_report.get("sample_count",0),
+            "missed_positive_60m":missed_report.get("missed_pump_examples",0),
+            "learned_rule":(missed_report.get("candidate") or {}).get("hypothesis"),
+            "can_promote_paper":False}
+        chosen=missed_report.get("candidate")
+        pending=[e for e in state["experiments"]
+                 if e.get("status")=="FORWARD_TEST"
+                 and str(e.get("id","")).startswith("research_miss_")]
+        if (missed_report.get("status")=="VALIDATED_FOR_FORWARD_SHADOW"
+                and isinstance(chosen,dict) and isinstance(chosen.get("policy"),dict)
+                and not pending and len(state["experiments"])<MAX_EXPERIMENTS):
+            policy=chosen["policy"]
+            if (policy.get("entry_lane")=="missed_pump"
+                    and all(number(policy.get(k)) is not None for k in BASELINE)):
+                signature=json.dumps(policy,sort_keys=True)
+                previous={json.dumps(e.get("policy"),sort_keys=True)
+                          for e in state["experiments"]}
+                previous.update(
+                    json.dumps(e.get("policy"),sort_keys=True)
+                    for e in state.get("archive",[])
+                    if (missed_report.get("sample_count",0) -
+                        e.get("missed_samples_at_retirement",
+                              missed_report.get("sample_count",0))) < 35
+                )
+                if signature not in previous:
+                    ident="research_miss_"+hashlib.sha256(signature.encode()).hexdigest()[:10]
+                    state["experiments"].append({
+                        "id":ident,"status":"FORWARD_TEST",
+                        "proposed_at":now.isoformat(),
+                        "hypothesis":chosen["hypothesis"],
+                        "policy":dict(policy),
+                        "train":chosen.get("train"),
+                        "validation":chosen.get("validation"),
+                        "evidence_tier":chosen["evidence_tier"],
+                        "rationale":"Learned from rejected BUY decisions and later observed 60m SDA returns.",
+                        "selection_bias_warning":chosen["selection_bias_warning"],
+                        "forward_valid_closes":0,"forward_net_sda":0,
+                        "missed_sample_count_at_proposal":missed_report["sample_count"],
+                        "conclusion":"AWAITING_NEW_FORWARD_OBSERVED_QUOTES",
+                        "can_promote_paper":False,"can_trade_real":False,
+                    })
+                    state["events"].append({
+                        "at":now.isoformat(),
+                        "event":"MISSED_PUMP_AUTO_SHADOW_FILTER_CREATED",
+                        "id":ident,"hypothesis":chosen["hypothesis"]})
     state["events"]=state["events"][-50:]
     state["control"]={"real_trading":False,"paper_champion_unchanged":True,
                       "source_rewriting":False,"runtime_parity_verified":False,
@@ -378,7 +433,22 @@ def main():
     trades=load(TRADES,{"trades":[]})
     shadow=load(FORWARD,{"strategies":{}})
     state=load(STATE,initial_state())
-    result=evolve(state,trades,shadow)
+    # Each scanner-hour provides fresh, causally tracked candidate outcomes.
+    from tools.missed_pump_learning import learn
+    opportunity_file=Path("strategy_lab/candidate_outcomes.json")
+    missed_source=load(opportunity_file,{"observations":[]})
+    if not isinstance(missed_source,dict) or not isinstance(
+            missed_source.get("observations",[]),list):
+        raise ValueError("Invalid candidate outcome research archive")
+    missed_report=learn(missed_source.get("observations",[]))
+    missed_report["updated_at"]=datetime.now(timezone.utc).isoformat()
+    report_path=Path("strategy_lab/missed_pump_learning.json")
+    report_path.parent.mkdir(parents=True,exist_ok=True)
+    report_tmp=report_path.with_suffix(".tmp")
+    report_tmp.write_text(json.dumps(missed_report,indent=2,ensure_ascii=False)+"\n",
+                          encoding="utf-8")
+    report_tmp.replace(report_path)
+    result=evolve(state,trades,shadow,missed_report=missed_report)
     STATE.parent.mkdir(parents=True,exist_ok=True)
     tmp=STATE.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(result,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")

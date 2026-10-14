@@ -147,6 +147,17 @@ def overview_report(auto, config):
               f"Baseline shadow P/L: {_pnl(baseline.get('net_sda'))}",
               f"Nový Champion: {'ANO' if auto.get('promotion_applied') else 'NE'}",
               f"Rollback: {'ANO' if auto.get('rollback_applied') else 'NE'}"]
+    missed=auto.get("missed_pump_learning")
+    if isinstance(missed,dict):
+        lines += [
+            "", "🔎 UČENÍ Z UNIKLÝCH PUMP • automaticky",
+            f"Stav: {str(missed.get('status') or 'NEZNÁMÝ')}",
+            f"Analyzované zamítnuté vstupy: {int(_number(missed.get('observed_candidates')))}",
+            f"Pozitivní 60m scénáře po modelových nákladech: {int(_number(missed.get('missed_60m_positive_after_costs')))}",
+        ]
+        if missed.get("learned_rule"):
+            lines.append(f"Nový testovaný BUY filtr: {str(missed['learned_rule'])[:120]}")
+        lines.append("Zpětná zjištění → nový forward Shadow test → případné ověření pro PAPER.")
     selected = auto.get("selected_challenger") or {}
     if isinstance(selected, dict) and selected.get("name"):
         lines.append(f"Kandidát: {selected['name']}")
@@ -182,6 +193,7 @@ def strategies_report(auto):
         icon = "⚪" if not count else ("🟢" if pnl > 0 else "🔴")
         tag = (" (V32 Trend Runner výzkum)" if name == "research_trend_runner"
                else " (V32 Breakout výzkum)" if name == "research_breakout_volume_trend"
+               else " (AI učení z uniklých pump)" if name.startswith("research_miss_")
                else " (V32 MACD výzkum)" if name.startswith("research_macd")
                else " (výzkum)" if name.startswith("research_") else "")
         lines += [f"{icon} {name}{tag}",
@@ -197,7 +209,7 @@ def strategies_report(auto):
                   f"   Rozdíl po nákladech: {_pnl(difference)}",
                   "   Pouze srovnání uzavřených párových Shadow obchodů."]
     lines += ["", "⚠️ Malý vzorek neprokazuje ziskovost.",
-              "WATCH, V32 MACD, Breakout ani Trend Runner se automaticky nenasazují."]
+              "WATCH, MACD, Breakout, Missed Pump ani Trend Runner se automaticky nenasazují bez ověření parity."]
     return "\n".join(lines)
 
 

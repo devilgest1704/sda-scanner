@@ -170,6 +170,26 @@ def report(state, config, real_ledger, now=None):
         "promotion_applied": False,
         "rollback_applied": False,
     }
+    # Surface the missed-opportunity learner in the EXISTING AI optimizer
+    # report. This is never used to override the live/PAPER BUY gates.
+    missed_path=Path("strategy_lab/missed_pump_learning.json")
+    try:
+        missed=json.loads(missed_path.read_text(encoding="utf-8"))
+    except (OSError,ValueError):
+        missed={}
+    if not isinstance(missed,dict):
+        missed={}
+    model["missed_pump_learning"]={
+        "status":missed.get("status","WAITING_FOR_CANDIDATE_OUTCOMES"),
+        "updated_at":missed.get("updated_at"),
+        "observed_candidates":missed.get("sample_count",0),
+        "missed_60m_positive_after_costs":missed.get("missed_pump_examples",0),
+        "learned_rule":(missed.get("candidate") or {}).get("hypothesis"),
+        "research_only":True,
+        "paper_buy_rules_modified":False,
+        "forward_execution_parity_verified":RUNTIME_EXECUTION_PARITY_VERIFIED,
+        "reason":"Train/holdout selects a rule; new forward Shadow must prove net SDA; unmatched exits prohibit auto PAPER promotion.",
+    }
     last = when(state.get("updated_at"))
     if last is None or not (0 <= (now-last).total_seconds() <= 1800):
         model["status"] = "WAITING_FOR_FRESH_SCANNER"

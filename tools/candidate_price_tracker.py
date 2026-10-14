@@ -11,6 +11,10 @@ from datetime import datetime,timezone
 from pathlib import Path
 
 HORIZONS=(15,60,240,1440)
+SAMPLE_MINUTES=30  # one causal snapshot per token per interval
+MAX_ENTRY_QUOTE_AGE_SEC=300
+MODEL_FRICTION_PER_SIDE=.011
+MODEL_NOTIONAL_SDA=50.0
 def parse_time(s):
     if not isinstance(s,str):return None
     try:return datetime.fromisoformat(s.replace("Z","+00:00")).astimezone(timezone.utc)
@@ -41,8 +45,14 @@ def update(state,market,max_observations=5000):
     existing=state.get("observations",[])
     if not isinstance(existing,list):existing=[]
     by_key={}
+    observed_slots=set()
     for row in existing:
-        if isinstance(row,dict) and row.get("id"):by_key[str(row["id"])]=row
+        if isinstance(row,dict) and row.get("id"):
+            by_key[str(row["id"])]=row
+            when=parse_time(row.get("at"))
+            if when is not None and row.get("address"):
+                observed_slots.add((str(row["address"]).lower(),
+                                    int(when.timestamp())//(60*SAMPLE_MINUTES)))
     for funnel in state.get("funnels",[]):
         if not isinstance(funnel,dict):continue
         at=parse_time(funnel.get("at"))
@@ -55,12 +65,38 @@ def update(state,market,max_observations=5000):
             stamp=item.get("at") or funnel.get("at")
             t=parse_time(stamp)
             if t is None or t>now:continue
+            # Freeze a single REAL, fresh scanner decision per token/30min.
+            # Previously 120 candidates each minute evicted 4h observations
+            # from the 5000-row rolling archive BEFORE they matured.
+            if item.get("phase") not in ("WATCH","IGNITION","CONFIRMATION","BREAKOUT"):
+                continue
+            quote_at=parse_time(item.get("quote_at"))
+            age=(t-quote_at).total_seconds() if quote_at is not None else None
+            if age is None or not 0<=age<=MAX_ENTRY_QUOTE_AGE_SEC:
+                continue
+            if positive(item.get("volume_1h")) is None:
+                continue
+            slot=(address,int(t.timestamp())//(60*SAMPLE_MINUTES))
+            if slot in observed_slots:
+                continue
             key=f"{stamp}|{address}"
             if key not in by_key:
-                by_key[key]={"id":key,"at":stamp,"address":address,"entry_price_sda":price,
-                             "eligible":bool(item.get("eligible")),"score":item.get("score"),
-                             "quality":item.get("quality"),"impulse":item.get("impulse"),
-                             "gates":item.get("gates",[]),"outcomes":{}}
+                features={k:item.get(k) for k in (
+                    "symbol","phase","score","quality","impulse",
+                    "delta_impulse","snapshot_impulse","data_age_sec",
+                    "m1h","m15","m4h","trades_1h","buy_ratio",
+                    "volume_1h","flow_1h","flow_15m",
+                    "research_breakout_ready","research_sparse_volume_candidate")}
+                by_key[key]={
+                    "id":key,"at":stamp,"address":address,
+                    "quote_at":quote_at.isoformat(),
+                    "entry_price_sda":price,
+                    "eligible":bool(item.get("eligible")),
+                    "score":item.get("score"),"quality":item.get("quality"),
+                    "impulse":item.get("impulse"),
+                    "gates":list(item.get("gates") or []),
+                    "features":features,"outcomes":{}}
+                observed_slots.add(slot)
     for row in by_key.values():
         start=parse_time(row.get("at"))
         entry=positive(row.get("entry_price_sda"))
@@ -76,6 +112,14 @@ def update(state,market,max_observations=5000):
         if quote_time is None or quote_time<=start or quote_time>now:continue
         elapsed=(quote_time-start).total_seconds()/60
         outcomes=row.setdefault("outcomes",{})
+        # Observed maximum is descriptive ONLY; no imaginary peak execution.
+        if elapsed<=240:
+            peak=row.get("observed_peak_240m")
+            pct=round((current/entry-1)*100,4)
+            if not isinstance(peak,dict) or pct>peak.get("price_return_pct",float("-inf")):
+                row["observed_peak_240m"]={
+                    "observed_at":quote_time.isoformat(),
+                    "price_return_pct":pct}
         for horizon in HORIZONS:
             label=str(horizon)+"m"
             # First observed fresh quote at/after horizon, at most one horizon
@@ -84,10 +128,17 @@ def update(state,market,max_observations=5000):
                 outcomes[label]={"observed_at":quote_time.isoformat(),
                     "elapsed_minutes":round(elapsed,2),
                     "price_sda":current,
-                    "price_return_pct":round((current/entry-1)*100,4)}
+                    "price_return_pct":round((current/entry-1)*100,4),
+                    "net_return_pct_model":round(100*((current*(1-MODEL_FRICTION_PER_SIDE))/
+                        (entry*(1+MODEL_FRICTION_PER_SIDE))-1),4),
+                    "net_sda_model":round(MODEL_NOTIONAL_SDA*(
+                        (current*(1-MODEL_FRICTION_PER_SIDE))/
+                        (entry*(1+MODEL_FRICTION_PER_SIDE))-1),5)}
     ordered=sorted(by_key.values(),key=lambda r:str(r.get("at","")))
     return {"schema_version":1,"updated_at":now.isoformat(),
             "method":"paper_observed_quotes_not_executable_backtest",
+            "sample_minutes":SAMPLE_MINUTES,
+            "model_friction_per_side":MODEL_FRICTION_PER_SIDE,
             "observations":ordered[-max_observations:],
             "promotion_eligible":False,"production_mutated":False}
 

@@ -12,6 +12,7 @@ import math
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tools.missed_pump_learning import safe_missed_entry
 from tools.v32_breakout import (
     research_signal_from_analysis, breakout_research_eligible,
     sparse_volume_research_eligible,
@@ -229,6 +230,11 @@ def macd_research_decision(row, name):
 def eligible(c, filters, research_watch=False, macd_mode=None):
     if not isinstance(c, dict):
         return False
+    # The autonomous missed-pump learner discovers bounded early-entry
+    # threshold experiments, using only features saved at decision time.
+    # Research Shadow ONLY; no Champion entry/exit rule or loss circuit bypass.
+    if isinstance(macd_mode,str) and macd_mode.startswith("research_miss_"):
+        return safe_missed_entry(c, filters)
     if macd_mode == BREAKOUT_RESEARCH_MODE:
         return breakout_research_eligible(c, filters)
     if macd_mode == SPARSE_VOLUME_RESEARCH_MODE:
@@ -612,6 +618,16 @@ def step(data, market, funnel):
             d = when(value)
             if d and (ts - d).total_seconds() > 86400:
                 del last_entry[key]
+    diagnostic["missed_pump_learning"] = {
+        "research_only": True,
+        "active_policy_count": sum(
+            name.startswith("research_miss_") and name in active_dynamic
+            for name in dynamic_policies),
+        "forward_qualified": {
+            name: policy_qualified.get(name, 0)
+            for name in dynamic_policies if name.startswith("research_miss_")},
+        "paper_champion_unchanged": True,
+    }
     diagnostic["strategy_evolution"] = {
         "active_experiments":len(active_dynamic),
         "tracked_experiments":len(dynamic_policies),
