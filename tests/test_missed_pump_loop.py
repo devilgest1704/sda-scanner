@@ -182,6 +182,9 @@ class MissedPumpAutonomousPipelineTest(unittest.TestCase):
                 output,unchanged=optimizer_report(
                     state,config,{"closed_trades":[]},now=now)
                 self.assertEqual(output["missed_pump_learning"]["observed_candidates"],140)
+                self.assertEqual(output["missed_pump_learning"]["archived_candidates"],140)
+                self.assertEqual(output["missed_pump_learning"]["with_60m_quote"],140)
+                self.assertFalse(output["missed_pump_learning"]["source_fresh"])
                 self.assertEqual(output["missed_pump_learning"]["status"],
                                  "VALIDATED_FOR_FORWARD_SHADOW")
                 self.assertFalse(output["missed_pump_learning"]["paper_buy_rules_modified"])
