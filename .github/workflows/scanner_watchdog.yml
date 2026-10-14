@@ -57,8 +57,8 @@ jobs:
 
           # A long-lived worker checks out source and paper Champion settings once.
           # If watched execution code OR paper-only champion config changes,
-          # restart an older worker after a grace
-          # period so new diagnostics/bug fixes actually take effect.
+          # restart an older worker after a grace period so changes to the
+          # hourly missed-pump learner and other research/entry code take effect.
           # Do not cancel fresh workers or workers already shutting down.
           active_run="$(timeout 30s gh run list --workflow scanner_v18.yml \
             --repo "${{ github.repository }}" --branch main --limit 20 \
@@ -73,8 +73,8 @@ jobs:
               # Shallow partial fetch avoids downloading many megabytes of
               # historical paper-state blobs on each watchdog run.
               if timeout 45s git fetch -q --filter=blob:none --depth=1 origin "$run_sha"; then
-                current_sources="$(git rev-parse HEAD:main.py HEAD:v30_pump_hunter.py HEAD:run_scanner_v18.sh HEAD:tools/candidate_price_tracker.py HEAD:tools/forward_shadow_agent.py HEAD:tools/strategy_evolution_agent.py HEAD:technical_analysis.py HEAD:tools/v32_hourly_macd.py HEAD:v30_agent_config.json)"
-                worker_sources="$(git rev-parse "$run_sha:main.py" "$run_sha:v30_pump_hunter.py" "$run_sha:run_scanner_v18.sh" "$run_sha:tools/candidate_price_tracker.py" "$run_sha:tools/forward_shadow_agent.py" "$run_sha:tools/strategy_evolution_agent.py" "$run_sha:technical_analysis.py" "$run_sha:tools/v32_hourly_macd.py" "$run_sha:v30_agent_config.json" 2>/dev/null || true)"
+                current_sources="$(git rev-parse HEAD:main.py HEAD:v30_pump_hunter.py HEAD:run_scanner_v18.sh HEAD:tools/candidate_price_tracker.py HEAD:tools/forward_shadow_agent.py HEAD:tools/strategy_evolution_agent.py HEAD:tools/missed_pump_learning.py HEAD:technical_analysis.py HEAD:tools/v32_hourly_macd.py HEAD:v30_agent_config.json)"
+                worker_sources="$(git rev-parse "$run_sha:main.py" "$run_sha:v30_pump_hunter.py" "$run_sha:run_scanner_v18.sh" "$run_sha:tools/candidate_price_tracker.py" "$run_sha:tools/forward_shadow_agent.py" "$run_sha:tools/strategy_evolution_agent.py" "$run_sha:tools/missed_pump_learning.py" "$run_sha:technical_analysis.py" "$run_sha:tools/v32_hourly_macd.py" "$run_sha:v30_agent_config.json" 2>/dev/null || true)"
                 # A watched source newly added to main is absent from the old
                 # worker commit. That is a source change too; never treat an
                 # empty/missing worker fingerprint as "same version".
