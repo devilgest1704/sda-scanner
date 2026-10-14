@@ -150,7 +150,27 @@ def observed_macd(analysis, ts, frame):
     if (end is None or end > ts or (ts-end).total_seconds() > 2*MACD_BAR_SECONDS[frame]
             or age is None or age < 0 or age > max(600, 2*MACD_BAR_SECONDS[frame])
             or n_bars is None or n_bars < MIN_MACD_CLOSED_BARS
-            or traded is None or traded < MIN_MACD_TRADED_BARS):
+            or traded is None):
+        return None
+    if frame == "1h_completed":
+        # An hourly indicator must represent actual CLOCK hours, never
+        # 35 scattered trade-hour samples compressed into a fake series.
+        from tools.v32_hourly_macd import (
+            MACD_METHOD, MIN_LOOKBACK_TRADE_HOURS,
+            MIN_RECENT_TRADE_HOURS, MAX_LOOKBACK_GAP_HOURS,
+            MAX_RECENT_GAP_HOURS,
+        )
+        lookback = finite(raw.get("lookback_traded_hours"))
+        lookback_gap = finite(raw.get("max_lookback_gap_hours"))
+        recent = finite(raw.get("recent_traded_hours"))
+        recent_gap = finite(raw.get("max_recent_gap_hours"))
+        if (raw.get("method") != MACD_METHOD
+                or lookback is None or lookback < MIN_LOOKBACK_TRADE_HOURS
+                or lookback_gap is None or lookback_gap > MAX_LOOKBACK_GAP_HOURS
+                or recent is None or recent < MIN_RECENT_TRADE_HOURS
+                or recent_gap is None or recent_gap > MAX_RECENT_GAP_HOURS):
+            return None
+    elif traded < MIN_MACD_TRADED_BARS:
         return None
     value = raw.get("macd")
     if not isinstance(value, dict):
