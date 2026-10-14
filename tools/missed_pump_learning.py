@@ -97,10 +97,20 @@ def normalize(observations):
         values={k:number(f.get(k)) for k in fields}
         if any(v is None for v in values.values()):
             continue
+        # Preserve the ORIGINAL lane and entry price/quote age. Historical
+        # simulations must use the exact gates the prospective Shadow arm
+        # will apply, not an invented WATCH phase or 30s fresh quote.
+        phase=f.get("phase")
+        if phase not in ("WATCH","IGNITION","CONFIRMATION","BREAKOUT"):
+            continue
+        frozen_snapshot={
+            **values,"phase":phase,"data_age_sec":age,"price_sda":entry,
+        }
         address=str(row.get("address") or "").lower()
         if not address:
             continue
         valid.append({"at":t,"address":address,"features":values,
+                      "frozen_snapshot":frozen_snapshot,
                       "pnl":net_sda(entry,end_price),
                       "gates":tuple(row["gates"]),
                       "observed_peak_pct":number((row.get("observed_peak_240m") or {}).get(
@@ -368,9 +378,9 @@ def learn(observations):
     safe={"entry_lane":"missed_pump","entry_score":60,
           "quality":56,"impulse":8,"buy_ratio":1.5,"trades":6}
     def selected(data,policy):
-        return [r for r in data if safe_missed_entry({
-            **r["features"],"data_age_sec":30,"price_sda":1.0,
-            "phase":"WATCH"},policy)]
+        # The frozen candidate was captured before the observed future
+        # price. Never turn BREAKOUT/NO into WATCH or stale age into 30s.
+        return [r for r in data if safe_missed_entry(r["frozen_snapshot"],policy)]
     baseline_train=selected(train,safe)
     baseline_valid=selected(valid,safe)
     base["eligible_unmodified_train"]=summary(baseline_train)
