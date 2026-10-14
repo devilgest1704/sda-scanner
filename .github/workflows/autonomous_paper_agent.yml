@@ -158,6 +158,20 @@ jobs:
           python -m py_compile tools/strategy_evolution_agent.py tools/forward_shadow_agent.py
           python -m unittest discover -s tests -p 'test_strategy_evolution_agent.py' -v
 
+      - name: Run V33 evolution diagnosis on actual trade archive (pull request smoke test)
+        if: github.event_name == 'pull_request'
+        env:
+          STRATEGY_LLM_API_KEY: ''
+        run: |
+          python -m tools.strategy_evolution_agent
+          python - <<'PY'
+          import json
+          x=json.load(open("strategy_lab/evolution_state.json",encoding="utf-8"))
+          assert x["schema"] == 1 and x["control"]["research_only"] is True
+          assert x["control"]["paper_champion_unchanged"] is True
+          print("V33 ACTUAL PAPER DIAGNOSIS:", x["diagnosis"])
+          PY
+
       - name: Test forward-only learning, holdout selection and risk rollback
         run: python -m unittest discover -s tests -p 'test_forward_*.py' -v
 
