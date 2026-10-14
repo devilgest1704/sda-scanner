@@ -1,6 +1,6 @@
 {
   "version": "FORWARD-PAPER-AGENT-1",
-  "updated_at": "2026-10-14T04:56:12.817965+00:00",
+  "updated_at": "2026-10-14T05:56:43.371049+00:00",
   "mode": "PAPER_ONLY",
   "objective": "maximize accumulated net SDA subject to observed quote risk",
   "real_trading": false,
@@ -14,7 +14,10 @@
     ],
     "may_promote_champion": false,
     "live_buy_rules_modified": false,
-    "caveat": "MACD arms use observed-quote Shadow exits, not V30 execution; no verified profit yet"
+    "paper_buy_rules_modified": true,
+    "paper_buy_gate": "1h completed observed MACD bearish+weakening veto; missing data reported UNAVAILABLE and does not invent a bullish signal",
+    "shadow_fallback": "validated 1h_completed when sparse 5m/15m unavailable",
+    "caveat": "PAPER-only MACD entry veto is now active; benefit in SDA remains unproven until new paired forward observations"
   },
   "v32_breakout": {
     "mode": "RESEARCH_ONLY",
@@ -58,7 +61,7 @@
     "paper_exits": "V30 emergency stop, adaptive trailing, early weakness, pump breakdown and stale",
     "warning": "Unmatched exit models cannot validate promotion until independent parity tests pass"
   },
-  "source_last_scan_at": "2026-10-14T04:55:49.414486+00:00",
+  "source_last_scan_at": "2026-10-14T05:56:21.315784+00:00",
   "strategies": {
     "baseline": {
       "all": {
@@ -338,7 +341,7 @@
     "research_macd_antipump": 0.0,
     "research_macd_confirmation": 0.0,
     "research_breakout_volume_trend": 0.0,
-    "research_trend_runner": 75.0
+    "research_trend_runner": 60.0
   },
   "learning_data_quality": {
     "baseline": {
@@ -413,10 +416,10 @@
       "excluded_closed": 3,
       "excluded_by_reason": {
         "legacy_unknown_quote_quality": 1,
-        "holding_time_over_4_5h": 2,
-        "quote_gap_over_30m": 2
+        "quote_gap_over_30m": 2,
+        "holding_time_over_4_5h": 2
       },
-      "open_virtual_positions": 0
+      "open_virtual_positions": 1
     },
     "research_watch_strict": {
       "total_closed": 2,
@@ -449,13 +452,14 @@
       "open_virtual_positions": 0
     },
     "research_trend_runner": {
-      "total_closed": 4,
+      "total_closed": 5,
       "valid_closed": 3,
-      "excluded_closed": 1,
+      "excluded_closed": 2,
       "excluded_by_reason": {
-        "runner_observation_gap_over_30m": 1
+        "runner_observation_gap_over_30m": 2,
+        "runner_holding_time_overrun": 1
       },
-      "open_virtual_positions": 1
+      "open_virtual_positions": 0
     }
   },
   "split": {
