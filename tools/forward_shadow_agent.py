@@ -12,7 +12,10 @@ import math
 from datetime import datetime, timezone
 from pathlib import Path
 
-from tools.v32_breakout import research_signal_from_analysis, breakout_research_eligible
+from tools.v32_breakout import (
+    research_signal_from_analysis, breakout_research_eligible,
+    sparse_volume_research_eligible,
+)
 from tools.strategy_evolution_agent import STATE as EVOLUTION_STATE, load as load_evolution, experiment_policies
 
 from tools.v32_trend_runner import (apply_observed_quote, close_record as runner_close_record,
@@ -50,12 +53,20 @@ POLICIES = {
         "entry_score": 55, "quality": 48, "impulse": 4,
         "buy_ratio": 1.15, "trades": 8,
     },
+    # Tests a three-swap high-volume ignition without compromising the PAPER
+    # risk circuit. This arm cannot be promoted to Champion.
+    "research_sparse_volume_ignition": {
+        "entry_score": 68, "quality": 58, "impulse": 6,
+        "buy_ratio": 1.5, "trades": 6,
+    },
     # Same entry gates as baseline: isolates the impact of runner EXITS.
     # Research-only; never allowed to change the V30 Champion.
     "research_trend_runner": {"entry_score": 68, "quality": 52, "impulse": 8,
                               "buy_ratio": 1.10, "trades": 5},
 }
 BREAKOUT_RESEARCH_MODE = "research_breakout_volume_trend"
+SPARSE_VOLUME_RESEARCH_MODE = "research_sparse_volume_ignition"
+BREAKOUT_EVIDENCE_MODES = frozenset((BREAKOUT_RESEARCH_MODE, SPARSE_VOLUME_RESEARCH_MODE))
 TREND_RUNNER_RESEARCH_MODE = "research_trend_runner"
 MACD_RESEARCH_MODES = frozenset(("research_macd_antipump", "research_macd_confirmation"))
 MACD_BAR_SECONDS = {"5m": 300, "15m": 900, "1h_completed": 3600}
@@ -220,6 +231,8 @@ def eligible(c, filters, research_watch=False, macd_mode=None):
         return False
     if macd_mode == BREAKOUT_RESEARCH_MODE:
         return breakout_research_eligible(c, filters)
+    if macd_mode == SPARSE_VOLUME_RESEARCH_MODE:
+        return sparse_volume_research_eligible(c, filters)
     phase = c.get("phase")
     if research_watch:
         if phase != "WATCH":
@@ -468,7 +481,7 @@ def step(data, market, funnel):
                             "notional_sda": SIZE_SDA,
                             "model": "conservative_risk_writeoff_no_observed_fill",
                             **({"v32_breakout_at_entry": position.get("v32_breakout_at_entry")}
-                               if name == BREAKOUT_RESEARCH_MODE else {}),
+                               if name in BREAKOUT_EVIDENCE_MODES else {}),
                         })
                     del positions[address]
                     closed += 1
@@ -539,7 +552,7 @@ def step(data, market, funnel):
                 **({"v32_macd_at_entry": position.get("v32_macd_at_entry")}
                    if name in MACD_RESEARCH_MODES else {}),
                 **({"v32_breakout_at_entry": position.get("v32_breakout_at_entry")}
-                   if name == BREAKOUT_RESEARCH_MODE else {}),
+                   if name in BREAKOUT_EVIDENCE_MODES else {}),
             })
             del positions[address]
             closed += 1
@@ -587,7 +600,7 @@ def step(data, market, funnel):
                     **({"v32_macd_at_entry": c.get("v32_macd")}
                        if name in MACD_RESEARCH_MODES else {}),
                     **({"v32_breakout_at_entry": c.get("v32_breakout")}
-                       if name == BREAKOUT_RESEARCH_MODE else {}),
+                       if name in BREAKOUT_EVIDENCE_MODES else {}),
                 }
                 last_entry[address] = ts.isoformat()
                 opened += 1
