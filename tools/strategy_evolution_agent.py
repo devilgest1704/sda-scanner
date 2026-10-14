@@ -255,7 +255,7 @@ def limited_llm_review(candidates, dataset):
 def initial_state():
     return {"schema":1,"paper_only":True,"mode":"EVIDENCE_DRIVEN_FORWARD_RESEARCH",
             "updated_at":None,"llm":{"status":"NOT_CONFIGURED"},
-            "dataset_rows":0,"diagnosis":{},"experiments":[],"events":[]}
+            "dataset_rows":0,"diagnosis":{},"experiments":[],"archive":[],"events":[]}
 
 
 def experiment_policies(data):
@@ -305,13 +305,40 @@ def evolve(state, trades, shadow, now=None, llm_reviewer=limited_llm_review):
         if e["status"]=="FORWARD_TEST" and len(valid)>=FORWARD_REVIEW_MIN:
             if e["forward_net_sda"] <= 0:
                 e["status"]="RETIRED"
+                e["retired_at"]=now.isoformat()
                 e["conclusion"]="FAILED_FORWARD_PROFITABILITY"
             else:
                 # A positive shadow experiment is NOT runtime parity proof.
                 e["conclusion"]="POSITIVE_FORWARD_SHADOW_NEEDS_RUNTIME_PARITY"
+    # A RETIRED arm finishes any open virtual risk before leaving the active
+    # experiment registry. Its immutable result lives in an append-only
+    # bounded archive; this allows lifelong learning, not a 6-experiment stop.
+    state.setdefault("archive",[])
+    keep=[]
+    for e in state["experiments"]:
+        journal=states.get(e.get("id"),{}) if isinstance(states,dict) else {}
+        if (e.get("status")=="RETIRED" and e.get("retired_at") != now.isoformat()
+                and not journal.get("positions")):
+            state["archive"].append({
+                "id":e["id"],"policy":e.get("policy"),
+                "hypothesis":e.get("hypothesis"),"conclusion":e.get("conclusion"),
+                "forward_valid_closes":e.get("forward_valid_closes",0),
+                "forward_net_sda":e.get("forward_net_sda",0),
+                "retired_at":e.get("retired_at"),
+                "dataset_rows_at_retirement":len(rows),
+            })
+        else:
+            keep.append(e)
+    state["archive"]=state["archive"][-80:]
+    state["experiments"]=keep
     active=sum(e["status"]=="FORWARD_TEST" for e in state["experiments"])
     if active < MAX_ACTIVE and len(state["experiments"]) < MAX_EXPERIMENTS and choices:
         previous={json.dumps(e.get("policy"),sort_keys=True) for e in state["experiments"]}
+        # Do not keep re-testing an identical failed experiment unless 35
+        # more REAL closed PAPER outcomes provide a new analysis cohort.
+        previous.update(json.dumps(e.get("policy"),sort_keys=True)
+                        for e in state["archive"]
+                        if len(rows)-e.get("dataset_rows_at_retirement",len(rows)) < 35)
         novel=[x for x in choices if json.dumps(x["policy"],sort_keys=True) not in previous]
         if novel:
             review=llm_reviewer(novel,diagnosis)
@@ -323,7 +350,10 @@ def evolve(state, trades, shadow, now=None, llm_reviewer=limited_llm_review):
                 novel=[novel[index]]
             for x in novel[:MAX_ACTIVE-active]:
                 policy=x["policy"]
-                ident="research_evo_"+hashlib.sha256(json.dumps(policy,sort_keys=True).encode()).hexdigest()[:10]
+                # Include the new evidence cohort: a previously rejected
+                # policy may be retested ONLY after enough independent closes.
+                signature=json.dumps(policy,sort_keys=True)+":"+str(len(rows)//35)
+                ident="research_evo_"+hashlib.sha256(signature.encode()).hexdigest()[:10]
                 state["experiments"].append({
                     "id":ident,"status":"FORWARD_TEST","proposed_at":now.isoformat(),
                     "hypothesis":x["hypothesis"],"policy":policy,
