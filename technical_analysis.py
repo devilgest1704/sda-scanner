@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tools.v32_breakout import analyze_breakout
+from tools.v32_hourly_macd import completed_hourly_macd
 
 MARKET_FILE = "market_data.json"
 TIMEFRAMES = {"1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800}
@@ -318,6 +319,10 @@ def analyze_token(token_data, as_of=None):
     at = as_of or datetime.now(timezone.utc)
     results.update({name: intraday_macd_analysis(history, seconds, at)
                     for name, seconds in INTRADAY_MACD_FRAMES.items()})
+    # Unlike sparse intraday data, traded hourly buckets often support a
+    # guarded MACD. Only COMPLETED hours may influence the PAPER BUY veto;
+    # the existing general-purpose 1h chart is unchanged.
+    results["1h_completed"] = completed_hourly_macd(history, at)
     # Unlike MACD, breakout research can still inspect sparse but valid
     # transaction data. Never mix its research signal into V30 BUY/SELL.
     results["breakout_volume_trend"] = analyze_breakout(history, at)
@@ -357,6 +362,7 @@ def main():
         "history_source": "market_scanner transaction history",
         "history_expanded": True,
         "intraday_macd": "research_only_closed_bars_no_future_price",
+        "hourly_macd": "completed_observed_trade_hour_paper_buy_veto",
         "intraday_missing_bars": "bounded_carry_forward_unavailable_if_sparse",
         "breakout_volume_trend": "research_only_observed_transactions_excluding_future_quotes",
     }
