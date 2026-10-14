@@ -441,6 +441,7 @@ def main():
             missed_source.get("observations",[]),list):
         raise ValueError("Invalid candidate outcome research archive")
     missed_report=learn(missed_source.get("observations",[]))
+    missed_report["updated_at"]=datetime.now(timezone.utc).isoformat()
     report_path=Path("strategy_lab/missed_pump_learning.json")
     report_path.parent.mkdir(parents=True,exist_ok=True)
     report_tmp=report_path.with_suffix(".tmp")
