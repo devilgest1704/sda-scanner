@@ -241,6 +241,90 @@ def research_signal_from_analysis(analysis, scanner_at, market_at):
     return {key: raw.get(key) for key in fields}
 
 
+
+SPARSE_VOLUME_ONLY_REJECTIONS = frozenset((
+    "insufficient_recent_trades", "insufficient_buy_transactions",
+))
+
+
+def sparse_volume_research_eligible(row, filters):
+    """Forward-only hypothesis: large early buy flow in just 2-4 swaps.
+
+    Reject stale observations, late 4h pumps and EVERY breakout rejection
+    except a sparse transaction count. Research-only: NEVER a V30 PAPER BUY.
+    This specifically tests whether the normal 5-swap minimum hides genuine
+    early moves, rather than weakening the live/paper risk circuit.
+    """
+    if not isinstance(row, dict) or row.get("phase") not in (
+            "WATCH", "IGNITION", "CONFIRMATION"):
+        return False
+    signal = row.get("v32_breakout")
+    if not isinstance(signal, dict) or signal.get("mode") != "RESEARCH_ONLY":
+        return False
+    reasons = signal.get("rejection_reasons")
+    if (signal.get("available") is not True
+            or signal.get("eligible") is not False
+            or not isinstance(reasons, list)
+            or not reasons
+            or not set(reasons).issubset(SPARSE_VOLUME_ONLY_REJECTIONS)):
+        return False
+
+    def number(source, key):
+        v = source.get(key)
+        if isinstance(v, bool):
+            return None
+        try:
+            n = float(v)
+            return n if math.isfinite(n) else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    keys = (
+        "score", "quality", "snapshot_impulse", "delta_impulse",
+        "data_age_sec", "m15", "m1h", "m4h", "trades_1h",
+        "buy_ratio", "volume_1h", "flow_1h", "flow_15m", "price_sda",
+    )
+    c = {key: number(row, key) for key in keys}
+    evidence = (
+        "base_trades", "base_span_minutes", "base_range_pct",
+        "breakout_pct", "recent_15m_swaps", "recent_15m_buys",
+        "recent_15m_volume_sda", "recent_15m_net_flow_sda",
+        "recent_15m_buy_ratio", "volume_multiple",
+        "recent_15m_price_change_pct", "last_vs_recent_peak_pct",
+        "reference_price_sda",
+    )
+    s = {key: number(signal, key) for key in evidence}
+    if any(x is None for x in (*c.values(), *s.values())):
+        return False
+    if not (
+            0 <= c["data_age_sec"] <= 180
+            and c["score"] >= filters["entry_score"]
+            and c["quality"] >= filters["quality"]
+            and max(c["snapshot_impulse"], c["delta_impulse"]) >= filters["impulse"]
+            and 0 < c["m1h"] <= 8 and 0.75 <= c["m15"] <= 8
+            and -5 <= c["m4h"] <= 30  # never chase an already +128% pump
+            and c["trades_1h"] >= filters["trades"]
+            and c["buy_ratio"] >= filters["buy_ratio"]
+            and c["volume_1h"] >= 650 and c["flow_1h"] >= 300
+            and c["flow_15m"] >= 350 and c["price_sda"] > 0
+            and s["base_trades"] >= MIN_BASE_TRADES
+            and s["base_span_minutes"] >= MIN_BASE_SPAN_MIN
+            and s["base_range_pct"] <= MAX_BASE_WIDTH_PCT
+            and 0.5 <= s["breakout_pct"] <= 6.0
+            and 2 <= s["recent_15m_swaps"] <= 4
+            and s["recent_15m_buys"] >= 2
+            and s["recent_15m_volume_sda"] >= 500
+            and s["recent_15m_net_flow_sda"] >= 350
+            and s["recent_15m_buy_ratio"] >= 1.5
+            and s["volume_multiple"] >= 2.0
+            and 0.75 <= s["recent_15m_price_change_pct"] <= 8.0
+            and s["last_vs_recent_peak_pct"] >= 97.5
+            and s["reference_price_sda"] > 0
+            and abs(c["price_sda"] / s["reference_price_sda"] - 1) <= .015):
+        return False
+    return True
+
+
 def breakout_research_eligible(row, filters):
     """Early breakout research may use WATCH, unlike production V30 gates.
 
