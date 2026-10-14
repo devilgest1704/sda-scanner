@@ -7,11 +7,19 @@ not imported by real trading.
 from datetime import datetime, timezone
 import math
 
+# MACD (12,26,9) needs a CLOCK-TIME series, not the last 35 arbitrarily
+# spaced traded hours. Missing hours carry only an actually observed last
+# traded close. No synthetic volume or trade is ever counted.
 MIN_CLOSED_TRADE_HOURS = 35
+LOOKBACK_CLOCK_HOURS = 60
+QUALITY_WINDOW_HOURS = 35
+MIN_LOOKBACK_TRADE_HOURS = 8
+MAX_LOOKBACK_GAP_HOURS = 12.0
 RECENT_WINDOW_HOURS = 12
 MIN_RECENT_TRADE_HOURS = 4
 MAX_RECENT_GAP_HOURS = 5.0
 MAX_COMPLETED_QUOTE_AGE_SECONDS = 7200
+MACD_METHOD = "completed_clock_hour_last_observed_close_bounded_carry_v2"
 
 
 def finite(value):
@@ -24,18 +32,33 @@ def finite(value):
         return None
 
 
-def completed_hourly_macd(history, as_of):
-    """Calculate a MACD from closed, genuinely traded 1h buckets.
+def _largest_clock_gap(traded_bucket_keys, start, end):
+    """Elapsed HOURS between genuine observations inside [start,end).
 
-    These are *observed* hours, not synthetic gap-filled hourly bars. Sparse
-    data are explicitly refused. The newest incomplete hour and future
-    transactions cannot influence the calculation.
+    Include both boundaries; unlike the old code this never reaches back to
+    the last 12 traded hours scattered across the historical archive.
     """
-    from technical_analysis import build_candles, bucket_ts, macd, parse_ts
+    keys = [key for key in traded_bucket_keys if start <= key < end]
+    endpoints = [start] + keys + [end]
+    return max((right-left)/3600 for left,right in
+               zip(endpoints, endpoints[1:]))
+
+
+def completed_hourly_macd(history, as_of):
+    """MACD on chronological completed CLOCK hours, with honest data quality.
+
+    Hours without trades carry the last actual observed close, but are marked
+    as carried (not counted as traded). Reject insufficient activity in the
+    last 35 and 12 clock hours, large genuine recent gaps, and stale prices.
+    Incomplete/current or future-hour transactions are never read. No
+    intraday or lookahead substitute can accidentally block a PAPER BUY.
+    """
+    from technical_analysis import bucket_ts, macd, parse_ts
     base = {
-        "available": False, "reason": "insufficient_completed_trade_hours",
-        "method": "completed_observed_trade_hour_macd_sparse_guard",
-        "macd": None, "completed_bars": 0, "traded_bars": 0,
+        "available": False, "reason": "insufficient_completed_clock_hours",
+        "method": MACD_METHOD, "macd": None,
+        "completed_bars": 0, "traded_bars": 0, "carried_bars": 0,
+        "lookback_traded_hours": 0, "max_lookback_gap_hours": None,
         "last_completed_at": None, "quote_age_seconds": None,
         "recent_traded_hours": 0, "max_recent_gap_hours": None,
     }
@@ -43,51 +66,85 @@ def completed_hourly_macd(history, as_of):
         return {**base, "reason": "invalid_as_of"}
     now = as_of.astimezone(timezone.utc)
     current_start = bucket_ts(now, 3600)
-    observed = [
-        tx for tx in (history if isinstance(history, list) else [])
-        if isinstance(tx, dict) and (when := parse_ts(tx.get("timestamp"))) is not None
-        and when.timestamp() < current_start
-        and (price := finite(tx.get("price"))) is not None and price > 0
-    ]
-    # A scanner/API is not guaranteed to return rows in chronological order.
-    # Sorting ensures every occupied bucket closes at its LAST observed trade.
-    observed.sort(key=lambda tx: (parse_ts(tx["timestamp"]), str(tx.get("hash") or "")))
-    # build_candles groups all valid records into occupied, ordered hourly
-    # buckets and handles transaction sorting for high/low/close.
-    candles = build_candles(observed, 3600)
-    n = len(candles)
-    if n < MIN_CLOSED_TRADE_HOURS:
-        return {**base, "completed_bars": n, "traded_bars": n}
-    times = [parse_ts(c["timestamp"]) for c in candles]
-    last_end = times[-1].timestamp() + 3600
-    # A bucket is complete, but its last actual trade may be earlier.
-    latest_trade_ts = max(parse_ts(tx["timestamp"]) for tx in observed
-                          if bucket_ts(parse_ts(tx["timestamp"]), 3600) ==
-                          int(times[-1].timestamp()))
-    age = (now - latest_trade_ts).total_seconds()
-    recent = [t for t in times if t.timestamp() >= current_start - RECENT_WINDOW_HOURS*3600]
-    latest12 = times[-12:]
-    max_gap = max(((b-a).total_seconds()/3600 for a,b in zip(latest12,latest12[1:])), default=0)
+    records = []
+    for tx in history if isinstance(history, list) else []:
+        if not isinstance(tx, dict):
+            continue
+        at = parse_ts(tx.get("timestamp"))
+        price = finite(tx.get("price"))
+        if (at is None or at.timestamp() >= current_start
+                or price is None or price <= 0):
+            continue
+        records.append((at, str(tx.get("hash") or ""), price))
+    if not records:
+        return {**base, "reason": "no_completed_observed_trades"}
+    records.sort(key=lambda record: (record[0], record[1]))
+    prices = {}
+    timestamps = {}
+    for at, _, price in records:
+        key = bucket_ts(at, 3600)
+        prices[key] = price
+        timestamps[key] = at
+
+    # A previous real quote may initialize the window, but there is never
+    # an invented starting price; the earliest observed hour is the fallback.
+    window_start = current_start - LOOKBACK_CLOCK_HOURS*3600
+    first = max(window_start, min(prices))
+    prior = None
+    for key in prices:
+        if key < first:
+            prior = prices[key]
+        else:
+            break
+    closes = []
+    trade_flags = []
+    for key in range(first, current_start, 3600):
+        traded = key in prices
+        if traded:
+            prior = prices[key]
+        if prior is None:
+            continue
+        closes.append(prior)
+        trade_flags.append(traded)
+
+    latest_bucket = max(prices)
+    age = (now-timestamps[latest_bucket]).total_seconds()
+    recent_start = current_start-RECENT_WINDOW_HOURS*3600
+    lookback_start = current_start-QUALITY_WINDOW_HOURS*3600
+    keys = sorted(prices)
+    recent_trades = sum(recent_start <= key < current_start for key in keys)
+    lookback_trades = sum(lookback_start <= key < current_start for key in keys)
+    max_recent_gap = _largest_clock_gap(keys, recent_start, current_start)
+    max_lookback_gap = _largest_clock_gap(keys, lookback_start, current_start)
     base.update({
-        "completed_bars": n, "traded_bars": n,
-        "last_completed_at": datetime.fromtimestamp(last_end, timezone.utc).isoformat(),
+        "completed_bars": len(closes), "traded_bars": sum(trade_flags),
+        "carried_bars": len(closes)-sum(trade_flags),
+        # This is the end of the most recently COMPLETED hour. It is
+        # intentionally not the time of the last trade or a partial candle.
+        "last_completed_at": datetime.fromtimestamp(
+            current_start, timezone.utc).isoformat(),
         "quote_age_seconds": round(age, 2),
-        "recent_traded_hours": len(recent),
-        "max_recent_gap_hours": round(max_gap, 2),
+        "recent_traded_hours": recent_trades,
+        "max_recent_gap_hours": round(max_recent_gap, 2),
+        "lookback_traded_hours": lookback_trades,
+        "max_lookback_gap_hours": round(max_lookback_gap, 2),
     })
-    if age > MAX_COMPLETED_QUOTE_AGE_SECONDS or age < 0:
+    if len(closes) < MIN_CLOSED_TRADE_HOURS:
+        return {**base, "reason": "insufficient_completed_clock_hours"}
+    if age < 0 or age > MAX_COMPLETED_QUOTE_AGE_SECONDS:
         return {**base, "reason": "stale_completed_hour"}
-    if len(recent) < MIN_RECENT_TRADE_HOURS or max_gap > MAX_RECENT_GAP_HOURS:
+    if (recent_trades < MIN_RECENT_TRADE_HOURS
+            or max_recent_gap > MAX_RECENT_GAP_HOURS):
         return {**base, "reason": "sparse_recent_trade_hours"}
-    closes = [float(c["close"]) for c in candles]
+    if (lookback_trades < MIN_LOOKBACK_TRADE_HOURS
+            or max_lookback_gap > MAX_LOOKBACK_GAP_HOURS):
+        return {**base, "reason": "sparse_lookback_trade_hours"}
     result = macd(closes)
     if not isinstance(result, dict):
         return {**base, "reason": "insufficient_macd_points"}
     price = closes[-1]
     if price <= 0 or not math.isfinite(price):
         return {**base, "reason": "invalid_price"}
-    # MACD histogram is normalized to % of the last observed price to keep
-    # reported strength comparable between different SDA token prices.
     fast = _ema(closes, 12)
     slow = _ema(closes, 26)
     line = [a-b for a,b in zip(fast,slow)]
@@ -134,7 +191,12 @@ def paper_macd_veto(analysis, as_of=None):
     delta = finite(m.get("histogram_delta_pct")) if isinstance(m, dict) else None
     recent = finite(raw.get("recent_traded_hours"))
     gap = finite(raw.get("max_recent_gap_hours"))
-    if (not isinstance(when, datetime) or when.tzinfo is None or end is None
+    lookback_trades = finite(raw.get("lookback_traded_hours"))
+    lookback_gap = finite(raw.get("max_lookback_gap_hours"))
+    if (raw.get("method") != MACD_METHOD
+            or lookback_trades is None or lookback_trades < MIN_LOOKBACK_TRADE_HOURS
+            or lookback_gap is None or lookback_gap > MAX_LOOKBACK_GAP_HOURS
+            or not isinstance(when, datetime) or when.tzinfo is None or end is None
             or end > when or (when-end).total_seconds() > 7200
             or age is None or age < 0 or age > MAX_COMPLETED_QUOTE_AGE_SECONDS
             or recent is None or recent < MIN_RECENT_TRADE_HOURS
