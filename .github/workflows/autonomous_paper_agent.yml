@@ -13,6 +13,8 @@ on:
       - 'tools/forward_shadow_agent.py'
       - 'tools/forward_shadow_optimizer.py'
       - 'technical_analysis.py'
+      - 'tools/v32_hourly_macd.py'
+      - 'tests/test_v32_hourly_macd_paper.py'
       - 'market_scanner.py'
       - 'tools/market_history_integrity.py'
       - 'tests/test_market_history_integrity.py'
@@ -45,6 +47,8 @@ on:
       - 'tools/forward_shadow_agent.py'
       - 'tools/forward_shadow_optimizer.py'
       - 'technical_analysis.py'
+      - 'tools/v32_hourly_macd.py'
+      - 'tests/test_v32_hourly_macd_paper.py'
       - 'market_scanner.py'
       - 'tools/market_history_integrity.py'
       - 'tests/test_market_history_integrity.py'
@@ -119,6 +123,11 @@ jobs:
         run: |
           python -m py_compile tools/market_history_integrity.py market_scanner.py
           python -m unittest discover -s tests -p 'test_market_history_integrity.py' -v
+
+      - name: Verify completed 1h MACD is an actual PAPER BUY gate
+        run: |
+          python -m py_compile technical_analysis.py tools/v32_hourly_macd.py v30_pump_hunter.py
+          python -m unittest discover -s tests -p 'test_v32_hourly_macd_paper.py' -v
 
       - name: Test MACD completed candles, sparse history, and forward-only V32 research
         run: |
