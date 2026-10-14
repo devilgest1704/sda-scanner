@@ -99,6 +99,21 @@ class EvidenceEvolutionTests(unittest.TestCase):
         self.assertIn(name,experiment_policies(next_state))
         self.assertTrue(next_state["control"]["paper_champion_unchanged"])
 
+    def test_retired_trial_is_archived_without_losing_forward_history(self):
+        state=evolve(initial_state(),historical_trades(),{"strategies":{}},
+                     now=T0,llm_reviewer=lambda _a,_b:{"status":"NOT_CONFIGURED"})
+        arm=state["experiments"][0]["id"]
+        ledger={"strategies":{arm:{"positions":{},"trades":[
+            {"valid_for_learning":True,"pnl_sda":-2.0}
+            for _ in range(12)]}}}
+        retired=evolve(state,historical_trades(),ledger,now=T0+timedelta(hours=1),
+                       llm_reviewer=lambda _a,_b:{"status":"NOT_CONFIGURED"})
+        archived=evolve(retired,historical_trades(),ledger,now=T0+timedelta(hours=2),
+                        llm_reviewer=lambda _a,_b:{"status":"NOT_CONFIGURED"})
+        self.assertTrue(any(x["id"]==arm for x in archived["archive"]))
+        self.assertNotIn(arm,experiment_policies(archived))
+        self.assertFalse(archived["control"]["runtime_parity_verified"])
+
     def test_llm_unconfigured_makes_no_network_calls(self):
         with patch.dict("os.environ",{"STRATEGY_LLM_API_KEY":""}):
             with patch("urllib.request.urlopen",side_effect=AssertionError("no network")):
