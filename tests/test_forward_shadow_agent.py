@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone, timedelta
 from tools.forward_shadow_agent import (
     POLICIES, default_state, eligible, step, exit_profit, MAX_HISTORY,
@@ -26,6 +27,14 @@ def funnel(t, **overrides):
 
 
 class ForwardPaperTests(unittest.TestCase):
+    def setUp(self):
+        # Static policy regression checks must NOT depend on the mutable
+        # autonomous experiment ledger from other CI steps/live scanner.
+        self._evolution_patch = patch("tools.forward_shadow_agent.load_evolution",
+                                      return_value={})
+        self._evolution_patch.start()
+        self.addCleanup(self._evolution_patch.stop)
+
     def test_shadow_entries_do_not_execute_or_use_current_quote_as_exit(self):
         state = default_state()
         result = step(state, market(T0), funnel(T0))
