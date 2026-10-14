@@ -10,7 +10,7 @@ is FORWARD tested independently and cannot promote PAPER Champion directly.
 """
 import json
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 SDA_NOTIONAL=50.0
 FRICTION_PER_SIDE=.011
@@ -185,11 +185,32 @@ def learn(observations):
     # Establish a deterministic chronological cut BEFORE examining profits.
     cut=int(len(all_rows)*.70)
     train,valid=all_rows[:cut],all_rows[cut:]
+    # Purge the boundary so the last train label (T+60..75m) is known
+    # BEFORE the first unseen holdout entry timestamp. This stops subtle
+    # 60-minute lookahead at the train/validation frontier.
+    if valid:
+        earliest=valid[0]["at"]-timedelta(minutes=75)
+        train=[r for r in train if r["at"]<=earliest]
+    def rejection_counts(rows):
+        counts={}
+        for item in rows:
+            for gate in set(item["gates"]):
+                label=str(gate)
+                counts[label]=counts.get(label,0)+1
+        return dict(sorted(counts.items(),key=lambda x:(-x[1],x[0]))[:12])
+    positives=[r for r in all_rows if r["pnl"]>=3]
+    negatives=[r for r in all_rows if r["pnl"]<0]
     base={
         "mode":"OBSERVED_QUOTE_HYPOTHESIS_NO_EXECUTION_PARITY",
         "paper_only":True,"can_promote_champion":False,
         "sample_count":len(all_rows),
-        "missed_pump_examples":sum(r["pnl"]>=3 for r in all_rows),
+        "missed_pump_examples":len(positives),
+        "positive_theoretical_60m_sda_model_not_fills":round(
+            sum(r["pnl"] for r in positives),4),
+        "negative_theoretical_60m_sda_model_not_fills":round(
+            sum(r["pnl"] for r in negatives),4),
+        "gates_on_profitable_rejected_candidates":rejection_counts(positives),
+        "gates_on_loss_making_rejected_candidates":rejection_counts(negatives),
         "potential_240m_peak_examples":sum(
             r["observed_peak_pct"] is not None and r["observed_peak_pct"]>=10
             for r in all_rows),
