@@ -10,7 +10,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from tools.missed_pump_learning import learn
+from tools.missed_pump_learning import learn, normalize
+from tools.candidate_price_tracker import update as track_candidates, original_snapshot_complete
 from tools.strategy_evolution_agent import main as evolve_main
 from tools.forward_shadow_optimizer import report as optimizer_report
 from tools.forward_shadow_agent import default_state, POLICIES
@@ -58,6 +59,90 @@ class MissedPumpAutonomousPipelineTest(unittest.TestCase):
         self.assertEqual(result["sample_count"],0)
         self.assertEqual(result["status"],"NO_VALID_MATURED_OUTCOMES")
         self.assertEqual(learn([])["status"],"COLLECTING")
+
+    def test_legacy_row_repaired_only_from_same_original_funnel(self):
+        old = archived_rows(1)[0]
+        t = datetime.fromisoformat(old["at"])
+        address = old["address"]
+        stamp = old["at"]
+        funnel_row={
+            **old["features"],
+            "address":address, "at":stamp, "quote_at":old["quote_at"],
+            "data_age_sec":60, "price_sda":1.0,
+            "phase":"WATCH", "eligible":False, "gates":list(old["gates"]),
+        }
+        legacy={
+            "id":f"{stamp}|{address}", "at":stamp, "address":address,
+            "entry_price_sda":1.0,
+            "score":76,"quality":70,"impulse":0,
+            "eligible":False,"gates":list(old["gates"]),
+            "outcomes":dict(old["outcomes"]),
+        }
+        market={
+            "updated_at":(t+timedelta(minutes=66)).isoformat(),
+            "tokens":{address:{"analysis":{
+                "price_in_sda":1.12,
+                "last_transaction":(t+timedelta(minutes=65)).isoformat(),
+            }}},
+        }
+        state={
+            "observations":[legacy],
+            "funnels":[{"at":stamp,"candidate_snapshots":[funnel_row]}],
+        }
+        result=track_candidates(state,market)
+        self.assertEqual(len(result["observations"]),1)
+        recovered=result["observations"][0]
+        self.assertTrue(original_snapshot_complete(recovered))
+        self.assertEqual(recovered["quote_at"],old["quote_at"])
+        self.assertEqual(recovered["features"]["flow_15m"],500)
+        self.assertEqual(recovered["outcomes"],old["outcomes"])
+        self.assertEqual(len(normalize(result["observations"])),1)
+
+        # A mismatched old price cannot be retrospectively rewritten using
+        # the present market price or an unrelated saved scanner quote.
+        legacy_bad={**legacy,"entry_price_sda":1.1}
+        bad=track_candidates({**state,"observations":[legacy_bad]},market)
+        self.assertFalse(original_snapshot_complete(bad["observations"][0]))
+        self.assertEqual(len(normalize(bad["observations"])),0)
+        untouched=track_candidates({"observations":[legacy],"funnels":[]},market)
+        self.assertFalse(original_snapshot_complete(untouched["observations"][0]))
+
+    def test_valid_frozen_rows_not_overwritten_by_later_quotes(self):
+        old=archived_rows(1)[0]
+        t=datetime.fromisoformat(old["at"])
+        address=old["address"]
+        snapshot={**old["features"],"at":old["at"],"address":address,
+                  "quote_at":old["quote_at"],"phase":"WATCH",
+                  "price_sda":1.0,"data_age_sec":60,
+                  "eligible":False,"gates":list(old["gates"])}
+        market={
+            "updated_at":(t+timedelta(minutes=1)).isoformat(),
+            "tokens":{address:{"analysis":{
+                "price_in_sda":1.0,
+                "last_transaction":t.isoformat(),
+            }}},
+        }
+        first=track_candidates({
+            "funnels":[{"at":old["at"],"candidate_snapshots":[snapshot]}]
+        },market)
+        self.assertEqual(len(first["observations"]),1)
+        self.assertTrue(original_snapshot_complete(first["observations"][0]))
+        later={
+            **market, "updated_at":(t+timedelta(minutes=66)).isoformat(),
+            "tokens":{address:{"analysis":{
+                "price_in_sda":1.2,
+                "last_transaction":(t+timedelta(minutes=65)).isoformat(),
+            }}},
+        }
+        second=track_candidates({
+            "observations":first["observations"],
+            "funnels":[{"at":old["at"],"candidate_snapshots":[snapshot]}],
+        },later)
+        row=second["observations"][0]
+        self.assertEqual(row["entry_price_sda"],1.0)
+        self.assertEqual(row["quote_at"],old["quote_at"])
+        self.assertEqual(row["features"]["flow_15m"],500)
+        self.assertEqual(row["outcomes"]["60m"]["price_sda"],1.2)
 
     def test_scheduled_evolution_produces_optimizer_visible_report(self):
         original = Path.cwd()
