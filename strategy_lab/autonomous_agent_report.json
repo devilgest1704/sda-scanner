@@ -1,6 +1,6 @@
 {
   "version": "FORWARD-PAPER-AGENT-1",
-  "updated_at": "2026-10-14T20:02:59.943177+00:00",
+  "updated_at": "2026-10-14T21:07:56.863752+00:00",
   "mode": "PAPER_ONLY",
   "objective": "maximize accumulated net SDA subject to observed quote risk",
   "real_trading": false,
@@ -61,7 +61,7 @@
     "paper_exits": "V30 emergency stop, adaptive trailing, early weakness, pump breakdown and stale",
     "warning": "Unmatched exit models cannot validate promotion until independent parity tests pass"
   },
-  "source_last_scan_at": "2026-10-14T20:02:22.408647+00:00",
+  "source_last_scan_at": "2026-10-14T21:07:25.781158+00:00",
   "strategies": {
     "baseline": {
       "all": {
@@ -350,25 +350,33 @@
   "promotion_applied": false,
   "rollback_applied": false,
   "missed_pump_learning": {
-    "status": "NO_VALID_MATURED_OUTCOMES",
-    "updated_at": "2026-10-14T20:02:59.520375+00:00",
-    "source_candidate_archive_at": "2026-10-14T20:01:57.033225+00:00",
+    "status": "COLLECTING",
+    "updated_at": "2026-10-14T21:07:56.299884+00:00",
+    "source_candidate_archive_at": "2026-10-14T21:06:59.591992+00:00",
     "source_age_minutes": 1.0,
     "source_fresh": true,
     "archived_candidates": 5000,
-    "with_60m_quote": 2843,
+    "with_60m_quote": 2840,
     "input_quality": {
       "rejection_counts": {
-        "invalid_or_missing_quote_time": 4935,
-        "missing_frozen_features": 4935,
-        "no_60m_followup_observed": 29,
-        "late_followup_75_to_120_minutes": 22,
+        "invalid_or_missing_quote_time": 4865,
+        "missing_frozen_features": 4865,
+        "late_followup_75_to_120_minutes": 61,
+        "no_60m_followup_observed": 57,
         "already_eligible_not_missed": 1
       },
       "missing_feature_counts": {
-        "m4h": 51
+        "m4h": 107
       },
       "legacy_frozen_age_recoverable": 0,
+      "maturity_stages": {
+        "with_original_quote_and_features": 134,
+        "with_fresh_entry_quote": 134,
+        "with_strict_60_to_75m_exit_quote": 16,
+        "with_strict_exit_and_full_features": 3
+      },
+      "latest_original_candidate_at": "2026-10-14T21:03:24.294195+00:00",
+      "latest_strict_matured_candidate_at": "2026-10-14T19:50:23.276767+00:00",
       "missing_quote_schema_examples": [
         {
           "row_keys": [
@@ -385,7 +393,7 @@
             "score"
           ],
           "feature_keys": [],
-          "has_60m": false,
+          "has_60m": true,
           "has_original_age": false
         },
         {
@@ -421,12 +429,12 @@
             "score"
           ],
           "feature_keys": [],
-          "has_60m": false,
+          "has_60m": true,
           "has_original_age": false
         }
       ]
     },
-    "observed_candidates": 0,
+    "observed_candidates": 3,
     "missed_60m_positive_after_costs": 0,
     "learned_rule": null,
     "research_only": true,
