@@ -132,6 +132,8 @@ def proposals_from_evidence(rows):
                     "train":len(train), "validation":len(validation)}
     base_train, base_valid = baseline_stats(train), baseline_stats(validation)
     choices = []
+    exploratory = []
+    feature_notes = []
     for description, policy_key, name, mode, floor, ceiling, aliases in FEATURES:
         win = [feature({"entry_metrics":r["metrics"]}, aliases)
                for r in train if r["pnl"] > 0]
@@ -142,6 +144,10 @@ def proposals_from_evidence(rows):
         if len(win) < 6 or len(lose) < 15:
             continue
         win_median, loss_median = statistics.median(win), statistics.median(lose)
+        feature_notes.append({"hypothesis":description, "winning_median":round(win_median,4),
+                              "losing_median":round(loss_median,4),
+                              "winner_observations":len(win),
+                              "loser_observations":len(lose)})
         # A hypothesis needs a directional difference that makes sense.
         if (mode == "max" and win_median >= loss_median) or (
                 mode == "min" and win_median <= loss_median):
@@ -158,15 +164,22 @@ def proposals_from_evidence(rows):
         # must show better expected net SDA per trade than the unfiltered rows.
         advantage_train = selected_train["avg_sda"]-base_train["avg_sda"]
         advantage_valid = selected_valid["avg_sda"]-base_valid["avg_sda"]
-        if advantage_train <= 0.03 or advantage_valid <= 0.03:
+        # VALIDATED requires improvement on both chronological partitions.
+        # In an unprofitable market, EXPLORATORY is allowed for actual future
+        # observed-quote research only, not for config promotion. It is driven
+        # by measured winner/loss separation, never by a parameter grid.
+        validated = advantage_train > 0.03 and advantage_valid > 0.03
+        contrast = abs(win_median-loss_median)/max(1,abs(loss_median))
+        if not validated and (contrast < 0.12 or advantage_train < -0.15):
             continue
         policy = dict(BASELINE)
         if policy_key in BASELINE:
             policy[policy_key] = max(policy[policy_key], bound)
         else:
             policy[policy_key] = bound
-        choices.append({
+        candidate = {
             "hypothesis": description, "signal": name, "direction": mode,
+            "evidence_tier": "HISTORICAL_VALIDATION" if validated else "EXPLORATION_ONLY",
             "limit": bound, "policy": policy,
             "train": selected_train, "validation": selected_valid,
             "baseline_train":base_train, "baseline_validation":base_valid,
@@ -175,11 +188,20 @@ def proposals_from_evidence(rows):
             "rationale": f"Winning entry {name} median {win_median:.3f}; losing median {loss_median:.3f}. "
                          f"Test the {mode} {bound:g} guard on NEW future candidates.",
             "warning":"Historical survivors are selection-biased; improvement is NOT a causal or deployable return.",
-        })
-    return sorted(choices, key=lambda x:(
-        x["validation_avg_improvement_sda"], x["train_avg_improvement_sda"]
-    ), reverse=True), {"status":"DIAGNOSED","train":len(train),"validation":len(validation),
+        }
+        (choices if validated else exploratory).append(candidate)
+    ranking=lambda x:(x["validation_avg_improvement_sda"],
+                      x["train_avg_improvement_sda"])
+    qualified=sorted(choices,key=ranking,reverse=True)
+    # The agent continues FORWARD research even when historical data cannot
+    # justify a champion; exploratory hypotheses are always labelled clearly.
+    selected=qualified if qualified else sorted(exploratory,key=lambda x:(
+        x["train_avg_improvement_sda"],x["validation_avg_improvement_sda"]),reverse=True)[:2]
+    return selected, {"status":"DIAGNOSED","train":len(train),"validation":len(validation),
                      "tested_hypothesis_families":len(FEATURES),
+                     "validated_hypotheses":len(qualified),
+                     "exploratory_hypotheses":len(exploratory),
+                     "feature_diagnostics":feature_notes,
                      "baseline_train":base_train,"baseline_validation":base_valid}
 
 
@@ -266,6 +288,7 @@ def evolve(state, trades, shadow, now=None, llm_reviewer=limited_llm_review):
     state["diagnosis"]={**diagnosis,"proposals_qualified":len(choices),
                        "leading_hypotheses": [
                            {"hypothesis":x["hypothesis"],"limit":x["limit"],
+                            "evidence_tier":x["evidence_tier"],
                             "validation_avg_improvement_sda":x["validation_avg_improvement_sda"]}
                            for x in choices[:3]]}
     states=shadow.get("strategies",{}) if isinstance(shadow,dict) else {}
@@ -305,6 +328,7 @@ def evolve(state, trades, shadow, now=None, llm_reviewer=limited_llm_review):
                     "id":ident,"status":"FORWARD_TEST","proposed_at":now.isoformat(),
                     "hypothesis":x["hypothesis"],"policy":policy,
                     "train":x["train"],"validation":x["validation"],
+                    "evidence_tier":x["evidence_tier"],
                     "rationale":x["rationale"],"selection_bias_warning":x["warning"],
                     "forward_valid_closes":0,"forward_net_sda":0,
                     "conclusion":"AWAITING_NEW_FORWARD_OBSERVED_QUOTES",
