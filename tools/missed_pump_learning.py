@@ -207,6 +207,8 @@ def archive_quality_diagnostics(observations):
     """
     reasons={}
     missing_fields={}
+    legacy_frozen_age_recoverable = 0
+    original_schema_examples = []
     fields=("score","quality","snapshot_impulse","m1h","m15","m4h",
             "trades_1h","buy_ratio","volume_1h","flow_1h","flow_15m")
     def flag(reason):
@@ -226,18 +228,30 @@ def archive_quality_diagnostics(observations):
             flag("invalid_or_missing_candidate_time")
         if quote is None:
             flag("invalid_or_missing_quote_time")
+            # Diagnosis only: a frozen original age may permit recovery
+            # without reading any price recorded after the decision.
+            observed_age = number(f.get("data_age_sec")) if isinstance(f,dict) else None
+            if t is not None and observed_age is not None and 0 <= observed_age <= 300:
+                legacy_frozen_age_recoverable += 1
+            if len(original_schema_examples) < 3:
+                original_schema_examples.append({
+                    "row_keys":sorted(row.keys()),
+                    "feature_keys": sorted(f) if isinstance(f,dict) else [],
+                    "has_60m":isinstance(outcome,dict),
+                    "has_original_age":observed_age is not None,
+                })
+        if isinstance(f,dict):
+            for key in fields:
+                if number(f.get(key)) is None:
+                    missing_fields[key]=missing_fields.get(key,0)+1
+        else:
+            flag("missing_frozen_features")
+        if not isinstance(row.get("gates"),list) or not row["gates"]:
+            flag("missing_rejection_gates")
         if t is None or quote is None:
             continue
         if not 0 <= (t-quote).total_seconds() <= 300:
             flag("stale_entry_quote")
-        if not isinstance(row.get("gates"),list) or not row["gates"]:
-            flag("missing_rejection_gates")
-        if not isinstance(f,dict):
-            flag("missing_frozen_features")
-        else:
-            for key in fields:
-                if number(f.get(key)) is None:
-                    missing_fields[key]=missing_fields.get(key,0)+1
         if not isinstance(outcome,dict):
             flag("no_60m_followup_observed")
             continue
@@ -259,6 +273,8 @@ def archive_quality_diagnostics(observations):
     return {
         "rejection_counts":dict(sorted(reasons.items(),key=lambda x:(-x[1],x[0]))),
         "missing_feature_counts":dict(sorted(missing_fields.items(),key=lambda x:(-x[1],x[0]))),
+        "legacy_frozen_age_recoverable":legacy_frozen_age_recoverable,
+        "missing_quote_schema_examples":original_schema_examples,
     }
 
 
