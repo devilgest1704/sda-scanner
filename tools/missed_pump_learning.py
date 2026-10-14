@@ -222,8 +222,11 @@ def archive_quality_diagnostics(observations):
         quote=at(row.get("quote_at"))
         f=row.get("features")
         outcome=(row.get("outcomes") or {}).get("60m")
+        if t is None:
+            flag("invalid_or_missing_candidate_time")
+        if quote is None:
+            flag("invalid_or_missing_quote_time")
         if t is None or quote is None:
-            flag("invalid_candidate_time")
             continue
         if not 0 <= (t-quote).total_seconds() <= 300:
             flag("stale_entry_quote")
