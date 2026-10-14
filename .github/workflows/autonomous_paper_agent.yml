@@ -12,6 +12,8 @@ on:
       - 'tests/test_optimizer_dashboard.py'
       - 'tools/forward_shadow_agent.py'
       - 'tools/forward_shadow_optimizer.py'
+      - 'tools/strategy_evolution_agent.py'
+      - 'tests/test_strategy_evolution_agent.py'
       - 'technical_analysis.py'
       - 'tools/v32_hourly_macd.py'
       - 'tests/test_v32_hourly_macd_paper.py'
@@ -46,6 +48,8 @@ on:
       - 'tests/test_optimizer_dashboard.py'
       - 'tools/forward_shadow_agent.py'
       - 'tools/forward_shadow_optimizer.py'
+      - 'tools/strategy_evolution_agent.py'
+      - 'tests/test_strategy_evolution_agent.py'
       - 'technical_analysis.py'
       - 'tools/v32_hourly_macd.py'
       - 'tests/test_v32_hourly_macd_paper.py'
@@ -148,6 +152,11 @@ jobs:
         run: |
           python -m py_compile v30_pump_hunter.py
           python -m unittest discover -s tests -p 'test_v32_breakout_sampler.py' -v
+
+      - name: Test strategy evolution hypotheses, no-lookahead and immutable Shadow deployment
+        run: |
+          python -m py_compile tools/strategy_evolution_agent.py tools/forward_shadow_agent.py
+          python -m unittest discover -s tests -p 'test_strategy_evolution_agent.py' -v
 
       - name: Test forward-only learning, holdout selection and risk rollback
         run: python -m unittest discover -s tests -p 'test_forward_*.py' -v
