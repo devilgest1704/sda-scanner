@@ -2,13 +2,136 @@
   "schema": 1,
   "paper_only": true,
   "mode": "EVIDENCE_DRIVEN_FORWARD_RESEARCH",
-  "updated_at": null,
+  "updated_at": "2026-10-14T13:44:25.518909+00:00",
   "llm": {
     "status": "NOT_CONFIGURED"
   },
-  "dataset_rows": 0,
-  "diagnosis": {},
-  "experiments": [],
+  "dataset_rows": 328,
+  "diagnosis": {
+    "status": "DIAGNOSED",
+    "train": 196,
+    "validation": 66,
+    "tested_hypothesis_families": 7,
+    "validated_hypotheses": 0,
+    "exploratory_hypotheses": 1,
+    "feature_diagnostics": [
+      {
+        "hypothesis": "avoid_late_hourly_chase",
+        "winning_median": 4.4055,
+        "losing_median": 4.4105,
+        "winner_observations": 38,
+        "loser_observations": 158
+      },
+      {
+        "hypothesis": "avoid_late_fifteen_min_chase",
+        "winning_median": 3.2179,
+        "losing_median": 2.3455,
+        "winner_observations": 38,
+        "loser_observations": 158
+      },
+      {
+        "hypothesis": "require_stronger_buy_pressure",
+        "winning_median": 5.8871,
+        "losing_median": 4.4201,
+        "winner_observations": 38,
+        "loser_observations": 158
+      },
+      {
+        "hypothesis": "require_stronger_quality",
+        "winning_median": 67.6,
+        "losing_median": 66.9,
+        "winner_observations": 38,
+        "loser_observations": 158
+      },
+      {
+        "hypothesis": "require_stronger_impulse",
+        "winning_median": 18.3,
+        "losing_median": 15.8,
+        "winner_observations": 38,
+        "loser_observations": 158
+      },
+      {
+        "hypothesis": "require_confirmed_trade_activity",
+        "winning_median": 15.0,
+        "losing_median": 17.0,
+        "winner_observations": 38,
+        "loser_observations": 158
+      }
+    ],
+    "baseline_train": {
+      "closed": 196,
+      "net_sda": -259.30587,
+      "avg_sda": -1.32299
+    },
+    "baseline_validation": {
+      "closed": 66,
+      "net_sda": -135.87738,
+      "avg_sda": -2.05875
+    },
+    "proposals_qualified": 1,
+    "leading_hypotheses": [
+      {
+        "hypothesis": "require_stronger_impulse",
+        "limit": 17.05,
+        "evidence_tier": "EXPLORATION_ONLY",
+        "validation_avg_improvement_sda": -0.29209
+      }
+    ]
+  },
+  "experiments": [
+    {
+      "id": "research_evo_55b7f0f909",
+      "status": "FORWARD_TEST",
+      "proposed_at": "2026-10-14T13:44:25.518909+00:00",
+      "hypothesis": "require_stronger_impulse",
+      "policy": {
+        "entry_score": 68,
+        "quality": 52,
+        "impulse": 17.05,
+        "buy_ratio": 1.1,
+        "trades": 5
+      },
+      "train": {
+        "closed": 90,
+        "net_sda": -61.49452,
+        "avg_sda": -0.68327,
+        "win_rate_pct": 26.67,
+        "profit_factor": 0.7703,
+        "coverage_pct": 45.92
+      },
+      "validation": {
+        "closed": 40,
+        "net_sda": -94.03348,
+        "avg_sda": -2.35084,
+        "win_rate_pct": 17.5,
+        "profit_factor": 0.2597,
+        "coverage_pct": 60.61
+      },
+      "evidence_tier": "EXPLORATION_ONLY",
+      "rationale": "Winning entry impulse median 18.300; losing median 15.800. Test the min 17.05 guard on NEW future candidates.",
+      "selection_bias_warning": "Historical survivors are selection-biased; improvement is NOT a causal or deployable return.",
+      "forward_valid_closes": 0,
+      "forward_net_sda": 0,
+      "conclusion": "AWAITING_NEW_FORWARD_OBSERVED_QUOTES",
+      "can_promote_paper": false,
+      "can_trade_real": false
+    }
+  ],
   "archive": [],
-  "events": []
+  "events": [
+    {
+      "at": "2026-10-14T13:44:25.518909+00:00",
+      "event": "CREATED_FORWARD_EXPERIMENT",
+      "id": "research_evo_55b7f0f909",
+      "hypothesis": "require_stronger_impulse"
+    }
+  ],
+  "control": {
+    "real_trading": false,
+    "paper_champion_unchanged": true,
+    "source_rewriting": false,
+    "runtime_parity_verified": false,
+    "research_only": true,
+    "open_research_arms": 1
+  }
 }
