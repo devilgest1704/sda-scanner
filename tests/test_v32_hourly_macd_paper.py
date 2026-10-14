@@ -189,7 +189,9 @@ class MacdRealPaperDecisionIntegration(unittest.TestCase):
                   "liquidity_ok": True, "price_flow_ok": True, "ratio": 1.0}),
               patch.object(v30, "cooldown_active", return_value=False),
               patch.object(v30, "load_state", return_value={
-                  "history": {"0xab": {"prev": prev}}})):
+                  "history": {"0xab": {"prev": prev}}}),
+              patch.object(v30, "paper_entry_risk_gate",
+                           return_value={"blocked":False,"status":"ACTIVE"})):
             return v30.decision("0xab", {"technical":{"1h_completed":frame}},
                                 persist=False)
 
