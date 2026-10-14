@@ -655,6 +655,11 @@ def write_scan_funnel(market_file="market_analysis.json"):
         src=Path(market_file)
         data=json.loads(src.read_text(encoding="utf-8")) if src.exists() else {}
         tokens=data.get("tokens",{}) if isinstance(data,dict) else {}
+        try:
+            metadata=json.loads(Path("token_metadata.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            metadata={}
+        if not isinstance(metadata,dict): metadata={}
         total=fresh=champion=shadow=0
         fresh_gate_counts={}
         near_ready=[]
@@ -671,8 +676,27 @@ def write_scan_funnel(market_file="market_analysis.json"):
             technical = an.get("technical") if isinstance(an,dict) else {}
             breakout = (technical or {}).get("breakout_volume_trend") if isinstance(technical,dict) else {}
             breakout = breakout if isinstance(breakout,dict) else {}
+            ident=metadata.get(str(address).lower(),{})
+            symbol=str((ident or {}).get("symbol") or "")[:20] if isinstance(ident,dict) else ""
+            # A count-limited burst is tracked even if the original research
+            # breakout rejects it for 2-4 rather than 5+ observed swaps.
+            # This flag affects candidate sampling ONLY, never PAPER BUY.
+            reasons=breakout.get("rejection_reasons")
+            sparse_candidate=(
+                breakout.get("available") is True
+                and breakout.get("eligible") is False
+                and isinstance(reasons,list) and bool(reasons)
+                and set(reasons).issubset({
+                    "insufficient_recent_trades", "insufficient_buy_transactions"})
+                and 2<=n(breakout.get("recent_15m_swaps"))<=4
+                and n(breakout.get("recent_15m_buys"))>=2
+                and n(breakout.get("recent_15m_volume_sda"))>=500
+                and n(breakout.get("recent_15m_net_flow_sda"))>=350
+                and 0.5<=n(breakout.get("breakout_pct"))<=6
+            )
             candidates.append({
                 "at":scan_at,"address":str(address).lower(),
+                "symbol":symbol,
                 "score":round(n(d.get("pump_score")),2),
                 "quality":round(n(d.get("pump_quality")),2),
                 "impulse":round(n(d.get("pump_change")),2),
@@ -684,7 +708,8 @@ def write_scan_funnel(market_file="market_analysis.json"):
                 "trades_1h":n(d.get("trades_1h")),
                 "buy_ratio":n(d.get("buy_ratio")),
                 "flow_1h":n(d.get("net_1h")),
-                "flow_15m":n(an.get("net_15m") or an.get("net_flow_15m") or an.get("flow_15m")),
+                "flow_15m":n(flow(an,"15m").get("net_flow")),
+                "m4h":n(d.get("m4h")),
                 "volume_1h":n(d.get("volume_1h")),
                 "m15":n(d.get("m15")),
                 "m1h":n(d.get("m1h")),
@@ -694,6 +719,7 @@ def write_scan_funnel(market_file="market_analysis.json"):
                 # V32 research-only sampler metadata. BUY rules and V30
                 # numeric score are completely unaffected.
                 "research_breakout_ready":breakout.get("eligible") is True,
+                "research_sparse_volume_candidate":sparse_candidate,
                 "research_breakout_pct":n(breakout.get("breakout_pct")),
                 "research_breakout_volume_multiple":n(breakout.get("volume_multiple")),
             })
@@ -710,7 +736,7 @@ def write_scan_funnel(market_file="market_analysis.json"):
                     fresh_gate_counts[gate]=fresh_gate_counts.get(gate,0)+1
                 near_ready.append({
                     "address":str(address).lower(),
-                    "symbol":str(an.get("symbol") or "")[:20],
+                    "symbol":symbol,
                     "score":round(n(d.get("pump_score")),1),
                     "quality":round(n(d.get("pump_quality")),1),
                     "impulse":round(n(d.get("pump_change")),1),
@@ -740,9 +766,13 @@ def write_scan_funnel(market_file="market_analysis.json"):
             key=lambda row:(abs(n(row.get("research_breakout_pct"))-2.0),
                             -n(row.get("research_breakout_volume_multiple")),
                             -row["score"],row["address"]))[:40]
+        sparse_candidates=sorted(
+            (row for row in candidates if row.get("research_sparse_volume_candidate")),
+            key=lambda row:(-n(row.get("flow_15m")),
+                            -row["score"],row["address"]))[:30]
         selected=[]
         seen=set()
-        for batch in (breakout_candidates,
+        for batch in (breakout_candidates,sparse_candidates,
                       group({"IGNITION","CONFIRMATION","BREAKOUT"},60),
                       group({"WATCH"},35),candidates[:40]):
             for row in batch:
@@ -760,6 +790,13 @@ def write_scan_funnel(market_file="market_analysis.json"):
         if not isinstance(state,dict): state={}
         events=state.get("events",[]) if isinstance(state.get("events"),list) else []
         funnels=state.get("funnels",[]) if isinstance(state.get("funnels"),list) else []
+        # Transparent alert-grade diagnostics, not reconstructed missed fills.
+        # Every row describes what the scanner REALLY observed at scan time.
+        surge_watch=sorted(
+            (row for row in candidates
+             if max(n(row.get("m4h")),n(row.get("m1h")))>=4),
+            key=lambda row:(-max(n(row.get("m4h")),n(row.get("m1h")),
+                                n(row.get("m15"))),row["address"]))[:12]
         funnels.append({
             "at":datetime.now(timezone.utc).isoformat(),
             "tokens":total,"fresh":fresh,
@@ -776,6 +813,11 @@ def write_scan_funnel(market_file="market_analysis.json"):
                 bool(c.get("research_breakout_ready")) for c in candidates),
             "breakout_research_sampled":sum(
                 bool(c.get("research_breakout_ready")) for c in selected),
+            "sparse_volume_research_total":sum(
+                bool(c.get("research_sparse_volume_candidate")) for c in candidates),
+            "sparse_volume_research_sampled":sum(
+                bool(c.get("research_sparse_volume_candidate")) for c in selected),
+            "pump_watch":surge_watch,
             "ready_hook_events":sum(1 for e in events if str(e.get("event")).upper()=="READY"),
             "created_hook_events":sum(1 for e in events if str(e.get("event")).upper()=="CREATED")
         })
