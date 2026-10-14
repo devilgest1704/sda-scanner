@@ -47,7 +47,11 @@ def completed_hourly_macd(history, as_of):
         tx for tx in (history if isinstance(history, list) else [])
         if isinstance(tx, dict) and (when := parse_ts(tx.get("timestamp"))) is not None
         and when.timestamp() < current_start
+        and (price := finite(tx.get("price"))) is not None and price > 0
     ]
+    # A scanner/API is not guaranteed to return rows in chronological order.
+    # Sorting ensures every occupied bucket closes at its LAST observed trade.
+    observed.sort(key=lambda tx: (parse_ts(tx["timestamp"]), str(tx.get("hash") or "")))
     # build_candles groups all valid records into occupied, ordered hourly
     # buckets and handles transaction sorting for high/low/close.
     candles = build_candles(observed, 3600)
