@@ -197,6 +197,68 @@ def summary(rows):
                 if result else 0}
 
 
+
+def archive_quality_diagnostics(observations):
+    """Count where historical observations fail strict learning eligibility.
+
+    This is read-only instrumentation, NOT a reason to relax stale-quote or
+    timestamp safety gates. Keep distinct counts to expose incompatible
+    outcome collection and older schema without synthesizing profit.
+    """
+    reasons={}
+    missing_fields={}
+    fields=("score","quality","snapshot_impulse","m1h","m15","m4h",
+            "trades_1h","buy_ratio","volume_1h","flow_1h","flow_15m")
+    def flag(reason):
+        reasons[reason]=reasons.get(reason,0)+1
+    for row in observations if isinstance(observations,list) else []:
+        if not isinstance(row,dict):
+            flag("invalid_archive_row")
+            continue
+        if row.get("eligible") is True:
+            flag("already_eligible_not_missed")
+            continue
+        t=at(row.get("at"))
+        quote=at(row.get("quote_at"))
+        f=row.get("features")
+        outcome=(row.get("outcomes") or {}).get("60m")
+        if t is None or quote is None:
+            flag("invalid_candidate_time")
+            continue
+        if not 0 <= (t-quote).total_seconds() <= 300:
+            flag("stale_entry_quote")
+        if not isinstance(row.get("gates"),list) or not row["gates"]:
+            flag("missing_rejection_gates")
+        if not isinstance(f,dict):
+            flag("missing_frozen_features")
+        else:
+            for key in fields:
+                if number(f.get(key)) is None:
+                    missing_fields[key]=missing_fields.get(key,0)+1
+        if not isinstance(outcome,dict):
+            flag("no_60m_followup_observed")
+            continue
+        future=at(outcome.get("observed_at"))
+        entry=number(row.get("entry_price_sda"))
+        end_price=number(outcome.get("price_sda"))
+        if future is None or future <= t:
+            flag("invalid_followup_time")
+        else:
+            elapsed=(future-t).total_seconds()/60
+            if elapsed < 60:
+                flag("early_followup_mislabeled")
+            elif elapsed > 75 and elapsed <=120:
+                flag("late_followup_75_to_120_minutes")
+            elif elapsed>120:
+                flag("very_late_followup")
+        if entry is None or entry<=0 or end_price is None or end_price<=0:
+            flag("invalid_price")
+    return {
+        "rejection_counts":dict(sorted(reasons.items(),key=lambda x:(-x[1],x[0]))),
+        "missing_feature_counts":dict(sorted(missing_fields.items(),key=lambda x:(-x[1],x[0]))),
+    }
+
+
 def learn(observations):
     # Surface archive coverage independently of the strict causal training
     # subset. An empty valid sample is not the same as an empty archive.
@@ -233,6 +295,7 @@ def learn(observations):
         "archived_candidate_snapshots":archived,
         "candidate_snapshots_with_60m_quote":with_horizon,
         "excluded_from_causal_learning":max(0,with_horizon-len(all_rows)),
+        "input_quality":archive_quality_diagnostics(archive),
         "missed_pump_examples":len(positives),
         "positive_theoretical_60m_sda_model_not_fills":round(
             sum(r["pnl"] for r in positives),4),
@@ -335,6 +398,7 @@ def main():
         "status":report["status"],"observations":report["sample_count"],
         "archived":report["archived_candidate_snapshots"],
         "with_60m_quote":report["candidate_snapshots_with_60m_quote"],
+        "input_quality":report["input_quality"],
         "observed_60m_positive":report["missed_pump_examples"],
         "proposed_rule":(report["candidate"] or {}).get("hypothesis")}))
 
