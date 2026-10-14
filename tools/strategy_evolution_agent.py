@@ -441,6 +441,10 @@ def main():
             missed_source.get("observations",[]),list):
         raise ValueError("Invalid candidate outcome research archive")
     missed_report=learn(missed_source.get("observations",[]))
+    # Preserve original scanner archive timestamp. The agent's own current
+    # timestamp is NOT proof that market observations are fresh.
+    missed_report["source_candidate_archive_updated_at"]=missed_source.get("updated_at")
+    missed_report["source_candidate_archive_method"]=missed_source.get("method")
     missed_report["updated_at"]=datetime.now(timezone.utc).isoformat()
     report_path=Path("strategy_lab/missed_pump_learning.json")
     report_path.parent.mkdir(parents=True,exist_ok=True)

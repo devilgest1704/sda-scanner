@@ -179,9 +179,18 @@ def report(state, config, real_ledger, now=None):
         missed={}
     if not isinstance(missed,dict):
         missed={}
+    archive_at=when(missed.get("source_candidate_archive_updated_at"))
+    archive_age=((now-archive_at).total_seconds()/60) if archive_at is not None else None
+    quality=missed.get("input_quality") if isinstance(missed.get("input_quality"),dict) else {}
     model["missed_pump_learning"]={
         "status":missed.get("status","WAITING_FOR_CANDIDATE_OUTCOMES"),
         "updated_at":missed.get("updated_at"),
+        "source_candidate_archive_at":missed.get("source_candidate_archive_updated_at"),
+        "source_age_minutes":round(archive_age,1) if archive_age is not None else None,
+        "source_fresh":archive_age is not None and 0<=archive_age<=30,
+        "archived_candidates":missed.get("archived_candidate_snapshots",0),
+        "with_60m_quote":missed.get("candidate_snapshots_with_60m_quote",0),
+        "input_quality":quality,
         "observed_candidates":missed.get("sample_count",0),
         "missed_60m_positive_after_costs":missed.get("missed_pump_examples",0),
         "learned_rule":(missed.get("candidate") or {}).get("hypothesis"),

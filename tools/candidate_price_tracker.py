@@ -15,6 +15,8 @@ SAMPLE_MINUTES=30  # one causal snapshot per token per interval
 MAX_ENTRY_QUOTE_AGE_SEC=300
 MODEL_FRICTION_PER_SIDE=.011
 MODEL_NOTIONAL_SDA=50.0
+FROZEN_FEATURES=("score","quality","snapshot_impulse","m1h","m15",
+                 "m4h","trades_1h","buy_ratio","volume_1h","flow_1h","flow_15m")
 def parse_time(s):
     if not isinstance(s,str):return None
     try:return datetime.fromisoformat(s.replace("Z","+00:00")).astimezone(timezone.utc)
@@ -24,6 +26,24 @@ def positive(v):
         x=float(v)
         return x if math.isfinite(x) and x>0 else None
     except (ValueError,TypeError):return None
+def original_snapshot_complete(row):
+    """An immutable entry reference, never reconstructed from later quotes."""
+    if not isinstance(row,dict):
+        return False
+    t=parse_time(row.get("at"))
+    quote=parse_time(row.get("quote_at"))
+    features=row.get("features")
+    if (t is None or quote is None or
+            not 0<=(t-quote).total_seconds()<=MAX_ENTRY_QUOTE_AGE_SEC
+            or positive(row.get("entry_price_sda")) is None
+            or not isinstance(features,dict) or
+            not all(isinstance(features.get(k),(int,float)) and
+                    not isinstance(features.get(k),bool) and
+                    math.isfinite(features[k]) for k in FROZEN_FEATURES)):
+        return False
+    return isinstance(row.get("gates"),list) and bool(row["gates"])
+
+
 def update(state,market,max_observations=5000):
     if not isinstance(state,dict) or not isinstance(market,dict):raise ValueError("state and market must be objects")
     now=parse_time(market.get("updated_at"))
@@ -50,7 +70,11 @@ def update(state,market,max_observations=5000):
         if isinstance(row,dict) and row.get("id"):
             by_key[str(row["id"])]=row
             when=parse_time(row.get("at"))
-            if when is not None and row.get("address"):
+            # Legacy rows lacking ORIGINAL quote time/features cannot
+            # monopolize a sampling slot. Rebuild only when we still have
+            # the exact contemporaneous scanner funnel, never from later
+            # market_analysis (which would be lookahead).
+            if original_snapshot_complete(row) and when is not None and row.get("address"):
                 observed_slots.add((str(row["address"]).lower(),
                                     int(when.timestamp())//(60*SAMPLE_MINUTES)))
     for funnel in state.get("funnels",[]):
@@ -80,7 +104,17 @@ def update(state,market,max_observations=5000):
             if slot in observed_slots:
                 continue
             key=f"{stamp}|{address}"
-            if key not in by_key:
+            prior=by_key.get(key)
+            if prior is not None and original_snapshot_complete(prior):
+                continue
+            # A legacy row with the identical address/decision timestamp
+            # may be repaired from the ORIGINAL immutable funnel only if
+            # its archived entry price agrees with the captured quote.
+            if prior is not None:
+                old_entry=positive(prior.get("entry_price_sda"))
+                if old_entry is None or abs(old_entry/price-1)>1e-9:
+                    continue
+            if prior is None or not original_snapshot_complete(prior):
                 features={k:item.get(k) for k in (
                     "symbol","phase","score","quality","impulse",
                     "delta_impulse","snapshot_impulse","data_age_sec",
@@ -95,7 +129,14 @@ def update(state,market,max_observations=5000):
                     "score":item.get("score"),"quality":item.get("quality"),
                     "impulse":item.get("impulse"),
                     "gates":list(item.get("gates") or []),
-                    "features":features,"outcomes":{}}
+                    "features":features,
+                    # A previously observed later quote remains valid
+                    # ONLY when original entry price/timestamp agree.
+                    "outcomes":(prior.get("outcomes") if isinstance(
+                        prior,dict) and isinstance(prior.get("outcomes"),dict)
+                        else {})}
+                if isinstance(prior,dict) and isinstance(prior.get("observed_peak_240m"),dict):
+                    by_key[key]["observed_peak_240m"]=prior["observed_peak_240m"]
                 observed_slots.add(slot)
     for row in by_key.values():
         start=parse_time(row.get("at"))

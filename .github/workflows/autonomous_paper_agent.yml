@@ -28,6 +28,7 @@ on:
       - 'tools/candidate_price_tracker.py'
       - 'tools/missed_pump_learning.py'
       - 'tests/test_missed_pump_learning.py'
+      - 'tests/test_missed_pump_loop.py'
       - 'tools/v32_trend_runner.py'
       - 'tests/test_v32_trend_runner.py'
       - 'tests/test_v32_breakout_sampler.py'
@@ -71,6 +72,7 @@ on:
       - 'tools/candidate_price_tracker.py'
       - 'tools/missed_pump_learning.py'
       - 'tests/test_missed_pump_learning.py'
+      - 'tests/test_missed_pump_loop.py'
       - 'tools/v32_trend_runner.py'
       - 'tests/test_v32_trend_runner.py'
       - 'tests/test_v32_breakout_sampler.py'
@@ -167,6 +169,9 @@ jobs:
           python -m py_compile tools/candidate_price_tracker.py tools/missed_pump_learning.py tools/strategy_evolution_agent.py tools/forward_shadow_agent.py
           python -m unittest discover -s tests -p 'test_missed_pump_learning.py' -v
 
+      - name: Test complete missed-pump evolution and optimizer reporting pipeline
+        run: python -m unittest discover -s tests -p 'test_missed_pump_loop.py' -v
+
       - name: Test sparse-swap pump research never opens Champion PAPER trades
         run: |
           python -m py_compile tools/v32_breakout.py tools/forward_shadow_agent.py v30_pump_hunter.py
@@ -190,18 +195,39 @@ jobs:
           python -m py_compile tools/strategy_evolution_agent.py tools/forward_shadow_agent.py
           python -m unittest discover -s tests -p 'test_strategy_evolution_agent.py' -v
 
-      - name: Run V33 evolution diagnosis on actual trade archive (pull request smoke test)
-        if: github.event_name == 'pull_request'
+      - name: Recompute missed-pump outcomes and SHADOW hypotheses every autonomous run
+        # Previously only pull requests ran this producer. On the actual
+        # hourly/manual workflow the optimizer saw a missing report and
+        # misleadingly displayed ZERO observed opportunities.
         env:
           STRATEGY_LLM_API_KEY: ''
         run: |
           python -m tools.strategy_evolution_agent
           python - <<'PY'
           import json
-          x=json.load(open("strategy_lab/evolution_state.json",encoding="utf-8"))
-          assert x["schema"] == 1 and x["control"]["research_only"] is True
-          assert x["control"]["paper_champion_unchanged"] is True
-          print("V33 ACTUAL PAPER DIAGNOSIS:", x["diagnosis"])
+          from pathlib import Path
+          evolution=json.loads(Path("strategy_lab/evolution_state.json").read_text())
+          missed=json.loads(Path("strategy_lab/missed_pump_learning.json").read_text())
+          assert evolution["schema"] == 1
+          assert evolution["control"]["research_only"] is True
+          assert evolution["control"]["paper_champion_unchanged"] is True
+          assert evolution["control"]["real_trading"] is False
+          assert missed["paper_only"] is True
+          assert missed["can_promote_champion"] is False
+          assert missed["sample_count"] <= missed["candidate_snapshots_with_60m_quote"]
+          assert missed["candidate_snapshots_with_60m_quote"] <= missed["archived_candidate_snapshots"]
+          assert evolution["diagnosis"]["missed_pump"]["observed_candidates"] == missed["sample_count"]
+          print("MISSED PUMP LEARNER:", json.dumps({
+              "status":missed["status"],
+              "archive":missed["archived_candidate_snapshots"],
+              "with_later_quote":missed["candidate_snapshots_with_60m_quote"],
+              "causally_valid":missed["sample_count"],
+              "theoretical_positive":missed["missed_pump_examples"],
+              "input_quality":missed["input_quality"],
+              "proposed_rule":(missed.get("candidate") or {}).get("hypothesis"),
+          }))
+          if missed["archived_candidate_snapshots"] and not missed["sample_count"]:
+              print("::warning::Observed candidates exist but none has a valid matured 60m outcome; do not report archive as empty")
           PY
 
       - name: Test forward-only learning, holdout selection and risk rollback
@@ -226,7 +252,12 @@ jobs:
           if x['promotion_applied'] or x['rollback_applied']:
               assert config['source'].startswith('FORWARD_AGENT_')
               assert config['generation']>0
-          print('AUTONOMOUS PAPER EVIDENCE GATE:',x['status'])
+          missed=json.loads(Path('strategy_lab/missed_pump_learning.json').read_text())
+          assert x["missed_pump_learning"]["observed_candidates"] == missed["sample_count"]
+          assert x["missed_pump_learning"]["status"] == missed["status"]
+          assert x["missed_pump_learning"]["paper_buy_rules_modified"] is False
+          print('AUTONOMOUS PAPER EVIDENCE GATE:',x['status'],
+                'MISSED PUMP SAMPLES:',missed["sample_count"])
           PY
 
       - name: Persist research report and only evidence-gated PAPER settings
@@ -237,7 +268,10 @@ jobs:
           set -euo pipefail
           git config user.name 'sda-scanner-bot'
           git config user.email 'scanner@github.local'
-          git add -f strategy_lab/autonomous_agent_report.json v30_agent_config.json
+          # Include the actual generated learner and its immutable SHADOW
+          # registry; otherwise a successful workflow publishes a fake
+          # WAITING_FOR_CANDIDATE_OUTCOMES dashboard forever.
+          git add -f strategy_lab/autonomous_agent_report.json v30_agent_config.json strategy_lab/missed_pump_learning.json strategy_lab/evolution_state.json
           if git diff --staged --quiet; then
             echo 'No new paper research evidence to commit.'
             exit 0
@@ -291,5 +325,7 @@ jobs:
           name: forward-sda-paper-agent
           path: |
             strategy_lab/autonomous_agent_report.json
+            strategy_lab/missed_pump_learning.json
+            strategy_lab/evolution_state.json
             v30_agent_config.json
           retention-days: 30

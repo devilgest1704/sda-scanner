@@ -197,7 +197,97 @@ def summary(rows):
                 if result else 0}
 
 
+
+def archive_quality_diagnostics(observations):
+    """Count where historical observations fail strict learning eligibility.
+
+    This is read-only instrumentation, NOT a reason to relax stale-quote or
+    timestamp safety gates. Keep distinct counts to expose incompatible
+    outcome collection and older schema without synthesizing profit.
+    """
+    reasons={}
+    missing_fields={}
+    legacy_frozen_age_recoverable = 0
+    original_schema_examples = []
+    fields=("score","quality","snapshot_impulse","m1h","m15","m4h",
+            "trades_1h","buy_ratio","volume_1h","flow_1h","flow_15m")
+    def flag(reason):
+        reasons[reason]=reasons.get(reason,0)+1
+    for row in observations if isinstance(observations,list) else []:
+        if not isinstance(row,dict):
+            flag("invalid_archive_row")
+            continue
+        if row.get("eligible") is True:
+            flag("already_eligible_not_missed")
+            continue
+        t=at(row.get("at"))
+        quote=at(row.get("quote_at"))
+        f=row.get("features")
+        outcome=(row.get("outcomes") or {}).get("60m")
+        if t is None:
+            flag("invalid_or_missing_candidate_time")
+        if quote is None:
+            flag("invalid_or_missing_quote_time")
+            # Diagnosis only: a frozen original age may permit recovery
+            # without reading any price recorded after the decision.
+            observed_age = number(f.get("data_age_sec")) if isinstance(f,dict) else None
+            if t is not None and observed_age is not None and 0 <= observed_age <= 300:
+                legacy_frozen_age_recoverable += 1
+            if len(original_schema_examples) < 3:
+                original_schema_examples.append({
+                    "row_keys":sorted(row.keys()),
+                    "feature_keys": sorted(f) if isinstance(f,dict) else [],
+                    "has_60m":isinstance(outcome,dict),
+                    "has_original_age":observed_age is not None,
+                })
+        if isinstance(f,dict):
+            for key in fields:
+                if number(f.get(key)) is None:
+                    missing_fields[key]=missing_fields.get(key,0)+1
+        else:
+            flag("missing_frozen_features")
+        if not isinstance(row.get("gates"),list) or not row["gates"]:
+            flag("missing_rejection_gates")
+        if t is None or quote is None:
+            continue
+        if not 0 <= (t-quote).total_seconds() <= 300:
+            flag("stale_entry_quote")
+        if not isinstance(outcome,dict):
+            flag("no_60m_followup_observed")
+            continue
+        future=at(outcome.get("observed_at"))
+        entry=number(row.get("entry_price_sda"))
+        end_price=number(outcome.get("price_sda"))
+        if future is None or future <= t:
+            flag("invalid_followup_time")
+        else:
+            elapsed=(future-t).total_seconds()/60
+            if elapsed < 60:
+                flag("early_followup_mislabeled")
+            elif elapsed > 75 and elapsed <=120:
+                flag("late_followup_75_to_120_minutes")
+            elif elapsed>120:
+                flag("very_late_followup")
+        if entry is None or entry<=0 or end_price is None or end_price<=0:
+            flag("invalid_price")
+    return {
+        "rejection_counts":dict(sorted(reasons.items(),key=lambda x:(-x[1],x[0]))),
+        "missing_feature_counts":dict(sorted(missing_fields.items(),key=lambda x:(-x[1],x[0]))),
+        "legacy_frozen_age_recoverable":legacy_frozen_age_recoverable,
+        "missing_quote_schema_examples":original_schema_examples,
+    }
+
+
 def learn(observations):
+    # Surface archive coverage independently of the strict causal training
+    # subset. An empty valid sample is not the same as an empty archive.
+    archive = observations if isinstance(observations,list) else []
+    archived = sum(isinstance(row,dict) for row in archive)
+    with_horizon = sum(
+        isinstance((row.get("outcomes") or {}).get("60m"),dict)
+        for row in archive if isinstance(row,dict)
+        and isinstance(row.get("outcomes"),dict)
+    )
     all_rows=normalize(observations)
     # Establish a deterministic chronological cut BEFORE examining profits.
     cut=int(len(all_rows)*.70)
@@ -221,6 +311,10 @@ def learn(observations):
         "mode":"OBSERVED_QUOTE_HYPOTHESIS_NO_EXECUTION_PARITY",
         "paper_only":True,"can_promote_champion":False,
         "sample_count":len(all_rows),
+        "archived_candidate_snapshots":archived,
+        "candidate_snapshots_with_60m_quote":with_horizon,
+        "excluded_from_causal_learning":max(0,with_horizon-len(all_rows)),
+        "input_quality":archive_quality_diagnostics(archive),
         "missed_pump_examples":len(positives),
         "positive_theoretical_60m_sda_model_not_fills":round(
             sum(r["pnl"] for r in positives),4),
@@ -239,6 +333,8 @@ def learn(observations):
     if (len(train)<MIN_TRAIN or len(valid)<MIN_VALIDATION
             or len({r["address"] for r in train})<MIN_UNIQUE_TRAIN
             or len({r["address"] for r in valid})<MIN_UNIQUE_VALIDATION):
+        if archived and not all_rows:
+            base["status"]="NO_VALID_MATURED_OUTCOMES"
         return base
     safe={"entry_lane":"missed_pump","entry_score":60,
           "quality":56,"impulse":8,"buy_ratio":1.5,"trades":6}
@@ -319,6 +415,9 @@ def main():
     temp.replace(output)
     print("MISSED PUMP AI LEARNER:",json.dumps({
         "status":report["status"],"observations":report["sample_count"],
+        "archived":report["archived_candidate_snapshots"],
+        "with_60m_quote":report["candidate_snapshots_with_60m_quote"],
+        "input_quality":report["input_quality"],
         "observed_60m_positive":report["missed_pump_examples"],
         "proposed_rule":(report["candidate"] or {}).get("hypothesis")}))
 
