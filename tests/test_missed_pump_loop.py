@@ -33,6 +33,7 @@ def archived_rows(count=140):
             "eligible": False,
             "gates": ["impulse", "lifecycle"],
             "features": {
+                "phase":"WATCH",
                 "score": 76, "quality": 70, "snapshot_impulse": 12,
                 "m1h": 4, "m15": 2.5, "m4h": 12,
                 "trades_1h": 8, "buy_ratio": 2.2,

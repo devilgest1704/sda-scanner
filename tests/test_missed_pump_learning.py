@@ -162,6 +162,41 @@ class MissedPumpCausalTests(unittest.TestCase):
             **policy,"learned_rules":[
                 {"feature":"__unsafe__","mode":"min","bound":0}]}))
 
+    def test_historical_training_uses_original_lane_and_quote_age(self):
+        policy={
+            **BASELINE,"entry_lane":"missed_pump",
+        }
+        row=research_row(0,good=True)
+        normalized=normalize([row])
+        self.assertEqual(len(normalized),1)
+        frozen=normalized[0]["frozen_snapshot"]
+        self.assertEqual(frozen["phase"],"WATCH")
+        self.assertEqual(frozen["data_age_sec"],60)
+        self.assertEqual(frozen["price_sda"],1.0)
+        self.assertTrue(safe_missed_entry(frozen,policy))
+
+        # Future winnings must never relabel a late breakout as WATCH.
+        breakout=copy.deepcopy(row)
+        breakout["features"]["phase"]="BREAKOUT"
+        observed=normalize([breakout])
+        self.assertEqual(observed[0]["frozen_snapshot"]["phase"],"BREAKOUT")
+        self.assertFalse(safe_missed_entry(observed[0]["frozen_snapshot"],policy))
+
+        # A 220s-old quote is a known original value; the forward arm's
+        # immutable 180s maximum must reject it in historical selection.
+        stale=copy.deepcopy(row)
+        stale["quote_at"]=(START-timedelta(seconds=220)).isoformat()
+        original=normalize([stale])[0]["frozen_snapshot"]
+        self.assertEqual(original["data_age_sec"],220)
+        self.assertFalse(safe_missed_entry(original,policy))
+
+        # Even an unrealistically profitable historical BREAKOUT cohort
+        # cannot fabricate a WATCH-only rule for future paper experiments.
+        breakout_only=dataset()
+        for item in breakout_only:
+            item["features"]["phase"]="BREAKOUT"
+        self.assertEqual(learn(breakout_only)["status"],"NO_PROFITABLE_TRAIN_RULE")
+
     def test_autonomous_enrollment_and_new_forward_virtual_portfolio_only(self):
         rule=learn(dataset())
         at=START+timedelta(days=9)
