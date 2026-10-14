@@ -198,6 +198,15 @@ def summary(rows):
 
 
 def learn(observations):
+    # Surface archive coverage independently of the strict causal training
+    # subset. An empty valid sample is not the same as an empty archive.
+    archive = observations if isinstance(observations,list) else []
+    archived = sum(isinstance(row,dict) for row in archive)
+    with_horizon = sum(
+        isinstance((row.get("outcomes") or {}).get("60m"),dict)
+        for row in archive if isinstance(row,dict)
+        and isinstance(row.get("outcomes"),dict)
+    )
     all_rows=normalize(observations)
     # Establish a deterministic chronological cut BEFORE examining profits.
     cut=int(len(all_rows)*.70)
@@ -221,6 +230,9 @@ def learn(observations):
         "mode":"OBSERVED_QUOTE_HYPOTHESIS_NO_EXECUTION_PARITY",
         "paper_only":True,"can_promote_champion":False,
         "sample_count":len(all_rows),
+        "archived_candidate_snapshots":archived,
+        "candidate_snapshots_with_60m_quote":with_horizon,
+        "excluded_from_causal_learning":max(0,with_horizon-len(all_rows)),
         "missed_pump_examples":len(positives),
         "positive_theoretical_60m_sda_model_not_fills":round(
             sum(r["pnl"] for r in positives),4),
@@ -239,6 +251,8 @@ def learn(observations):
     if (len(train)<MIN_TRAIN or len(valid)<MIN_VALIDATION
             or len({r["address"] for r in train})<MIN_UNIQUE_TRAIN
             or len({r["address"] for r in valid})<MIN_UNIQUE_VALIDATION):
+        if archived and not all_rows:
+            base["status"]="NO_VALID_MATURED_OUTCOMES"
         return base
     safe={"entry_lane":"missed_pump","entry_score":60,
           "quality":56,"impulse":8,"buy_ratio":1.5,"trades":6}
@@ -319,6 +333,8 @@ def main():
     temp.replace(output)
     print("MISSED PUMP AI LEARNER:",json.dumps({
         "status":report["status"],"observations":report["sample_count"],
+        "archived":report["archived_candidate_snapshots"],
+        "with_60m_quote":report["candidate_snapshots_with_60m_quote"],
         "observed_60m_positive":report["missed_pump_examples"],
         "proposed_rule":(report["candidate"] or {}).get("hypothesis")}))
 
