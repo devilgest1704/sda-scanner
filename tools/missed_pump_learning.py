@@ -209,6 +209,14 @@ def archive_quality_diagnostics(observations):
     missing_fields={}
     legacy_frozen_age_recoverable = 0
     original_schema_examples = []
+    stages={
+        "with_original_quote_and_features":0,
+        "with_fresh_entry_quote":0,
+        "with_strict_60_to_75m_exit_quote":0,
+        "with_strict_exit_and_full_features":0,
+    }
+    latest_candidate_at=None
+    latest_matured_at=None
     fields=("score","quality","snapshot_impulse","m1h","m15","m4h",
             "trades_1h","buy_ratio","volume_1h","flow_1h","flow_15m")
     def flag(reason):
@@ -224,6 +232,8 @@ def archive_quality_diagnostics(observations):
         quote=at(row.get("quote_at"))
         f=row.get("features")
         outcome=(row.get("outcomes") or {}).get("60m")
+        if t is not None and (latest_candidate_at is None or t>latest_candidate_at):
+            latest_candidate_at=t
         if t is None:
             flag("invalid_or_missing_candidate_time")
         if quote is None:
@@ -250,8 +260,13 @@ def archive_quality_diagnostics(observations):
             flag("missing_rejection_gates")
         if t is None or quote is None:
             continue
-        if not 0 <= (t-quote).total_seconds() <= 300:
+        if isinstance(f,dict):
+            stages["with_original_quote_and_features"]+=1
+        age=(t-quote).total_seconds()
+        if not 0 <= age <= 300:
             flag("stale_entry_quote")
+        else:
+            stages["with_fresh_entry_quote"]+=1
         if not isinstance(outcome,dict):
             flag("no_60m_followup_observed")
             continue
@@ -262,7 +277,18 @@ def archive_quality_diagnostics(observations):
             flag("invalid_followup_time")
         else:
             elapsed=(future-t).total_seconds()/60
-            if elapsed < 60:
+            if 60 <= elapsed <=75:
+                stages["with_strict_60_to_75m_exit_quote"]+=1
+                if (0<=age<=300 and isinstance(f,dict)
+                        and all(number(f.get(k)) is not None for k in fields)
+                        and isinstance(row.get("gates"),list)
+                        and bool(row["gates"])
+                        and entry is not None and entry>0
+                        and end_price is not None and end_price>0):
+                    stages["with_strict_exit_and_full_features"]+=1
+                    if latest_matured_at is None or t>latest_matured_at:
+                        latest_matured_at=t
+            elif elapsed < 60:
                 flag("early_followup_mislabeled")
             elif elapsed > 75 and elapsed <=120:
                 flag("late_followup_75_to_120_minutes")
@@ -274,6 +300,9 @@ def archive_quality_diagnostics(observations):
         "rejection_counts":dict(sorted(reasons.items(),key=lambda x:(-x[1],x[0]))),
         "missing_feature_counts":dict(sorted(missing_fields.items(),key=lambda x:(-x[1],x[0]))),
         "legacy_frozen_age_recoverable":legacy_frozen_age_recoverable,
+        "maturity_stages":stages,
+        "latest_original_candidate_at":latest_candidate_at.isoformat() if latest_candidate_at else None,
+        "latest_strict_matured_candidate_at":latest_matured_at.isoformat() if latest_matured_at else None,
         "missing_quote_schema_examples":original_schema_examples,
     }
 
