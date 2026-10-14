@@ -148,15 +148,32 @@ def safe_missed_entry(row,policy):
         and v["flow_15m"]>=100
     ):
         return False
-    k=policy.get("learned_feature")
-    if k is None:
-        return True
-    mode=policy.get("learned_mode")
-    bound=number(policy.get("learned_bound"))
-    if bound is None or (k,mode) not in {(x,y) for x,y,_ in PARAMETERS}:
+    # Allow a bounded conjunction of TWO pre-registered, train-selected
+    # signals. An unrecognized or duplicated feature fails closed.
+    rules=policy.get("learned_rules")
+    if rules is None:
+        k=policy.get("learned_feature")
+        if k is None:
+            return True
+        rules=[{"feature":k,"mode":policy.get("learned_mode"),
+                "bound":policy.get("learned_bound")}]
+    if not isinstance(rules,list) or not 1<=len(rules)<=2:
         return False
-    val=v[k]
-    return val>=bound if mode=="min" else val<=bound
+    allowed={(x,y) for x,y,_ in PARAMETERS}
+    seen=set()
+    for rule in rules:
+        if not isinstance(rule,dict):
+            return False
+        key=rule.get("feature")
+        mode=rule.get("mode")
+        bound=number(rule.get("bound"))
+        if (not isinstance(key,str) or (key,mode) not in allowed
+                or key in seen or bound is None):
+            return False
+        seen.add(key)
+        if not (v[key]>=bound if mode=="min" else v[key]<=bound):
+            return False
+    return True
 
 
 def summary(rows):
@@ -233,30 +250,39 @@ def learn(observations):
     baseline_valid=selected(valid,safe)
     base["eligible_unmodified_train"]=summary(baseline_train)
     base["eligible_unmodified_validation"]=summary(baseline_valid)
+    # Search only training observations. Evaluate single and two-signal
+    # conjunctions; both are frozen BEFORE touching chronological validation.
+    # Penalize complexity to avoid a lucky fit to a few historic pumps.
+    from itertools import combinations
+    alternatives=[(key,mode,bound)
+                  for key,mode,thresholds in PARAMETERS for bound in thresholds]
     proposals=[]
-    for key,mode,thresholds in PARAMETERS:
-        for bound in thresholds:
-            policy={**safe,"learned_feature":key,
-                    "learned_mode":mode,"learned_bound":bound}
-            t=selected(train,policy)
-            if (len(t)<MIN_SELECTED_TRAIN
-                    or len({x["address"] for x in t})<MIN_UNIQUE_TRAIN):
-                continue
-            stats=summary(t)
-            # Reject empty or negative expected-value selection and demand
-            # material improvement over an unfiltered safe cohort.
-            if (stats["net_sda_model"]<=0
-                    or stats["profit_factor_model"]<=1.12
-                    or stats["mean_sda_model"]<=
-                        summary(baseline_train)["mean_sda_model"]+.30):
-                continue
-            objective=stats["mean_sda_model"]-.04*stats["max_drawdown_sda_model"]
-            proposals.append((objective,key,mode,bound,policy,stats))
+    baseline_train_stats=summary(baseline_train)
+    hypotheses=[(one,) for one in alternatives]
+    hypotheses.extend((a,b) for a,b in combinations(alternatives,2)
+                      if a[0]!=b[0])
+    for rules in hypotheses:
+        policy={**safe,"learned_rules":[
+            {"feature":key,"mode":mode,"bound":bound}
+            for key,mode,bound in rules]}
+        t=selected(train,policy)
+        if (len(t)<MIN_SELECTED_TRAIN
+                or len({x["address"] for x in t})<MIN_UNIQUE_TRAIN):
+            continue
+        stats=summary(t)
+        if (stats["net_sda_model"]<=0
+                or stats["profit_factor_model"]<=1.12
+                or stats["mean_sda_model"]<=baseline_train_stats["mean_sda_model"]+.30):
+            continue
+        complexity_penalty=.18*(len(rules)-1)
+        objective=(stats["mean_sda_model"]-
+                   .04*stats["max_drawdown_sda_model"]-complexity_penalty)
+        proposals.append((objective,rules,policy,stats))
     if not proposals:
         return {**base,"status":"NO_PROFITABLE_TRAIN_RULE",
-                "tested_rules":sum(len(z) for _,_,z in PARAMETERS)}
-    proposals.sort(key=lambda x:(-x[0],x[1],x[3]))
-    _,key,mode,bound,policy,tstat=proposals[0]
+                "tested_rules":len(hypotheses)}
+    proposals.sort(key=lambda x:(-x[0],len(x[1]),x[1]))
+    _,rules,policy,tstat=proposals[0]
     # HOLDOUT is assessed ONCE for this single train-selected policy.
     v=selected(valid,policy)
     vstat=summary(v)
@@ -266,15 +292,16 @@ def learn(observations):
             and vstat["profit_factor_model"]>1.10
             and vstat["mean_sda_model"]>
                 summary(baseline_valid)["mean_sda_model"]+.15)
-    candidate={"hypothesis":f"missed_60m_net_sda:{key}:{mode}:{bound}",
+    candidate={"hypothesis":"missed_60m_net_sda:"+",".join(
+        f"{key}:{mode}:{bound}" for key,mode,bound in rules),
                "policy":policy,"train":tstat,"validation":vstat,
-               "selection":"single feature train-only search, untouched chronological validation",
+               "selection":"one or two pre-registered features, train-only search, untouched chronological validation",
                "selection_bias_warning":"Outcome is a quoted 60m mark, NOT an executed trade. Verify on future Shadow portfolio.",
                "evidence_tier":"CHRONOLOGICAL_QUOTE_VALIDATION" if passed else "REJECTED_VALIDATION",
                "can_promote_paper":False,"can_trade_real":False}
     return {**base,"status":"VALIDATED_FOR_FORWARD_SHADOW" if passed
             else "TRAIN_RULE_FAILED_VALIDATION",
-            "tested_rules":sum(len(z) for _,_,z in PARAMETERS),
+            "tested_rules":len(hypotheses),
             "candidate":candidate}
 
 
