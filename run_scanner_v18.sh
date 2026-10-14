@@ -31,7 +31,7 @@ if ! [[ "$OPTIMIZER_INTERVAL" =~ ^[0-9]+$ ]] || [ "$OPTIMIZER_INTERVAL" -lt 900 
   exit 1
 fi
 
-STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json strategy_lab/candidate_outcomes.json strategy_lab/forward_shadow_state.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json"
+STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json strategy_lab/candidate_outcomes.json strategy_lab/forward_shadow_state.json strategy_lab/evolution_state.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json"
 
 ensure_json_state() {
   python - <<'PY'
@@ -180,7 +180,39 @@ maybe_dispatch_v31_research() {
   return 0
 }
 
+maybe_run_strategy_evolution() {
+  # Every hour: diagnose actual losing trades, invent bounded hypotheses,
+  # review existing forward outcomes and enroll new PAPER-only Shadow arms.
+  # Run in the scanner workspace so new experiment policy is visible to
+  # forward_shadow_agent WITHOUT restarting the worker.
+  local now last_age
+  now="$(date +%s)"
+  last_age="$(python - <<'PY'
+import json
+from datetime import datetime,timezone
+from pathlib import Path
+p=Path("strategy_lab/evolution_state.json")
+try:
+    x=json.loads(p.read_text(encoding="utf-8"))
+    t=datetime.fromisoformat(str(x["updated_at"]).replace("Z","+00:00"))
+    print(max(0,int((datetime.now(timezone.utc)-t).total_seconds())))
+except (OSError,ValueError,KeyError,TypeError,AttributeError):
+    print(86400)
+PY
+)"
+  if [ "$last_age" -lt 3600 ]; then
+    return 0
+  fi
+  if python -m tools.strategy_evolution_agent; then
+    echo "EVIDENCE AGENT: refreshed hypotheses from paper outcomes."
+  else
+    echo "::warning::EVIDENCE AGENT: hypothesis refresh failed; existing paper/Shadow policies retained."
+  fi
+  return 0
+}
+
 maybe_dispatch_research_and_optimizer() {
+  maybe_run_strategy_evolution
   maybe_dispatch_optimizer
   maybe_dispatch_v31_research
   return 0

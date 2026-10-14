@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tools.v32_breakout import research_signal_from_analysis, breakout_research_eligible
+from tools.strategy_evolution_agent import STATE as EVOLUTION_STATE, load as load_evolution, experiment_policies
+
 from tools.v32_trend_runner import (apply_observed_quote, close_record as runner_close_record,
                                    stale_writeoff as runner_stale_writeoff,
                                    AFTER_TAKE_NO_QUOTE_HOURS)
@@ -251,6 +253,14 @@ def eligible(c, filters, research_watch=False, macd_mode=None):
                 and m15 >= (1.5 if phase == "CONFIRMATION" else 0.8)
                 and trades >= 12):
             return False
+    # Optional, agent-authored hypotheses are bounded by the SAME immutable
+    # V31 quote/activity gates above. They can make entry stricter, not loosen.
+    if "m1h_max" in filters and m1h > filters["m1h_max"]:
+        return False
+    if "m15_max" in filters and m15 > filters["m15_max"]:
+        return False
+    if "flow_1h_min" in filters and flow < filters["flow_1h_min"]:
+        return False
     return (score >= filters["entry_score"] and quality >= filters["quality"]
             and impulse >= filters["impulse"] and ratio >= filters["buy_ratio"]
             and trades >= filters["trades"]
@@ -273,6 +283,17 @@ def step(data, market, funnel):
     if previous and ts <= previous:
         return {"status": "already_processed", "at": funnel.get("at"), "opened": 0, "closed": 0}
     quotes = quote_map(market, market_ts)
+    # The agent may introduce NEW immutable research hypotheses, never V30
+    # production/PAPER config. Retired arms still settle their open positions.
+    evolution = load_evolution(EVOLUTION_STATE, {})
+    dynamic_policies = experiment_policies(evolution)
+    research_policies = {**POLICIES, **dynamic_policies}
+    active_dynamic = {e["id"] for e in evolution.get("experiments",[])
+                      if isinstance(e,dict) and e.get("status")=="FORWARD_TEST"
+                      and e.get("id") in dynamic_policies}
+    for name, filters in dynamic_policies.items():
+        data["strategies"].setdefault(name, {"filters":filters.copy(),
+            "positions":{}, "trades":[], "last_entry":{}})
     candidates = funnel.get("candidate_snapshots", [])
     if not isinstance(candidates, list):
         raise ValueError("Missing candidate snapshots")
@@ -320,7 +341,7 @@ def step(data, market, funnel):
         return (q is not None and price is not None and q[0] <= ts
                 and 0 <= (ts - q[0]).total_seconds() <= 300
                 and abs(q[1]/price - 1) <= 0.015)
-    for name, filters in POLICIES.items():
+    for name, filters in research_policies.items():
         matches = [c for c in ranked if eligible(
             c, filters, name.startswith("research_watch"), name)]
         policy_qualified[name] = len(matches)
@@ -404,7 +425,7 @@ def step(data, market, funnel):
             rejected_gates.items(), key=lambda kv: (-kv[1], kv[0]))[:8]),
     }
     opened = closed = 0
-    for name, filters in POLICIES.items():
+    for name, filters in research_policies.items():
         strategy = data["strategies"][name]
         positions = strategy["positions"]
         trades = strategy["trades"]
@@ -524,7 +545,9 @@ def step(data, market, funnel):
             closed += 1
         # Refractory period prevents a volatile token from producing an
         # artificial stream of repeated simulated entries.
-        if len(positions) < MAX_POSITIONS:
+        if len(positions) < MAX_POSITIONS and (
+                name not in dynamic_policies or name in active_dynamic):
+            # Retired dynamic arms evaluate exits, but cannot open new entries.
             # Rank only this research lane toward the *earlier* breakouts.
             # All existing paper/Shadow policies retain their score ordering.
             choices = (sorted(
@@ -576,6 +599,12 @@ def step(data, market, funnel):
             d = when(value)
             if d and (ts - d).total_seconds() > 86400:
                 del last_entry[key]
+    diagnostic["strategy_evolution"] = {
+        "active_experiments":len(active_dynamic),
+        "tracked_experiments":len(dynamic_policies),
+        "qualified":{name:policy_qualified.get(name,0) for name in dynamic_policies},
+        "research_only":True, "paper_champion_unchanged":True,
+    }
     runner_state = data["strategies"][TREND_RUNNER_RESEARCH_MODE]
     diagnostic["trend_runner_research"] = {
         "entry_reference": "same_entry_filters_as_baseline",
