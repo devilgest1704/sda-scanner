@@ -5,8 +5,9 @@ from unittest.mock import patch
 
 from technical_analysis import analyze_token
 from tools.v32_hourly_macd import (
-    completed_hourly_macd, paper_macd_veto
+    completed_hourly_macd, paper_macd_veto, MACD_METHOD
 )
+from tools.forward_shadow_agent import observed_macd
 import v30_pump_hunter as v30
 
 # Always use a completed, already observed reference hour for integration
@@ -30,6 +31,8 @@ def paper_frame(histogram=-.1, delta=-.02):
     return {
         "available": True,
         "completed_bars": 40, "traded_bars": 40,
+        "method": MACD_METHOD,
+        "lookback_traded_hours": 35, "max_lookback_gap_hours": 1,
         "recent_traded_hours": 12, "max_recent_gap_hours": 1,
         "last_completed_at": AT.replace(minute=0, second=0).isoformat(),
         "quote_age_seconds": 4300,
@@ -62,6 +65,76 @@ class HourlyMacdEvidence(unittest.TestCase):
         src = history()
         self.assertEqual(completed_hourly_macd(src, AT),
                          completed_hourly_macd(list(reversed(src)), AT))
+
+    def test_missing_hour_preserves_clock_spacing_not_synthetic_trades(self):
+        complete = completed_hourly_macd(history(), AT)
+        missing = completed_hourly_macd([
+            x for i,x in enumerate(history()) if i not in {5, 9, 11}
+        ], AT)
+        self.assertTrue(complete["available"])
+        self.assertTrue(missing["available"], missing)
+        self.assertEqual(missing["completed_bars"], 40)
+        self.assertEqual(missing["traded_bars"], 37)
+        self.assertEqual(missing["carried_bars"], 3)
+        self.assertNotEqual(missing["macd"]["histogram_pct"],
+                            complete["macd"]["histogram_pct"])
+
+    def test_old_157h_gap_is_not_mistaken_for_recent_gap(self):
+        # Older trades from an archive should not poison a well-observed
+        # recent 35-hour window, or be compressed as consecutive 1h bars.
+        origin = AT.replace(minute=0, second=0, microsecond=0)
+        ancient = [{
+            "timestamp": (origin - timedelta(hours=180 + i)).isoformat(),
+            "hash": f"0xanc{i}", "price": 1.0+i*.001
+        } for i in range(35)]
+        hours_ago = [33,29,26,22,18,15,12,9,6,4,2,1]
+        recent = [{
+            "timestamp": (origin-timedelta(hours=hours)+timedelta(minutes=12)).isoformat(),
+            "hash": f"0xrecent{hours}", "price": 1.15+(35-hours)*.001,
+        } for hours in hours_ago]
+        r = completed_hourly_macd(ancient+recent, AT)
+        self.assertTrue(r["available"], r)
+        self.assertGreaterEqual(r["completed_bars"], 35)
+        self.assertEqual(r["lookback_traded_hours"], 12)
+        self.assertLessEqual(r["max_recent_gap_hours"], 5)
+        self.assertLessEqual(r["max_lookback_gap_hours"], 12)
+        self.assertGreater(r["carried_bars"], 0)
+        # Research gate must accept the same fixed-clock evidence.
+        observed = observed_macd({"technical":{"1h_completed":r}}, AT, "1h_completed")
+        self.assertIsNotNone(observed)
+
+    def test_sparse_last35_hours_is_not_faked_by_old_history(self):
+        origin=AT.replace(minute=0, second=0, microsecond=0)
+        ancient=[{
+            "timestamp":(origin-timedelta(hours=300+i)).isoformat(),
+            "price":1.0+i*.001, "hash":f"old{i}"
+        } for i in range(35)]
+        recent=[{
+            "timestamp":(origin-timedelta(hours=h)+timedelta(minutes=8)).isoformat(),
+            "price":1.2+h*.0001, "hash":f"recent{h}"
+        } for h in (10,7,4,1)]
+        r=completed_hourly_macd(ancient+recent, AT)
+        self.assertFalse(r["available"])
+        self.assertEqual(r["reason"],"sparse_lookback_trade_hours")
+        self.assertIsNone(r["macd"])
+
+    def test_true_six_hour_gap_within_recent_window_fails_closed(self):
+        src=[x for i,x in enumerate(history()) if i not in set(range(32,38))]
+        r=completed_hourly_macd(src, AT)
+        self.assertFalse(r["available"], r)
+        self.assertEqual(r["reason"],"sparse_recent_trade_hours")
+        self.assertGreater(r["max_recent_gap_hours"], 5)
+
+    def test_shadow_hourly_validator_rejects_legacy_compressed_candles(self):
+        raw = paper_frame()
+        valid = observed_macd({"technical":{"1h_completed":raw}}, AT, "1h_completed")
+        self.assertIsNotNone(valid)
+        legacy = {**raw,"method":"completed_observed_trade_hour_macd_sparse_guard"}
+        self.assertIsNone(observed_macd({"technical":{"1h_completed":legacy}},
+                                        AT, "1h_completed"))
+        sparse = {**raw,"lookback_traded_hours":1}
+        self.assertIsNone(observed_macd({"technical":{"1h_completed":sparse}},
+                                        AT, "1h_completed"))
 
     def test_stale_or_sparse_history_remains_unavailable(self):
         stale = history()[:-4]
