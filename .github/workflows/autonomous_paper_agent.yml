@@ -25,6 +25,9 @@ on:
       - 'tools/v32_breakout.py'
       - 'tests/test_v32_breakout.py'
       - 'tests/test_v32_sparse_volume.py'
+      - 'tools/candidate_price_tracker.py'
+      - 'tools/missed_pump_learning.py'
+      - 'tests/test_missed_pump_learning.py'
       - 'tools/v32_trend_runner.py'
       - 'tests/test_v32_trend_runner.py'
       - 'tests/test_v32_breakout_sampler.py'
@@ -65,6 +68,9 @@ on:
       - 'tools/v32_breakout.py'
       - 'tests/test_v32_breakout.py'
       - 'tests/test_v32_sparse_volume.py'
+      - 'tools/candidate_price_tracker.py'
+      - 'tools/missed_pump_learning.py'
+      - 'tests/test_missed_pump_learning.py'
       - 'tools/v32_trend_runner.py'
       - 'tests/test_v32_trend_runner.py'
       - 'tests/test_v32_breakout_sampler.py'
@@ -155,6 +161,11 @@ jobs:
         run: |
           python -m py_compile tools/v32_breakout.py technical_analysis.py tools/forward_shadow_agent.py
           python -m unittest discover -s tests -p 'test_v32_breakout.py' -v
+
+      - name: Test autonomous missed-pump learning with chronological outcome and risk-safety checks
+        run: |
+          python -m py_compile tools/candidate_price_tracker.py tools/missed_pump_learning.py tools/strategy_evolution_agent.py tools/forward_shadow_agent.py
+          python -m unittest discover -s tests -p 'test_missed_pump_learning.py' -v
 
       - name: Test sparse-swap pump research never opens Champion PAPER trades
         run: |
