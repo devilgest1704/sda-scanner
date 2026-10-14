@@ -9,7 +9,10 @@ from tools.v32_hourly_macd import (
 )
 import v30_pump_hunter as v30
 
-AT = datetime(2026, 10, 14, 6, 22, tzinfo=timezone.utc)
+# Always use a completed, already observed reference hour for integration
+# with v30.decision(), which intentionally evaluates freshness at wall-clock NOW.
+AT = (datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+      - timedelta(minutes=38))
 
 
 def history(prices=None):
