@@ -209,7 +209,7 @@ def strategies_report(auto):
                   f"   Rozdíl po nákladech: {_pnl(difference)}",
                   "   Pouze srovnání uzavřených párových Shadow obchodů."]
     lines += ["", "⚠️ Malý vzorek neprokazuje ziskovost.",
-              "WATCH, MACD, Breakout, Missed Pump ani Trend Runner se bez parity automaticky nenasazují."]
+              "WATCH, MACD, Breakout, Missed Pump ani Trend Runner se automaticky nenasazují bez ověření parity."]
     return "\n".join(lines)
 
 
