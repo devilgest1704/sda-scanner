@@ -163,9 +163,15 @@ def update(state,market,max_observations=5000):
                     "price_return_pct":pct}
         for horizon in HORIZONS:
             label=str(horizon)+"m"
-            # First observed fresh quote at/after horizon, at most one horizon
-            # late; label is an observation, not an exact-horizon price.
-            if label not in outcomes and horizon<=elapsed<=horizon*2:
+            # First observed quote at/after the target horizon; 60m
+            # labels require the stricter 75m learner window. These are
+            # observations, not executable prices or exact-horizon fills.
+            # The 60m AI learner accepts a later observed quote only
+            # within 60-75m. Do not label a 90-120m observation "60m":
+            # that silently creates unusable training rows and can hide
+            # the absence of timely scanner checkpoints.
+            max_elapsed=75 if horizon==60 else horizon*2
+            if label not in outcomes and horizon<=elapsed<=max_elapsed:
                 outcomes[label]={"observed_at":quote_time.isoformat(),
                     "elapsed_minutes":round(elapsed,2),
                     "price_sda":current,
