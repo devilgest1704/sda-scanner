@@ -5,9 +5,10 @@ Never infer missing prices; observations require strictly later timestamps.
 This produces marked-to-market hypothetical price returns, NOT executable P/L.
 """
 import argparse
+from bisect import bisect_left
 import json
 import math
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from pathlib import Path
 
 HORIZONS=(15,60,240,1440)
@@ -44,7 +45,67 @@ def original_snapshot_complete(row):
     return isinstance(row.get("gates"),list) and bool(row["gates"])
 
 
-def update(state,market,max_observations=5000):
+def original_transaction_quotes(history_market, market_at, addresses):
+    """Rebuild quote labels from actually OBSERVED later token swaps.
+
+    This is a research mark, NOT a backtest exit fill: the transaction
+    timestamp can be recovered at a later checkpoint, not traded at that
+    historical price by the scanner. Never reconstruct BUY features, quote
+    times or entry prices from these *future* transactions.
+    Both snapshots MUST come from the exact same market-scanner cycle.
+    """
+    if not isinstance(history_market,dict):
+        return {}
+    source_at=parse_time(history_market.get("updated_at"))
+    if source_at is None or source_at != market_at:
+        return {}
+    tokens=history_market.get("tokens")
+    if not isinstance(tokens,dict):
+        return {}
+    result={}
+    for address in addresses:
+        token=tokens.get(address)
+        if not isinstance(token,dict):
+            continue
+        history=token.get("transactions")
+        if not isinstance(history,list):
+            continue
+        quotes=[]
+        for transaction in history:
+            if not isinstance(transaction,dict):
+                continue
+            timestamp=parse_time(transaction.get("timestamp"))
+            price=positive(transaction.get("price"))
+            volume=transaction.get("volume")
+            # A quote is grounded only in a genuinely recorded swap with
+            # plausible types/volumes. Missing hashes alone do not fake data.
+            if (timestamp is None or timestamp>market_at or price is None
+                    or transaction.get("type") not in ("buy","sell")
+                    or isinstance(volume,bool) or
+                    not isinstance(volume,(float,int)) or
+                    not math.isfinite(volume) or volume<0):
+                continue
+            quotes.append((timestamp,price,str(transaction.get("hash") or "")))
+        if quotes:
+            quotes.sort(key=lambda row:(row[0],row[2],row[1]))
+            result[address]=([row[0] for row in quotes],quotes)
+    return result
+
+
+def observed_horizon_quote(index, start, horizon):
+    """Earliest verified swap in a horizon window; never choose a peak."""
+    if index is None:
+        return None
+    timestamps,quotes=index
+    minimum=start+timedelta(minutes=horizon)
+    deadline=start+timedelta(minutes=(75 if horizon==60 else horizon*2))
+    offset=bisect_left(timestamps,minimum)
+    if offset>=len(quotes) or quotes[offset][0]>deadline:
+        return None
+    return quotes[offset]
+
+
+def update(state,market,max_observations=5000,history_market=None):
     if not isinstance(state,dict) or not isinstance(market,dict):raise ValueError("state and market must be objects")
     now=parse_time(market.get("updated_at"))
     if now is None:
@@ -138,6 +199,14 @@ def update(state,market,max_observations=5000):
                 if isinstance(prior,dict) and isinstance(prior.get("observed_peak_240m"),dict):
                     by_key[key]["observed_peak_240m"]=prior["observed_peak_240m"]
                 observed_slots.add(slot)
+    # Historical price evidence is read only AFTER the original BUY
+    # snapshot was frozen. No historical transaction is used to select
+    # the entry or its decision-time features.
+    need_quotes={str(row.get("address") or "").lower()
+                 for row in by_key.values()
+                 if original_snapshot_complete(row) and
+                 not isinstance((row.get("outcomes") or {}).get("60m"),dict)}
+    history_quotes=original_transaction_quotes(history_market,now,need_quotes)
     for row in by_key.values():
         start=parse_time(row.get("at"))
         entry=positive(row.get("entry_price_sda"))
@@ -153,6 +222,28 @@ def update(state,market,max_observations=5000):
         if quote_time is None or quote_time<=start or quote_time>now:continue
         elapsed=(quote_time-start).total_seconds()/60
         outcomes=row.setdefault("outcomes",{})
+        # Capture a missing 60-minute LABEL from the first genuine on-chain
+        # quote between +60 and +75m. This increases usable research samples
+        # when the token's most recent quote at the next scanner tick has
+        # already moved past the narrow horizon. NOT an executable fill.
+        if original_snapshot_complete(row) and "60m" not in outcomes:
+            point=observed_horizon_quote(
+                history_quotes.get(str(row.get("address") or "").lower()),
+                start,60)
+            if point is not None:
+                stamp,history_price,transaction_hash=point
+                ret=(history_price*(1-MODEL_FRICTION_PER_SIDE))/(
+                    entry*(1+MODEL_FRICTION_PER_SIDE))-1
+                outcomes["60m"]={
+                    "observed_at":stamp.isoformat(),
+                    "elapsed_minutes":round((stamp-start).total_seconds()/60,2),
+                    "price_sda":history_price,
+                    "price_return_pct":round((history_price/entry-1)*100,4),
+                    "net_return_pct_model":round(100*ret,4),
+                    "net_sda_model":round(MODEL_NOTIONAL_SDA*ret,5),
+                    "source":"observed_later_market_transaction_not_executable_fill",
+                    "tx_hash":transaction_hash or None,
+                }
         # Observed maximum is descriptive ONLY; no imaginary peak execution.
         if elapsed<=240:
             peak=row.get("observed_peak_240m")
@@ -194,6 +285,8 @@ def main():
     ap.add_argument("--state",default="v30_execution_state.json")
     ap.add_argument("--market",default="market_analysis.json")
     ap.add_argument("--output",default="strategy_lab/candidate_outcomes.json")
+    ap.add_argument("--history",default="market_data.json",
+                    help="Verified scanner transaction history from same market cycle")
     args=ap.parse_args()
     state=json.loads(Path(args.state).read_text(encoding="utf-8"))
     market=json.loads(Path(args.market).read_text(encoding="utf-8"))
@@ -203,8 +296,23 @@ def main():
         if isinstance(previous,dict):
             state=dict(state)
             state["observations"]=previous.get("observations",[])
-    result=update(state,market)
+    history=None
+    source=Path(args.history)
+    if source.is_file():
+        # Optional evidence: corrupt/misaligned history cannot silently
+        # change entry decisions; skip its labels without blocking stops.
+        try:
+            history=json.loads(source.read_text(encoding="utf-8"))
+        except (OSError,ValueError):
+            history=None
+    result=update(state,market,history_market=history)
     dest.parent.mkdir(parents=True,exist_ok=True)
     dest.write_text(json.dumps(result,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
-    print("Candidate observations:",len(result["observations"]))
+    verified=sum(
+        (row.get("outcomes") or {}).get("60m",{}).get("source")==
+        "observed_later_market_transaction_not_executable_fill"
+        for row in result["observations"]
+        if isinstance(row,dict) and isinstance(row.get("outcomes"),dict))
+    print("Candidate observations:",len(result["observations"]),
+          "transaction-backed 60m labels:",verified)
 if __name__=="__main__":main()
