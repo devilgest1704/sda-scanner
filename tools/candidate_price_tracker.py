@@ -5,7 +5,7 @@ Never infer missing prices; observations require strictly later timestamps.
 This produces marked-to-market hypothetical price returns, NOT executable P/L.
 """
 import argparse
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 import json
 import math
 from datetime import datetime,timezone,timedelta
@@ -106,6 +106,23 @@ def observed_horizon_quote(index, start, horizon):
     if offset>=len(quotes) or quotes[offset][0]>deadline:
         return None
     return quotes[offset]
+
+
+def observed_240m_peak(index, start):
+    """Highest REAL recorded later swap within 4h, descriptive NOT a sell fill.
+
+    Only frozen original entries can be compared. Do not select this peak as
+    the optimizer's hypothetical executable exit: trading at a known future
+    maximum would introduce lookahead bias.
+    """
+    if index is None:
+        return None
+    timestamps, quotes = index
+    lo = bisect_right(timestamps, start)
+    hi = bisect_right(timestamps, start + timedelta(minutes=240))
+    if lo >= hi:
+        return None
+    return max(quotes[lo:hi], key=lambda item: item[1])
 
 
 def update(state,market,max_observations=5000,history_market=None):
@@ -219,8 +236,7 @@ def update(state,market,max_observations=5000,history_market=None):
     # the entry or its decision-time features.
     need_quotes={str(row.get("address") or "").lower()
                  for row in by_key.values()
-                 if original_snapshot_complete(row) and
-                 not isinstance((row.get("outcomes") or {}).get("60m"),dict)}
+                 if original_snapshot_complete(row)}
     history_quotes=original_transaction_quotes(history_market,now,need_quotes)
     for row in by_key.values():
         start=parse_time(row.get("at"))
@@ -228,21 +244,21 @@ def update(state,market,max_observations=5000,history_market=None):
         if start is None or entry is None or now<=start:continue
         outcomes=row.setdefault("outcomes",{})
         # Historical on-chain transaction evidence is independent of the
-        # current last-price field. It remains valid even if compact analysis
-        # temporarily omits or stales that token; no invented market fill.
-        # Capture a missing 60-minute LABEL from the first genuine on-chain
-        # quote between +60 and +75m. This increases usable research samples
-        # when the token's most recent quote at the next scanner tick has
-        # already moved past the narrow horizon. NOT an executable fill.
-        if original_snapshot_complete(row) and "60m" not in outcomes:
-            point=observed_horizon_quote(
-                history_quotes.get(str(row.get("address") or "").lower()),
-                start,60)
-            if point is not None:
+        # current last-price field. Source cycle and swap validity were checked
+        # by original_transaction_quotes; original entry features stay frozen.
+        history=history_quotes.get(str(row.get("address") or "").lower())
+        if original_snapshot_complete(row):
+            for horizon in HORIZONS:
+                label=f"{horizon}m"
+                if label in outcomes:
+                    continue
+                point=observed_horizon_quote(history,start,horizon)
+                if point is None:
+                    continue
                 stamp,history_price,transaction_hash=point
                 ret=(history_price*(1-MODEL_FRICTION_PER_SIDE))/(
                     entry*(1+MODEL_FRICTION_PER_SIDE))-1
-                outcomes["60m"]={
+                outcomes[label]={
                     "observed_at":stamp.isoformat(),
                     "elapsed_minutes":round((stamp-start).total_seconds()/60,2),
                     "price_sda":history_price,
@@ -252,6 +268,22 @@ def update(state,market,max_observations=5000,history_market=None):
                     "source":"observed_later_market_transaction_not_executable_fill",
                     "tx_hash":transaction_hash or None,
                 }
+            # Separately log real observed highs to diagnose *missed pumps*.
+            # This is never a replay fill or a training P/L target.
+            peak_point=observed_240m_peak(history,start)
+            if peak_point is not None:
+                peak_stamp,peak_price,peak_hash=peak_point
+                pct=round((peak_price/entry-1)*100,4)
+                prior=row.get("observed_peak_240m")
+                prior_pct=(prior.get("price_return_pct")
+                           if isinstance(prior,dict) else None)
+                if not isinstance(prior_pct,(int,float)) or pct>prior_pct:
+                    row["observed_peak_240m"]={
+                        "observed_at":peak_stamp.isoformat(),
+                        "price_return_pct":pct,
+                        "source":"genuine_swap_observed_peak_not_executable_fill",
+                        "tx_hash":peak_hash or None,
+                    }
         td=tokens.get(row.get("address"),{})
         if not isinstance(td,dict):continue
         a=td.get("analysis",td)
