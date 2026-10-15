@@ -1,18 +1,18 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-10-15T14:39:14.086434+00:00",
+  "checked_at": "2026-10-15T14:45:03.082974+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-10-15T14:38:45.293171+00:00",
+    "market_at": "2026-10-15T14:44:34.343705+00:00",
     "tokens": 168,
-    "quotes_last_5m": 6,
-    "quotes_last_15m": 29,
-    "quotes_last_60m": 75,
-    "fresh_with_8_trades_1h": 3,
-    "fresh_with_12_trades_1h": 2,
-    "fresh_m15_ge_1_5pct": 1,
-    "fresh_m15_ge_1_5pct_and_8_trades": 1,
-    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 1
+    "quotes_last_5m": 11,
+    "quotes_last_15m": 23,
+    "quotes_last_60m": 72,
+    "fresh_with_8_trades_1h": 6,
+    "fresh_with_12_trades_1h": 5,
+    "fresh_m15_ge_1_5pct": 4,
+    "fresh_m15_ge_1_5pct_and_8_trades": 2,
+    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 2
   },
   "paper_loss_circuit": {
     "paper_only": true,
@@ -32,45 +32,48 @@
   "last_paper_close_at": "2026-10-15T13:21:59.468590+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-10-15T14:39:11.988209+00:00",
+    "at": "2026-10-15T14:45:00.960100+00:00",
     "age_minutes": 0.0,
     "aligned_to_market": true,
     "tokens_scored": 168,
-    "fresh_tokens": 28,
+    "fresh_tokens": 22,
     "champion_ready": 0,
     "shadow_ready": 0,
     "sampled_rows": 40,
     "sampled_phases": {
+      "BREAKOUT": 1,
       "IGNITION": 1,
-      "WATCH": 9,
-      "NO": 30
+      "CONFIRMATION": 1,
+      "WATCH": 6,
+      "NO": 31
     },
     "sampled_rejections": {
-      "lifecycle": 39,
-      "v31_age": 37,
+      "lifecycle": 38,
       "score": 37,
-      "quality": 35,
-      "v31_activity": 31,
-      "liquidity": 30,
+      "v31_age": 33,
+      "quality": 32,
+      "liquidity": 31,
+      "v31_activity": 30,
       "stale_data": 26,
-      "trades": 23,
-      "buy_ratio": 9,
-      "late_spike": 5,
-      "cooldown": 2,
-      "impulse": 1
+      "trades": 24,
+      "buy_ratio": 10,
+      "late_spike": 7,
+      "price_flow": 3,
+      "cooldown": 2
     },
     "fresh_rejections": {
-      "lifecycle": 27,
-      "quality": 25,
-      "score": 25,
-      "v31_age": 22,
-      "liquidity": 21,
-      "v31_activity": 21,
-      "buy_ratio": 20,
-      "trades": 11,
+      "lifecycle": 20,
+      "score": 19,
+      "quality": 17,
+      "liquidity": 15,
+      "v31_activity": 15,
+      "buy_ratio": 14,
+      "v31_age": 12,
+      "trades": 4,
       "cooldown": 3,
-      "late_spike": 3,
-      "impulse": 1
+      "late_spike": 2,
+      "impulse": 1,
+      "price_flow": 1
     },
     "risk_only_rejected_rows": 0,
     "would_buy_if_only_loss_circuit_cleared": false,
@@ -78,81 +81,79 @@
       {
         "address": "0x2ce9e7c168035d61cc3a3655949c147c063eecc4",
         "symbol": "SMAf",
-        "score": 73.7,
-        "quality": 69.2,
-        "impulse": 4.5,
+        "score": 72.5,
+        "quality": 72.5,
+        "impulse": 0.0,
         "phase": "IGNITION",
-        "data_age_sec": 136.9,
+        "data_age_sec": 292.9,
         "gates": [
           "impulse"
         ],
-        "reason": "IGNITION / no delta impulse +4.5<8.0; impulse +4.5<8.0"
+        "reason": "IGNITION / no delta impulse +0.0<8.0; impulse +0.0<8.0"
       },
       {
-        "address": "0x4ae77f557c5aaca450eec79b929b5cd06a8b8e6d",
-        "symbol": "IDM",
-        "score": 72.0,
-        "quality": 72.0,
-        "impulse": 0.0,
-        "phase": "WATCH",
-        "data_age_sec": 392.9,
+        "address": "0x63ec72e6a6d6b4f8725c76bd279bee162663b75b",
+        "symbol": "SDFL",
+        "score": 88.5,
+        "quality": 68.5,
+        "impulse": 20.0,
+        "phase": "BREAKOUT",
+        "data_age_sec": 117.9,
         "gates": [
-          "v31_age",
-          "lifecycle",
-          "late_spike",
-          "cooldown"
-        ],
-        "reason": "WATCH / cooldown; V31 BUY gate: data age missing or >300s; no eligible entry lane"
-      },
-      {
-        "address": "0x4765561e63914e72168bbd2a7e2ce72f9057ca04",
-        "symbol": "GMAI",
-        "score": 70.4,
-        "quality": 70.4,
-        "impulse": 0.0,
-        "phase": "WATCH",
-        "data_age_sec": 734.0,
-        "gates": [
-          "v31_age",
+          "v31_activity",
           "lifecycle",
           "late_spike",
           "liquidity"
         ],
-        "reason": "WATCH / V31 BUY gate: data age missing or >300s; no eligible entry lane; late entry: M1H>12%"
+        "reason": "BREAKOUT / V31 BUY gate: trades 1h <12 (no early exception); no eligible entry lane; late entry: M1H>12%"
       },
       {
-        "address": "0x940692728873f93b5eceabb373871ddef5910312",
-        "symbol": "SGWA",
-        "score": 19.0,
-        "quality": 19.0,
+        "address": "0x4ae77f557c5aaca450eec79b929b5cd06a8b8e6d",
+        "symbol": "IDM",
+        "score": 70.0,
+        "quality": 70.0,
         "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 522.9,
+        "phase": "WATCH",
+        "data_age_sec": 256.9,
         "gates": [
-          "v31_age",
           "lifecycle",
-          "score",
-          "quality",
-          "buy_ratio"
+          "late_spike",
+          "price_flow",
+          "cooldown"
         ],
-        "reason": "NO / V31 BUY gate: data age missing or >300s; no eligible entry lane; score 19<68"
+        "reason": "WATCH / cooldown; no eligible entry lane; late entry: M1H>12%"
       },
       {
-        "address": "0x0d3ec7134ac8708a891773b35329555c24a3bad6",
-        "symbol": "DBN",
-        "score": 16.5,
-        "quality": 16.5,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 768.9,
+        "address": "0xfadd71e410a550e62ffb72d21ead0eb6f00091ef",
+        "symbol": "IPT",
+        "score": 57.6,
+        "quality": 57.6,
+        "impulse": 13.5,
+        "phase": "CONFIRMATION",
+        "data_age_sec": 287.9,
+        "gates": [
+          "v31_activity",
+          "score",
+          "liquidity",
+          "trades"
+        ],
+        "reason": "CONFIRMATION / V31 BUY gate: trades 1h <12 (no early exception); score 58<74; trades 3<5"
+      },
+      {
+        "address": "0xe5666e48b80b2d81b7f74bc0c7ec318d840af2c1",
+        "symbol": "USDT",
+        "score": 57.3,
+        "quality": 57.1,
+        "impulse": 0.2,
+        "phase": "WATCH",
+        "data_age_sec": 360.9,
         "gates": [
           "v31_age",
+          "v31_activity",
           "lifecycle",
-          "score",
-          "quality",
-          "buy_ratio"
+          "score"
         ],
-        "reason": "NO / V31 BUY gate: data age missing or >300s; no eligible entry lane; score 16<68"
+        "reason": "WATCH / V31 BUY gate: data age missing or >300s; V31 BUY gate: trades 1h <12 (no early exception); no eligible entry lane"
       }
     ]
   },
