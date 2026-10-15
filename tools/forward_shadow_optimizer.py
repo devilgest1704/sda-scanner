@@ -172,6 +172,20 @@ def report(state, config, real_ledger, now=None):
             "limitation": ("Swap turnover is not pool depth; forward quote exits are not "
                            "executable fills. No profit claim or automatic promotion."),
         },
+        "v33_cost_aware_breakout": {
+            "mode": "RESEARCH_ONLY",
+            "policy": "research_v33_cost_aware_breakout",
+            "source": "same-scan V32 observed breakout with stricter V33 filters",
+            "cost_model": "1.5% estimated friction each side (including 0.4% stress), not verified fills",
+            "exit_model": "observed +10% take, -2.5% stop, 4% trailing, max 3h",
+            "break_even_rate_is_not_prediction": True,
+            "paper_champion_modified": False,
+            "pool_liquidity_verified": False,
+            "can_promote_champion": False,
+            "diagnostic": ((state.get("last_diagnostic") or {}).get("v33_cost_breakout_research")
+                           if isinstance(state.get("last_diagnostic"), dict) else None),
+            "limitation": "Unmatched exits and observed swap turnover cannot establish executable profit",
+        },
         "runtime_parity": {
             "verified": RUNTIME_EXECUTION_PARITY_VERIFIED,
             "shadow_exits": "fixed 2.5% stop, +8% take, -3.5% trailing, 4h timeout",
