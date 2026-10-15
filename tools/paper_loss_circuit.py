@@ -6,6 +6,7 @@ claims about strategy improvement are made.
 """
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
+from itertools import groupby
 from pathlib import Path
 import json
 import math
@@ -57,6 +58,7 @@ def evaluate_closed(rows, at):
         "blocked": False, "status": "COLLECTING", "reason": "insufficient_recent_closes",
         "window_closed": 0, "window_wins": 0, "window_pnl_sda": 0.0,
         "last_closed_at": None,
+        "projected_recovery_at_no_new_closes": None,
     }
     if not isinstance(rows, list) or not isinstance(at, datetime) or at.tzinfo is None:
         return {**base, "blocked": True, "status": "INVALID_LEDGER",
@@ -81,6 +83,21 @@ def evaluate_closed(rows, at):
     count = len(recent)
     last = max((stamp for stamp, _ in recent), default=None)
     guard = count >= MIN_CLOSED_TRADES and total <= -LOSS_BUDGET_SDA
+    # Deterministic projection from the ORIGINAL ledger, NOT a relaxation
+    # of the 24h risk budget. A new close can move this time.
+    recovery = None
+    if guard:
+        remaining_count, remaining_pnl = count, total
+        for closed_at, rows_at_time in groupby(sorted(recent), key=lambda x: x[0]):
+            expired = list(rows_at_time)
+            remaining_count -= len(expired)
+            remaining_pnl -= sum(pnl for _, pnl in expired)
+            if remaining_count < MIN_CLOSED_TRADES or remaining_pnl > -LOSS_BUDGET_SDA:
+                # Rows exactly 24 hours old are still included: use the
+                # first instant STRICTLY after their 24h expiry.
+                recovery = (closed_at + timedelta(
+                    hours=WINDOW_HOURS, microseconds=1)).isoformat()
+                break
     return {
         **base,
         "blocked": guard,
@@ -91,6 +108,7 @@ def evaluate_closed(rows, at):
         "window_wins": sum(pnl > 0 for _, pnl in recent),
         "window_pnl_sda": round(total, 4),
         "last_closed_at": last.isoformat() if last else None,
+        "projected_recovery_at_no_new_closes": recovery,
     }
 
 
