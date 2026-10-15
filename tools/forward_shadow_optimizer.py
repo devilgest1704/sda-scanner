@@ -193,6 +193,7 @@ def report(state, config, real_ledger, now=None):
         "input_quality":quality,
         "observed_candidates":missed.get("sample_count",0),
         "missed_60m_positive_after_costs":missed.get("missed_pump_examples",0),
+        "observed_4h_pump_research":missed.get("observed_4h_pump_research",{}),
         "learned_rule":(missed.get("candidate") or {}).get("hypothesis"),
         "research_only":True,
         "paper_buy_rules_modified":False,
