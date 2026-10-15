@@ -22,7 +22,7 @@ def market(m15=2.5, trades=12, net=300, minutes_old=1):
     }}
 
 
-def funnel(gates=None, champion=0, minutes_ago=1):
+def funnel(gates=None, champion=0, minutes_ago=0):
     gates = ["score", "lifecycle"] if gates is None else gates
     return {"funnels": [{
         "at": (NOW-timedelta(minutes=minutes_ago)).isoformat(),
