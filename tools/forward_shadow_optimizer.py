@@ -199,6 +199,37 @@ def report(state, config, real_ledger, now=None):
         "forward_execution_parity_verified":RUNTIME_EXECUTION_PARITY_VERIFIED,
         "reason":"Train/holdout selects a rule; new forward Shadow must prove net SDA; unmatched exits prohibit auto PAPER promotion.",
     }
+    # Scanner checkpoints publish a small auditable NO-BUY diagnosis.
+    # Its timestamp (not this optimizer's run time) is the evidence age.
+    # Never pretend that a missing diagnostic means a healthy BUY pipeline.
+    buy_audit_path = Path("v30_no_buy_diagnostic.json")
+    try:
+        buy_audit = json.loads(buy_audit_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        buy_audit = None
+    if isinstance(buy_audit, dict) and buy_audit.get("mode") == "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC":
+        guard = buy_audit.get("paper_loss_circuit") or {}
+        funnel = buy_audit.get("funnel") or {}
+        checked_at = when(buy_audit.get("checked_at"))
+        source_age = (now - checked_at).total_seconds()/60 if checked_at else None
+        model["scanner_no_buy"] = {
+            "assessment": buy_audit.get("assessment"),
+            "checked_at": buy_audit.get("checked_at"),
+            "audit_fresh": source_age is not None and 0 <= source_age <= 30,
+            "audit_age_minutes": round(source_age, 1) if source_age is not None else None,
+            "risk_blocked": guard.get("blocked"),
+            "loss_last_24h_sda": guard.get("window_pnl_sda"),
+            "loss_window_closed": guard.get("window_closed"),
+            "projected_recovery_at_no_new_closes": guard.get(
+                "projected_recovery_at_no_new_closes"),
+            "risk_only_buy_ready": funnel.get("would_buy_if_only_loss_circuit_cleared"),
+            "fresh_tokens": funnel.get("fresh_tokens"),
+            "champion_ready": funnel.get("champion_ready"),
+            "paper_buy_rules_modified": False,
+        }
+    else:
+        model["scanner_no_buy"] = None
+
     last = when(state.get("updated_at"))
     if last is None or not (0 <= (now-last).total_seconds() <= 1800):
         model["status"] = "WAITING_FOR_FRESH_SCANNER"
