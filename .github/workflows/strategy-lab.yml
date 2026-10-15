@@ -176,7 +176,10 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           # Keep reviewed evidence alongside the durable trade/price archives.
           # These are small, reproducible PAPER research reports, not live settings.
-          git add -f strategy_lab/closed_trades.json strategy_lab/candidate_outcomes.json strategy_lab/research.json strategy_lab/trade_lessons.json strategy_lab/v31_profit_learning.json strategy_lab/paper_reconciliation.json strategy_lab/report.json
+          # Candidate outcomes are written ONLY by the continuous scanner;
+          # the daily Strategy Lab reads that archive but must never push
+          # its own stale copy over newer scanner candidate observations.
+          git add -f strategy_lab/closed_trades.json strategy_lab/research.json strategy_lab/trade_lessons.json strategy_lab/v31_profit_learning.json strategy_lab/paper_reconciliation.json strategy_lab/report.json
           if git diff --cached --quiet; then
             echo 'No research archive changes'
           else

@@ -28,6 +28,7 @@ on:
       - 'tools/candidate_price_tracker.py'
       - 'tools/missed_pump_learning.py'
       - 'tests/test_missed_pump_learning.py'
+      - 'tests/test_state_writer_ownership.py'
       - 'tests/test_missed_pump_loop.py'
       - 'tools/v32_trend_runner.py'
       - 'tests/test_v32_trend_runner.py'
@@ -72,6 +73,7 @@ on:
       - 'tools/candidate_price_tracker.py'
       - 'tools/missed_pump_learning.py'
       - 'tests/test_missed_pump_learning.py'
+      - 'tests/test_state_writer_ownership.py'
       - 'tests/test_missed_pump_loop.py'
       - 'tools/v32_trend_runner.py'
       - 'tests/test_v32_trend_runner.py'
@@ -230,6 +232,9 @@ jobs:
               print("::warning::Observed candidates exist but none has a valid matured 60m outcome; do not report archive as empty")
           PY
 
+      - name: Verify single-writer state checkpoint ownership
+        run: python -m unittest discover -s tests -p 'test_state_writer_ownership.py' -v
+
       - name: Test forward-only learning, holdout selection and risk rollback
         run: python -m unittest discover -s tests -p 'test_forward_*.py' -v
 
@@ -260,7 +265,7 @@ jobs:
                 'MISSED PUMP SAMPLES:',missed["sample_count"])
           PY
 
-      - name: Persist research report and only evidence-gated PAPER settings
+      - name: Persist autonomous report and only evidence-gated PAPER settings
         # Source-change checks are diagnostic only and must not publish stale
         # reports or race an active checkpoint. Scheduled/manual runs own writes.
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -268,10 +273,13 @@ jobs:
           set -euo pipefail
           git config user.name 'sda-scanner-bot'
           git config user.email 'scanner@github.local'
-          # Include the actual generated learner and its immutable SHADOW
-          # registry; otherwise a successful workflow publishes a fake
-          # WAITING_FOR_CANDIDATE_OUTCOMES dashboard forever.
-          git add -f strategy_lab/autonomous_agent_report.json v30_agent_config.json strategy_lab/missed_pump_learning.json strategy_lab/evolution_state.json
+          # Single-writer rule: scanner checkpoint alone owns the durable
+          # candidate, missed-pump, and evolution journals. The autonomous
+          # agent MAY compute these in its checkout for its current report
+          # and publish them as workflow artifacts, but MUST NOT commit them:
+          # concurrent agent commits caused 62 scanner rebase conflicts.
+          # Only this agent owns its report and the evidence-gated PAPER config.
+          git add -f strategy_lab/autonomous_agent_report.json v30_agent_config.json
           if git diff --staged --quiet; then
             echo 'No new paper research evidence to commit.'
             exit 0
