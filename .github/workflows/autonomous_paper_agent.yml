@@ -11,6 +11,8 @@ on:
       - 'telegram_callback_router.py'
       - 'tests/test_optimizer_dashboard.py'
       - 'tools/forward_shadow_agent.py'
+      - 'tools/v33_flow_continuation.py'
+      - 'tests/test_v33_flow_continuation.py'
       - 'tools/forward_shadow_optimizer.py'
       - 'tools/strategy_evolution_agent.py'
       - 'tests/test_strategy_evolution_agent.py'
@@ -60,6 +62,8 @@ on:
       - 'telegram_callback_router.py'
       - 'tests/test_optimizer_dashboard.py'
       - 'tools/forward_shadow_agent.py'
+      - 'tools/v33_flow_continuation.py'
+      - 'tests/test_v33_flow_continuation.py'
       - 'tools/forward_shadow_optimizer.py'
       - 'tools/strategy_evolution_agent.py'
       - 'tests/test_strategy_evolution_agent.py'
@@ -204,6 +208,11 @@ jobs:
         run: |
           python -m py_compile v30_pump_hunter.py
           python -m unittest discover -s tests -p 'test_v32_breakout_sampler.py' -v
+
+      - name: Verify causal V33 15m buyer-flow SHADOW evidence and unchanged Champion
+        run: |
+          python -m py_compile tools/v33_flow_continuation.py tools/forward_shadow_agent.py tools/forward_shadow_optimizer.py
+          python -m unittest discover -s tests -p 'test_v33_flow_continuation.py' -v
 
       - name: Verify V33 agent journal bootstrap preserves scanner startup
         run: python -m unittest discover -s tests -p 'test_v33_bootstrap.py' -v
