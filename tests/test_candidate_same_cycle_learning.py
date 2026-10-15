@@ -112,6 +112,31 @@ class SourceLinkedMissedBuyTest(unittest.TestCase):
         self.assertEqual(row["entry_price_sda"], 1.0)
         self.assertEqual(len(normalize(result["observations"])), 1)
 
+    def test_observed_four_hour_pump_peak_is_not_a_model_exit_fill(self):
+        initial = update({"funnels": [initial_funnel(market_at=stamp(0))]},
+                         market(0))
+        later = market(5 * 3600, price=None)
+        history = {
+            "updated_at": later["updated_at"],
+            "tokens": {ADDRESS: {"transactions": [
+                swap(60 * 60 + 25, 1.03),
+                swap(95 * 60, 2.4),
+                swap(130 * 60, 0.80),
+                swap(250 * 60, 9.0),  # outside the 240m peak window
+            ]}},
+        }
+        result = update({"observations": initial["observations"]},
+                        later, history_market=history)
+        row = result["observations"][0]
+        self.assertEqual(row["outcomes"]["60m"]["price_sda"], 1.03)
+        self.assertEqual(row["observed_peak_240m"]["price_return_pct"], 140.0)
+        self.assertEqual(row["observed_peak_240m"]["tx_hash"],
+                         "real-swap-5700")
+        self.assertIn("not_executable_fill",
+                      row["observed_peak_240m"]["source"])
+        self.assertEqual(row["entry_price_sda"], 1.0)
+        self.assertEqual(len(normalize(result["observations"])), 1)
+
     def test_wrong_history_cycle_never_labels_missing_current_price(self):
         initial = update({"funnels": [initial_funnel(market_at=stamp(0))]},
                          market(0))
