@@ -51,7 +51,9 @@ def ledger(losses=0):
 class NoBuyDiagnosisTests(unittest.TestCase):
     def test_missing_signals_distinguished_from_blocking_circuit(self):
         report = diagnose(market(), funnel(), ledger(8), NOW)
-        self.assertEqual(report["assessment"], "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED")
+        self.assertEqual(report["assessment"], "NO_ELIGIBLE_BUY_SIGNALS_AND_LOSS_COOLDOWN")
+        self.assertFalse(report["funnel"]["would_buy_if_only_loss_circuit_cleared"])
+        self.assertIsNotNone(report["paper_loss_circuit"]["projected_recovery_at_no_new_closes"])
         self.assertTrue(report["paper_loss_circuit"]["blocked"])
         self.assertEqual(report["paper_loss_circuit"]["window_pnl_sda"], -24)
         self.assertEqual(report["funnel"]["risk_only_rejected_rows"], 0)
