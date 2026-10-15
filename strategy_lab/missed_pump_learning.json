@@ -2,15 +2,15 @@
   "mode": "OBSERVED_QUOTE_HYPOTHESIS_NO_EXECUTION_PARITY",
   "paper_only": true,
   "can_promote_champion": false,
-  "sample_count": 3,
+  "sample_count": 13,
   "archived_candidate_snapshots": 5000,
-  "candidate_snapshots_with_60m_quote": 2822,
-  "excluded_from_causal_learning": 2819,
+  "candidate_snapshots_with_60m_quote": 2815,
+  "excluded_from_causal_learning": 2802,
   "input_quality": {
     "rejection_counts": {
-      "invalid_or_missing_quote_time": 4834,
-      "missing_frozen_features": 4834,
-      "no_60m_followup_observed": 88,
+      "invalid_or_missing_quote_time": 4809,
+      "missing_frozen_features": 4809,
+      "no_60m_followup_observed": 100,
       "late_followup_75_to_120_minutes": 61,
       "already_eligible_not_missed": 1
     },
@@ -19,14 +19,32 @@
     },
     "legacy_frozen_age_recoverable": 0,
     "maturity_stages": {
-      "with_original_quote_and_features": 165,
-      "with_fresh_entry_quote": 165,
-      "with_strict_60_to_75m_exit_quote": 16,
-      "with_strict_exit_and_full_features": 3
+      "with_original_quote_and_features": 190,
+      "with_fresh_entry_quote": 190,
+      "with_strict_60_to_75m_exit_quote": 29,
+      "with_strict_exit_and_full_features": 16
     },
-    "latest_original_candidate_at": "2026-10-15T05:37:00.132866+00:00",
-    "latest_strict_matured_candidate_at": "2026-10-14T19:50:23.276767+00:00",
+    "latest_original_candidate_at": "2026-10-15T06:37:30.649815+00:00",
+    "latest_strict_matured_candidate_at": "2026-10-15T05:34:02.771875+00:00",
     "missing_quote_schema_examples": [
+      {
+        "row_keys": [
+          "address",
+          "at",
+          "eligible",
+          "entry_price_sda",
+          "gates",
+          "id",
+          "impulse",
+          "observed_peak_240m",
+          "outcomes",
+          "quality",
+          "score"
+        ],
+        "feature_keys": [],
+        "has_60m": true,
+        "has_original_age": false
+      },
       {
         "row_keys": [
           "address",
@@ -62,56 +80,52 @@
         "feature_keys": [],
         "has_60m": true,
         "has_original_age": false
-      },
-      {
-        "row_keys": [
-          "address",
-          "at",
-          "eligible",
-          "entry_price_sda",
-          "gates",
-          "id",
-          "impulse",
-          "observed_peak_240m",
-          "outcomes",
-          "quality",
-          "score"
-        ],
-        "feature_keys": [],
-        "has_60m": true,
-        "has_original_age": false
       }
     ]
   },
   "missed_pump_examples": 0,
   "positive_theoretical_60m_sda_model_not_fills": 0,
-  "negative_theoretical_60m_sda_model_not_fills": -4.4172,
+  "negative_theoretical_60m_sda_model_not_fills": -20.5359,
   "gates_on_profitable_rejected_candidates": {},
   "gates_on_loss_making_rejected_candidates": {
-    "loss_circuit": 3,
-    "lifecycle": 2,
-    "score": 2,
-    "v31_activity": 2,
-    "cooldown": 1,
-    "quality": 1,
-    "trades": 1
+    "loss_circuit": 12,
+    "score": 10,
+    "v31_activity": 9,
+    "lifecycle": 8,
+    "quality": 8,
+    "liquidity": 6,
+    "trades": 3,
+    "impulse": 2,
+    "cooldown": 1
   },
   "potential_240m_peak_examples": 0,
+  "observed_4h_pump_research": {
+    "source": "actual_observed_swaps_original_frozen_rejected_decisions",
+    "paper_only": true,
+    "executable_peak_fills": false,
+    "distinct_observed_4h_peaks": 7,
+    "observed_peak_ge_10_pct": 0,
+    "observed_peak_ge_25_pct": 0,
+    "observed_peak_ge_50_pct": 0,
+    "blocking_gates_ge_10_pct": {},
+    "examples": [],
+    "limitation": "Observed later swap highs are not executable fills, net SDA or a BUY validation target."
+  },
   "objective": "net SDA at first 60m observed quote after 2.2% roundtrip model cost",
   "limitation": "no fill or intrabar peak assumed; 4h/token de-correlation; new rule requires untouched forward shadow",
   "train": {
-    "samples": 0,
-    "unique_tokens": 0,
-    "net_sda_model": 0,
-    "mean_sda_model": 0,
-    "profit_factor_model": 0,
-    "max_drawdown_sda_model": 0,
-    "win_rate_pct_model": 0
+    "samples": 3,
+    "unique_tokens": 3,
+    "net_sda_model": -4.41721,
+    "mean_sda_model": -1.4724,
+    "profit_factor_model": 0.0,
+    "max_drawdown_sda_model": 4.4172,
+    "win_rate_pct_model": 0.0
   },
-  "validation_sample_count": 1,
+  "validation_sample_count": 4,
   "status": "COLLECTING",
   "candidate": null,
-  "source_candidate_archive_updated_at": "2026-10-15T05:38:33.576606+00:00",
+  "source_candidate_archive_updated_at": "2026-10-15T06:41:59.420755+00:00",
   "source_candidate_archive_method": "paper_observed_quotes_not_executable_backtest",
-  "updated_at": "2026-10-15T05:39:04.671133+00:00"
+  "updated_at": "2026-10-15T06:42:39.249316+00:00"
 }
