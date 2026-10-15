@@ -1,6 +1,6 @@
 {
   "version": "FORWARD-PAPER-AGENT-1",
-  "updated_at": "2026-10-15T04:31:40.657333+00:00",
+  "updated_at": "2026-10-15T05:39:27.154866+00:00",
   "mode": "PAPER_ONLY",
   "objective": "maximize accumulated net SDA subject to observed quote risk",
   "real_trading": false,
@@ -61,7 +61,7 @@
     "paper_exits": "V30 emergency stop, adaptive trailing, early weakness, pump breakdown and stale",
     "warning": "Unmatched exit models cannot validate promotion until independent parity tests pass"
   },
-  "source_last_scan_at": "2026-10-15T04:31:00.650772+00:00",
+  "source_last_scan_at": "2026-10-15T05:38:58.594392+00:00",
   "strategies": {
     "baseline": {
       "all": {
@@ -351,18 +351,18 @@
   "rollback_applied": false,
   "missed_pump_learning": {
     "status": "COLLECTING",
-    "updated_at": "2026-10-15T04:31:39.901823+00:00",
-    "source_candidate_archive_at": "2026-10-15T04:30:34.326357+00:00",
-    "source_age_minutes": 1.1,
+    "updated_at": "2026-10-15T05:39:26.516695+00:00",
+    "source_candidate_archive_at": "2026-10-15T05:38:33.576606+00:00",
+    "source_age_minutes": 0.9,
     "source_fresh": true,
     "archived_candidates": 5000,
-    "with_60m_quote": 2839,
+    "with_60m_quote": 2822,
     "input_quality": {
       "rejection_counts": {
-        "invalid_or_missing_quote_time": 4864,
-        "missing_frozen_features": 4864,
+        "invalid_or_missing_quote_time": 4834,
+        "missing_frozen_features": 4834,
+        "no_60m_followup_observed": 88,
         "late_followup_75_to_120_minutes": 61,
-        "no_60m_followup_observed": 58,
         "already_eligible_not_missed": 1
       },
       "missing_feature_counts": {
@@ -370,12 +370,12 @@
       },
       "legacy_frozen_age_recoverable": 0,
       "maturity_stages": {
-        "with_original_quote_and_features": 135,
-        "with_fresh_entry_quote": 135,
+        "with_original_quote_and_features": 165,
+        "with_fresh_entry_quote": 165,
         "with_strict_60_to_75m_exit_quote": 16,
         "with_strict_exit_and_full_features": 3
       },
-      "latest_original_candidate_at": "2026-10-15T04:26:04.045835+00:00",
+      "latest_original_candidate_at": "2026-10-15T05:37:00.132866+00:00",
       "latest_strict_matured_candidate_at": "2026-10-14T19:50:23.276767+00:00",
       "missing_quote_schema_examples": [
         {
@@ -393,7 +393,7 @@
             "score"
           ],
           "feature_keys": [],
-          "has_60m": true,
+          "has_60m": false,
           "has_original_age": false
         },
         {
@@ -441,6 +441,20 @@
     "paper_buy_rules_modified": false,
     "forward_execution_parity_verified": false,
     "reason": "Train/holdout selects a rule; new forward Shadow must prove net SDA; unmatched exits prohibit auto PAPER promotion."
+  },
+  "scanner_no_buy": {
+    "assessment": "NO_ELIGIBLE_BUY_SIGNALS_AND_LOSS_COOLDOWN",
+    "checked_at": "2026-10-15T05:39:00.269372+00:00",
+    "audit_fresh": true,
+    "audit_age_minutes": 0.4,
+    "risk_blocked": true,
+    "loss_last_24h_sda": -38.1904,
+    "loss_window_closed": 14,
+    "projected_recovery_at_no_new_closes": "2026-10-15T11:23:23.529001+00:00",
+    "risk_only_buy_ready": false,
+    "fresh_tokens": 28,
+    "champion_ready": 0,
+    "paper_buy_rules_modified": false
   },
   "incumbent_policy": "baseline",
   "quote_coverage_pct": {
@@ -531,8 +545,8 @@
       "excluded_closed": 5,
       "excluded_by_reason": {
         "legacy_unknown_quote_quality": 1,
-        "holding_time_over_4_5h": 2,
-        "quote_gap_over_30m": 4
+        "quote_gap_over_30m": 4,
+        "holding_time_over_4_5h": 2
       },
       "open_virtual_positions": 0
     },
@@ -541,8 +555,8 @@
       "valid_closed": 6,
       "excluded_closed": 1,
       "excluded_by_reason": {
-        "holding_time_over_4_5h": 1,
-        "quote_gap_over_30m": 1
+        "quote_gap_over_30m": 1,
+        "holding_time_over_4_5h": 1
       },
       "open_virtual_positions": 0
     },
@@ -567,8 +581,8 @@
       "valid_closed": 4,
       "excluded_closed": 1,
       "excluded_by_reason": {
-        "holding_time_over_4_5h": 1,
-        "quote_gap_over_30m": 1
+        "quote_gap_over_30m": 1,
+        "holding_time_over_4_5h": 1
       },
       "open_virtual_positions": 0
     },
