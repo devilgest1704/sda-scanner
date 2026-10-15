@@ -31,6 +31,7 @@ on:
       - 'tests/test_state_writer_ownership.py'
       - 'tests/test_missed_pump_loop.py'
       - 'tests/test_candidate_history_maturity.py'
+      - 'tests/test_candidate_same_cycle_learning.py'
       - 'tools/v32_trend_runner.py'
       - 'tests/test_v32_trend_runner.py'
       - 'tests/test_v32_breakout_sampler.py'
@@ -77,6 +78,7 @@ on:
       - 'tests/test_state_writer_ownership.py'
       - 'tests/test_missed_pump_loop.py'
       - 'tests/test_candidate_history_maturity.py'
+      - 'tests/test_candidate_same_cycle_learning.py'
       - 'tools/v32_trend_runner.py'
       - 'tests/test_v32_trend_runner.py'
       - 'tests/test_v32_breakout_sampler.py'
@@ -176,8 +178,11 @@ jobs:
       - name: Test complete missed-pump evolution and optimizer reporting pipeline
         run: python -m unittest discover -s tests -p 'test_missed_pump_loop.py' -v
 
-      - name: Verify first real after-hour swap labels rejected BUY outcomes, never peaks
-        run: python -m unittest discover -s tests -p 'test_candidate_history_maturity.py' -v
+      - name: Verify source-linked same-cycle capture, observed swaps and missed pump highs
+        run: |
+          python -m unittest discover -s tests -p 'test_candidate_history_maturity.py' -v
+          python -m unittest discover -s tests -p 'test_candidate_same_cycle_learning.py' -v
+          python -m unittest discover -s tests -p 'test_candidate_price_horizon.py' -v
 
       - name: Test sparse-swap pump research never opens Champion PAPER trades
         run: |

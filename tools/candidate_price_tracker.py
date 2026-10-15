@@ -5,7 +5,7 @@ Never infer missing prices; observations require strictly later timestamps.
 This produces marked-to-market hypothetical price returns, NOT executable P/L.
 """
 import argparse
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 import json
 import math
 from datetime import datetime,timezone,timedelta
@@ -14,6 +14,9 @@ from pathlib import Path
 HORIZONS=(15,60,240,1440)
 SAMPLE_MINUTES=30  # one causal snapshot per token per interval
 MAX_ENTRY_QUOTE_AGE_SEC=300
+# The market export precedes V30 funnel scoring within the SAME scanner cycle.
+# Accept a strictly source-linked, bounded delay, never an arbitrary future decision.
+MAX_SAME_CYCLE_DECISION_LAG_SEC=120
 MODEL_FRICTION_PER_SIDE=.011
 MODEL_NOTIONAL_SDA=50.0
 FROZEN_FEATURES=("score","quality","snapshot_impulse","m1h","m15",
@@ -105,6 +108,23 @@ def observed_horizon_quote(index, start, horizon):
     return quotes[offset]
 
 
+def observed_240m_peak(index, start):
+    """Highest REAL recorded later swap within 4h, descriptive NOT a sell fill.
+
+    Only frozen original entries can be compared. Do not select this peak as
+    the optimizer's hypothetical executable exit: trading at a known future
+    maximum would introduce lookahead bias.
+    """
+    if index is None:
+        return None
+    timestamps, quotes = index
+    lo = bisect_right(timestamps, start)
+    hi = bisect_right(timestamps, start + timedelta(minutes=240))
+    if lo >= hi:
+        return None
+    return max(quotes[lo:hi], key=lambda item: item[1])
+
+
 def update(state,market,max_observations=5000,history_market=None):
     if not isinstance(state,dict) or not isinstance(market,dict):raise ValueError("state and market must be objects")
     now=parse_time(market.get("updated_at"))
@@ -141,7 +161,12 @@ def update(state,market,max_observations=5000,history_market=None):
     for funnel in state.get("funnels",[]):
         if not isinstance(funnel,dict):continue
         at=parse_time(funnel.get("at"))
-        if at is None or at>now:continue
+        if at is None:continue
+        same_cycle_late=(at>now and
+                         parse_time(funnel.get("market_at"))==now and
+                         0<(at-now).total_seconds()<=MAX_SAME_CYCLE_DECISION_LAG_SEC)
+        if at>now and not same_cycle_late:
+            continue
         for item in funnel.get("candidate_snapshots",[]):
             if not isinstance(item,dict):continue
             address=str(item.get("address") or "").lower()
@@ -149,7 +174,13 @@ def update(state,market,max_observations=5000,history_market=None):
             if not address or price is None:continue
             stamp=item.get("at") or funnel.get("at")
             t=parse_time(stamp)
-            if t is None or t>now:continue
+            # Snapshot features and price were frozen by this original funnel,
+            # not synthesized from the next market scan. An unlinked future
+            # funnel is never accepted, even if timestamps are close.
+            if (t is None or
+                    (t>now and not (same_cycle_late and t<=at and
+                                    (t-now).total_seconds()<=MAX_SAME_CYCLE_DECISION_LAG_SEC))):
+                continue
             # Freeze a single REAL, fresh scanner decision per token/30min.
             # Previously 120 candidates each minute evicted 4h observations
             # from the 5000-row rolling archive BEFORE they matured.
@@ -157,7 +188,8 @@ def update(state,market,max_observations=5000,history_market=None):
                 continue
             quote_at=parse_time(item.get("quote_at"))
             age=(t-quote_at).total_seconds() if quote_at is not None else None
-            if age is None or not 0<=age<=MAX_ENTRY_QUOTE_AGE_SEC:
+            if (age is None or not 0<=age<=MAX_ENTRY_QUOTE_AGE_SEC
+                    or quote_at>now):
                 continue
             if positive(item.get("volume_1h")) is None:
                 continue
@@ -204,13 +236,54 @@ def update(state,market,max_observations=5000,history_market=None):
     # the entry or its decision-time features.
     need_quotes={str(row.get("address") or "").lower()
                  for row in by_key.values()
-                 if original_snapshot_complete(row) and
-                 not isinstance((row.get("outcomes") or {}).get("60m"),dict)}
+                 if original_snapshot_complete(row)}
     history_quotes=original_transaction_quotes(history_market,now,need_quotes)
     for row in by_key.values():
         start=parse_time(row.get("at"))
         entry=positive(row.get("entry_price_sda"))
         if start is None or entry is None or now<=start:continue
+        outcomes=row.setdefault("outcomes",{})
+        # Historical on-chain transaction evidence is independent of the
+        # current last-price field. Source cycle and swap validity were checked
+        # by original_transaction_quotes; original entry features stay frozen.
+        history=history_quotes.get(str(row.get("address") or "").lower())
+        if original_snapshot_complete(row):
+            for horizon in HORIZONS:
+                label=f"{horizon}m"
+                if label in outcomes:
+                    continue
+                point=observed_horizon_quote(history,start,horizon)
+                if point is None:
+                    continue
+                stamp,history_price,transaction_hash=point
+                ret=(history_price*(1-MODEL_FRICTION_PER_SIDE))/(
+                    entry*(1+MODEL_FRICTION_PER_SIDE))-1
+                outcomes[label]={
+                    "observed_at":stamp.isoformat(),
+                    "elapsed_minutes":round((stamp-start).total_seconds()/60,2),
+                    "price_sda":history_price,
+                    "price_return_pct":round((history_price/entry-1)*100,4),
+                    "net_return_pct_model":round(100*ret,4),
+                    "net_sda_model":round(MODEL_NOTIONAL_SDA*ret,5),
+                    "source":"observed_later_market_transaction_not_executable_fill",
+                    "tx_hash":transaction_hash or None,
+                }
+            # Separately log real observed highs to diagnose *missed pumps*.
+            # This is never a replay fill or a training P/L target.
+            peak_point=observed_240m_peak(history,start)
+            if peak_point is not None:
+                peak_stamp,peak_price,peak_hash=peak_point
+                pct=round((peak_price/entry-1)*100,4)
+                prior=row.get("observed_peak_240m")
+                prior_pct=(prior.get("price_return_pct")
+                           if isinstance(prior,dict) else None)
+                if not isinstance(prior_pct,(int,float)) or pct>prior_pct:
+                    row["observed_peak_240m"]={
+                        "observed_at":peak_stamp.isoformat(),
+                        "price_return_pct":pct,
+                        "source":"genuine_swap_observed_peak_not_executable_fill",
+                        "tx_hash":peak_hash or None,
+                    }
         td=tokens.get(row.get("address"),{})
         if not isinstance(td,dict):continue
         a=td.get("analysis",td)
@@ -221,29 +294,6 @@ def update(state,market,max_observations=5000,history_market=None):
         quote_time=parse_time(a.get("last_transaction") or td.get("last_transaction"))
         if quote_time is None or quote_time<=start or quote_time>now:continue
         elapsed=(quote_time-start).total_seconds()/60
-        outcomes=row.setdefault("outcomes",{})
-        # Capture a missing 60-minute LABEL from the first genuine on-chain
-        # quote between +60 and +75m. This increases usable research samples
-        # when the token's most recent quote at the next scanner tick has
-        # already moved past the narrow horizon. NOT an executable fill.
-        if original_snapshot_complete(row) and "60m" not in outcomes:
-            point=observed_horizon_quote(
-                history_quotes.get(str(row.get("address") or "").lower()),
-                start,60)
-            if point is not None:
-                stamp,history_price,transaction_hash=point
-                ret=(history_price*(1-MODEL_FRICTION_PER_SIDE))/(
-                    entry*(1+MODEL_FRICTION_PER_SIDE))-1
-                outcomes["60m"]={
-                    "observed_at":stamp.isoformat(),
-                    "elapsed_minutes":round((stamp-start).total_seconds()/60,2),
-                    "price_sda":history_price,
-                    "price_return_pct":round((history_price/entry-1)*100,4),
-                    "net_return_pct_model":round(100*ret,4),
-                    "net_sda_model":round(MODEL_NOTIONAL_SDA*ret,5),
-                    "source":"observed_later_market_transaction_not_executable_fill",
-                    "tx_hash":transaction_hash or None,
-                }
         # Observed maximum is descriptive ONLY; no imaginary peak execution.
         if elapsed<=240:
             peak=row.get("observed_peak_240m")

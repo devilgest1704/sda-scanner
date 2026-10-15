@@ -799,6 +799,9 @@ def write_scan_funnel(market_file="market_analysis.json"):
                                 n(row.get("m15"))),row["address"]))[:12]
         funnels.append({
             "at":datetime.now(timezone.utc).isoformat(),
+            # Provenance for same-cycle learner: the contemporaneous market
+            # snapshot predates this decision by seconds, never future data.
+            "market_at":data.get("updated_at"),
             "tokens":total,"fresh":fresh,
             "champion_ready":champion,"shadow_ready":shadow,
             "paper_loss_circuit":paper_entry_risk_gate(),
