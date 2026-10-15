@@ -13,6 +13,8 @@ on:
       - 'tools/forward_shadow_agent.py'
       - 'tools/v33_flow_continuation.py'
       - 'tests/test_v33_flow_continuation.py'
+      - 'tools/v33_cost_aware_breakout.py'
+      - 'tests/test_v33_cost_aware_breakout.py'
       - 'tools/forward_shadow_optimizer.py'
       - 'tools/strategy_evolution_agent.py'
       - 'tests/test_strategy_evolution_agent.py'
@@ -64,6 +66,8 @@ on:
       - 'tools/forward_shadow_agent.py'
       - 'tools/v33_flow_continuation.py'
       - 'tests/test_v33_flow_continuation.py'
+      - 'tools/v33_cost_aware_breakout.py'
+      - 'tests/test_v33_cost_aware_breakout.py'
       - 'tools/forward_shadow_optimizer.py'
       - 'tools/strategy_evolution_agent.py'
       - 'tests/test_strategy_evolution_agent.py'
@@ -213,6 +217,11 @@ jobs:
         run: |
           python -m py_compile tools/v33_flow_continuation.py tools/forward_shadow_agent.py tools/forward_shadow_optimizer.py
           python -m unittest discover -s tests -p 'test_v33_flow_continuation.py' -v
+
+      - name: Test fee-stressed V33 breakout and independent forward quote accounting
+        run: |
+          python -m py_compile tools/v33_cost_aware_breakout.py tools/forward_shadow_agent.py tools/forward_shadow_optimizer.py
+          python -m unittest discover -s tests -p 'test_v33_cost_aware_breakout.py' -v
 
       - name: Verify V33 agent journal bootstrap preserves scanner startup
         run: python -m unittest discover -s tests -p 'test_v33_bootstrap.py' -v
