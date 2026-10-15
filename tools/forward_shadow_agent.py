@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tools.missed_pump_learning import safe_missed_entry
+from tools.v33_flow_continuation import observed_flow_signal
 from tools.v32_breakout import (
     research_signal_from_analysis, breakout_research_eligible,
     sparse_volume_research_eligible,
@@ -69,12 +70,17 @@ POLICIES = {
     # stale quote as a fill. Only independent forward Shadow, no promotion.
     "research_temporal_recovery": {"entry_score": 64, "quality": 60,
                                    "impulse": 4, "buy_ratio": 1.20, "trades": 12},
+    # Research ONLY: confirmed 15m observed buyers with a 1h turnover floor,
+    # before the 4h surge matures. This cannot replace the PAPER Champion.
+    "research_v33_flow_continuation": {"entry_score": 70, "quality": 56,
+                                      "impulse": 8, "buy_ratio": 1.20, "trades": 12},
 }
 BREAKOUT_RESEARCH_MODE = "research_breakout_volume_trend"
 SPARSE_VOLUME_RESEARCH_MODE = "research_sparse_volume_ignition"
 BREAKOUT_EVIDENCE_MODES = frozenset((BREAKOUT_RESEARCH_MODE, SPARSE_VOLUME_RESEARCH_MODE))
 TREND_RUNNER_RESEARCH_MODE = "research_trend_runner"
 TEMPORAL_RESEARCH_MODE = "research_temporal_recovery"
+FLOW_V33_RESEARCH_MODE = "research_v33_flow_continuation"
 MACD_RESEARCH_MODES = frozenset(("research_macd_antipump", "research_macd_confirmation"))
 MACD_BAR_SECONDS = {"5m": 300, "15m": 900, "1h_completed": 3600}
 MIN_MACD_CLOSED_BARS = 35
@@ -349,6 +355,9 @@ def eligible(c, filters, research_watch=False, macd_mode=None):
         return sparse_volume_research_eligible(c, filters)
     if macd_mode == TEMPORAL_RESEARCH_MODE and c.get("research_temporal_recovery_ready") is not True:
         return False
+    if macd_mode == FLOW_V33_RESEARCH_MODE and not (
+            isinstance(c.get("v33_flow"), dict) and c["v33_flow"].get("eligible") is True):
+        return False
     phase = c.get("phase")
     if research_watch:
         if phase != "WATCH":
@@ -444,6 +453,9 @@ def step(data, market, funnel):
             research_signal_from_analysis(info, ts, market_ts)
             if market_ts <= ts else None
         )
+        # Only completed, original swap buckets from this exact scan, and no
+        # historical hindsight or additional Champion execution path.
+        candidate["v33_flow"] = observed_flow_signal(candidate, info, ts, market_ts)
     # Research-only signal timing joins prior and current frozen signals.
     temporal_diagnostic=evaluate_temporal_recovery(data,ranked,ts)
     # Diagnostics distinguish "no signal" from missing telemetry fields.
@@ -509,6 +521,11 @@ def step(data, market, funnel):
             selected_reasons[label] = selected_reasons.get(label, 0) + 1
         macd_market_reasons[frame] = dict(sorted(all_reasons.items()))
         macd_candidate_reasons[frame] = dict(sorted(selected_reasons.items()))
+    flow_records = [c for c in ranked if isinstance(c.get("v33_flow"), dict)]
+    flow_rejections = {}
+    for c in flow_records:
+        for reason in set(c["v33_flow"].get("rejection_reasons") or []):
+            flow_rejections[reason] = flow_rejections.get(reason, 0) + 1
     rejected_gates = {}
     for c in ranked:
         for gate in c.get("gates", []):
@@ -551,6 +568,20 @@ def step(data, market, funnel):
                  "reason": c["v32_breakout"].get("reason")}
                 for c in breakout_records if c["v32_breakout"].get("eligible") is True
             ][:5],
+        },
+        "v33_flow_research": {
+            "mode": "RESEARCH_ONLY", "paper_champion_unchanged": True,
+            "measured": len(flow_records),
+            "has_observed_market_data": sum(c["v33_flow"].get("available") is True
+                                             for c in flow_records),
+            "observed_pressure_ready": sum(c["v33_flow"].get("eligible") is True
+                                           for c in flow_records),
+            "eligible_after_common_shadow_gates": policy_qualified.get(FLOW_V33_RESEARCH_MODE, 0),
+            "fresh_price_quote_ready": policy_quote_ready.get(FLOW_V33_RESEARCH_MODE, 0),
+            "rejections": dict(sorted(flow_rejections.items(),
+                                      key=lambda item: (-item[1], item[0]))[:12]),
+            "pool_liquidity_verified": False,
+            "execution_parity_verified": False,
         },
         "most_common_rejection_gates": dict(sorted(
             rejected_gates.items(), key=lambda kv: (-kv[1], kv[0]))[:8]),
@@ -601,6 +632,8 @@ def step(data, market, funnel):
                             "model": "conservative_risk_writeoff_no_observed_fill",
                             **({"v32_breakout_at_entry": position.get("v32_breakout_at_entry")}
                                if name in BREAKOUT_EVIDENCE_MODES else {}),
+                            **({"v33_flow_at_entry": position.get("v33_flow_at_entry")}
+                               if name == FLOW_V33_RESEARCH_MODE else {}),
                         })
                     del positions[address]
                     closed += 1
@@ -672,6 +705,8 @@ def step(data, market, funnel):
                    if name in MACD_RESEARCH_MODES else {}),
                 **({"v32_breakout_at_entry": position.get("v32_breakout_at_entry")}
                    if name in BREAKOUT_EVIDENCE_MODES else {}),
+                **({"v33_flow_at_entry": position.get("v33_flow_at_entry")}
+                   if name == FLOW_V33_RESEARCH_MODE else {}),
             })
             del positions[address]
             closed += 1
@@ -720,6 +755,8 @@ def step(data, market, funnel):
                        if name in MACD_RESEARCH_MODES else {}),
                     **({"v32_breakout_at_entry": c.get("v32_breakout")}
                        if name in BREAKOUT_EVIDENCE_MODES else {}),
+                    **({"v33_flow_at_entry": c.get("v33_flow")}
+                       if name == FLOW_V33_RESEARCH_MODE else {}),
                 }
                 last_entry[address] = ts.isoformat()
                 opened += 1
@@ -778,7 +815,8 @@ def step(data, market, funnel):
             "policies": len(POLICIES),
             "macd_research_paper_only": True,
             "breakout_research_paper_only": True,
-            "trend_runner_research_paper_only": True}
+            "trend_runner_research_paper_only": True,
+            "v33_flow_research_paper_only": True}
 
 
 def main():
