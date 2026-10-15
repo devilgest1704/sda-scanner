@@ -317,6 +317,84 @@ def archive_quality_diagnostics(observations):
     }
 
 
+
+def observed_peak_diagnostics(observations):
+    """What the scanner actually missed, WITHOUT pretending to sell at peaks.
+
+    A strictly frozen rejected decision is joined only to an independently
+    recorded genuine swap within four hours. Keep the 60m executable-proxy
+    target separate; highs must NEVER authorize a BUY or promotion.
+    Four-hour de-correlation prevents one asset from becoming many successes.
+    """
+    observed=[]
+    for row in observations if isinstance(observations,list) else []:
+        if not isinstance(row,dict) or row.get("eligible") is True:
+            continue
+        decision=at(row.get("at"))
+        quote=at(row.get("quote_at"))
+        price=number(row.get("entry_price_sda"))
+        features=row.get("features")
+        peak=row.get("observed_peak_240m")
+        gates=row.get("gates")
+        if not (decision and quote and price is not None and price>0
+                and isinstance(features,dict)
+                and isinstance(gates,list) and bool(gates)
+                and isinstance(peak,dict)
+                and peak.get("source")=="genuine_swap_observed_peak_not_executable_fill"):
+            continue
+        age=(decision-quote).total_seconds()
+        peak_at=at(peak.get("observed_at"))
+        change=number(peak.get("price_return_pct"))
+        if (not 0<=age<=300 or peak_at is None or change is None
+                or not 0 < (peak_at-decision).total_seconds() <= 240*60):
+            continue
+        # Confirm at least a minimal pre-outcome immutable signal vector.
+        # A 4h peak cannot recover features absent from original research.
+        if any(number(features.get(k)) is None for k in (
+                "score","quality","snapshot_impulse","m1h","m15",
+                "trades_1h","volume_1h","flow_1h","flow_15m")):
+            continue
+        address=str(row.get("address") or "").lower()
+        if not address:
+            continue
+        observed.append({"at":decision,"peak_at":peak_at,
+                         "address":address,
+                         "symbol":str(features.get("symbol") or "")[:20],
+                         "change":change,"gates":sorted(set(map(str,gates)))})
+    observed.sort(key=lambda r:(r["at"],r["address"]))
+    latest={}
+    distinct=[]
+    for row in observed:
+        last=latest.get(row["address"])
+        if last is not None and (row["at"]-last).total_seconds()<OBSERVATION_COOLDOWN_SECONDS:
+            continue
+        latest[row["address"]]=row["at"]
+        distinct.append(row)
+    positive=[row for row in distinct if row["change"]>=10]
+    blockers={}
+    for row in positive:
+        for gate in row["gates"]:
+            blockers[gate]=blockers.get(gate,0)+1
+    strongest=sorted(positive,key=lambda row:(-row["change"],row["at"]))[:5]
+    return {
+        "source":"actual_observed_swaps_original_frozen_rejected_decisions",
+        "paper_only":True,"executable_peak_fills":False,
+        "distinct_observed_4h_peaks":len(distinct),
+        "observed_peak_ge_10_pct":len(positive),
+        "observed_peak_ge_25_pct":sum(row["change"]>=25 for row in distinct),
+        "observed_peak_ge_50_pct":sum(row["change"]>=50 for row in distinct),
+        "blocking_gates_ge_10_pct":dict(sorted(
+            blockers.items(),key=lambda x:(-x[1],x[0]))[:12]),
+        "examples":[{"address":row["address"],"symbol":row["symbol"],
+                     "decision_at":row["at"].isoformat(),
+                     "peak_observed_at":row["peak_at"].isoformat(),
+                     "observed_peak_return_pct":round(row["change"],2),
+                     "gates":row["gates"]}
+                    for row in strongest],
+        "limitation":"Observed later swap highs are not executable fills, net SDA or a BUY validation target.",
+    }
+
+
 def learn(observations):
     # Surface archive coverage independently of the strict causal training
     # subset. An empty valid sample is not the same as an empty archive.
@@ -364,6 +442,7 @@ def learn(observations):
         "potential_240m_peak_examples":sum(
             r["observed_peak_pct"] is not None and r["observed_peak_pct"]>=10
             for r in all_rows),
+        "observed_4h_pump_research":observed_peak_diagnostics(archive),
         "objective":"net SDA at first 60m observed quote after 2.2% roundtrip model cost",
         "limitation":"no fill or intrabar peak assumed; 4h/token de-correlation; new rule requires untouched forward shadow",
         "train":summary(train),"validation_sample_count":len(valid),

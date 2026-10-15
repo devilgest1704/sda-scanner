@@ -155,6 +155,18 @@ def overview_report(auto, config):
             f"Analyzované zamítnuté vstupy: {int(_number(missed.get('observed_candidates')))}",
             f"Pozitivní 60m scénáře po modelových nákladech: {int(_number(missed.get('missed_60m_positive_after_costs')))}",
         ]
+        peaks=missed.get("observed_4h_pump_research")
+        if isinstance(peaks,dict) and peaks.get("source")=="actual_observed_swaps_original_frozen_rejected_decisions":
+            lines.append(
+                f"Ověřené původně zamítnuté 4h vrcholy: {int(_number(peaks.get('distinct_observed_4h_peaks')))} "
+                f"• růst ≥10 %: {int(_number(peaks.get('observed_peak_ge_10_pct')))} "
+                f"• ≥25 %: {int(_number(peaks.get('observed_peak_ge_25_pct')))}")
+            top=peaks.get("blocking_gates_ge_10_pct") or {}
+            if isinstance(top,dict) and top:
+                lines.append("Časté původní BUY blokace: " +
+                             ", ".join(f"{k} ({int(_number(v))})"
+                                       for k,v in list(top.items())[:4]))
+            lines.append("⚠️ Jde o skutečně zaznamenané cenové vrcholy, NIKOLI dosažitelné prodejní ceny.")
         if missed.get("learned_rule"):
             lines.append(f"Nový testovaný BUY filtr: {str(missed['learned_rule'])[:120]}")
         lines.append("Zpětná zjištění → nový forward Shadow test → případné ověření pro PAPER.")
