@@ -11,7 +11,10 @@ import math
 from datetime import datetime,timezone,timedelta
 from pathlib import Path
 
-HORIZONS=(15,60,240,1440)
+HORIZONS=(5,15,60,240,1440)
+# The earliest *observed* later swap, never the maximum price within a window.
+# Narrow early windows avoid accidentally labeling much later moves as 5m/15m.
+HORIZON_DEADLINES={5:10,15:25,60:75,240:480,1440:2880}
 SAMPLE_MINUTES=30  # one causal snapshot per token per interval
 MAX_ENTRY_QUOTE_AGE_SEC=300
 # The market export precedes V30 funnel scoring within the SAME scanner cycle.
@@ -101,7 +104,7 @@ def observed_horizon_quote(index, start, horizon):
         return None
     timestamps,quotes=index
     minimum=start+timedelta(minutes=horizon)
-    deadline=start+timedelta(minutes=(75 if horizon==60 else horizon*2))
+    deadline=start+timedelta(minutes=HORIZON_DEADLINES[horizon])
     offset=bisect_left(timestamps,minimum)
     if offset>=len(quotes) or quotes[offset][0]>deadline:
         return None
@@ -311,7 +314,7 @@ def update(state,market,max_observations=5000,history_market=None):
             # within 60-75m. Do not label a 90-120m observation "60m":
             # that silently creates unusable training rows and can hide
             # the absence of timely scanner checkpoints.
-            max_elapsed=75 if horizon==60 else horizon*2
+            max_elapsed=HORIZON_DEADLINES[horizon]
             if label not in outcomes and horizon<=elapsed<=max_elapsed:
                 outcomes[label]={"observed_at":quote_time.isoformat(),
                     "elapsed_minutes":round(elapsed,2),
