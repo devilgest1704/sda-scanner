@@ -395,6 +395,84 @@ def observed_peak_diagnostics(observations):
     }
 
 
+
+def early_horizon_research(observations):
+    """Causal 5/15/60m missed-BUY outcome cohorts; NOT an executable fill.
+
+    Require a verified original entry and the FIRST actually observed swap in
+    the bounded horizon. Do not use a future peak, stale quote, legacy label
+    without transaction source, or reuse one correlated token repeatedly.
+    Results are diagnostic only; Champion selection remains 60m + forward.
+    """
+    windows={5:(5,10),15:(15,25),60:(60,75)}
+    results={}
+    rows=observations if isinstance(observations,list) else []
+    for horizon,(earliest,latest) in windows.items():
+        candidates=[]
+        for row in rows:
+            if not isinstance(row,dict) or row.get("eligible") is True:
+                continue
+            decision=at(row.get("at"))
+            quote=at(row.get("quote_at"))
+            entry=number(row.get("entry_price_sda"))
+            frozen=row.get("features")
+            gates=row.get("gates")
+            out=(row.get("outcomes") or {}).get(f"{horizon}m")
+            if (decision is None or quote is None or entry is None or entry<=0
+                    or not 0 <= (decision-quote).total_seconds() <=300
+                    or not isinstance(frozen,dict) or not isinstance(gates,list)
+                    or not gates or not isinstance(out,dict)
+                    or out.get("source")!="observed_later_market_transaction_not_executable_fill"):
+                continue
+            # Require a complete ORIGINAL vector, never reconstructed features.
+            fields=("score","quality","snapshot_impulse","m1h","m15","m4h",
+                    "trades_1h","buy_ratio","volume_1h","flow_1h","flow_15m")
+            if frozen.get("phase") not in ("WATCH","IGNITION","CONFIRMATION","BREAKOUT"):
+                continue
+            if any(number(frozen.get(key)) is None for key in fields):
+                continue
+            observed=at(out.get("observed_at"))
+            exit_price=number(out.get("price_sda"))
+            if (observed is None or exit_price is None or exit_price<=0
+                    or not earliest <= (observed-decision).total_seconds()/60 <=latest):
+                continue
+            address=str(row.get("address") or "").lower()
+            if not address:
+                continue
+            candidates.append((decision,address,exit_price,entry,tuple(gates)))
+        candidates.sort(key=lambda item:(item[0],item[1]))
+        last={}
+        distinct=[]
+        for decision,address,exit_price,entry,gates in candidates:
+            prev=last.get(address)
+            if prev is not None and (decision-prev).total_seconds()<OBSERVATION_COOLDOWN_SECONDS:
+                continue
+            last[address]=decision
+            distinct.append((decision,address,net_sda(entry,exit_price),gates))
+        total=sum(pnl for _,_,pnl,_ in distinct)
+        winning=[row for row in distinct if row[2]>0]
+        winning_gates={}
+        for _,_,_,gates in winning:
+            for key in set(map(str,gates)):
+                winning_gates[key]=winning_gates.get(key,0)+1
+        results[f"{horizon}m"]={
+            "strict_first_observed_swap_window_minutes":[earliest,latest],
+            "valid_distinct_cases":len(distinct),
+            "model_positive_after_costs":len(winning),
+            "model_net_sda_total":round(total,4),
+            "positive_gate_counts":dict(sorted(
+                winning_gates.items(),key=lambda v:(-v[1],v[0]))[:10]),
+            "research_only":True,"cannot_promote_champion":True,
+        }
+    return {
+        "source":"original_frozen_features_verified_first_swap_only",
+        "execution_parity":False,
+        "paper_only":True,
+        "horizons":results,
+        "warning":"Historical observed quote outcomes include model friction, NOT actual entry/exit fills; no hindsight peaks.",
+    }
+
+
 def learn(observations):
     # Surface archive coverage independently of the strict causal training
     # subset. An empty valid sample is not the same as an empty archive.
@@ -443,6 +521,7 @@ def learn(observations):
             r["observed_peak_pct"] is not None and r["observed_peak_pct"]>=10
             for r in all_rows),
         "observed_4h_pump_research":observed_peak_diagnostics(archive),
+        "early_horizon_research":early_horizon_research(archive),
         "objective":"net SDA at first 60m observed quote after 2.2% roundtrip model cost",
         "limitation":"no fill or intrabar peak assumed; 4h/token de-correlation; new rule requires untouched forward shadow",
         "train":summary(train),"validation_sample_count":len(valid),

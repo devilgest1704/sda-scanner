@@ -294,6 +294,28 @@ def evolve(state, trades, shadow, now=None, llm_reviewer=limited_llm_review, mis
                             "validation_avg_improvement_sda":x["validation_avg_improvement_sda"]}
                            for x in choices[:3]]}
     states=shadow.get("strategies",{}) if isinstance(shadow,dict) else {}
+    # Maintain diverse causal hypotheses instead of spending both research
+    # slots on nearly identical impulse thresholds. Retire redundant arms
+    # from NEW entries only; their virtual open exits still run to completion
+    # and their outcomes remain in the research archive.
+    active_families=set()
+    diversity_retirements=0
+    for experiment in state["experiments"]:
+        if not isinstance(experiment,dict) or experiment.get("status")!="FORWARD_TEST":
+            continue
+        if not str(experiment.get("id","")).startswith("research_evo_"):
+            continue
+        family=str(experiment.get("hypothesis") or "")
+        if not family:
+            continue
+        if family in active_families:
+            experiment["status"]="RETIRED"
+            experiment["retired_at"]=now.isoformat()
+            experiment["conclusion"]="REDUNDANT_HYPOTHESIS_FAMILY"
+            diversity_retirements+=1
+        else:
+            active_families.add(family)
+    state["diagnosis"]["diversity_retirements"]=diversity_retirements
     for e in state["experiments"]:
         if e.get("status") not in ("FORWARD_TEST","RETIRED"):
             continue
@@ -343,7 +365,15 @@ def evolve(state, trades, shadow, now=None, llm_reviewer=limited_llm_review, mis
         previous.update(json.dumps(e.get("policy"),sort_keys=True)
                         for e in state["archive"]
                         if len(rows)-e.get("dataset_rows_at_retirement",len(rows)) < 35)
-        novel=[x for x in choices if json.dumps(x["policy"],sort_keys=True) not in previous]
+        active_families={
+            str(e.get("hypothesis") or "")
+            for e in state["experiments"] if isinstance(e,dict)
+            and e.get("status")=="FORWARD_TEST"
+            and str(e.get("id","")).startswith("research_evo_")
+        }
+        novel=[x for x in choices
+               if json.dumps(x["policy"],sort_keys=True) not in previous
+               and x.get("hypothesis") not in active_families]
         if novel:
             review=llm_reviewer(novel,diagnosis)
             state["llm"]=review

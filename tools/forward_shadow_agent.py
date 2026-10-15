@@ -64,11 +64,17 @@ POLICIES = {
     # Research-only; never allowed to change the V30 Champion.
     "research_trend_runner": {"entry_score": 68, "quality": 52, "impulse": 8,
                               "buy_ratio": 1.10, "trades": 5},
+    # A DIFFERENT research hypothesis: re-evaluate a previously strong but
+    # stale signal only after a genuinely newer fresh quote. Never reuse the
+    # stale quote as a fill. Only independent forward Shadow, no promotion.
+    "research_temporal_recovery": {"entry_score": 64, "quality": 60,
+                                   "impulse": 4, "buy_ratio": 1.20, "trades": 12},
 }
 BREAKOUT_RESEARCH_MODE = "research_breakout_volume_trend"
 SPARSE_VOLUME_RESEARCH_MODE = "research_sparse_volume_ignition"
 BREAKOUT_EVIDENCE_MODES = frozenset((BREAKOUT_RESEARCH_MODE, SPARSE_VOLUME_RESEARCH_MODE))
 TREND_RUNNER_RESEARCH_MODE = "research_trend_runner"
+TEMPORAL_RESEARCH_MODE = "research_temporal_recovery"
 MACD_RESEARCH_MODES = frozenset(("research_macd_antipump", "research_macd_confirmation"))
 MACD_BAR_SECONDS = {"5m": 300, "15m": 900, "1h_completed": 3600}
 MIN_MACD_CLOSED_BARS = 35
@@ -227,6 +233,108 @@ def macd_research_decision(row, name):
     return slow["histogram_pct"] > 0 and slow["rising"]
 
 
+
+def evaluate_temporal_recovery(state, candidates, at_time):
+    """Join only TWO historical, independently timestamped scanner signals.
+
+    An old score/impulse cannot justify a PAPER or real BUY. Research is allowed
+    only with an entirely NEW quote <=300s old, true current liquidity/activity,
+    and a strong earlier signal blocked by age (300-900s).
+    The historical signal influences Shadow hypothesis membership ONLY and is
+    never treated as a current price, market fill or completed profit.
+    """
+    store=state.setdefault("timing_research",{})
+    last=store.get("last_signals")
+    if not isinstance(last,dict):
+        last={}
+    events=store.get("events")
+    if not isinstance(events,list):
+        events=[]
+    n_seen=0
+    n_recovered=0
+    for candidate in candidates:
+        candidate["research_temporal_recovery_ready"]=False
+        address=str(candidate.get("address") or "").lower()
+        quoted=when(candidate.get("quote_at"))
+        decision=when(candidate.get("at"))
+        current_age=finite(candidate.get("data_age_sec"))
+        current_price=positive(candidate.get("price_sda"))
+        if (not address or quoted is None or decision is None
+                or quoted>at_time or not 0<=(at_time-decision).total_seconds()<=600
+                or current_age is None or not 0<=current_age<=900
+                or abs((decision-quoted).total_seconds()-current_age)>30
+                or current_price is None):
+            continue
+        prior=last.get(address)
+        prior_at=when(prior.get("decision_at")) if isinstance(prior,dict) else None
+        prior_quote=when(prior.get("quote_at")) if isinstance(prior,dict) else None
+        prior_age=finite(prior.get("data_age_sec")) if isinstance(prior,dict) else None
+        prior_score=finite(prior.get("score")) if isinstance(prior,dict) else None
+        prior_impulse=finite(prior.get("impulse")) if isinstance(prior,dict) else None
+        present_score=finite(candidate.get("score"))
+        present_impulse=finite(candidate.get("impulse"))
+        present_quality=finite(candidate.get("quality"))
+        present_m1h=finite(candidate.get("m1h"))
+        present_m15=finite(candidate.get("m15"))
+        present_volume=finite(candidate.get("volume_1h"))
+        present_flow=finite(candidate.get("flow_1h"))
+        present_trades=finite(candidate.get("trades_1h"))
+        present_ratio=finite(candidate.get("buy_ratio"))
+        current_lane=candidate.get("phase")
+        if (prior_at is not None and prior_quote is not None and
+                prior_age is not None and prior_score is not None and
+                prior_impulse is not None and prior.get("phase") in
+                ("IGNITION","CONFIRMATION") and
+                prior_score>=68 and prior_impulse>=8 and 300<prior_age<=900
+                and 0<(decision-prior_at).total_seconds()<=600
+                and quoted>prior_quote and quoted<=decision
+                and current_age<=300 and
+                current_lane in ("IGNITION","CONFIRMATION")
+                and all(v is not None for v in (
+                    present_score,present_impulse,present_quality,present_m1h,
+                    present_m15,present_volume,present_flow,present_trades,present_ratio))
+                and present_score>=64 and present_quality>=60 and
+                present_impulse>=4 and 0<=present_m1h<=12
+                and present_m15>=(1.5 if current_lane=="CONFIRMATION" else .8)
+                and present_volume>=500 and present_flow>=150 and
+                present_trades>=12 and present_ratio>=1.2):
+            n_recovered+=1
+            candidate["research_temporal_recovery_ready"]=True
+            events.append({
+                "at":decision.isoformat(),"address":address,
+                "symbol":str(candidate.get("symbol") or "")[:20],
+                "previous_age_sec":round(prior_age,1),
+                "current_age_sec":round(current_age,1),
+                "previous_score":round(prior_score,1),
+                "current_score":round(present_score,1),
+                "previous_impulse":round(prior_impulse,1),
+                "current_impulse":round(present_impulse,1),
+                "quote_advanced":True,"research_only":True,
+                "current_gates":list(candidate.get("gates") or []),
+            })
+        n_seen+=1
+        last[address]={
+            "decision_at":decision.isoformat(),
+            "quote_at":quoted.isoformat(),
+            "data_age_sec":current_age,
+            "score":present_score,"impulse":present_impulse,
+            "phase":current_lane,
+        }
+    last={address:row for address,row in last.items()
+          if (stamp:=when(row.get("decision_at"))) is not None
+          and 0<=(at_time-stamp).total_seconds()<=600}
+    store["last_signals"]=dict(list(last.items())[-200:])
+    store["events"]=events[-100:]
+    store["total_recovered"]=int(store.get("total_recovered") or 0)+n_recovered
+    store["last_at"]=at_time.isoformat()
+    return {"compared_current_candidates":n_seen,
+            "recovered_this_cycle":n_recovered,
+            "recovered_total":store["total_recovered"],
+            "recent_examples":events[-3:],
+            "paper_only":True,"changes_champion":False,
+            "entry_requires_current_fresh_quote":True}
+
+
 def eligible(c, filters, research_watch=False, macd_mode=None):
     if not isinstance(c, dict):
         return False
@@ -239,6 +347,8 @@ def eligible(c, filters, research_watch=False, macd_mode=None):
         return breakout_research_eligible(c, filters)
     if macd_mode == SPARSE_VOLUME_RESEARCH_MODE:
         return sparse_volume_research_eligible(c, filters)
+    if macd_mode == TEMPORAL_RESEARCH_MODE and c.get("research_temporal_recovery_ready") is not True:
+        return False
     phase = c.get("phase")
     if research_watch:
         if phase != "WATCH":
@@ -334,6 +444,8 @@ def step(data, market, funnel):
             research_signal_from_analysis(info, ts, market_ts)
             if market_ts <= ts else None
         )
+    # Research-only signal timing joins prior and current frozen signals.
+    temporal_diagnostic=evaluate_temporal_recovery(data,ranked,ts)
     # Diagnostics distinguish "no signal" from missing telemetry fields.
     activity_fields = ("trades_1h", "buy_ratio", "flow_1h", "volume_1h", "m15", "m1h")
     feature_complete = sum(all(finite(row.get(k)) is not None for k in activity_fields)
@@ -442,6 +554,7 @@ def step(data, market, funnel):
         },
         "most_common_rejection_gates": dict(sorted(
             rejected_gates.items(), key=lambda kv: (-kv[1], kv[0]))[:8]),
+        "temporal_recovery_research": temporal_diagnostic,
     }
     opened = closed = 0
     for name, filters in research_policies.items():
