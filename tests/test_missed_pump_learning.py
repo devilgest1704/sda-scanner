@@ -72,7 +72,8 @@ class MissedPumpCausalTests(unittest.TestCase):
         self.assertEqual(original["features"]["score"],76)
         self.assertEqual(original["at"],a["at"])
         # No later high from the current hour becomes a fake 60m exit.
-        self.assertEqual(original["outcomes"],{})
+        # The new 5m research observation is allowed, but cannot become a 60m exit.
+        self.assertNotIn("60m",original["outcomes"])
         later=copy.deepcopy(state)
         later["observations"]=result["observations"]
         market["updated_at"]=(START+timedelta(minutes=66)).isoformat()
