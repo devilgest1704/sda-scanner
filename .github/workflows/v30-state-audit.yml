@@ -9,6 +9,7 @@ on:
       - 'tests/test_v32_hourly_macd_paper.py'
       - 'tools/**'
       - 'tests/test_*telemetry.py'
+      - 'tests/test_no_buy_diagnostic.py'
       - '.github/workflows/v30-state-audit.yml'
   schedule:
     - cron: '17,47 * * * *'
@@ -43,6 +44,10 @@ jobs:
           python-version: '3.11'
       - name: Test paper telemetry
         run: python -m unittest discover -s tests -p 'test_*telemetry.py'
+      - name: Test no-BUY root-cause attribution without modifying trading
+        run: python -m unittest discover -s tests -p 'test_no_buy_diagnostic.py' -v
+      - name: Verify real BUY blockers against current PAPER ledger and market
+        run: python -m tools.no_buy_diagnostic --output v30_no_buy_diagnostic.json
       - name: Generate paper trade telemetry report
         id: telemetry
         continue-on-error: true
@@ -101,5 +106,6 @@ jobs:
           path: |
             v30_audit_report.json
             v30_paper_telemetry_report.json
+            v30_no_buy_diagnostic.json
           if-no-files-found: warn
           retention-days: 14
