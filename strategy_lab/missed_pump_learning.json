@@ -2,15 +2,15 @@
   "mode": "OBSERVED_QUOTE_HYPOTHESIS_NO_EXECUTION_PARITY",
   "paper_only": true,
   "can_promote_champion": false,
-  "sample_count": 23,
+  "sample_count": 29,
   "archived_candidate_snapshots": 5000,
   "candidate_snapshots_with_60m_quote": 2805,
-  "excluded_from_causal_learning": 2782,
+  "excluded_from_causal_learning": 2776,
   "input_quality": {
     "rejection_counts": {
-      "invalid_or_missing_quote_time": 4739,
-      "missing_frozen_features": 4739,
-      "no_60m_followup_observed": 140,
+      "invalid_or_missing_quote_time": 4720,
+      "missing_frozen_features": 4720,
+      "no_60m_followup_observed": 147,
       "late_followup_75_to_120_minutes": 61
     },
     "missing_feature_counts": {
@@ -18,32 +18,14 @@
     },
     "legacy_frozen_age_recoverable": 0,
     "maturity_stages": {
-      "with_original_quote_and_features": 261,
-      "with_fresh_entry_quote": 261,
-      "with_strict_60_to_75m_exit_quote": 60,
-      "with_strict_exit_and_full_features": 47
+      "with_original_quote_and_features": 280,
+      "with_fresh_entry_quote": 280,
+      "with_strict_60_to_75m_exit_quote": 72,
+      "with_strict_exit_and_full_features": 59
     },
-    "latest_original_candidate_at": "2026-10-15T09:49:57.975772+00:00",
-    "latest_strict_matured_candidate_at": "2026-10-15T08:35:28.225844+00:00",
+    "latest_original_candidate_at": "2026-10-15T10:54:58.033852+00:00",
+    "latest_strict_matured_candidate_at": "2026-10-15T09:39:59.091893+00:00",
     "missing_quote_schema_examples": [
-      {
-        "row_keys": [
-          "address",
-          "at",
-          "eligible",
-          "entry_price_sda",
-          "gates",
-          "id",
-          "impulse",
-          "observed_peak_240m",
-          "outcomes",
-          "quality",
-          "score"
-        ],
-        "feature_keys": [],
-        "has_60m": true,
-        "has_original_age": false
-      },
       {
         "row_keys": [
           "address",
@@ -71,28 +53,54 @@
           "gates",
           "id",
           "impulse",
+          "outcomes",
+          "quality",
+          "score"
+        ],
+        "feature_keys": [],
+        "has_60m": false,
+        "has_original_age": false
+      },
+      {
+        "row_keys": [
+          "address",
+          "at",
+          "eligible",
+          "entry_price_sda",
+          "gates",
+          "id",
+          "impulse",
           "observed_peak_240m",
           "outcomes",
           "quality",
           "score"
         ],
         "feature_keys": [],
-        "has_60m": true,
+        "has_60m": false,
         "has_original_age": false
       }
     ]
   },
-  "missed_pump_examples": 0,
-  "positive_theoretical_60m_sda_model_not_fills": 0,
-  "negative_theoretical_60m_sda_model_not_fills": -42.12,
-  "gates_on_profitable_rejected_candidates": {},
+  "missed_pump_examples": 1,
+  "positive_theoretical_60m_sda_model_not_fills": 24.2736,
+  "negative_theoretical_60m_sda_model_not_fills": -46.798,
+  "gates_on_profitable_rejected_candidates": {
+    "buy_ratio": 1,
+    "late_spike": 1,
+    "lifecycle": 1,
+    "liquidity": 1,
+    "loss_circuit": 1,
+    "price_flow": 1,
+    "quality": 1,
+    "score": 1
+  },
   "gates_on_loss_making_rejected_candidates": {
-    "loss_circuit": 21,
-    "score": 19,
-    "v31_activity": 18,
-    "lifecycle": 15,
-    "quality": 14,
-    "liquidity": 13,
+    "loss_circuit": 25,
+    "score": 21,
+    "v31_activity": 19,
+    "lifecycle": 18,
+    "quality": 15,
+    "liquidity": 14,
     "trades": 7,
     "impulse": 4,
     "buy_ratio": 2,
@@ -100,12 +108,12 @@
     "late_spike": 1,
     "price_flow": 1
   },
-  "potential_240m_peak_examples": 1,
+  "potential_240m_peak_examples": 2,
   "observed_4h_pump_research": {
     "source": "actual_observed_swaps_original_frozen_rejected_decisions",
     "paper_only": true,
     "executable_peak_fills": false,
-    "distinct_observed_4h_peaks": 49,
+    "distinct_observed_4h_peaks": 55,
     "observed_peak_ge_10_pct": 2,
     "observed_peak_ge_25_pct": 2,
     "observed_peak_ge_50_pct": 2,
@@ -167,9 +175,9 @@
           5,
           10
         ],
-        "valid_distinct_cases": 16,
+        "valid_distinct_cases": 21,
         "model_positive_after_costs": 2,
-        "model_net_sda_total": 15.6127,
+        "model_net_sda_total": -5.2001,
         "positive_gate_counts": {
           "buy_ratio": 2,
           "late_spike": 2,
@@ -188,9 +196,9 @@
           15,
           25
         ],
-        "valid_distinct_cases": 23,
+        "valid_distinct_cases": 25,
         "model_positive_after_costs": 4,
-        "model_net_sda_total": -47.2219,
+        "model_net_sda_total": -49.4884,
         "positive_gate_counts": {
           "lifecycle": 4,
           "loss_circuit": 4,
@@ -209,18 +217,20 @@
           60,
           75
         ],
-        "valid_distinct_cases": 18,
-        "model_positive_after_costs": 2,
-        "model_net_sda_total": -32.558,
+        "valid_distinct_cases": 24,
+        "model_positive_after_costs": 4,
+        "model_net_sda_total": -11.9935,
         "positive_gate_counts": {
-          "loss_circuit": 2,
-          "quality": 2,
-          "score": 2,
+          "loss_circuit": 4,
+          "lifecycle": 3,
+          "quality": 3,
+          "score": 3,
+          "liquidity": 2,
+          "buy_ratio": 1,
           "impulse": 1,
-          "lifecycle": 1,
-          "liquidity": 1,
-          "trades": 1,
-          "v31_activity": 1
+          "late_spike": 1,
+          "price_flow": 1,
+          "trades": 1
         },
         "research_only": true,
         "cannot_promote_champion": true
@@ -231,18 +241,18 @@
   "objective": "net SDA at first 60m observed quote after 2.2% roundtrip model cost",
   "limitation": "no fill or intrabar peak assumed; 4h/token de-correlation; new rule requires untouched forward shadow",
   "train": {
-    "samples": 4,
-    "unique_tokens": 4,
-    "net_sda_model": -5.42338,
-    "mean_sda_model": -1.35584,
-    "profit_factor_model": 0.0,
-    "max_drawdown_sda_model": 5.4234,
-    "win_rate_pct_model": 0.0
+    "samples": 20,
+    "unique_tokens": 18,
+    "net_sda_model": -32.4436,
+    "mean_sda_model": -1.62218,
+    "profit_factor_model": 0.0053,
+    "max_drawdown_sda_model": 32.4436,
+    "win_rate_pct_model": 5.0
   },
-  "validation_sample_count": 7,
+  "validation_sample_count": 9,
   "status": "COLLECTING",
   "candidate": null,
-  "source_candidate_archive_updated_at": "2026-10-15T09:53:31.844292+00:00",
+  "source_candidate_archive_updated_at": "2026-10-15T10:55:31.690323+00:00",
   "source_candidate_archive_method": "paper_observed_quotes_not_executable_backtest",
-  "updated_at": "2026-10-15T09:54:04.533549+00:00"
+  "updated_at": "2026-10-15T10:56:10.184466+00:00"
 }
