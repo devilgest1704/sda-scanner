@@ -158,6 +158,20 @@ def report(state, config, real_ledger, now=None):
             "cost_accounting": "one full 50 SDA entry; separate 50% exit legs charged round-trip fees only once each; aggregate ONE completed trade",
             "caveat": "No real fills, no historical hindsight, invalid quotes excluded, no verified profit or execution parity",
         },
+        "v33_flow_continuation": {
+            "mode": "RESEARCH_ONLY",
+            "policy": "research_v33_flow_continuation",
+            "source": "same-scan observed 15m and 1h swap activity",
+            "evidence": "15m buy dominance, hourly turnover and bounded price momentum",
+            "roundtrip_model_friction_pct": 2.2,
+            "paper_champion_modified": False,
+            "pool_liquidity_verified": False,
+            "can_promote_champion": False,
+            "diagnostic": ((state.get("last_diagnostic") or {}).get("v33_flow_research")
+                           if isinstance(state.get("last_diagnostic"), dict) else None),
+            "limitation": ("Swap turnover is not pool depth; forward quote exits are not "
+                           "executable fills. No profit claim or automatic promotion."),
+        },
         "runtime_parity": {
             "verified": RUNTIME_EXECUTION_PARITY_VERIFIED,
             "shadow_exits": "fixed 2.5% stop, +8% take, -3.5% trailing, 4h timeout",
