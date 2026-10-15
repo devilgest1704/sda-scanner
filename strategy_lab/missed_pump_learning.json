@@ -2,15 +2,15 @@
   "mode": "OBSERVED_QUOTE_HYPOTHESIS_NO_EXECUTION_PARITY",
   "paper_only": true,
   "can_promote_champion": false,
-  "sample_count": 20,
+  "sample_count": 23,
   "archived_candidate_snapshots": 5000,
-  "candidate_snapshots_with_60m_quote": 2810,
-  "excluded_from_causal_learning": 2790,
+  "candidate_snapshots_with_60m_quote": 2805,
+  "excluded_from_causal_learning": 2782,
   "input_quality": {
     "rejection_counts": {
-      "invalid_or_missing_quote_time": 4763,
-      "missing_frozen_features": 4763,
-      "no_60m_followup_observed": 125,
+      "invalid_or_missing_quote_time": 4739,
+      "missing_frozen_features": 4739,
+      "no_60m_followup_observed": 140,
       "late_followup_75_to_120_minutes": 61
     },
     "missing_feature_counts": {
@@ -18,13 +18,13 @@
     },
     "legacy_frozen_age_recoverable": 0,
     "maturity_stages": {
-      "with_original_quote_and_features": 237,
-      "with_fresh_entry_quote": 237,
-      "with_strict_60_to_75m_exit_quote": 51,
-      "with_strict_exit_and_full_features": 38
+      "with_original_quote_and_features": 261,
+      "with_fresh_entry_quote": 261,
+      "with_strict_60_to_75m_exit_quote": 60,
+      "with_strict_exit_and_full_features": 47
     },
-    "latest_original_candidate_at": "2026-10-15T08:52:29.044262+00:00",
-    "latest_strict_matured_candidate_at": "2026-10-15T07:31:28.664940+00:00",
+    "latest_original_candidate_at": "2026-10-15T09:49:57.975772+00:00",
+    "latest_strict_matured_candidate_at": "2026-10-15T08:35:28.225844+00:00",
     "missing_quote_schema_examples": [
       {
         "row_keys": [
@@ -41,7 +41,7 @@
           "score"
         ],
         "feature_keys": [],
-        "has_60m": false,
+        "has_60m": true,
         "has_original_age": false
       },
       {
@@ -84,28 +84,28 @@
   },
   "missed_pump_examples": 0,
   "positive_theoretical_60m_sda_model_not_fills": 0,
-  "negative_theoretical_60m_sda_model_not_fills": -32.6152,
+  "negative_theoretical_60m_sda_model_not_fills": -42.12,
   "gates_on_profitable_rejected_candidates": {},
   "gates_on_loss_making_rejected_candidates": {
-    "loss_circuit": 19,
-    "score": 17,
-    "v31_activity": 16,
-    "lifecycle": 13,
-    "quality": 13,
-    "liquidity": 11,
-    "trades": 6,
+    "loss_circuit": 21,
+    "score": 19,
+    "v31_activity": 18,
+    "lifecycle": 15,
+    "quality": 14,
+    "liquidity": 13,
+    "trades": 7,
     "impulse": 4,
     "buy_ratio": 2,
     "cooldown": 1,
     "late_spike": 1,
     "price_flow": 1
   },
-  "potential_240m_peak_examples": 0,
+  "potential_240m_peak_examples": 1,
   "observed_4h_pump_research": {
     "source": "actual_observed_swaps_original_frozen_rejected_decisions",
     "paper_only": true,
     "executable_peak_fills": false,
-    "distinct_observed_4h_peaks": 38,
+    "distinct_observed_4h_peaks": 49,
     "observed_peak_ge_10_pct": 2,
     "observed_peak_ge_25_pct": 2,
     "observed_peak_ge_50_pct": 2,
@@ -157,21 +157,92 @@
     ],
     "limitation": "Observed later swap highs are not executable fills, net SDA or a BUY validation target."
   },
+  "early_horizon_research": {
+    "source": "original_frozen_features_verified_first_swap_only",
+    "execution_parity": false,
+    "paper_only": true,
+    "horizons": {
+      "5m": {
+        "strict_first_observed_swap_window_minutes": [
+          5,
+          10
+        ],
+        "valid_distinct_cases": 16,
+        "model_positive_after_costs": 2,
+        "model_net_sda_total": 15.6127,
+        "positive_gate_counts": {
+          "buy_ratio": 2,
+          "late_spike": 2,
+          "lifecycle": 2,
+          "liquidity": 2,
+          "loss_circuit": 2,
+          "price_flow": 2,
+          "quality": 2,
+          "score": 2
+        },
+        "research_only": true,
+        "cannot_promote_champion": true
+      },
+      "15m": {
+        "strict_first_observed_swap_window_minutes": [
+          15,
+          25
+        ],
+        "valid_distinct_cases": 23,
+        "model_positive_after_costs": 4,
+        "model_net_sda_total": -47.2219,
+        "positive_gate_counts": {
+          "lifecycle": 4,
+          "loss_circuit": 4,
+          "quality": 3,
+          "score": 3,
+          "buy_ratio": 2,
+          "late_spike": 2,
+          "liquidity": 1,
+          "price_flow": 1
+        },
+        "research_only": true,
+        "cannot_promote_champion": true
+      },
+      "60m": {
+        "strict_first_observed_swap_window_minutes": [
+          60,
+          75
+        ],
+        "valid_distinct_cases": 18,
+        "model_positive_after_costs": 2,
+        "model_net_sda_total": -32.558,
+        "positive_gate_counts": {
+          "loss_circuit": 2,
+          "quality": 2,
+          "score": 2,
+          "impulse": 1,
+          "lifecycle": 1,
+          "liquidity": 1,
+          "trades": 1,
+          "v31_activity": 1
+        },
+        "research_only": true,
+        "cannot_promote_champion": true
+      }
+    },
+    "warning": "Historical observed quote outcomes include model friction, NOT actual entry/exit fills; no hindsight peaks."
+  },
   "objective": "net SDA at first 60m observed quote after 2.2% roundtrip model cost",
   "limitation": "no fill or intrabar peak assumed; 4h/token de-correlation; new rule requires untouched forward shadow",
   "train": {
-    "samples": 3,
-    "unique_tokens": 3,
-    "net_sda_model": -4.41721,
-    "mean_sda_model": -1.4724,
+    "samples": 4,
+    "unique_tokens": 4,
+    "net_sda_model": -5.42338,
+    "mean_sda_model": -1.35584,
     "profit_factor_model": 0.0,
-    "max_drawdown_sda_model": 4.4172,
+    "max_drawdown_sda_model": 5.4234,
     "win_rate_pct_model": 0.0
   },
-  "validation_sample_count": 6,
+  "validation_sample_count": 7,
   "status": "COLLECTING",
   "candidate": null,
-  "source_candidate_archive_updated_at": "2026-10-15T08:51:59.753486+00:00",
+  "source_candidate_archive_updated_at": "2026-10-15T09:53:31.844292+00:00",
   "source_candidate_archive_method": "paper_observed_quotes_not_executable_backtest",
-  "updated_at": "2026-10-15T08:52:36.018992+00:00"
+  "updated_at": "2026-10-15T09:54:04.533549+00:00"
 }
