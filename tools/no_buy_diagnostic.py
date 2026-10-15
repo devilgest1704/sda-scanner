@@ -168,6 +168,7 @@ def diagnose(market, execution, ledger, at=None):
         "sampled_rejections": dict(gates.most_common(12)),
         "fresh_rejections": fresh_gates,
         "risk_only_rejected_rows": risk_only,
+        "would_buy_if_only_loss_circuit_cleared": risk_only > 0,
         "top_near_ready": (funnel.get("near_ready") or [])[:5],
     }
     if result["funnel"]["status"] != "CURRENT":
@@ -179,7 +180,12 @@ def diagnose(market, execution, ledger, at=None):
     elif markets.get("status") == "OK" and markets.get("quotes_last_5m", 0) == 0:
         result["assessment"] = "NO_FRESH_MARKET_QUOTE"
     elif isinstance(funnel.get("champion_ready"), int) and funnel["champion_ready"] == 0:
-        result["assessment"] = "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED"
+        # A loss cooldown AND no technical entry signal are independent
+        # reasons. Do not misreport that lifting the risk guard would BUY.
+        result["assessment"] = (
+            "NO_ELIGIBLE_BUY_SIGNALS_AND_LOSS_COOLDOWN"
+            if circuit.get("blocked") and circuit.get("status") == "LOSS_COOLDOWN"
+            else "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED")
     return result
 
 

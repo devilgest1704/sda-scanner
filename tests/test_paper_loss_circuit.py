@@ -27,6 +27,32 @@ class PaperLossCircuitTests(unittest.TestCase):
         self.assertEqual(gate["window_closed"], 8)
         self.assertEqual(gate["window_pnl_sda"], -24)
 
+    def test_recovery_projection_updates_as_losses_leave_rolling_window(self):
+        # Eight losses hit -24. After the earliest closes age out the
+        # risk gate MUST reopen automatically, without changing thresholds.
+        data = [trade(-3, hours_ago=23) for _ in range(3)]
+        data += [trade(-3, hours_ago=4) for _ in range(5)]
+        blocked = evaluate_closed(data, AT)
+        self.assertTrue(blocked["blocked"])
+        eta = (AT + timedelta(hours=1, microseconds=1)).isoformat()
+        self.assertEqual(blocked["projected_recovery_at_no_new_closes"], eta)
+        self.assertFalse(evaluate_closed(data, AT+timedelta(hours=1, seconds=1))["blocked"])
+        self.assertIsNone(evaluate_closed(data, AT+timedelta(hours=2))[
+            "projected_recovery_at_no_new_closes"])
+
+    def test_recovery_projection_accounts_for_winner_expiry(self):
+        # Expiring a recent WIN may worsen the 24h result. The prediction
+        # must keep iterating until remaining losses fall below the budget.
+        data = [trade(10, hours_ago=23)]
+        data += [trade(-5, hours_ago=22) for _ in range(7)]
+        data += [trade(-4, hours_ago=10) for _ in range(2)]
+        gate = evaluate_closed(data, AT)
+        self.assertTrue(gate["blocked"])
+        # After the win expires, still blocked. After old losses expire,
+        # fewer than 8 closes remain and the gate clears.
+        self.assertEqual(gate["projected_recovery_at_no_new_closes"],
+                         (AT+timedelta(hours=2, microseconds=1)).isoformat())
+
     def test_insufficient_sample_does_not_invent_negative_result(self):
         gate = evaluate_closed([trade(-9) for _ in range(2)], AT)
         self.assertFalse(gate["blocked"])

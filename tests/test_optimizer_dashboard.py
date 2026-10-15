@@ -45,6 +45,26 @@ class OptimizerDashboardTests(unittest.TestCase):
         self.assertIn("PAPER ONLY", result)
         self.assertLess(len(result), 3900)
 
+    def test_no_buy_diagnosis_is_visible_only_in_requested_optimizer_menu(self):
+        from copy import deepcopy
+        data = deepcopy(AUTO)
+        data["scanner_no_buy"] = {
+            "assessment":"NO_ELIGIBLE_BUY_SIGNALS_AND_LOSS_COOLDOWN",
+            "checked_at":"2026-10-15T05:01:00+00:00",
+            "audit_fresh":True,
+            "risk_blocked":True,
+            "loss_last_24h_sda":-42.8397,
+            "projected_recovery_at_no_new_closes":"2026-10-15T16:14:20+00:00",
+            "risk_only_buy_ready":False,
+        }
+        txt=od.overview_report(data, CONFIG)
+        self.assertIn("PROČ NECHODÍ BUY",txt)
+        self.assertIn("Ztrátová ochrana + žádný platný tržní signál",txt)
+        self.assertIn("-42.84 SDA",txt)
+        self.assertIn("Stačilo by pouze vypnout ochranu? NE",txt)
+        self.assertIn("18:14",txt)  # Prague summer-time conversion
+        self.assertLess(len(txt),3900)
+
     def test_strategy_list_shows_each_policy_and_data_quality(self):
         result = od.strategies_report(AUTO)
         self.assertIn("baseline", result)

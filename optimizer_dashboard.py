@@ -158,6 +158,36 @@ def overview_report(auto, config):
         if missed.get("learned_rule"):
             lines.append(f"Nový testovaný BUY filtr: {str(missed['learned_rule'])[:120]}")
         lines.append("Zpětná zjištění → nový forward Shadow test → případné ověření pro PAPER.")
+    buy = auto.get("scanner_no_buy")
+    if isinstance(buy, dict):
+        labels = {
+            "NO_ELIGIBLE_BUY_SIGNALS_AND_LOSS_COOLDOWN":
+                "Ztrátová ochrana + žádný platný tržní signál",
+            "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED":
+                "Žádný platný tržní signál",
+            "ONLY_PAPER_LOSS_CIRCUIT_BLOCKED_SOME_SIGNALS":
+                "Platný signál blokuje jen 24h ztrátová ochrana",
+            "STALE_OR_UNALIGNED_SCANNER_OBSERVATIONS":
+                "Data scanneru jsou zastaralá nebo nesouhlasí",
+        }
+        lines += [
+            "", "🛑 PROČ NECHODÍ BUY • poslední checkpoint",
+            f"Diagnóza: {labels.get(buy.get('assessment'),buy.get('assessment') or 'Nedostupná')}",
+            f"Kontrola: {_time(buy.get('checked_at'))}",
+        ]
+        if not buy.get("audit_fresh"):
+            lines.append("⚠️ Tato kontrola není aktuální.")
+        if buy.get("risk_blocked") is True:
+            lines.append(
+                f"24h ochrana aktivní • výsledek {_pnl(buy.get('loss_last_24h_sda'))}")
+            lines.append(
+                "Možné uvolnění bez nových obchodů: " +
+                _time(buy.get("projected_recovery_at_no_new_closes")))
+            lines.append(
+                "Stačilo by pouze vypnout ochranu? " +
+                ("ANO" if buy.get("risk_only_buy_ready") else "NE"))
+        elif buy.get("risk_blocked") is False:
+            lines.append("24h ztrátová ochrana neblokuje nové vstupy.")
     selected = auto.get("selected_challenger") or {}
     if isinstance(selected, dict) and selected.get("name"):
         lines.append(f"Kandidát: {selected['name']}")
