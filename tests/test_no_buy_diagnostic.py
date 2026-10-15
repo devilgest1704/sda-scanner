@@ -60,6 +60,11 @@ class NoBuyDiagnosisTests(unittest.TestCase):
         self.assertFalse(report["paper_buy_rules_modified"])
         self.assertFalse(report["real_trading"])
 
+    def test_no_signal_without_risk_block_is_not_a_circuit_fault(self):
+        report=diagnose(market(),funnel(),ledger(),NOW)
+        self.assertEqual(report["assessment"],"NO_ELIGIBLE_BUY_SIGNALS_OBSERVED")
+        self.assertFalse(report["paper_loss_circuit"]["blocked"])
+
     def test_risk_only_candidate_identified_without_disabling_protection(self):
         report = diagnose(market(), funnel(["loss_circuit"]), ledger(8), NOW)
         self.assertEqual(report["assessment"], "ONLY_PAPER_LOSS_CIRCUIT_BLOCKED_SOME_SIGNALS")
