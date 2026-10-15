@@ -194,11 +194,24 @@ def report(state, config, real_ledger, now=None):
         "observed_candidates":missed.get("sample_count",0),
         "missed_60m_positive_after_costs":missed.get("missed_pump_examples",0),
         "observed_4h_pump_research":missed.get("observed_4h_pump_research",{}),
+        "early_horizon_research":missed.get("early_horizon_research",{}),
         "learned_rule":(missed.get("candidate") or {}).get("hypothesis"),
         "research_only":True,
         "paper_buy_rules_modified":False,
         "forward_execution_parity_verified":RUNTIME_EXECUTION_PARITY_VERIFIED,
         "reason":"Train/holdout selects a rule; new forward Shadow must prove net SDA; unmatched exits prohibit auto PAPER promotion.",
+    }
+    # Immutable forward signal-timing research is read-only and never affects
+    # promotion, PAPER loss circuits, or Champion gate thresholds.
+    timing=state.get("timing_research") if isinstance(state,dict) else None
+    model["temporal_recovery_research"]={
+        "source_at": timing.get("last_at") if isinstance(timing,dict) else None,
+        "total_recovered": timing.get("total_recovered",0) if isinstance(timing,dict) else 0,
+        "recent_examples": timing.get("events",[])[-3:] if isinstance(timing,dict)
+                           and isinstance(timing.get("events"),list) else [],
+        "shadow_policy": "research_temporal_recovery",
+        "paper_only":True,"champion_modified":False,
+        "condition":"strong stale signal followed by genuinely new fresh quote and current activity",
     }
     # Scanner checkpoints publish a small auditable NO-BUY diagnosis.
     # Its timestamp (not this optimizer's run time) is the evidence age.
