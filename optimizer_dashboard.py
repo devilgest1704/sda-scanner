@@ -167,9 +167,24 @@ def overview_report(auto, config):
                              ", ".join(f"{k} ({int(_number(v))})"
                                        for k,v in list(top.items())[:4]))
             lines.append("⚠️ Jde o skutečně zaznamenané cenové vrcholy, NIKOLI dosažitelné prodejní ceny.")
+        fast=missed.get("early_horizon_research")
+        if isinstance(fast,dict) and fast.get("source")=="original_frozen_features_verified_first_swap_only":
+            horizons=fast.get("horizons") or {}
+            if isinstance(horizons,dict):
+                def _horizon_mark(h):
+                    row=horizons.get(h) or {}
+                    return (f"{int(_number(row.get('valid_distinct_cases')))} případů, "
+                            f"{int(_number(row.get('model_positive_after_costs')))} kladných")
+                lines.append(f"Rychlé pohyby 5m: {_horizon_mark('5m')} • 15m: {_horizon_mark('15m')}")
+                lines.append("⚠️ Pouze následné ověřené swapy, ne proveditelné obchody.")
         if missed.get("learned_rule"):
             lines.append(f"Nový testovaný BUY filtr: {str(missed['learned_rule'])[:120]}")
         lines.append("Zpětná zjištění → nový forward Shadow test → případné ověření pro PAPER.")
+    timing=auto.get("temporal_recovery_research")
+    if isinstance(timing,dict) and timing.get("paper_only") is True:
+        lines.append("⏱️ Časové nesoulady BUY (Shadow): " +
+                     str(int(_number(timing.get("total_recovered")))) +
+                     " • žádné prolomení ochrany Champion")
     buy = auto.get("scanner_no_buy")
     if isinstance(buy, dict):
         labels = {
