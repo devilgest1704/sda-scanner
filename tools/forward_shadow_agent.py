@@ -14,6 +14,12 @@ from pathlib import Path
 
 from tools.missed_pump_learning import safe_missed_entry
 from tools.v33_flow_continuation import observed_flow_signal
+from tools.v33_cost_aware_breakout import (cost_aware_breakout_signal,
+                                           SIDE_FRICTION as V33_SIDE_FRICTION,
+                                           TARGET_GROSS as V33_TARGET,
+                                           TRAIL_GROSS as V33_TRAIL,
+                                           MAX_HOURS as V33_MAX_HOURS,
+                                           modeled_net_sda as v33_net_sda)
 from tools.v32_breakout import (
     research_signal_from_analysis, breakout_research_eligible,
     sparse_volume_research_eligible,
@@ -74,6 +80,10 @@ POLICIES = {
     # before the 4h surge matures. This cannot replace the PAPER Champion.
     "research_v33_flow_continuation": {"entry_score": 70, "quality": 56,
                                       "impulse": 8, "buy_ratio": 1.20, "trades": 12},
+    # Independent WATCH-capable breakout arm: conservative net-of-cost model.
+    # This does NOT enter the PAPER Champion or auto-promotion candidate set.
+    "research_v33_cost_aware_breakout": {"entry_score": 55, "quality": 48,
+                                        "impulse": 4, "buy_ratio": 1.15, "trades": 8},
 }
 BREAKOUT_RESEARCH_MODE = "research_breakout_volume_trend"
 SPARSE_VOLUME_RESEARCH_MODE = "research_sparse_volume_ignition"
@@ -81,6 +91,7 @@ BREAKOUT_EVIDENCE_MODES = frozenset((BREAKOUT_RESEARCH_MODE, SPARSE_VOLUME_RESEA
 TREND_RUNNER_RESEARCH_MODE = "research_trend_runner"
 TEMPORAL_RESEARCH_MODE = "research_temporal_recovery"
 FLOW_V33_RESEARCH_MODE = "research_v33_flow_continuation"
+COST_BREAKOUT_V33_MODE = "research_v33_cost_aware_breakout"
 MACD_RESEARCH_MODES = frozenset(("research_macd_antipump", "research_macd_confirmation"))
 MACD_BAR_SECONDS = {"5m": 300, "15m": 900, "1h_completed": 3600}
 MIN_MACD_CLOSED_BARS = 35
@@ -351,6 +362,8 @@ def eligible(c, filters, research_watch=False, macd_mode=None):
         return safe_missed_entry(c, filters)
     if macd_mode == BREAKOUT_RESEARCH_MODE:
         return breakout_research_eligible(c, filters)
+    if macd_mode == COST_BREAKOUT_V33_MODE:
+        return isinstance(c.get("v33_cost_breakout"), dict) and c["v33_cost_breakout"].get("eligible") is True
     if macd_mode == SPARSE_VOLUME_RESEARCH_MODE:
         return sparse_volume_research_eligible(c, filters)
     if macd_mode == TEMPORAL_RESEARCH_MODE and c.get("research_temporal_recovery_ready") is not True:
@@ -456,6 +469,8 @@ def step(data, market, funnel):
         # Only completed, original swap buckets from this exact scan, and no
         # historical hindsight or additional Champion execution path.
         candidate["v33_flow"] = observed_flow_signal(candidate, info, ts, market_ts)
+        candidate["v33_cost_breakout"] = cost_aware_breakout_signal(
+            candidate, candidate.get("v32_breakout"), POLICIES[COST_BREAKOUT_V33_MODE])
     # Research-only signal timing joins prior and current frozen signals.
     temporal_diagnostic=evaluate_temporal_recovery(data,ranked,ts)
     # Diagnostics distinguish "no signal" from missing telemetry fields.
@@ -522,6 +537,11 @@ def step(data, market, funnel):
         macd_market_reasons[frame] = dict(sorted(all_reasons.items()))
         macd_candidate_reasons[frame] = dict(sorted(selected_reasons.items()))
     flow_records = [c for c in ranked if isinstance(c.get("v33_flow"), dict)]
+    cost_records = [c for c in ranked if isinstance(c.get("v33_cost_breakout"), dict)]
+    cost_rejections = {}
+    for c in cost_records:
+        for reason in set(c["v33_cost_breakout"].get("rejection_reasons") or []):
+            cost_rejections[reason] = cost_rejections.get(reason, 0) + 1
     flow_rejections = {}
     for c in flow_records:
         for reason in set(c["v33_flow"].get("rejection_reasons") or []):
@@ -568,6 +588,16 @@ def step(data, market, funnel):
                  "reason": c["v32_breakout"].get("reason")}
                 for c in breakout_records if c["v32_breakout"].get("eligible") is True
             ][:5],
+        },
+        "v33_cost_breakout_research": {
+            "mode": "RESEARCH_ONLY", "paper_champion_unchanged": True,
+            "measured": len(cost_records),
+            "eligible_after_cost_gate": sum(c["v33_cost_breakout"].get("eligible") is True for c in cost_records),
+            "eligible_after_shadow_gates": policy_qualified.get(COST_BREAKOUT_V33_MODE, 0),
+            "fresh_quote_ready": policy_quote_ready.get(COST_BREAKOUT_V33_MODE, 0),
+            "rejections": dict(sorted(cost_rejections.items(), key=lambda item: (-item[1], item[0]))[:12]),
+            "modeled_friction_per_side_pct": V33_SIDE_FRICTION * 100,
+            "execution_parity_verified": False,
         },
         "v33_flow_research": {
             "mode": "RESEARCH_ONLY", "paper_champion_unchanged": True,
@@ -634,6 +664,8 @@ def step(data, market, funnel):
                                if name in BREAKOUT_EVIDENCE_MODES else {}),
                             **({"v33_flow_at_entry": position.get("v33_flow_at_entry")}
                                if name == FLOW_V33_RESEARCH_MODE else {}),
+                            **({"v33_cost_breakout_at_entry": position.get("v33_cost_breakout_at_entry")}
+                               if name == COST_BREAKOUT_V33_MODE else {}),
                         })
                     del positions[address]
                     closed += 1
@@ -674,20 +706,24 @@ def step(data, market, funnel):
             position["peak_price_sda"] = max(price, positive(position.get("peak_price_sda")) or entry)
             move = price / entry - 1
             trailing = price / position["peak_price_sda"] - 1
+            target = V33_TARGET if name == COST_BREAKOUT_V33_MODE else TAKE_PCT
+            trail = V33_TRAIL if name == COST_BREAKOUT_V33_MODE else TRAIL_PCT
+            maximum_hours = V33_MAX_HOURS if name == COST_BREAKOUT_V33_MODE else MAX_HOURS
             reason = ("STOP" if move <= STOP_PCT else
-                      "TAKE" if move >= TAKE_PCT else
-                      "TRAIL" if duration >= 0.25 and trailing <= -TRAIL_PCT else
-                      "TIME" if duration >= MAX_HOURS else None)
+                      "TAKE" if move >= target else
+                      "TRAIL" if duration >= 0.25 and trailing <= -trail else
+                      "TIME" if duration >= maximum_hours else None)
             if not reason:
                 continue
-            net = round(exit_profit(entry, price), 6)
+            net = round((v33_net_sda(move) if name == COST_BREAKOUT_V33_MODE
+                         else exit_profit(entry, price)), 6)
             # Gapped or delayed observed prices are recorded but excluded from
             # trustworthy model selection.
             exclusion_reasons = []
             if gap > MAX_QUOTE_GAP_MIN:
                 exclusion_reasons.append("quote_gap_over_30m")
-            if duration > MAX_HOURS + 0.5:
-                exclusion_reasons.append("holding_time_over_4_5h")
+            if duration > maximum_hours + 0.5:
+                exclusion_reasons.append("holding_time_over_max_plus_30m")
             if not (0.2 <= price/entry <= 4.0):
                 exclusion_reasons.append("implausible_quote_jump")
             valid = not exclusion_reasons
@@ -707,6 +743,8 @@ def step(data, market, funnel):
                    if name in BREAKOUT_EVIDENCE_MODES else {}),
                 **({"v33_flow_at_entry": position.get("v33_flow_at_entry")}
                    if name == FLOW_V33_RESEARCH_MODE else {}),
+                **({"v33_cost_breakout_at_entry": position.get("v33_cost_breakout_at_entry")}
+                   if name == COST_BREAKOUT_V33_MODE else {}),
             })
             del positions[address]
             closed += 1
@@ -757,6 +795,8 @@ def step(data, market, funnel):
                        if name in BREAKOUT_EVIDENCE_MODES else {}),
                     **({"v33_flow_at_entry": c.get("v33_flow")}
                        if name == FLOW_V33_RESEARCH_MODE else {}),
+                    **({"v33_cost_breakout_at_entry": c.get("v33_cost_breakout")}
+                       if name == COST_BREAKOUT_V33_MODE else {}),
                 }
                 last_entry[address] = ts.isoformat()
                 opened += 1
