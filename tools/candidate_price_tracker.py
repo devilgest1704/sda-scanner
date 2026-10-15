@@ -14,6 +14,9 @@ from pathlib import Path
 HORIZONS=(15,60,240,1440)
 SAMPLE_MINUTES=30  # one causal snapshot per token per interval
 MAX_ENTRY_QUOTE_AGE_SEC=300
+# The market export precedes V30 funnel scoring within the SAME scanner cycle.
+# Accept a strictly source-linked, bounded delay, never an arbitrary future decision.
+MAX_SAME_CYCLE_DECISION_LAG_SEC=120
 MODEL_FRICTION_PER_SIDE=.011
 MODEL_NOTIONAL_SDA=50.0
 FROZEN_FEATURES=("score","quality","snapshot_impulse","m1h","m15",
@@ -141,7 +144,12 @@ def update(state,market,max_observations=5000,history_market=None):
     for funnel in state.get("funnels",[]):
         if not isinstance(funnel,dict):continue
         at=parse_time(funnel.get("at"))
-        if at is None or at>now:continue
+        if at is None:continue
+        same_cycle_late=(at>now and
+                         parse_time(funnel.get("market_at"))==now and
+                         0<(at-now).total_seconds()<=MAX_SAME_CYCLE_DECISION_LAG_SEC)
+        if at>now and not same_cycle_late:
+            continue
         for item in funnel.get("candidate_snapshots",[]):
             if not isinstance(item,dict):continue
             address=str(item.get("address") or "").lower()
@@ -149,7 +157,13 @@ def update(state,market,max_observations=5000,history_market=None):
             if not address or price is None:continue
             stamp=item.get("at") or funnel.get("at")
             t=parse_time(stamp)
-            if t is None or t>now:continue
+            # Snapshot features and price were frozen by this original funnel,
+            # not synthesized from the next market scan. An unlinked future
+            # funnel is never accepted, even if timestamps are close.
+            if (t is None or
+                    (t>now and not (same_cycle_late and t<=at and
+                                    (t-now).total_seconds()<=MAX_SAME_CYCLE_DECISION_LAG_SEC))):
+                continue
             # Freeze a single REAL, fresh scanner decision per token/30min.
             # Previously 120 candidates each minute evicted 4h observations
             # from the 5000-row rolling archive BEFORE they matured.
@@ -157,7 +171,8 @@ def update(state,market,max_observations=5000,history_market=None):
                 continue
             quote_at=parse_time(item.get("quote_at"))
             age=(t-quote_at).total_seconds() if quote_at is not None else None
-            if age is None or not 0<=age<=MAX_ENTRY_QUOTE_AGE_SEC:
+            if (age is None or not 0<=age<=MAX_ENTRY_QUOTE_AGE_SEC
+                    or quote_at>now):
                 continue
             if positive(item.get("volume_1h")) is None:
                 continue
@@ -211,17 +226,10 @@ def update(state,market,max_observations=5000,history_market=None):
         start=parse_time(row.get("at"))
         entry=positive(row.get("entry_price_sda"))
         if start is None or entry is None or now<=start:continue
-        td=tokens.get(row.get("address"),{})
-        if not isinstance(td,dict):continue
-        a=td.get("analysis",td)
-        if not isinstance(a,dict):continue
-        current=positive(a.get("price_in_sda"))
-        if current is None:continue
-        # Reject token-level stale quotes: market.updated_at alone is insufficient.
-        quote_time=parse_time(a.get("last_transaction") or td.get("last_transaction"))
-        if quote_time is None or quote_time<=start or quote_time>now:continue
-        elapsed=(quote_time-start).total_seconds()/60
         outcomes=row.setdefault("outcomes",{})
+        # Historical on-chain transaction evidence is independent of the
+        # current last-price field. It remains valid even if compact analysis
+        # temporarily omits or stales that token; no invented market fill.
         # Capture a missing 60-minute LABEL from the first genuine on-chain
         # quote between +60 and +75m. This increases usable research samples
         # when the token's most recent quote at the next scanner tick has
@@ -244,6 +252,16 @@ def update(state,market,max_observations=5000,history_market=None):
                     "source":"observed_later_market_transaction_not_executable_fill",
                     "tx_hash":transaction_hash or None,
                 }
+        td=tokens.get(row.get("address"),{})
+        if not isinstance(td,dict):continue
+        a=td.get("analysis",td)
+        if not isinstance(a,dict):continue
+        current=positive(a.get("price_in_sda"))
+        if current is None:continue
+        # Reject token-level stale quotes: market.updated_at alone is insufficient.
+        quote_time=parse_time(a.get("last_transaction") or td.get("last_transaction"))
+        if quote_time is None or quote_time<=start or quote_time>now:continue
+        elapsed=(quote_time-start).total_seconds()/60
         # Observed maximum is descriptive ONLY; no imaginary peak execution.
         if elapsed<=240:
             peak=row.get("observed_peak_240m")
