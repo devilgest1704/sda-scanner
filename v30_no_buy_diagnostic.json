@@ -1,18 +1,18 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-10-16T07:14:06.756938+00:00",
+  "checked_at": "2026-10-16T07:19:07.333388+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-10-16T07:13:38.822394+00:00",
+    "market_at": "2026-10-16T07:18:38.917687+00:00",
     "tokens": 172,
-    "quotes_last_5m": 18,
-    "quotes_last_15m": 38,
-    "quotes_last_60m": 80,
-    "fresh_with_8_trades_1h": 9,
-    "fresh_with_12_trades_1h": 7,
-    "fresh_m15_ge_1_5pct": 0,
-    "fresh_m15_ge_1_5pct_and_8_trades": 0,
-    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 0
+    "quotes_last_5m": 11,
+    "quotes_last_15m": 37,
+    "quotes_last_60m": 76,
+    "fresh_with_8_trades_1h": 8,
+    "fresh_with_12_trades_1h": 5,
+    "fresh_m15_ge_1_5pct": 3,
+    "fresh_m15_ge_1_5pct_and_8_trades": 1,
+    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 1
   },
   "paper_loss_circuit": {
     "paper_only": true,
@@ -32,46 +32,95 @@
   "last_paper_close_at": "2026-10-16T00:25:55.666773+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-10-16T07:14:04.614322+00:00",
+    "at": "2026-10-16T07:19:05.237592+00:00",
     "age_minutes": 0.0,
     "aligned_to_market": true,
     "tokens_scored": 172,
-    "fresh_tokens": 38,
+    "fresh_tokens": 37,
     "champion_ready": 0,
     "shadow_ready": 0,
     "sampled_rows": 40,
     "sampled_phases": {
-      "WATCH": 6,
+      "IGNITION": 3,
+      "WATCH": 3,
       "NO": 34
     },
     "sampled_rejections": {
       "loss_circuit": 40,
-      "score": 40,
-      "lifecycle": 40,
+      "score": 39,
       "quality": 38,
-      "v31_activity": 34,
-      "v31_age": 33,
+      "lifecycle": 37,
       "liquidity": 32,
-      "trades": 26,
-      "stale_data": 24,
-      "buy_ratio": 8,
-      "late_spike": 4,
-      "price_flow": 2
+      "v31_age": 31,
+      "v31_activity": 28,
+      "trades": 22,
+      "stale_data": 19,
+      "buy_ratio": 13,
+      "late_spike": 3,
+      "impulse": 1
     },
     "fresh_rejections": {
-      "lifecycle": 38,
-      "loss_circuit": 38,
-      "score": 38,
-      "quality": 37,
-      "liquidity": 30,
-      "v31_activity": 29,
-      "v31_age": 23,
-      "buy_ratio": 22,
-      "trades": 12
+      "loss_circuit": 37,
+      "quality": 36,
+      "score": 36,
+      "lifecycle": 34,
+      "liquidity": 29,
+      "v31_activity": 26,
+      "v31_age": 26,
+      "buy_ratio": 25,
+      "trades": 14,
+      "impulse": 1
     },
-    "risk_only_rejected_rows": 0,
-    "would_buy_if_only_loss_circuit_cleared": false,
+    "risk_only_rejected_rows": 1,
+    "would_buy_if_only_loss_circuit_cleared": true,
     "top_near_ready": [
+      {
+        "address": "0x4ce5ef02f9aebb80bb4e327f76dfb95eac1b69a6",
+        "symbol": "AIR",
+        "score": 90.3,
+        "quality": 70.3,
+        "impulse": 20.0,
+        "phase": "IGNITION",
+        "data_age_sec": 128.2,
+        "gates": [
+          "loss_circuit"
+        ],
+        "reason": "IGNITION / PAPER 24h loss circuit: LOSS_COOLDOWN"
+      },
+      {
+        "address": "0xc716d2d396298d061f4cbd78dc00590a2638e825",
+        "symbol": "DGPT",
+        "score": 54.8,
+        "quality": 51.2,
+        "impulse": 3.6,
+        "phase": "IGNITION",
+        "data_age_sec": 95.2,
+        "gates": [
+          "v31_activity",
+          "impulse",
+          "score",
+          "quality",
+          "loss_circuit"
+        ],
+        "reason": "IGNITION / PAPER 24h loss circuit: LOSS_COOLDOWN; V31 BUY gate: trades 1h <12 (no early exception); no delta impulse +3.6<8.0"
+      },
+      {
+        "address": "0xbe7360fe473e65a4afee06c776440ec2e807182f",
+        "symbol": "BINV",
+        "score": 54.5,
+        "quality": 40.1,
+        "impulse": 14.3,
+        "phase": "IGNITION",
+        "data_age_sec": 109.1,
+        "gates": [
+          "v31_activity",
+          "score",
+          "quality",
+          "liquidity",
+          "loss_circuit"
+        ],
+        "reason": "IGNITION / PAPER 24h loss circuit: LOSS_COOLDOWN; V31 BUY gate: trades 1h <12 (no early exception); score 54<74"
+      },
       {
         "address": "0x4ed722fbc1de078d3bd27588fc92f0cf7113bd63",
         "symbol": "DIIGE",
@@ -79,40 +128,7 @@
         "quality": 22.0,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 120.6,
-        "gates": [
-          "lifecycle",
-          "score",
-          "quality",
-          "loss_circuit"
-        ],
-        "reason": "NO / PAPER 24h loss circuit: LOSS_COOLDOWN; no eligible entry lane; score 22<68"
-      },
-      {
-        "address": "0x4ce5ef02f9aebb80bb4e327f76dfb95eac1b69a6",
-        "symbol": "AIR",
-        "score": 57.4,
-        "quality": 57.4,
-        "impulse": 0.0,
-        "phase": "WATCH",
-        "data_age_sec": 342.5,
-        "gates": [
-          "v31_age",
-          "v31_activity",
-          "lifecycle",
-          "score",
-          "loss_circuit"
-        ],
-        "reason": "WATCH / PAPER 24h loss circuit: LOSS_COOLDOWN; V31 BUY gate: data age missing or >300s; V31 BUY gate: trades 1h <12 (no early exception)"
-      },
-      {
-        "address": "0x8f2e99691855a5663beb39deb9075f28b3dcc51b",
-        "symbol": "DMCS",
-        "score": 47.1,
-        "quality": 46.3,
-        "impulse": 0.8,
-        "phase": "WATCH",
-        "data_age_sec": 785.5,
+        "data_age_sec": 421.2,
         "gates": [
           "v31_age",
           "lifecycle",
@@ -120,33 +136,16 @@
           "quality",
           "loss_circuit"
         ],
-        "reason": "WATCH / PAPER 24h loss circuit: LOSS_COOLDOWN; V31 BUY gate: data age missing or >300s; no eligible entry lane"
+        "reason": "NO / PAPER 24h loss circuit: LOSS_COOLDOWN; V31 BUY gate: data age missing or >300s; no eligible entry lane"
       },
       {
-        "address": "0x5f37152b8bfdb758339a279a7fdf88e84bd30b6e",
-        "symbol": "OUSD",
-        "score": 20.9,
-        "quality": 20.9,
+        "address": "0xe1a8ffd7280d5a278a9e8c6daff6d391b59081b4",
+        "symbol": "GLNs",
+        "score": 14.5,
+        "quality": 14.5,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 169.6,
-        "gates": [
-          "lifecycle",
-          "score",
-          "quality",
-          "liquidity",
-          "loss_circuit"
-        ],
-        "reason": "NO / PAPER 24h loss circuit: LOSS_COOLDOWN; no eligible entry lane; score 21<68"
-      },
-      {
-        "address": "0x0683e98cfb3bb37239f45f390b7147746b20b74e",
-        "symbol": "NVDA",
-        "score": 14.7,
-        "quality": 14.7,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 110.6,
+        "data_age_sec": 285.2,
         "gates": [
           "lifecycle",
           "score",
@@ -154,11 +153,11 @@
           "buy_ratio",
           "loss_circuit"
         ],
-        "reason": "NO / PAPER 24h loss circuit: LOSS_COOLDOWN; no eligible entry lane; score 15<68"
+        "reason": "NO / PAPER 24h loss circuit: LOSS_COOLDOWN; no eligible entry lane; score 14<68"
       }
     ]
   },
-  "assessment": "NO_ELIGIBLE_BUY_SIGNALS_AND_LOSS_COOLDOWN",
+  "assessment": "ONLY_PAPER_LOSS_CIRCUIT_BLOCKED_SOME_SIGNALS",
   "paper_buy_rules_modified": false,
   "real_trading": false
 }
