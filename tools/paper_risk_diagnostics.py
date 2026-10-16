@@ -20,6 +20,8 @@ def main():
     stats = load("paper_stats.json")
     diag = load("v30_no_buy_diagnostic.json")
     lessons = load("strategy_lab/trade_lessons.json")
+    shadow_report = load("strategy_lab/autonomous_agent_report.json")
+    optimizer = load("v30_ai_optimizer.json")
     market = diag.get("market", {})
     loss = diag.get("paper_loss_circuit", {})
     reasons = lessons.get("by_exit_reason", [])
@@ -57,6 +59,22 @@ def main():
                  "net_sda": r.get("net_pnl_sda")} for r in top_losses
             ],
         },
+        "research": {
+            "runtime_parity_verified": shadow_report.get("runtime_parity", {}).get("verified", False),
+            "shadow_strategies": {
+                name: {
+                    "closed": metrics.get("all", {}).get("closed"),
+                    "net_sda": metrics.get("all", {}).get("net_sda"),
+                    "max_drawdown_sda": metrics.get("all", {}).get("max_drawdown_sda"),
+                    "profit_factor": metrics.get("all", {}).get("profit_factor"),
+                }
+                for name, metrics in shadow_report.get("strategies", {}).items()
+            },
+            "optimizer_candidates_tested": optimizer.get("candidates_tested"),
+            "challenger_test_net_sda": optimizer.get("challenger", {}).get("test", {}).get("pnl_sda"),
+            "challenger_recommend_promotion": optimizer.get("challenger", {}).get("recommend_promotion"),
+            "promotion_applied": optimizer.get("promotion_applied"),
+        },
         "warnings": [],
     }
     if result["market"]["age_minutes"] is None or result["market"]["age_minutes"] > 15:
@@ -65,6 +83,10 @@ def main():
         result["warnings"].append("QUOTE_COVERAGE_BELOW_10_PERCENT")
     if lessons.get("overall", {}).get("closed") != stats.get("closed_trades"):
         result["warnings"].append("TRADE_LESSONS_NOT_CURRENT")
+    if not result["research"]["runtime_parity_verified"]:
+        result["warnings"].append("SHADOW_PAPER_PARITY_UNVERIFIED")
+    if result["research"]["promotion_applied"] and not result["research"]["runtime_parity_verified"]:
+        result["warnings"].append("PROMOTION_WITHOUT_VERIFIED_PARITY")
     if loss.get("blocked"):
         result["warnings"].append("PAPER_LOSS_CIRCUIT_ACTIVE")
     print(json.dumps(result, indent=2, ensure_ascii=False))
