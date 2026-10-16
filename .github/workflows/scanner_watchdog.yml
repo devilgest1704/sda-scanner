@@ -127,8 +127,24 @@ jobs:
               --repo "${{ github.repository }}" \
               --ref main \
               -f run_reason=watchdog; then
-              echo 'Scanner workflow dispatched by watchdog.'
-              exit 0
+              echo 'Scanner workflow dispatch accepted; verifying a worker is visible.'
+              # A successful dispatch API call is not proof that a worker started.
+              # Allow GitHub Actions some time to register the queued run.
+              for check in $(seq 1 12); do
+                sleep 5
+                visible="$(timeout 20s gh run list \\
+                  --workflow scanner_v18.yml \\
+                  --repo "${{ github.repository }}" \\
+                  --branch main --limit 20 --json status \\
+                  --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending" or .status == "waiting" or .status == "requested")] | length' || echo 0)"
+                echo "Scanner visible active/pending: ${visible} (check ${check}/12)"
+                if [ "${visible}" -gt 0 ] 2>/dev/null; then
+                  echo 'Scanner dispatch verified.'
+                  exit 0
+                fi
+              done
+              echo '::error::Scanner dispatch was accepted but no active/pending run appeared within 60 seconds.'
+              exit 1
             fi
 
             if [ "$attempt" -lt 3 ]; then
