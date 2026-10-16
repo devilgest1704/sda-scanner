@@ -31,6 +31,18 @@ class PaperRiskDiagnosticTests(unittest.TestCase):
                     },
                     "funnel": {"champion_ready": 0, "risk_only_rejected_rows": 0},
                 },
+                "strategy_lab/autonomous_agent_report.json": {
+                    "runtime_parity": {"verified": False},
+                    "strategies": {"baseline": {"all": {
+                        "closed": 55, "net_sda": -53.93,
+                        "max_drawdown_sda": 66.64, "profit_factor": 0.50,
+                    }}},
+                },
+                "v30_ai_optimizer.json": {
+                    "candidates_tested": 3000,
+                    "challenger": {"test": {"pnl_sda": -23.05}, "recommend_promotion": False},
+                    "promotion_applied": False,
+                },
                 "strategy_lab/trade_lessons.json": {
                     "generated_at": "2026-10-16T08:17:40+00:00",
                     "overall": {"closed": 536, "net_pnl_sda": -1427.72},
@@ -48,11 +60,14 @@ class PaperRiskDiagnosticTests(unittest.TestCase):
             report = json.loads(output.getvalue())
             self.assertEqual(report["paper"]["closed"], 539)
             self.assertEqual(report["lessons"]["top_negative_exit_reasons"][0]["reason"], "STOP")
+            self.assertEqual(report["research"]["shadow_strategies"]["baseline"]["closed"], 55)
+            self.assertEqual(report["research"]["challenger_test_net_sda"], -23.05)
             self.assertEqual(set(report["warnings"]), {
                 "MARKET_DATA_STALE_OVER_15_MIN",
                 "QUOTE_COVERAGE_BELOW_10_PERCENT",
                 "TRADE_LESSONS_NOT_CURRENT",
                 "PAPER_LOSS_CIRCUIT_ACTIVE",
+                "SHADOW_PAPER_PARITY_UNVERIFIED",
             })
 
 
