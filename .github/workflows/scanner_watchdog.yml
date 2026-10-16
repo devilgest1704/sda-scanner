@@ -132,10 +132,10 @@ jobs:
               # Allow GitHub Actions some time to register the queued run.
               for check in $(seq 1 12); do
                 sleep 5
-                visible="$(timeout 20s gh run list \\
-                  --workflow scanner_v18.yml \\
-                  --repo "${{ github.repository }}" \\
-                  --branch main --limit 20 --json status \\
+                visible="$(timeout 20s gh run list \
+                  --workflow scanner_v18.yml \
+                  --repo "${{ github.repository }}" \
+                  --branch main --limit 20 --json status \
                   --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending" or .status == "waiting" or .status == "requested")] | length' || echo 0)"
                 echo "Scanner visible active/pending: ${visible} (check ${check}/12)"
                 if [ "${visible}" -gt 0 ] 2>/dev/null; then
