@@ -2,15 +2,15 @@
   "mode": "OBSERVED_QUOTE_HYPOTHESIS_NO_EXECUTION_PARITY",
   "paper_only": true,
   "can_promote_champion": false,
-  "sample_count": 94,
+  "sample_count": 105,
   "archived_candidate_snapshots": 5000,
-  "candidate_snapshots_with_60m_quote": 2772,
-  "excluded_from_causal_learning": 2678,
+  "candidate_snapshots_with_60m_quote": 2768,
+  "excluded_from_causal_learning": 2663,
   "input_quality": {
     "rejection_counts": {
-      "invalid_or_missing_quote_time": 4400,
-      "missing_frozen_features": 4400,
-      "no_60m_followup_observed": 293,
+      "invalid_or_missing_quote_time": 4372,
+      "missing_frozen_features": 4372,
+      "no_60m_followup_observed": 306,
       "late_followup_75_to_120_minutes": 61,
       "already_eligible_not_missed": 11
     },
@@ -19,13 +19,13 @@
     },
     "legacy_frozen_age_recoverable": 0,
     "maturity_stages": {
-      "with_original_quote_and_features": 589,
-      "with_fresh_entry_quote": 589,
-      "with_strict_60_to_75m_exit_quote": 235,
-      "with_strict_exit_and_full_features": 222
+      "with_original_quote_and_features": 617,
+      "with_fresh_entry_quote": 617,
+      "with_strict_60_to_75m_exit_quote": 250,
+      "with_strict_exit_and_full_features": 237
     },
-    "latest_original_candidate_at": "2026-10-16T06:41:05.698850+00:00",
-    "latest_strict_matured_candidate_at": "2026-10-16T05:30:06.922732+00:00",
+    "latest_original_candidate_at": "2026-10-16T07:45:04.677736+00:00",
+    "latest_strict_matured_candidate_at": "2026-10-16T06:39:07.280309+00:00",
     "missing_quote_schema_examples": [
       {
         "row_keys": [
@@ -42,25 +42,7 @@
           "score"
         ],
         "feature_keys": [],
-        "has_60m": false,
-        "has_original_age": false
-      },
-      {
-        "row_keys": [
-          "address",
-          "at",
-          "eligible",
-          "entry_price_sda",
-          "gates",
-          "id",
-          "impulse",
-          "observed_peak_240m",
-          "outcomes",
-          "quality",
-          "score"
-        ],
-        "feature_keys": [],
-        "has_60m": false,
+        "has_60m": true,
         "has_original_age": false
       },
       {
@@ -80,12 +62,30 @@
         "feature_keys": [],
         "has_60m": true,
         "has_original_age": false
+      },
+      {
+        "row_keys": [
+          "address",
+          "at",
+          "eligible",
+          "entry_price_sda",
+          "gates",
+          "id",
+          "impulse",
+          "observed_peak_240m",
+          "outcomes",
+          "quality",
+          "score"
+        ],
+        "feature_keys": [],
+        "has_60m": false,
+        "has_original_age": false
       }
     ]
   },
   "missed_pump_examples": 7,
   "positive_theoretical_60m_sda_model_not_fills": 50.7875,
-  "negative_theoretical_60m_sda_model_not_fills": -164.1904,
+  "negative_theoretical_60m_sda_model_not_fills": -180.5571,
   "gates_on_profitable_rejected_candidates": {
     "quality": 6,
     "score": 6,
@@ -100,16 +100,16 @@
     "price_flow": 1
   },
   "gates_on_loss_making_rejected_candidates": {
-    "score": 63,
-    "v31_activity": 53,
-    "lifecycle": 52,
-    "quality": 44,
-    "liquidity": 38,
-    "loss_circuit": 38,
-    "trades": 25,
-    "impulse": 17,
-    "late_spike": 10,
-    "buy_ratio": 7,
+    "score": 73,
+    "v31_activity": 63,
+    "lifecycle": 58,
+    "quality": 53,
+    "loss_circuit": 48,
+    "liquidity": 45,
+    "trades": 30,
+    "impulse": 21,
+    "late_spike": 11,
+    "buy_ratio": 10,
     "cooldown": 4,
     "price_flow": 3
   },
@@ -118,22 +118,22 @@
     "source": "actual_observed_swaps_original_frozen_rejected_decisions",
     "paper_only": true,
     "executable_peak_fills": false,
-    "distinct_observed_4h_peaks": 185,
-    "observed_peak_ge_10_pct": 20,
-    "observed_peak_ge_25_pct": 7,
-    "observed_peak_ge_50_pct": 6,
+    "distinct_observed_4h_peaks": 195,
+    "observed_peak_ge_10_pct": 22,
+    "observed_peak_ge_25_pct": 8,
+    "observed_peak_ge_50_pct": 7,
     "blocking_gates_ge_10_pct": {
-      "score": 18,
-      "lifecycle": 16,
-      "liquidity": 14,
-      "quality": 14,
-      "v31_activity": 10,
-      "late_spike": 8,
-      "trades": 8,
-      "loss_circuit": 6,
+      "score": 20,
+      "lifecycle": 17,
+      "liquidity": 16,
+      "quality": 16,
+      "v31_activity": 12,
+      "trades": 10,
+      "late_spike": 9,
+      "loss_circuit": 8,
       "buy_ratio": 4,
+      "impulse": 4,
       "cooldown": 3,
-      "impulse": 3,
       "price_flow": 3
     },
     "examples": [
@@ -163,6 +163,23 @@
           "late_spike",
           "lifecycle",
           "liquidity",
+          "score",
+          "trades",
+          "v31_activity"
+        ]
+      },
+      {
+        "address": "0x7a9be267f0830be68948056925fa34020e5eef7b",
+        "symbol": "NXR",
+        "decision_at": "2026-10-16T05:03:02.928440+00:00",
+        "peak_observed_at": "2026-10-16T06:56:32+00:00",
+        "observed_peak_return_pct": 86.35,
+        "gates": [
+          "late_spike",
+          "lifecycle",
+          "liquidity",
+          "loss_circuit",
+          "quality",
           "score",
           "trades",
           "v31_activity"
@@ -200,23 +217,6 @@
           "quality",
           "score"
         ]
-      },
-      {
-        "address": "0x4b7ded7fa9f3d96854c7c14874dfc5ad4ce8236c",
-        "symbol": "sDOGE",
-        "decision_at": "2026-10-15T08:44:28.533890+00:00",
-        "peak_observed_at": "2026-10-15T11:05:15+00:00",
-        "observed_peak_return_pct": 66.4,
-        "gates": [
-          "buy_ratio",
-          "late_spike",
-          "lifecycle",
-          "liquidity",
-          "loss_circuit",
-          "price_flow",
-          "quality",
-          "score"
-        ]
       }
     ],
     "limitation": "Observed later swap highs are not executable fills, net SDA or a BUY validation target."
@@ -231,17 +231,17 @@
           5,
           10
         ],
-        "valid_distinct_cases": 86,
-        "model_positive_after_costs": 13,
-        "model_net_sda_total": -71.0901,
+        "valid_distinct_cases": 93,
+        "model_positive_after_costs": 14,
+        "model_net_sda_total": -78.5711,
         "positive_gate_counts": {
-          "lifecycle": 12,
-          "score": 12,
+          "lifecycle": 13,
+          "score": 13,
+          "quality": 10,
           "liquidity": 9,
-          "quality": 9,
-          "v31_activity": 7,
+          "v31_activity": 8,
+          "loss_circuit": 5,
           "late_spike": 4,
-          "loss_circuit": 4,
           "trades": 4,
           "buy_ratio": 2,
           "price_flow": 2
@@ -254,17 +254,17 @@
           15,
           25
         ],
-        "valid_distinct_cases": 92,
-        "model_positive_after_costs": 11,
-        "model_net_sda_total": -146.3476,
+        "valid_distinct_cases": 98,
+        "model_positive_after_costs": 12,
+        "model_net_sda_total": -192.5404,
         "positive_gate_counts": {
+          "score": 11,
+          "lifecycle": 10,
           "quality": 10,
-          "score": 10,
-          "lifecycle": 9,
-          "loss_circuit": 7,
+          "loss_circuit": 8,
           "liquidity": 6,
+          "v31_activity": 4,
           "buy_ratio": 3,
-          "v31_activity": 3,
           "impulse": 2,
           "late_spike": 2,
           "trades": 2
@@ -277,16 +277,16 @@
           60,
           75
         ],
-        "valid_distinct_cases": 89,
-        "model_positive_after_costs": 17,
-        "model_net_sda_total": -97.3572,
+        "valid_distinct_cases": 100,
+        "model_positive_after_costs": 18,
+        "model_net_sda_total": -112.1159,
         "positive_gate_counts": {
-          "score": 15,
-          "quality": 13,
-          "lifecycle": 11,
-          "liquidity": 11,
-          "loss_circuit": 9,
-          "v31_activity": 8,
+          "score": 16,
+          "quality": 14,
+          "lifecycle": 12,
+          "liquidity": 12,
+          "loss_circuit": 10,
+          "v31_activity": 9,
           "trades": 6,
           "impulse": 5,
           "late_spike": 3,
@@ -301,15 +301,15 @@
   "objective": "net SDA at first 60m observed quote after 2.2% roundtrip model cost",
   "limitation": "no fill or intrabar peak assumed; 4h/token de-correlation; new rule requires untouched forward shadow",
   "train": {
-    "samples": 62,
-    "unique_tokens": 41,
-    "net_sda_model": -63.38476,
-    "mean_sda_model": -1.02233,
-    "profit_factor_model": 0.4214,
-    "max_drawdown_sda_model": 63.3848,
-    "win_rate_pct_model": 17.74
+    "samples": 66,
+    "unique_tokens": 43,
+    "net_sda_model": -73.64607,
+    "mean_sda_model": -1.11585,
+    "profit_factor_model": 0.3854,
+    "max_drawdown_sda_model": 73.6461,
+    "win_rate_pct_model": 16.67
   },
-  "validation_sample_count": 29,
+  "validation_sample_count": 32,
   "status": "NO_PROFITABLE_TRAIN_RULE",
   "candidate": null,
   "eligible_unmodified_train": {
@@ -331,7 +331,7 @@
     "win_rate_pct_model": 0.0
   },
   "tested_rules": 345,
-  "source_candidate_archive_updated_at": "2026-10-16T06:40:38.756258+00:00",
+  "source_candidate_archive_updated_at": "2026-10-16T07:46:38.622283+00:00",
   "source_candidate_archive_method": "paper_observed_quotes_not_executable_backtest",
-  "updated_at": "2026-10-16T06:41:11.467129+00:00"
+  "updated_at": "2026-10-16T07:47:09.020293+00:00"
 }
