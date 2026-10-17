@@ -10,6 +10,7 @@ on:
   workflow_run:
     workflows:
       - SDA Scanner V18
+      - Autonomous SDA Paper Agent
     types:
       - completed
   schedule:
@@ -127,8 +128,22 @@ jobs:
               --repo "${{ github.repository }}" \
               --ref main \
               -f run_reason=watchdog; then
-              echo 'Scanner workflow dispatched by watchdog.'
-              exit 0
+              echo 'Scanner dispatch accepted; checking that a worker appears.'
+              for check in $(seq 1 12); do
+                sleep 5
+                visible="$(timeout 20s gh run list \
+                  --workflow scanner_v18.yml \
+                  --repo "${{ github.repository }}" \
+                  --branch main --limit 20 --json status \
+                  --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending" or .status == "waiting" or .status == "requested")] | length' || echo 0)"
+                echo "Visible scanner workers: ${visible} (check ${check}/12)"
+                if [ "${visible}" -gt 0 ] 2>/dev/null; then
+                  echo 'Scanner restart verified.'
+                  exit 0
+                fi
+              done
+              echo '::error::Scanner dispatch accepted but no worker appeared within 60 seconds.'
+              exit 1
             fi
 
             if [ "$attempt" -lt 3 ]; then
