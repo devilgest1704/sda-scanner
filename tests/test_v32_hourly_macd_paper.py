@@ -183,7 +183,8 @@ class MacdRealPaperDecisionIntegration(unittest.TestCase):
         # Isolate the actual V30 gate from dynamic lifecycle/network and
         # independently verify that MACD alone changes BUY eligibility.
         prev={"m1": 0, "m15": 0, "flow": 0, "vol": 100, "price": .99, "trades": 12}
-        with (patch.object(v30, "score", return_value=(c, 90, 90, 12, "CONFIRMATION")),
+        with (patch.object(v30, "PAPER_BUY_MODE", "baseline"),
+              patch.object(v30, "score", return_value=(c, 90, 90, 12, "CONFIRMATION")),
               patch.object(v30, "entry_gate", return_value={
                   "buy": True, "entry_impulse": 12,
                   "liquidity_ok": True, "price_flow_ok": True, "ratio": 1.0}),

@@ -54,7 +54,8 @@ class PaperTelemetryTests(unittest.TestCase):
         config = {"entry_score": 68.0, "quality": 52.0, "impulse": 8.0,
                   "buy_ratio": 1.10, "trades": 5}
         history = {"0xtest": {"last": dict(metrics), "prev": dict(metrics), "fresh": True}}
-        with patch.object(v30, "score", return_value=(metrics, 69.9, 68.2, 1.7, "IGNITION")), \
+        with patch.object(v30, "PAPER_BUY_MODE", "baseline"), \
+             patch.object(v30, "score", return_value=(metrics, 69.9, 68.2, 1.7, "IGNITION")), \
              patch.object(v30, "cooldown_active", return_value=False), \
              patch.object(v30, "load_agent_config", return_value=config), \
              patch.object(v30, "load_state", return_value={"history": history}):

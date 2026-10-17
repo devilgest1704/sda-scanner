@@ -104,7 +104,8 @@ class PaperLossCircuitTests(unittest.TestCase):
            "buy_ratio":3.0,"trade_ratio":2.0,
            "data_age_sec":0,"last_transaction":AT.isoformat()}
         previous={"m1":0,"m15":0,"flow":0,"vol":100,"price":.99,"trades":12}
-        with (patch.object(v30, "score", return_value=(c, 90, 90, 12, "CONFIRMATION")),
+        with (patch.object(v30, "PAPER_BUY_MODE", "baseline"),
+              patch.object(v30, "score", return_value=(c, 90, 90, 12, "CONFIRMATION")),
               patch.object(v30, "entry_gate", return_value={
                   "buy":True,"entry_impulse":12,"liquidity_ok":True,
                   "price_flow_ok":True,"ratio":1.0}),
