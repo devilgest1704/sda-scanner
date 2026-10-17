@@ -2,15 +2,15 @@
   "mode": "OBSERVED_QUOTE_HYPOTHESIS_NO_EXECUTION_PARITY",
   "paper_only": true,
   "can_promote_champion": false,
-  "sample_count": 211,
+  "sample_count": 215,
   "archived_candidate_snapshots": 5000,
-  "candidate_snapshots_with_60m_quote": 2747,
-  "excluded_from_causal_learning": 2536,
+  "candidate_snapshots_with_60m_quote": 2748,
+  "excluded_from_causal_learning": 2533,
   "input_quality": {
     "rejection_counts": {
-      "invalid_or_missing_quote_time": 3930,
-      "missing_frozen_features": 3930,
-      "no_60m_followup_observed": 491,
+      "invalid_or_missing_quote_time": 3918,
+      "missing_frozen_features": 3918,
+      "no_60m_followup_observed": 496,
       "late_followup_75_to_120_minutes": 61,
       "already_eligible_not_missed": 29
     },
@@ -19,13 +19,13 @@
     },
     "legacy_frozen_age_recoverable": 0,
     "maturity_stages": {
-      "with_original_quote_and_features": 1041,
-      "with_fresh_entry_quote": 1041,
-      "with_strict_60_to_75m_exit_quote": 489,
-      "with_strict_exit_and_full_features": 476
+      "with_original_quote_and_features": 1053,
+      "with_fresh_entry_quote": 1053,
+      "with_strict_60_to_75m_exit_quote": 496,
+      "with_strict_exit_and_full_features": 483
     },
-    "latest_original_candidate_at": "2026-10-17T19:03:44.060211+00:00",
-    "latest_strict_matured_candidate_at": "2026-10-17T17:32:54.600108+00:00",
+    "latest_original_candidate_at": "2026-10-17T20:10:56.438266+00:00",
+    "latest_strict_matured_candidate_at": "2026-10-17T19:20:55.116322+00:00",
     "missing_quote_schema_examples": [
       {
         "row_keys": [
@@ -72,19 +72,20 @@
           "gates",
           "id",
           "impulse",
+          "observed_peak_240m",
           "outcomes",
           "quality",
           "score"
         ],
         "feature_keys": [],
-        "has_60m": false,
+        "has_60m": true,
         "has_original_age": false
       }
     ]
   },
   "missed_pump_examples": 12,
   "positive_theoretical_60m_sda_model_not_fills": 89.1132,
-  "negative_theoretical_60m_sda_model_not_fills": -477.1706,
+  "negative_theoretical_60m_sda_model_not_fills": -481.063,
   "gates_on_profitable_rejected_candidates": {
     "score": 10,
     "liquidity": 9,
@@ -101,39 +102,39 @@
   "gates_on_loss_making_rejected_candidates": {
     "score": 138,
     "lifecycle": 118,
-    "v31_activity": 109,
+    "v31_activity": 113,
     "loss_circuit": 103,
     "quality": 95,
     "liquidity": 73,
     "trades": 53,
     "impulse": 31,
     "late_spike": 24,
+    "temporal_recovery": 19,
     "buy_ratio": 15,
-    "temporal_recovery": 15,
-    "cooldown": 6
+    "cooldown": 7
   },
   "potential_240m_peak_examples": 32,
   "observed_4h_pump_research": {
     "source": "actual_observed_swaps_original_frozen_rejected_decisions",
     "paper_only": true,
     "executable_peak_fills": false,
-    "distinct_observed_4h_peaks": 385,
-    "observed_peak_ge_10_pct": 47,
-    "observed_peak_ge_25_pct": 18,
+    "distinct_observed_4h_peaks": 393,
+    "observed_peak_ge_10_pct": 48,
+    "observed_peak_ge_25_pct": 19,
     "observed_peak_ge_50_pct": 10,
     "blocking_gates_ge_10_pct": {
       "score": 40,
       "lifecycle": 36,
       "liquidity": 35,
+      "v31_activity": 31,
       "quality": 30,
-      "v31_activity": 30,
+      "late_spike": 22,
       "loss_circuit": 22,
-      "late_spike": 21,
       "trades": 18,
       "buy_ratio": 8,
       "impulse": 6,
       "price_flow": 6,
-      "cooldown": 3
+      "temporal_recovery": 4
     },
     "examples": [
       {
@@ -252,20 +253,20 @@
           15,
           25
         ],
-        "valid_distinct_cases": 217,
-        "model_positive_after_costs": 27,
-        "model_net_sda_total": -416.7989,
+        "valid_distinct_cases": 222,
+        "model_positive_after_costs": 29,
+        "model_net_sda_total": -415.138,
         "positive_gate_counts": {
           "score": 22,
           "quality": 19,
           "lifecycle": 18,
+          "v31_activity": 16,
           "liquidity": 14,
-          "v31_activity": 14,
           "loss_circuit": 12,
+          "late_spike": 7,
           "trades": 7,
           "impulse": 5,
-          "late_spike": 5,
-          "buy_ratio": 3
+          "temporal_recovery": 5
         },
         "research_only": true,
         "cannot_promote_champion": true
@@ -275,9 +276,9 @@
           60,
           75
         ],
-        "valid_distinct_cases": 206,
+        "valid_distinct_cases": 210,
         "model_positive_after_costs": 32,
-        "model_net_sda_total": -361.9735,
+        "model_net_sda_total": -365.8659,
         "positive_gate_counts": {
           "score": 27,
           "lifecycle": 24,
@@ -299,15 +300,15 @@
   "objective": "net SDA at first 60m observed quote after 2.2% roundtrip model cost",
   "limitation": "no fill or intrabar peak assumed; 4h/token de-correlation; new rule requires untouched forward shadow",
   "train": {
-    "samples": 144,
-    "unique_tokens": 63,
-    "net_sda_model": -209.05988,
-    "mean_sda_model": -1.4518,
-    "profit_factor_model": 0.278,
-    "max_drawdown_sda_model": 209.0599,
-    "win_rate_pct_model": 17.36
+    "samples": 149,
+    "unique_tokens": 65,
+    "net_sda_model": -203.77687,
+    "mean_sda_model": -1.36763,
+    "profit_factor_model": 0.3182,
+    "max_drawdown_sda_model": 218.3819,
+    "win_rate_pct_model": 17.45
   },
-  "validation_sample_count": 64,
+  "validation_sample_count": 65,
   "status": "NO_PROFITABLE_TRAIN_RULE",
   "candidate": null,
   "eligible_unmodified_train": {
@@ -329,7 +330,7 @@
     "win_rate_pct_model": 50.0
   },
   "tested_rules": 345,
-  "source_candidate_archive_updated_at": "2026-10-17T19:05:29.546348+00:00",
+  "source_candidate_archive_updated_at": "2026-10-17T20:39:51.213706+00:00",
   "source_candidate_archive_method": "paper_observed_quotes_not_executable_backtest",
-  "updated_at": "2026-10-17T19:06:03.511542+00:00"
+  "updated_at": "2026-10-17T20:40:24.389148+00:00"
 }
