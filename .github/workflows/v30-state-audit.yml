@@ -46,6 +46,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_*telemetry.py'
       - name: Test no-BUY root-cause attribution without modifying trading
         run: python -m unittest discover -s tests -p 'test_no_buy_diagnostic.py' -v
+      - name: Test isolated temporal PAPER trial safety and accounting
+        run: python -m unittest discover -s tests -p 'test_temporal_paper_trial.py' -v
       - name: Verify real BUY blockers against current PAPER ledger and market
         run: python -m tools.no_buy_diagnostic --output v30_no_buy_diagnostic.json
       - name: Generate paper trade telemetry report
