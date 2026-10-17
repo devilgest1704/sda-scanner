@@ -31,7 +31,7 @@ if ! [[ "$OPTIMIZER_INTERVAL" =~ ^[0-9]+$ ]] || [ "$OPTIMIZER_INTERVAL" -lt 900 
   exit 1
 fi
 
-STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json v30_no_buy_diagnostic.json strategy_lab/candidate_outcomes.json strategy_lab/missed_pump_learning.json strategy_lab/forward_shadow_state.json strategy_lab/evolution_state.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json"
+STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json v30_no_buy_diagnostic.json strategy_lab/candidate_outcomes.json strategy_lab/missed_pump_learning.json strategy_lab/forward_shadow_state.json strategy_lab/evolution_state.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json strategy_lab/temporal_paper_trial.json strategy_lab/temporal_paper_trial_report.json"
 
 ensure_json_state() {
   python - <<'PY'
@@ -320,6 +320,12 @@ PY
   if ! python -m tools.forward_shadow_agent; then
     echo "::warning::Forward paper learning skipped this scan; existing state preserved."
   fi
+  # Isolated PAPER experimental lane follows only newly-observed temporal
+  # recovery Shadow signals. Its ledger is separate from positions.json.
+  # Preserve main paper stop/exit evaluation even on trial failures.
+  if ! python -m tools.temporal_paper_trial; then
+    echo "::warning::Temporal PAPER trial unavailable; Champion ledger and stops unchanged." >&2
+  fi
   run_timed_stage training_data python tools/v30_collect_training_data.py
   # Research-only: join this cycle's fresh market quotes to prior candidate
   # decisions, and persist the archive with the scanner checkpoint.
@@ -349,7 +355,7 @@ PY
 python -m tools.paper_state_guard
 
 # Compile once per worker, not once per minute.
-python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py v30_pump_hunter.py
+python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py v30_pump_hunter.py tools/temporal_paper_trial.py
 find . -type d -name __pycache__ -prune -exec rm -rf {} +
 
 echo "🔄 CONTINUOUS SDA SCANNER"
