@@ -24,7 +24,9 @@ permissions:
 
 concurrency:
   group: sda-scanner-watchdog
-  cancel-in-progress: true
+  # A new push or schedule must not cancel a watchdog midway through replacing
+  # an expired scanner, as that can strand the only paper-state worker.
+  cancel-in-progress: false
 
 jobs:
   dispatch-scanner:
