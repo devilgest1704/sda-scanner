@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from tools.missed_pump_learning import safe_missed_entry
+from tools.temporal_recovery_signal import temporal_recovery_match
 from tools.v33_flow_continuation import observed_flow_signal
 from tools.v33_cost_aware_breakout import (cost_aware_breakout_signal,
                                            SIDE_FRICTION as V33_SIDE_FRICTION,
@@ -298,23 +299,7 @@ def evaluate_temporal_recovery(state, candidates, at_time):
         present_trades=finite(candidate.get("trades_1h"))
         present_ratio=finite(candidate.get("buy_ratio"))
         current_lane=candidate.get("phase")
-        if (prior_at is not None and prior_quote is not None and
-                prior_age is not None and prior_score is not None and
-                prior_impulse is not None and prior.get("phase") in
-                ("IGNITION","CONFIRMATION") and
-                prior_score>=68 and prior_impulse>=8 and 300<prior_age<=900
-                and 0<(decision-prior_at).total_seconds()<=600
-                and quoted>prior_quote and quoted<=decision
-                and current_age<=300 and
-                current_lane in ("IGNITION","CONFIRMATION")
-                and all(v is not None for v in (
-                    present_score,present_impulse,present_quality,present_m1h,
-                    present_m15,present_volume,present_flow,present_trades,present_ratio))
-                and present_score>=64 and present_quality>=60 and
-                present_impulse>=4 and 0<=present_m1h<=12
-                and present_m15>=(1.5 if current_lane=="CONFIRMATION" else .8)
-                and present_volume>=500 and present_flow>=150 and
-                present_trades>=12 and present_ratio>=1.2):
+        if temporal_recovery_match(prior, candidate, at_time):
             n_recovered+=1
             candidate["research_temporal_recovery_ready"]=True
             events.append({
