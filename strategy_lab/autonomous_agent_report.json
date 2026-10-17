@@ -1,6 +1,6 @@
 {
   "version": "FORWARD-PAPER-AGENT-1",
-  "updated_at": "2026-10-17T20:57:44.587139+00:00",
+  "updated_at": "2026-10-17T22:03:44.929059+00:00",
   "mode": "PAPER_ONLY",
   "objective": "maximize accumulated net SDA subject to observed quote risk",
   "real_trading": false,
@@ -68,17 +68,17 @@
       "mode": "RESEARCH_ONLY",
       "paper_champion_unchanged": true,
       "measured": 40,
-      "has_observed_market_data": 0,
+      "has_observed_market_data": 1,
       "observed_pressure_ready": 0,
       "eligible_after_common_shadow_gates": 0,
       "fresh_price_quote_ready": 0,
       "rejections": {
-        "stale_or_future_quote": 40,
-        "insufficient_observed_swaps": 39,
-        "weak_trade_activity": 39,
-        "missing_or_overheated_momentum": 38,
+        "missing_or_overheated_momentum": 39,
+        "stale_or_future_quote": 39,
         "weak_recent_buy_pressure": 38,
-        "late_four_hour_chase": 13
+        "insufficient_observed_swaps": 37,
+        "weak_trade_activity": 37,
+        "late_four_hour_chase": 10
       },
       "pool_liquidity_verified": false,
       "execution_parity_verified": false
@@ -104,13 +104,13 @@
       "fresh_quote_ready": 0,
       "rejections": {
         "missing_observed_breakout_features": 38,
-        "missing_same_scan_breakout": 36,
-        "original_breakout_entry_not_eligible": 4,
-        "insufficient_observed_turnover": 2,
-        "weak_activity_acceleration": 2,
+        "missing_same_scan_breakout": 37,
+        "original_breakout_entry_not_eligible": 3,
+        "too_late_or_no_early_breakout": 2,
         "weak_buy_pressure": 2,
-        "too_late_or_no_early_breakout": 1,
-        "wide_consolidation": 1
+        "already_reversing": 1,
+        "insufficient_observed_turnover": 1,
+        "weak_activity_acceleration": 1
       },
       "modeled_friction_per_side_pct": 1.5,
       "execution_parity_verified": false
@@ -123,7 +123,7 @@
     "paper_exits": "V30 emergency stop, adaptive trailing, early weakness, pump breakdown and stale",
     "warning": "Unmatched exit models cannot validate promotion until independent parity tests pass"
   },
-  "source_last_scan_at": "2026-10-17T20:57:16.093575+00:00",
+  "source_last_scan_at": "2026-10-17T22:03:16.942587+00:00",
   "strategies": {
     "baseline": {
       "all": {
@@ -476,17 +476,17 @@
   "rollback_applied": false,
   "missed_pump_learning": {
     "status": "NO_PROFITABLE_TRAIN_RULE",
-    "updated_at": "2026-10-17T20:57:43.841708+00:00",
-    "source_candidate_archive_at": "2026-10-17T20:56:51.768680+00:00",
+    "updated_at": "2026-10-17T22:03:44.157856+00:00",
+    "source_candidate_archive_at": "2026-10-17T22:02:52.171023+00:00",
     "source_age_minutes": 0.9,
     "source_fresh": true,
     "archived_candidates": 5000,
-    "with_60m_quote": 2749,
+    "with_60m_quote": 2742,
     "input_quality": {
       "rejection_counts": {
-        "invalid_or_missing_quote_time": 3916,
-        "missing_frozen_features": 3916,
-        "no_60m_followup_observed": 496,
+        "invalid_or_missing_quote_time": 3902,
+        "missing_frozen_features": 3902,
+        "no_60m_followup_observed": 509,
         "late_followup_75_to_120_minutes": 61,
         "already_eligible_not_missed": 29
       },
@@ -495,14 +495,32 @@
       },
       "legacy_frozen_age_recoverable": 0,
       "maturity_stages": {
-        "with_original_quote_and_features": 1055,
-        "with_fresh_entry_quote": 1055,
-        "with_strict_60_to_75m_exit_quote": 498,
-        "with_strict_exit_and_full_features": 485
+        "with_original_quote_and_features": 1069,
+        "with_fresh_entry_quote": 1069,
+        "with_strict_60_to_75m_exit_quote": 499,
+        "with_strict_exit_and_full_features": 486
       },
-      "latest_original_candidate_at": "2026-10-17T20:53:16.048432+00:00",
-      "latest_strict_matured_candidate_at": "2026-10-17T19:40:55.365972+00:00",
+      "latest_original_candidate_at": "2026-10-17T21:53:16.395405+00:00",
+      "latest_strict_matured_candidate_at": "2026-10-17T20:00:55.911789+00:00",
       "missing_quote_schema_examples": [
+        {
+          "row_keys": [
+            "address",
+            "at",
+            "eligible",
+            "entry_price_sda",
+            "gates",
+            "id",
+            "impulse",
+            "observed_peak_240m",
+            "outcomes",
+            "quality",
+            "score"
+          ],
+          "feature_keys": [],
+          "has_60m": true,
+          "has_original_age": false
+        },
         {
           "row_keys": [
             "address",
@@ -538,24 +556,6 @@
           "feature_keys": [],
           "has_60m": false,
           "has_original_age": false
-        },
-        {
-          "row_keys": [
-            "address",
-            "at",
-            "eligible",
-            "entry_price_sda",
-            "gates",
-            "id",
-            "impulse",
-            "observed_peak_240m",
-            "outcomes",
-            "quality",
-            "score"
-          ],
-          "feature_keys": [],
-          "has_60m": true,
-          "has_original_age": false
         }
       ]
     },
@@ -565,7 +565,7 @@
       "source": "actual_observed_swaps_original_frozen_rejected_decisions",
       "paper_only": true,
       "executable_peak_fills": false,
-      "distinct_observed_4h_peaks": 393,
+      "distinct_observed_4h_peaks": 401,
       "observed_peak_ge_10_pct": 48,
       "observed_peak_ge_25_pct": 19,
       "observed_peak_ge_50_pct": 10,
@@ -677,9 +677,9 @@
             5,
             10
           ],
-          "valid_distinct_cases": 196,
+          "valid_distinct_cases": 197,
           "model_positive_after_costs": 26,
-          "model_net_sda_total": -283.8241,
+          "model_net_sda_total": -284.6698,
           "positive_gate_counts": {
             "score": 24,
             "lifecycle": 21,
@@ -700,9 +700,9 @@
             15,
             25
           ],
-          "valid_distinct_cases": 222,
+          "valid_distinct_cases": 226,
           "model_positive_after_costs": 29,
-          "model_net_sda_total": -415.138,
+          "model_net_sda_total": -422.465,
           "positive_gate_counts": {
             "score": 22,
             "quality": 19,
@@ -751,7 +751,7 @@
     "reason": "Train/holdout selects a rule; new forward Shadow must prove net SDA; unmatched exits prohibit auto PAPER promotion."
   },
   "temporal_recovery_research": {
-    "source_at": "2026-10-17T20:57:16.093575+00:00",
+    "source_at": "2026-10-17T22:03:16.942587+00:00",
     "total_recovered": 6,
     "recent_examples": [
       {
@@ -804,7 +804,7 @@
   },
   "scanner_no_buy": {
     "assessment": "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED",
-    "checked_at": "2026-10-17T20:57:18.270096+00:00",
+    "checked_at": "2026-10-17T22:03:19.218321+00:00",
     "audit_fresh": true,
     "audit_age_minutes": 0.4,
     "risk_blocked": false,
@@ -812,65 +812,65 @@
     "loss_window_closed": 10,
     "projected_recovery_at_no_new_closes": null,
     "risk_only_buy_ready": false,
-    "fresh_tokens": 11,
+    "fresh_tokens": 16,
     "champion_ready": 0,
     "paper_buy_rules_modified": false
   },
   "incumbent_policy": "baseline",
   "quote_coverage_pct": {
-    "baseline": 73.17,
-    "quality": 72.84,
-    "momentum": 74.6,
+    "baseline": 72.29,
+    "quality": 71.95,
+    "momentum": 73.44,
     "selective": 82.61,
     "score": 77.59,
-    "quality_plus": 74.03,
+    "quality_plus": 73.08,
     "research_watch": 82.5,
     "research_watch_strict": 84.62,
     "research_macd_antipump": 0.0,
     "research_macd_confirmation": 0.0,
     "research_breakout_volume_trend": 86.96,
     "research_sparse_volume_ignition": 0.0,
-    "research_trend_runner": 59.62,
+    "research_trend_runner": 58.49,
     "research_temporal_recovery": 100.0,
     "research_v33_flow_continuation": 80.0,
     "research_v33_cost_aware_breakout": 60.0
   },
   "learning_data_quality": {
     "baseline": {
-      "total_closed": 82,
+      "total_closed": 83,
       "valid_closed": 60,
-      "excluded_closed": 22,
+      "excluded_closed": 23,
       "excluded_by_reason": {
         "legacy_unknown_quote_quality": 4,
-        "quote_gap_over_30m": 17,
+        "quote_gap_over_30m": 18,
         "holding_time_over_4_5h": 5,
-        "holding_time_over_max_plus_30m": 3,
+        "holding_time_over_max_plus_30m": 4,
         "stale_timeout_no_observed_exit_quote": 1
       },
       "open_virtual_positions": 2
     },
     "quality": {
-      "total_closed": 81,
+      "total_closed": 82,
       "valid_closed": 59,
-      "excluded_closed": 22,
+      "excluded_closed": 23,
       "excluded_by_reason": {
         "legacy_unknown_quote_quality": 4,
-        "quote_gap_over_30m": 17,
+        "quote_gap_over_30m": 18,
         "holding_time_over_4_5h": 5,
-        "holding_time_over_max_plus_30m": 3,
+        "holding_time_over_max_plus_30m": 4,
         "stale_timeout_no_observed_exit_quote": 1
       },
       "open_virtual_positions": 2
     },
     "momentum": {
-      "total_closed": 63,
+      "total_closed": 64,
       "valid_closed": 47,
-      "excluded_closed": 16,
+      "excluded_closed": 17,
       "excluded_by_reason": {
         "legacy_unknown_quote_quality": 4,
-        "quote_gap_over_30m": 11,
+        "quote_gap_over_30m": 12,
         "holding_time_over_4_5h": 2,
-        "holding_time_over_max_plus_30m": 3,
+        "holding_time_over_max_plus_30m": 4,
         "stale_timeout_no_observed_exit_quote": 1
       },
       "open_virtual_positions": 2
@@ -886,7 +886,7 @@
         "stale_timeout_no_observed_exit_quote": 1,
         "holding_time_over_max_plus_30m": 1
       },
-      "open_virtual_positions": 0
+      "open_virtual_positions": 1
     },
     "score": {
       "total_closed": 58,
@@ -898,17 +898,17 @@
         "holding_time_over_4_5h": 2,
         "holding_time_over_max_plus_30m": 2
       },
-      "open_virtual_positions": 1
+      "open_virtual_positions": 2
     },
     "quality_plus": {
-      "total_closed": 77,
+      "total_closed": 78,
       "valid_closed": 57,
-      "excluded_closed": 20,
+      "excluded_closed": 21,
       "excluded_by_reason": {
         "legacy_unknown_quote_quality": 3,
-        "quote_gap_over_30m": 16,
+        "quote_gap_over_30m": 17,
         "holding_time_over_4_5h": 4,
-        "holding_time_over_max_plus_30m": 3,
+        "holding_time_over_max_plus_30m": 4,
         "stale_timeout_no_observed_exit_quote": 1
       },
       "open_virtual_positions": 2
@@ -919,8 +919,8 @@
       "excluded_closed": 7,
       "excluded_by_reason": {
         "legacy_unknown_quote_quality": 1,
-        "holding_time_over_4_5h": 2,
-        "quote_gap_over_30m": 6
+        "quote_gap_over_30m": 6,
+        "holding_time_over_4_5h": 2
       },
       "open_virtual_positions": 0
     },
@@ -929,8 +929,8 @@
       "valid_closed": 11,
       "excluded_closed": 2,
       "excluded_by_reason": {
-        "holding_time_over_4_5h": 1,
-        "quote_gap_over_30m": 2
+        "quote_gap_over_30m": 2,
+        "holding_time_over_4_5h": 1
       },
       "open_virtual_positions": 0
     },
@@ -955,19 +955,19 @@
       "valid_closed": 20,
       "excluded_closed": 3,
       "excluded_by_reason": {
-        "holding_time_over_4_5h": 1,
         "quote_gap_over_30m": 3,
+        "holding_time_over_4_5h": 1,
         "holding_time_over_max_plus_30m": 1
       },
       "open_virtual_positions": 0
     },
     "research_trend_runner": {
-      "total_closed": 52,
+      "total_closed": 53,
       "valid_closed": 31,
-      "excluded_closed": 21,
+      "excluded_closed": 22,
       "excluded_by_reason": {
-        "runner_observation_gap_over_30m": 21,
-        "runner_holding_time_overrun": 6
+        "runner_observation_gap_over_30m": 22,
+        "runner_holding_time_overrun": 7
       },
       "open_virtual_positions": 2
     },
@@ -976,8 +976,8 @@
       "valid_closed": 0,
       "excluded_closed": 1,
       "excluded_by_reason": {
-        "holding_time_over_max_plus_30m": 1,
-        "quote_gap_over_30m": 1
+        "quote_gap_over_30m": 1,
+        "holding_time_over_max_plus_30m": 1
       },
       "open_virtual_positions": 0
     },
@@ -993,8 +993,8 @@
       "valid_closed": 8,
       "excluded_closed": 2,
       "excluded_by_reason": {
-        "holding_time_over_max_plus_30m": 1,
-        "quote_gap_over_30m": 2
+        "quote_gap_over_30m": 2,
+        "holding_time_over_max_plus_30m": 1
       },
       "open_virtual_positions": 0
     },
@@ -1003,8 +1003,8 @@
       "valid_closed": 3,
       "excluded_closed": 2,
       "excluded_by_reason": {
-        "holding_time_over_max_plus_30m": 2,
-        "quote_gap_over_30m": 2
+        "quote_gap_over_30m": 2,
+        "holding_time_over_max_plus_30m": 2
       },
       "open_virtual_positions": 0
     }
