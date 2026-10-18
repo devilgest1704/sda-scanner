@@ -124,3 +124,64 @@ def evaluate(address, current, *, at=None, previous=None):
         "previous_impulse": previous_impulse,
         "previous_data_age_sec": previous_age,
     }
+
+
+def evaluate_fresh_confirmation(current, *, at=None):
+    """Guarded PAPER-only second entry lane when temporal recovery is absent.
+
+    This is NOT a profit prediction. It admits only a newly observed, actively
+    traded quote showing early momentum, flow and buy-side confirmation.
+    The caller must still apply cooldown, completed-hour MACD veto, position
+    limits, legacy exits and the 24-hour realized-loss circuit.
+    """
+    base = {"ready": False, "reason": "missing_current_metrics",
+            "source": "fresh_momentum_confirmation"}
+    if not isinstance(current, dict):
+        return base
+    now = at if at is not None else datetime.now(timezone.utc)
+    if not isinstance(now, datetime) or now.tzinfo is None:
+        return {**base, "reason": "invalid_clock"}
+    now = now.astimezone(timezone.utc)
+    quote = stamp(current.get("quote_at"))
+    age = num(current.get("data_age_sec"))
+    price = num(current.get("price_sda"))
+    fields = ("score", "quality", "impulse", "delta_impulse", "m1h", "m15",
+              "m4h", "volume_1h", "flow_1h", "flow_15m", "trades_1h",
+              "buy_ratio")
+    m = {k: num(current.get(k)) for k in fields}
+    if any(v is None for v in m.values()) or price is None or price <= 0:
+        return base
+    if (quote is None or quote > now or age is None or not 0 <= age <= 180
+            or abs((now-quote).total_seconds()-age) > 30):
+        return {**base, "reason": "no_fresh_observed_swap"}
+    phase = current.get("phase")
+    if phase not in ("IGNITION", "CONFIRMATION"):
+        return {**base, "reason": "requires_ignition_or_confirmation"}
+    if (current.get("fresh_transition") is not True
+            or m["delta_impulse"] < 4):
+        return {**base, "reason": "no_new_momentum_transition"}
+    if not (0 < m["m1h"] <= 10 and 1.5 <= m["m15"] <= 8
+            and m["m4h"] >= -0.25 and
+            (phase != "CONFIRMATION" or m["m15"] >= 2)):
+        return {**base, "reason": "momentum_outside_early_entry_window"}
+    if (m["score"] < 76 or m["quality"] < 63 or m["impulse"] < 8):
+        return {**base, "reason": "momentum_quality_not_confirmed"}
+    if m["trades_1h"] >= 12:
+        activity = (m["volume_1h"] >= 650 and m["flow_1h"] >= 180
+                    and m["flow_15m"] >= 60 and m["buy_ratio"] >= 1.35)
+    elif m["trades_1h"] >= 10:
+        activity = (m["volume_1h"] >= 700 and m["flow_1h"] >= 210
+                    and m["flow_15m"] >= 70 and m["buy_ratio"] >= 1.45)
+    elif m["trades_1h"] >= 8:
+        activity = (m["score"] >= 84 and m["quality"] >= 72
+                    and m["delta_impulse"] >= 8 and
+                    m["volume_1h"] >= 900 and m["flow_1h"] >= 300
+                    and m["flow_15m"] >= 100 and m["buy_ratio"] >= 1.65)
+    else:
+        activity = False
+    if not activity or m["flow_1h"] / max(m["volume_1h"], 1) < .22:
+        return {**base, "reason": "insufficient_real_buy_flow_or_liquidity"}
+    return {"ready": True, "reason": "FRESH_MOMENTUM_CONFIRMED",
+            "source": "fresh_momentum_confirmation",
+            "quote_at": quote.isoformat(), "data_age_sec": age,
+            "trades_1h": m["trades_1h"], "observed_score": m["score"]}
