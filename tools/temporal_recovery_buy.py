@@ -124,3 +124,102 @@ def evaluate(address, current, *, at=None, previous=None):
         "previous_impulse": previous_impulse,
         "previous_data_age_sec": previous_age,
     }
+
+
+def evaluate_continuation(address, current, *, at=None, previous=None):
+    """Second PAPER entry lane: two independently observed, *fresh* swap quotes.
+
+    The previous scanner scan must show an already forming IGNITION/CONFIRMATION
+    with positive impulse. The NEW scan must strengthen that signal, including
+    price follow-through and current buy-side liquidity. Strictly forward-only:
+    neither an earlier stale recovery signal nor a single isolated spike can
+    authorize this lane. The main PAPER loss circuit, MACD veto and cooldown
+    are applied by the caller, never bypassed here.
+    """
+    answer = {"ready": False, "reason": "no_confirmed_fresh_continuation",
+              "source": "research_temporal_recovery",
+              "lane": "confirmed_continuation", "prior_quote_at": None}
+    if not isinstance(current, dict):
+        return {**answer, "reason": "missing_current_candidate"}
+    prior = previous if previous is not None else previous_signals().get(str(address).lower())
+    if not isinstance(prior, dict):
+        return {**answer, "reason": "missing_prior_frozen_signal"}
+    now = at if at is not None else datetime.now(timezone.utc)
+    if not isinstance(now, datetime) or now.tzinfo is None:
+        return {**answer, "reason": "invalid_clock"}
+    now = now.astimezone(timezone.utc)
+    previous_decision = stamp(prior.get("decision_at"))
+    previous_quote = stamp(prior.get("quote_at"))
+    current_quote = stamp(current.get("quote_at"))
+    prior_age = num(prior.get("data_age_sec"))
+    prior_price = num(prior.get("price_sda"))
+    prior_score = num(prior.get("score"))
+    prior_impulse = num(prior.get("impulse"))
+    age = num(current.get("data_age_sec"))
+    price = num(current.get("price_sda"))
+    fields = ("score", "quality", "impulse", "m1h", "m15",
+              "volume_1h", "flow_1h", "flow_15m", "trades_1h", "buy_ratio")
+    v = {key: num(current.get(key)) for key in fields}
+    if (previous_decision is None or previous_quote is None
+            or current_quote is None or prior_age is None
+            or prior_price is None or prior_price <= 0
+            or prior_score is None or prior_impulse is None
+            or age is None or price is None or price <= 0
+            or any(value is None for value in v.values())):
+        return {**answer, "reason": "incomplete_independent_quotes"}
+    if (prior.get("phase") not in ("IGNITION", "CONFIRMATION")
+            or prior_score < 62 or prior_impulse < 4
+            or not 0 <= prior_age <= 300
+            or not 0 <= (previous_decision - previous_quote).total_seconds() <= 300
+            or abs((previous_decision - previous_quote).total_seconds() - prior_age) > 30
+            or not 0 < (now - previous_decision).total_seconds() <= 480):
+        return {**answer, "reason": "prior_continuation_not_confirmed"}
+    if (current.get("phase") not in ("IGNITION", "CONFIRMATION")
+            or not 0 <= age <= 180
+            or not 0 <= (now - current_quote).total_seconds() <= 180
+            or abs((now - current_quote).total_seconds() - age) > 30
+            or current_quote <= previous_quote
+            or not 0 < (current_quote - previous_quote).total_seconds() <= 480
+            or not prior_price < price <= prior_price * 1.05):
+        return {**answer, "reason": "no_new_fresh_price_followthrough"}
+    strong = (
+        v["score"] >= 70 and v["quality"] >= 62 and v["impulse"] >= 6
+        and 1 <= v["m1h"] <= 10 and v["m15"] >= 1.5
+        and v["volume_1h"] >= 700 and v["flow_1h"] >= 220
+        and v["flow_15m"] >= 60 and v["trades_1h"] >= 8
+        and v["buy_ratio"] >= 1.4
+    )
+    # 8-11 trades are only admissible at materially stronger activity than
+    # 12+ trade signals; this is not a blanket relaxation of trade count.
+    if v["trades_1h"] < 12:
+        strong = (strong and v["volume_1h"] >= 900
+                  and v["flow_1h"] >= 300
+                  and v["flow_15m"] >= 80 and v["buy_ratio"] >= 1.6)
+    if not strong:
+        return {**answer, "reason": "continuation_strength_or_flow_insufficient"}
+    return {
+        "ready": True, "reason": "TWO_FRESH_QUOTES_CONFIRMED",
+        "source": "research_temporal_recovery",
+        "lane": "confirmed_continuation",
+        "prior_quote_at": previous_quote.isoformat(),
+        "current_quote_at": current_quote.isoformat(),
+        "previous_score": prior_score,
+        "previous_impulse": prior_impulse,
+        "previous_data_age_sec": prior_age,
+        "price_advance_pct": round((price / prior_price - 1) * 100, 4),
+    }
+
+
+def evaluate_paper(address, current, *, at=None, previous=None):
+    """Prefer original research recovery; otherwise test strong continuation.
+
+    Fail-closed when neither hypothesis has an independently validated signal.
+    This function never changes positions, trade exits or real trading.
+    """
+    recovery = evaluate(address, current, at=at, previous=previous)
+    if recovery["ready"]:
+        return {**recovery, "lane": "temporal_recovery"}
+    continuation = evaluate_continuation(address, current, at=at, previous=previous)
+    if continuation["ready"]:
+        return continuation
+    return {**recovery, "continuation_reason": continuation["reason"]}
