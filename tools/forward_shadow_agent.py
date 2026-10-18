@@ -335,6 +335,7 @@ def evaluate_temporal_recovery(state, candidates, at_time):
             "quote_at":quoted.isoformat(),
             "data_age_sec":current_age,
             "score":present_score,"impulse":present_impulse,
+            "price_sda":current_price,
             "phase":current_lane,
         }
     last={address:row for address,row in last.items()
