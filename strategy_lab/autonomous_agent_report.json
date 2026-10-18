@@ -1,10 +1,12 @@
 {
   "version": "FORWARD-PAPER-AGENT-1",
-  "updated_at": "2026-10-18T18:39:29.265484+00:00",
+  "updated_at": "2026-10-18T20:45:47.607765+00:00",
   "mode": "PAPER_ONLY",
   "objective": "maximize accumulated net SDA subject to observed quote risk",
   "real_trading": false,
-  "paper_config_automatic": true,
+  "paper_config_automatic": false,
+  "active_paper_buy_mode": "temporal_recovery",
+  "optimizer_targets_active_buy": false,
   "shadow_method": "forward observed quote fills, estimated friction, NOT real market execution",
   "v32_macd": {
     "mode": "RESEARCH_ONLY",
@@ -68,17 +70,17 @@
       "mode": "RESEARCH_ONLY",
       "paper_champion_unchanged": true,
       "measured": 40,
-      "has_observed_market_data": 1,
+      "has_observed_market_data": 3,
       "observed_pressure_ready": 0,
       "eligible_after_common_shadow_gates": 0,
       "fresh_price_quote_ready": 0,
       "rejections": {
-        "weak_recent_buy_pressure": 40,
-        "insufficient_observed_swaps": 39,
+        "insufficient_observed_swaps": 40,
+        "weak_trade_activity": 40,
         "missing_or_overheated_momentum": 39,
-        "stale_or_future_quote": 39,
-        "weak_trade_activity": 38,
-        "late_four_hour_chase": 5
+        "weak_recent_buy_pressure": 39,
+        "stale_or_future_quote": 37,
+        "late_four_hour_chase": 13
       },
       "pool_liquidity_verified": false,
       "execution_parity_verified": false
@@ -103,9 +105,13 @@
       "eligible_after_shadow_gates": 0,
       "fresh_quote_ready": 0,
       "rejections": {
-        "missing_observed_breakout_features": 40,
-        "missing_same_scan_breakout": 39,
-        "original_breakout_entry_not_eligible": 1
+        "missing_observed_breakout_features": 37,
+        "missing_same_scan_breakout": 36,
+        "original_breakout_entry_not_eligible": 4,
+        "too_late_or_no_early_breakout": 3,
+        "weak_activity_acceleration": 3,
+        "insufficient_observed_turnover": 2,
+        "weak_buy_pressure": 2
       },
       "modeled_friction_per_side_pct": 1.5,
       "execution_parity_verified": false
@@ -118,345 +124,8 @@
     "paper_exits": "V30 emergency stop, adaptive trailing, early weakness, pump breakdown and stale",
     "warning": "Unmatched exit models cannot validate promotion until independent parity tests pass"
   },
-  "source_last_scan_at": "2026-10-18T18:38:59.947160+00:00",
-  "strategies": {
-    "baseline": {
-      "all": {
-        "closed": 69,
-        "net_sda": -64.742,
-        "max_drawdown_sda": 66.6447,
-        "win_rate_pct": 24.64,
-        "profit_factor": 0.5018,
-        "unique_tokens": 29,
-        "last_closed_at": "2026-10-18T17:12:27+00:00"
-      },
-      "train": {
-        "closed": 51,
-        "net_sda": -55.2851,
-        "max_drawdown_sda": 66.6447,
-        "win_rate_pct": 21.57,
-        "profit_factor": 0.4562,
-        "unique_tokens": 22,
-        "last_closed_at": "2026-10-16T06:22:23+00:00"
-      },
-      "holdout_sample_count": 18
-    },
-    "quality": {
-      "all": {
-        "closed": 68,
-        "net_sda": -57.0092,
-        "max_drawdown_sda": 62.3296,
-        "win_rate_pct": 26.47,
-        "profit_factor": 0.546,
-        "unique_tokens": 29,
-        "last_closed_at": "2026-10-18T17:12:27+00:00"
-      },
-      "train": {
-        "closed": 50,
-        "net_sda": -53.768,
-        "max_drawdown_sda": 62.3296,
-        "win_rate_pct": 22.0,
-        "profit_factor": 0.4631,
-        "unique_tokens": 22,
-        "last_closed_at": "2026-10-16T06:22:23+00:00"
-      },
-      "holdout_sample_count": 18
-    },
-    "momentum": {
-      "all": {
-        "closed": 55,
-        "net_sda": -37.6946,
-        "max_drawdown_sda": 46.5399,
-        "win_rate_pct": 29.09,
-        "profit_factor": 0.639,
-        "unique_tokens": 26,
-        "last_closed_at": "2026-10-18T17:12:27+00:00"
-      },
-      "train": {
-        "closed": 40,
-        "net_sda": -34.8483,
-        "max_drawdown_sda": 46.5399,
-        "win_rate_pct": 25.0,
-        "profit_factor": 0.5824,
-        "unique_tokens": 19,
-        "last_closed_at": "2026-10-16T06:22:23+00:00"
-      },
-      "holdout_sample_count": 15
-    },
-    "selective": {
-      "all": {
-        "closed": 42,
-        "net_sda": -60.9782,
-        "max_drawdown_sda": 61.4993,
-        "win_rate_pct": 23.81,
-        "profit_factor": 0.3263,
-        "unique_tokens": 21,
-        "last_closed_at": "2026-10-18T13:33:14+00:00"
-      },
-      "train": {
-        "closed": 30,
-        "net_sda": -42.5734,
-        "max_drawdown_sda": 43.0945,
-        "win_rate_pct": 23.33,
-        "profit_factor": 0.3471,
-        "unique_tokens": 16,
-        "last_closed_at": "2026-10-16T06:22:23+00:00"
-      },
-      "holdout_sample_count": 12
-    },
-    "score": {
-      "all": {
-        "closed": 51,
-        "net_sda": -8.1497,
-        "max_drawdown_sda": 27.8665,
-        "win_rate_pct": 35.29,
-        "profit_factor": 0.9058,
-        "unique_tokens": 25,
-        "last_closed_at": "2026-10-18T13:33:14+00:00"
-      },
-      "train": {
-        "closed": 39,
-        "net_sda": -18.8591,
-        "max_drawdown_sda": 27.8665,
-        "win_rate_pct": 28.21,
-        "profit_factor": 0.7486,
-        "unique_tokens": 20,
-        "last_closed_at": "2026-10-16T06:22:23+00:00"
-      },
-      "holdout_sample_count": 12
-    },
-    "quality_plus": {
-      "all": {
-        "closed": 65,
-        "net_sda": -53.2348,
-        "max_drawdown_sda": 63.6729,
-        "win_rate_pct": 27.69,
-        "profit_factor": 0.5629,
-        "unique_tokens": 28,
-        "last_closed_at": "2026-10-18T17:12:27+00:00"
-      },
-      "train": {
-        "closed": 48,
-        "net_sda": -52.3133,
-        "max_drawdown_sda": 63.6729,
-        "win_rate_pct": 22.92,
-        "profit_factor": 0.4699,
-        "unique_tokens": 22,
-        "last_closed_at": "2026-10-16T06:22:23+00:00"
-      },
-      "holdout_sample_count": 17
-    },
-    "research_watch": {
-      "all": {
-        "closed": 37,
-        "net_sda": -55.7669,
-        "max_drawdown_sda": 58.4992,
-        "win_rate_pct": 18.92,
-        "profit_factor": 0.2347,
-        "unique_tokens": 16,
-        "last_closed_at": "2026-10-18T16:32:43+00:00"
-      },
-      "train": {
-        "closed": 26,
-        "net_sda": -42.7798,
-        "max_drawdown_sda": 42.7798,
-        "win_rate_pct": 15.38,
-        "profit_factor": 0.2047,
-        "unique_tokens": 13,
-        "last_closed_at": "2026-10-16T06:07:49+00:00"
-      },
-      "holdout_sample_count": 11
-    },
-    "research_watch_strict": {
-      "all": {
-        "closed": 11,
-        "net_sda": -29.638,
-        "max_drawdown_sda": 29.638,
-        "win_rate_pct": 0.0,
-        "profit_factor": 0.0,
-        "unique_tokens": 7,
-        "last_closed_at": "2026-10-17T03:34:42+00:00"
-      },
-      "train": {
-        "closed": 10,
-        "net_sda": -27.0868,
-        "max_drawdown_sda": 27.0868,
-        "win_rate_pct": 0.0,
-        "profit_factor": 0.0,
-        "unique_tokens": 7,
-        "last_closed_at": "2026-10-16T04:51:06+00:00"
-      },
-      "holdout_sample_count": 1
-    },
-    "research_macd_antipump": {
-      "all": {
-        "closed": 0,
-        "net_sda": 0,
-        "max_drawdown_sda": 0.0,
-        "win_rate_pct": 0,
-        "profit_factor": 0,
-        "unique_tokens": 0,
-        "last_closed_at": null
-      },
-      "train": {
-        "closed": 0,
-        "net_sda": 0,
-        "max_drawdown_sda": 0.0,
-        "win_rate_pct": 0,
-        "profit_factor": 0,
-        "unique_tokens": 0,
-        "last_closed_at": null
-      },
-      "holdout_sample_count": 0
-    },
-    "research_macd_confirmation": {
-      "all": {
-        "closed": 0,
-        "net_sda": 0,
-        "max_drawdown_sda": 0.0,
-        "win_rate_pct": 0,
-        "profit_factor": 0,
-        "unique_tokens": 0,
-        "last_closed_at": null
-      },
-      "train": {
-        "closed": 0,
-        "net_sda": 0,
-        "max_drawdown_sda": 0.0,
-        "win_rate_pct": 0,
-        "profit_factor": 0,
-        "unique_tokens": 0,
-        "last_closed_at": null
-      },
-      "holdout_sample_count": 0
-    },
-    "research_breakout_volume_trend": {
-      "all": {
-        "closed": 25,
-        "net_sda": -33.2321,
-        "max_drawdown_sda": 36.334,
-        "win_rate_pct": 20.0,
-        "profit_factor": 0.3189,
-        "unique_tokens": 15,
-        "last_closed_at": "2026-10-18T17:12:27+00:00"
-      },
-      "train": {
-        "closed": 14,
-        "net_sda": -21.8109,
-        "max_drawdown_sda": 26.3569,
-        "win_rate_pct": 21.43,
-        "profit_factor": 0.2562,
-        "unique_tokens": 11,
-        "last_closed_at": "2026-10-16T04:34:31+00:00"
-      },
-      "holdout_sample_count": 11
-    },
-    "research_sparse_volume_ignition": {
-      "all": {
-        "closed": 0,
-        "net_sda": 0,
-        "max_drawdown_sda": 0.0,
-        "win_rate_pct": 0,
-        "profit_factor": 0,
-        "unique_tokens": 0,
-        "last_closed_at": null
-      },
-      "train": {
-        "closed": 0,
-        "net_sda": 0,
-        "max_drawdown_sda": 0.0,
-        "win_rate_pct": 0,
-        "profit_factor": 0,
-        "unique_tokens": 0,
-        "last_closed_at": null
-      },
-      "holdout_sample_count": 0
-    },
-    "research_trend_runner": {
-      "all": {
-        "closed": 35,
-        "net_sda": -55.38,
-        "max_drawdown_sda": 55.38,
-        "win_rate_pct": 14.29,
-        "profit_factor": 0.3106,
-        "unique_tokens": 17,
-        "last_closed_at": "2026-10-18T13:52:14+00:00"
-      },
-      "train": {
-        "closed": 24,
-        "net_sda": -35.3662,
-        "max_drawdown_sda": 44.565,
-        "win_rate_pct": 12.5,
-        "profit_factor": 0.3545,
-        "unique_tokens": 13,
-        "last_closed_at": "2026-10-16T06:22:23+00:00"
-      },
-      "holdout_sample_count": 11
-    },
-    "research_temporal_recovery": {
-      "all": {
-        "closed": 5,
-        "net_sda": 6.1238,
-        "max_drawdown_sda": 8.0378,
-        "win_rate_pct": 20.0,
-        "profit_factor": 1.5854,
-        "unique_tokens": 5,
-        "last_closed_at": "2026-10-18T13:33:14+00:00"
-      },
-      "train": {
-        "closed": 2,
-        "net_sda": 14.1616,
-        "max_drawdown_sda": 2.4237,
-        "win_rate_pct": 50.0,
-        "profit_factor": 6.8429,
-        "unique_tokens": 2,
-        "last_closed_at": "2026-10-16T01:07:59+00:00"
-      },
-      "holdout_sample_count": 3
-    },
-    "research_v33_flow_continuation": {
-      "all": {
-        "closed": 12,
-        "net_sda": -9.4176,
-        "max_drawdown_sda": 12.1347,
-        "win_rate_pct": 25.0,
-        "profit_factor": 0.5475,
-        "unique_tokens": 10,
-        "last_closed_at": "2026-10-18T13:50:54+00:00"
-      },
-      "train": {
-        "closed": 2,
-        "net_sda": -5.327,
-        "max_drawdown_sda": 5.327,
-        "win_rate_pct": 0.0,
-        "profit_factor": 0.0,
-        "unique_tokens": 2,
-        "last_closed_at": "2026-10-16T05:37:31+00:00"
-      },
-      "holdout_sample_count": 10
-    },
-    "research_v33_cost_aware_breakout": {
-      "all": {
-        "closed": 6,
-        "net_sda": -13.6803,
-        "max_drawdown_sda": 13.6803,
-        "win_rate_pct": 0.0,
-        "profit_factor": 0.0,
-        "unique_tokens": 4,
-        "last_closed_at": "2026-10-18T16:31:28+00:00"
-      },
-      "train": {
-        "closed": 0,
-        "net_sda": 0,
-        "max_drawdown_sda": 0.0,
-        "win_rate_pct": 0,
-        "profit_factor": 0,
-        "unique_tokens": 0,
-        "last_closed_at": null
-      },
-      "holdout_sample_count": 6
-    }
-  },
+  "source_last_scan_at": "2026-10-18T20:45:16.733705+00:00",
+  "strategies": {},
   "champion": {
     "generation": 0,
     "filters": {
@@ -471,17 +140,17 @@
   "rollback_applied": false,
   "missed_pump_learning": {
     "status": "NO_PROFITABLE_TRAIN_RULE",
-    "updated_at": "2026-10-18T18:39:28.633084+00:00",
-    "source_candidate_archive_at": "2026-10-18T18:38:33.846160+00:00",
+    "updated_at": "2026-10-18T20:45:46.858345+00:00",
+    "source_candidate_archive_at": "2026-10-18T20:44:52.372986+00:00",
     "source_age_minutes": 0.9,
     "source_fresh": true,
     "archived_candidates": 5000,
-    "with_60m_quote": 2692,
+    "with_60m_quote": 2679,
     "input_quality": {
       "rejection_counts": {
-        "invalid_or_missing_quote_time": 3616,
-        "missing_frozen_features": 3616,
-        "no_60m_followup_observed": 654,
+        "invalid_or_missing_quote_time": 3595,
+        "missing_frozen_features": 3595,
+        "no_60m_followup_observed": 673,
         "late_followup_75_to_120_minutes": 59,
         "already_eligible_not_missed": 29
       },
@@ -490,32 +159,14 @@
       },
       "legacy_frozen_age_recoverable": 0,
       "maturity_stages": {
-        "with_original_quote_and_features": 1355,
-        "with_fresh_entry_quote": 1355,
-        "with_strict_60_to_75m_exit_quote": 642,
-        "with_strict_exit_and_full_features": 635
+        "with_original_quote_and_features": 1376,
+        "with_fresh_entry_quote": 1376,
+        "with_strict_60_to_75m_exit_quote": 644,
+        "with_strict_exit_and_full_features": 637
       },
-      "latest_original_candidate_at": "2026-10-18T18:36:59.746231+00:00",
-      "latest_strict_matured_candidate_at": "2026-10-18T17:20:00.642480+00:00",
+      "latest_original_candidate_at": "2026-10-18T20:45:16.533981+00:00",
+      "latest_strict_matured_candidate_at": "2026-10-18T18:30:00.311611+00:00",
       "missing_quote_schema_examples": [
-        {
-          "row_keys": [
-            "address",
-            "at",
-            "eligible",
-            "entry_price_sda",
-            "gates",
-            "id",
-            "impulse",
-            "observed_peak_240m",
-            "outcomes",
-            "quality",
-            "score"
-          ],
-          "feature_keys": [],
-          "has_60m": true,
-          "has_original_age": false
-        },
         {
           "row_keys": [
             "address",
@@ -551,6 +202,24 @@
           "feature_keys": [],
           "has_60m": false,
           "has_original_age": false
+        },
+        {
+          "row_keys": [
+            "address",
+            "at",
+            "eligible",
+            "entry_price_sda",
+            "gates",
+            "id",
+            "impulse",
+            "observed_peak_240m",
+            "outcomes",
+            "quality",
+            "score"
+          ],
+          "feature_keys": [],
+          "has_60m": true,
+          "has_original_age": false
         }
       ]
     },
@@ -560,12 +229,12 @@
       "source": "actual_observed_swaps_original_frozen_rejected_decisions",
       "paper_only": true,
       "executable_peak_fills": false,
-      "distinct_observed_4h_peaks": 535,
-      "observed_peak_ge_10_pct": 60,
-      "observed_peak_ge_25_pct": 23,
+      "distinct_observed_4h_peaks": 550,
+      "observed_peak_ge_10_pct": 61,
+      "observed_peak_ge_25_pct": 24,
       "observed_peak_ge_50_pct": 13,
       "blocking_gates_ge_10_pct": {
-        "v31_activity": 42,
+        "v31_activity": 43,
         "score": 40,
         "lifecycle": 36,
         "liquidity": 35,
@@ -573,7 +242,7 @@
         "late_spike": 25,
         "loss_circuit": 22,
         "trades": 18,
-        "temporal_recovery": 16,
+        "temporal_recovery": 17,
         "buy_ratio": 8,
         "impulse": 6,
         "price_flow": 6
@@ -672,9 +341,9 @@
             5,
             10
           ],
-          "valid_distinct_cases": 254,
+          "valid_distinct_cases": 262,
           "model_positive_after_costs": 30,
-          "model_net_sda_total": -322.5337,
+          "model_net_sda_total": -337.4787,
           "positive_gate_counts": {
             "score": 24,
             "lifecycle": 21,
@@ -695,16 +364,16 @@
             15,
             25
           ],
-          "valid_distinct_cases": 290,
-          "model_positive_after_costs": 38,
-          "model_net_sda_total": -456.9141,
+          "valid_distinct_cases": 296,
+          "model_positive_after_costs": 39,
+          "model_net_sda_total": -473.2469,
           "positive_gate_counts": {
-            "v31_activity": 24,
+            "v31_activity": 25,
             "score": 22,
             "quality": 19,
             "lifecycle": 18,
+            "temporal_recovery": 15,
             "liquidity": 14,
-            "temporal_recovery": 14,
             "loss_circuit": 12,
             "late_spike": 10,
             "trades": 7,
@@ -746,7 +415,7 @@
     "reason": "Train/holdout selects a rule; new forward Shadow must prove net SDA; unmatched exits prohibit auto PAPER promotion."
   },
   "temporal_recovery_research": {
-    "source_at": "2026-10-18T18:38:59.947160+00:00",
+    "source_at": "2026-10-18T20:45:16.733705+00:00",
     "total_recovered": 7,
     "recent_examples": [
       {
@@ -799,9 +468,9 @@
   },
   "scanner_no_buy": {
     "assessment": "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED",
-    "checked_at": "2026-10-18T18:39:02.805876+00:00",
+    "checked_at": "2026-10-18T20:45:19.689428+00:00",
     "audit_fresh": true,
-    "audit_age_minutes": 0.4,
+    "audit_age_minutes": 0.5,
     "risk_blocked": false,
     "loss_last_24h_sda": -10.4296,
     "loss_window_closed": 2,
@@ -811,7 +480,8 @@
     "champion_ready": 0,
     "paper_buy_rules_modified": false
   },
-  "incumbent_policy": "baseline",
+  "incumbent_policy": "research_temporal_recovery",
+  "shadow_comparison_reference": "baseline",
   "quote_coverage_pct": {
     "baseline": 71.88,
     "quality": 71.58,
@@ -914,8 +584,8 @@
       "excluded_closed": 11,
       "excluded_by_reason": {
         "legacy_unknown_quote_quality": 1,
-        "holding_time_over_4_5h": 2,
-        "quote_gap_over_30m": 10
+        "quote_gap_over_30m": 10,
+        "holding_time_over_4_5h": 2
       },
       "open_virtual_positions": 0
     },
@@ -924,8 +594,8 @@
       "valid_closed": 11,
       "excluded_closed": 2,
       "excluded_by_reason": {
-        "holding_time_over_4_5h": 1,
-        "quote_gap_over_30m": 2
+        "quote_gap_over_30m": 2,
+        "holding_time_over_4_5h": 1
       },
       "open_virtual_positions": 0
     },
@@ -950,8 +620,8 @@
       "valid_closed": 25,
       "excluded_closed": 4,
       "excluded_by_reason": {
-        "holding_time_over_4_5h": 1,
         "quote_gap_over_30m": 4,
+        "holding_time_over_4_5h": 1,
         "holding_time_over_max_plus_30m": 1
       },
       "open_virtual_positions": 0
@@ -1006,11 +676,21 @@
       "open_virtual_positions": 0
     }
   },
-  "split": {
-    "method": "chronological_70_30_train_holdout",
-    "first_holdout_at": "2026-10-16T07:55:58+00:00",
-    "train_selection_only": true
+  "active_paper_evidence": {
+    "strategy": "research_temporal_recovery",
+    "valid_forward_closes": 5,
+    "observed_quote_model": {
+      "closed": 5,
+      "net_sda": 6.1238,
+      "max_drawdown_sda": 8.0378,
+      "win_rate_pct": 20.0,
+      "profit_factor": 1.5854,
+      "unique_tokens": 5,
+      "last_closed_at": "2026-10-18T13:33:14+00:00"
+    },
+    "quote_coverage_pct": 83.33,
+    "execution_parity_verified": false
   },
-  "status": "NO_PROFITABLE_TRAIN_CHALLENGER",
-  "reason": "No challenger had sufficient positive after-cost training returns"
+  "status": "ACTIVE_TEMPORAL_MODE_RESEARCH_ONLY",
+  "reason": "PAPER uses temporal_recovery, but this optimizer only tunes baseline numeric filters. Temporal forward evidence is diagnostic and lacks execution parity; no unrelated filter promotion is permitted."
 }
