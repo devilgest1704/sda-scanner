@@ -195,8 +195,13 @@ class LivePaperFreshLaneTests(unittest.TestCase):
             }),
             patch.object(v30,"cooldown_active",return_value=cooldown),
             patch.object(v30,"load_state",return_value={
-                "history":{ADDRESS:{"prev":{"m1":0,"m15":0,
-                    "flow":0,"vol":100,"price":.8,"trades":5}}}
+                # Scanner has already persisted the CURRENT quote, so the
+                # read-only decision sees same_last and compares to prev.
+                "history":{ADDRESS:{
+                    "last":c,"fresh":True,
+                    "prev":{"m1":0,"m15":0,"flow":0,
+                            "vol":100,"price":.8,"trades":5},
+                }}
             }),
             patch.object(v30,"temporal_recovery_signal",return_value={
                 "ready":False,"reason":"missing_prior_frozen_signal"
