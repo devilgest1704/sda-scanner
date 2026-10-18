@@ -6,9 +6,9 @@ import json, os
 from datetime import datetime, timezone, timedelta
 from tools.v32_hourly_macd import paper_macd_veto
 from tools.paper_loss_circuit import paper_entry_risk_gate
-from tools.temporal_recovery_buy import evaluate as temporal_recovery_signal
+from tools.temporal_recovery_buy import evaluate_paper as temporal_recovery_signal
 
-VERSION="V30.11-TEMPORAL-RECOVERY-PAPER-BUY"
+VERSION="V30.12-TEMPORAL-CONTINUATION-PAPER-BUY"
 # Explicit strategy selector. It changes NEW PAPER entries only. Existing
 # V30 paper stops, close paths, 24h loss circuit and real-trading guards stay.
 PAPER_BUY_MODE=os.environ.get("SDA_PAPER_BUY_MODE","temporal_recovery")
@@ -340,16 +340,21 @@ def decision(address,a,ws=None,persist=True):
         "data_age_sec": data_age, "price_sda": c.get("price"),
         "m1h": c.get("m1"), "m15": c.get("m15"),
         "volume_1h": c.get("vol"), "flow_1h": c.get("flow"),
+        "flow_15m": c.get("flow15"),
         "trades_1h": c.get("trades"), "buy_ratio": c.get("buy_ratio")
     }) if PAPER_BUY_MODE == "temporal_recovery" else {
         "ready": False, "reason": "baseline_mode"
     }
+    temporal_early_ok=(temporal.get("ready") is True
+                       and temporal.get("lane") == "confirmed_continuation"
+                       and v31_early_ok)
+    temporal_activity_ok=v31_trades_ok or temporal_early_ok
     if PAPER_BUY_MODE == "temporal_recovery":
         # Keep immutable V31 quote/activity safety, paper per-token cooldown,
         # price/flow sanity, anti-chase and MACD veto, plus the 24h loss budget.
         # Don't silently permit the old baseline lane alongside this mode.
         blocked = (not temporal["ready"] or cd or not v31_age_ok
-                   or not v31_trades_ok or not price_flow_ok or late_spike
+                   or not temporal_activity_ok or not price_flow_ok or late_spike
                    or macd_gate["blocked"] or loss_circuit["blocked"])
     else:
         blocked=(not buy) or cd or s<entry_score_required or not data_fresh_for_entry or not v31_buy_ok or late_spike or macd_gate["blocked"] or loss_circuit["blocked"]
@@ -403,7 +408,7 @@ def decision(address,a,ws=None,persist=True):
         gate_failures = []
         if not temporal["ready"]: gate_failures.append("temporal_recovery")
         if not v31_age_ok: gate_failures.append("v31_age")
-        if not v31_trades_ok: gate_failures.append("v31_activity")
+        if not temporal_activity_ok: gate_failures.append("v31_activity")
         if not price_flow_ok: gate_failures.append("price_flow")
         if late_spike: gate_failures.append("late_spike")
         if cd: gate_failures.append("cooldown")
@@ -411,7 +416,9 @@ def decision(address,a,ws=None,persist=True):
         if loss_circuit["blocked"]: gate_failures.append("loss_circuit")
         reason = ("READY" if not blocked else
                   f"{phase} / "+("; ".join(gate_failures[:2])+
-                  (": "+temporal["reason"] if not temporal["ready"] else "")))
+                  (": "+temporal["reason"]+
+                   " / "+str(temporal.get("continuation_reason") or "")
+                   if not temporal["ready"] else "")))
     else:
         reason="READY" if not blocked else f"{phase} / "+"; ".join(failures[:3])
 
