@@ -36,6 +36,33 @@ def samples(positive=True):
 
 
 class ForwardOptimizerTests(unittest.TestCase):
+    def setUp(self):
+        # Legacy numerical Champion tests explicitly exercise baseline mode.
+        # Production defaults to temporal_recovery and must not promote those
+        # baseline threshold configurations into the active temporal strategy.
+        env = patch.dict("os.environ", {"SDA_PAPER_BUY_MODE": "baseline"})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_temporal_mode_rejects_numeric_champion_promotion(self):
+        state = samples()
+        state["strategies"]["research_temporal_recovery"]["trades"] = [
+            {**r, "pnl_sda": 5.0} for r in
+            state["strategies"]["quality"]["trades"][:6]
+        ]
+        with patch.dict("os.environ", {"SDA_PAPER_BUY_MODE": "temporal_recovery"}):
+            with patch("tools.forward_shadow_optimizer.RUNTIME_EXECUTION_PARITY_VERIFIED", True):
+                result, unchanged = report(state, copy.deepcopy(BASE),
+                                           {"closed_trades": []}, NOW)
+        self.assertEqual(result["status"], "ACTIVE_TEMPORAL_MODE_RESEARCH_ONLY")
+        self.assertEqual(result["active_paper_buy_mode"], "temporal_recovery")
+        self.assertEqual(result["incumbent_policy"], "research_temporal_recovery")
+        self.assertEqual(result["shadow_comparison_reference"], "baseline")
+        self.assertFalse(result["optimizer_targets_active_buy"])
+        self.assertFalse(result["promotion_applied"])
+        self.assertEqual(result["active_paper_evidence"]["valid_forward_closes"], 6)
+        self.assertEqual(unchanged, BASE)
+
     def test_can_promote_after_positive_forward_holdout(self):
         # A validated parity fixture proves the optimizer math can still
         # promote in isolation. Production does NOT have parity approval.
