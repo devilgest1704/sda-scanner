@@ -536,7 +536,9 @@ def patch(main_module,engine):
                   "entry_pump_score":n(s.get("pump_score",s.get("confidence"))),
                   "entry_pump_change":n(s.get("pump_change")),"entry_phase":s.get("pump_phase","NO"),
                   "entry_paper_buy_mode":s.get("paper_buy_mode","baseline"),
-                  "entry_temporal_recovery":s.get("paper_temporal_recovery")})
+                  "entry_paper_buy_lane":s.get("paper_buy_lane","NONE"),
+                  "entry_temporal_recovery":s.get("paper_temporal_recovery"),
+                  "entry_fresh_confirmation":s.get("paper_fresh_confirmation")})
         z["pump_entry_snapshot"]={
             "at":z.get("opened_at"),"price_sda":e,"reference_price_sda":n(an.get("price_in_sda")),
             "score":n(s.get("pump_score",s.get("confidence"))),
