@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import v30_pump_hunter as v30
-from tools.temporal_recovery_buy import evaluate
+from tools.temporal_recovery_buy import evaluate, evaluate_fresh_confirmation
 
 T = datetime.now(timezone.utc).replace(microsecond=0)
 ADDRESS = "0xab"
@@ -116,6 +116,141 @@ class ActualPaperGateTests(unittest.TestCase):
         self.assertEqual(v30.SL_PCT,.025)
         self.assertEqual(v30.MAX_BUYS_PER_RUN,1)
         self.assertEqual(v30.MAX_OPEN,4)
+
+
+
+
+def fresh_signal(**changes):
+    row={
+        "phase":"IGNITION","score":78,"quality":65,
+        "impulse":9,"delta_impulse":9,"fresh_transition":True,
+        "quote_at":(T-timedelta(seconds=15)).isoformat(),
+        "data_age_sec":15,"price_sda":1.0,
+        "m1h":5,"m15":2.3,"m4h":3,
+        "volume_1h":800,"flow_1h":300,"flow_15m":100,
+        "trades_1h":12,"buy_ratio":1.6,
+    }
+    row.update(changes)
+    return row
+
+
+class FreshConfirmationSafetyTests(unittest.TestCase):
+    def test_high_quality_fresh_signal_without_old_stale_signal(self):
+        self.assertTrue(evaluate_fresh_confirmation(fresh_signal(),at=T)["ready"])
+
+    def test_rejects_old_quote_nonmoving_market_and_missing_transaction(self):
+        for row in (
+            fresh_signal(data_age_sec=301),
+            fresh_signal(quote_at=(T+timedelta(seconds=1)).isoformat()),
+            fresh_signal(quote_at=""),
+            fresh_signal(fresh_transition=False),
+            fresh_signal(delta_impulse=0),
+            fresh_signal(price_sda=0),
+            fresh_signal(m1h=15),
+            fresh_signal(m15=12),
+            fresh_signal(m4h=-3),
+            fresh_signal(phase="WATCH"),
+        ):
+            with self.subTest(row=row):
+                self.assertFalse(evaluate_fresh_confirmation(row,at=T)["ready"])
+
+    def test_rejects_weak_low_volume_or_few_swaps(self):
+        for row in (
+            fresh_signal(score=60),fresh_signal(quality=48),
+            fresh_signal(impulse=2),fresh_signal(volume_1h=220),
+            fresh_signal(flow_1h=20),fresh_signal(flow_15m=2),
+            fresh_signal(buy_ratio=1.05),fresh_signal(trades_1h=4),
+            fresh_signal(trades_1h=9),  # 8-9 swaps require stronger confirmation
+        ):
+            with self.subTest(row=row):
+                self.assertFalse(evaluate_fresh_confirmation(row,at=T)["ready"])
+
+    def test_tightly_bounded_early_eight_nine_swaps(self):
+        row=fresh_signal(
+            trades_1h=9,score=85,quality=73,delta_impulse=10,
+            volume_1h=1100,flow_1h=350,flow_15m=125,buy_ratio=1.8,
+        )
+        self.assertTrue(evaluate_fresh_confirmation(row,at=T)["ready"])
+        self.assertFalse(evaluate_fresh_confirmation(
+            {**row,"volume_1h":650},at=T)["ready"])
+
+
+class LivePaperFreshLaneTests(unittest.TestCase):
+    def run_decision(self, mode, *, loss=False,macd=False,cooldown=False,
+                     age=15,trades=12,score=78,quality=65,flow=300,
+                     volume=800,delta=9,ratio=1.6,flow15=100):
+        c={
+            "price":1,"m1":5,"m15":2.3,"m4":3,
+            "flow":flow,"flow15":flow15,
+            "vol":volume,"trades":trades,"buy_ratio":ratio,
+            "trade_ratio":2,"data_age_sec":age,
+            "last_transaction":(datetime.now(timezone.utc)-timedelta(seconds=age)).isoformat(),
+        }
+        with (
+            patch.object(v30,"PAPER_BUY_MODE",mode),
+            patch.object(v30,"score",return_value=(c,score,quality,delta,"IGNITION")),
+            patch.object(v30,"entry_gate",return_value={
+                "buy":False,"entry_impulse":delta,
+                "liquidity_ok":True,"price_flow_ok":True,"ratio":.375,
+            }),
+            patch.object(v30,"cooldown_active",return_value=cooldown),
+            patch.object(v30,"load_state",return_value={
+                "history":{ADDRESS:{"prev":{"m1":0,"m15":0,
+                    "flow":0,"vol":100,"price":.8,"trades":5}}}
+            }),
+            patch.object(v30,"temporal_recovery_signal",return_value={
+                "ready":False,"reason":"missing_prior_frozen_signal"
+            }),
+            patch.object(v30,"paper_macd_veto",return_value={
+                "blocked":macd,"status":"BEARISH_VETO" if macd else "UNAVAILABLE"
+            }),
+            patch.object(v30,"paper_entry_risk_gate",return_value={
+                "blocked":loss,"status":"LOSS_COOLDOWN" if loss else "ACTIVE"
+            }),
+        ):
+            return v30.decision(ADDRESS,{},persist=False)
+
+    def test_adding_lane_genuinely_expands_buy_eligibility(self):
+        before=self.run_decision("temporal_recovery")
+        after=self.run_decision("temporal_recovery_plus")
+        self.assertFalse(before["eligible_for_buy"])
+        self.assertTrue(after["eligible_for_buy"])
+        self.assertEqual(after["paper_buy_lane"],"fresh_momentum_confirmation")
+        self.assertEqual(after["confidence"],78)
+        self.assertTrue(after["paper_fresh_confirmation"]["ready"])
+        self.assertNotIn("temporal_recovery",after["paper_buy_gate_failures"])
+
+    def test_10_swaps_with_strong_flow_meet_v31_early_exception(self):
+        result=self.run_decision("temporal_recovery_plus",trades=10)
+        self.assertTrue(result["eligible_for_buy"])
+        self.assertTrue(result["v31_early_exception_passed"])
+
+    def test_risk_still_vetoes_fresh_confirmation(self):
+        for opts,gate in (
+            ({"loss":True},"loss_circuit"),
+            ({"macd":True},"macd_bearish"),
+            ({"cooldown":True},"cooldown"),
+        ):
+            with self.subTest(opts=opts):
+                result=self.run_decision("temporal_recovery_plus",**opts)
+                self.assertFalse(result["eligible_for_buy"])
+                self.assertIn(gate,result["paper_buy_gate_failures"])
+
+    def test_invalid_market_data_is_never_promoted(self):
+        for opts in (
+            {"age":350},{"trades":2},
+            {"score":60},{"quality":45},
+            {"flow":30},{"volume":200},
+            {"delta":0},{"ratio":1.05},
+        ):
+            with self.subTest(opts=opts):
+                result=self.run_decision("temporal_recovery_plus",**opts)
+                self.assertFalse(result["eligible_for_buy"])
+
+    def test_legacy_exits_and_order_capacity_unchanged(self):
+        self.assertEqual(v30.SL_PCT,.025)
+        self.assertEqual(v30.MAX_OPEN,4)
+        self.assertEqual(v30.MAX_BUYS_PER_RUN,1)
 
 
 if __name__ == "__main__":
