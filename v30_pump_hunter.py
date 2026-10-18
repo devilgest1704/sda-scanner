@@ -6,13 +6,14 @@ import json, os
 from datetime import datetime, timezone, timedelta
 from tools.v32_hourly_macd import paper_macd_veto
 from tools.paper_loss_circuit import paper_entry_risk_gate
-from tools.temporal_recovery_buy import evaluate as temporal_recovery_signal
+from tools.temporal_recovery_buy import (evaluate as temporal_recovery_signal,
+                                         evaluate_fresh_confirmation)
 
-VERSION="V30.11-TEMPORAL-RECOVERY-PAPER-BUY"
+VERSION="V30.12-TEMPORAL-RECOVERY-GUARDED-FRESH-PAPER"
 # Explicit strategy selector. It changes NEW PAPER entries only. Existing
 # V30 paper stops, close paths, 24h loss circuit and real-trading guards stay.
-PAPER_BUY_MODE=os.environ.get("SDA_PAPER_BUY_MODE","temporal_recovery")
-if PAPER_BUY_MODE not in ("temporal_recovery","baseline"):
+PAPER_BUY_MODE=os.environ.get("SDA_PAPER_BUY_MODE","temporal_recovery_plus")
+if PAPER_BUY_MODE not in ("temporal_recovery_plus","temporal_recovery","baseline"):
     raise ValueError("Unsupported PAPER BUY mode: "+PAPER_BUY_MODE)
 STATE_FILE="v30_pump_state.json"
 SL_PCT=0.025
@@ -333,23 +334,44 @@ def decision(address,a,ws=None,persist=True):
     # research_temporal_recovery, using the previous finished Shadow scan's
     # frozen signal AND the independently fresh current on-chain quote.
     # A stale score is never itself permission to trade.
-    temporal = temporal_recovery_signal(address, {
+    temporal_mode=PAPER_BUY_MODE in ("temporal_recovery", "temporal_recovery_plus")
+    current_signal={
         "phase": phase, "score": s, "quality": q,
-        "impulse": entry_impulse,
+        "impulse": entry_impulse, "delta_impulse": delta_impulse,
+        "fresh_transition": bool(fresh),
         "quote_at": c.get("last_transaction"),
         "data_age_sec": data_age, "price_sda": c.get("price"),
-        "m1h": c.get("m1"), "m15": c.get("m15"),
+        "m1h": c.get("m1"), "m15": c.get("m15"), "m4h": c.get("m4"),
         "volume_1h": c.get("vol"), "flow_1h": c.get("flow"),
+        "flow_15m": c.get("flow15"),
         "trades_1h": c.get("trades"), "buy_ratio": c.get("buy_ratio")
-    }) if PAPER_BUY_MODE == "temporal_recovery" else {
+    }
+    temporal = temporal_recovery_signal(address,current_signal) if temporal_mode else {
         "ready": False, "reason": "baseline_mode"
     }
-    if PAPER_BUY_MODE == "temporal_recovery":
-        # Keep immutable V31 quote/activity safety, paper per-token cooldown,
-        # price/flow sanity, anti-chase and MACD veto, plus the 24h loss budget.
-        # Don't silently permit the old baseline lane alongside this mode.
-        blocked = (not temporal["ready"] or cd or not v31_age_ok
-                   or not v31_trades_ok or not price_flow_ok or late_spike
+    # The strict temporal recovery hypothesis stays the PRIMARY lane.
+    # A separate, independently verified, early fresh-momentum lane admits
+    # only actively traded, genuinely newer quotes with stronger live flow.
+    # The two modes never interfere with the existing SELL/exit logic.
+    fresh_confirmation = (
+        evaluate_fresh_confirmation(current_signal)
+        if PAPER_BUY_MODE == "temporal_recovery_plus" and not temporal["ready"]
+        else {"ready": False, "reason": "not_evaluated"}
+    )
+    paper_buy_lane=(
+        "temporal_recovery" if temporal["ready"] else
+        "fresh_momentum_confirmation" if fresh_confirmation["ready"] else
+        "NONE"
+    ) if temporal_mode else ("baseline" if buy else "NONE")
+    if temporal_mode:
+        # Temporal keeps >=12 traded swaps, as before. The new confirmation
+        # lane may accept 8-11 swaps ONLY after satisfying its independently
+        # stronger volume/flow/quality thresholds and V31 early exception.
+        activity_ok=(v31_trades_ok if paper_buy_lane=="temporal_recovery"
+                     else v31_buy_ok if paper_buy_lane=="fresh_momentum_confirmation"
+                     else False)
+        blocked = (paper_buy_lane=="NONE" or cd or not v31_age_ok
+                   or not activity_ok or not price_flow_ok or late_spike
                    or macd_gate["blocked"] or loss_circuit["blocked"])
     else:
         blocked=(not buy) or cd or s<entry_score_required or not data_fresh_for_entry or not v31_buy_ok or late_spike or macd_gate["blocked"] or loss_circuit["blocked"]
@@ -396,22 +418,31 @@ def decision(address,a,ws=None,persist=True):
     if cd: gate_failures.append("cooldown")
     if macd_gate["blocked"]: gate_failures.append("macd_bearish")
     if loss_circuit["blocked"]: gate_failures.append("loss_circuit")
-    if PAPER_BUY_MODE == "temporal_recovery":
-        # Baseline score/impulse thresholds aren't the temporal strategy's
-        # thresholds. Show actual temporal rejections, not spurious baseline
-        # failures when a recovered signal is admissible.
-        gate_failures = []
-        if not temporal["ready"]: gate_failures.append("temporal_recovery")
+    if temporal_mode:
+        # Show blockers for the actual selected lane, without falsely
+        # attributing an unselected strict-temporal requirement to a valid
+        # independently confirmed fresh entry.
+        gate_failures=[]
+        if paper_buy_lane=="NONE":
+            gate_failures.append("temporal_recovery")
+            if PAPER_BUY_MODE=="temporal_recovery_plus":
+                gate_failures.append("fresh_momentum_confirmation")
         if not v31_age_ok: gate_failures.append("v31_age")
-        if not v31_trades_ok: gate_failures.append("v31_activity")
+        if not activity_ok: gate_failures.append("v31_activity")
         if not price_flow_ok: gate_failures.append("price_flow")
         if late_spike: gate_failures.append("late_spike")
         if cd: gate_failures.append("cooldown")
         if macd_gate["blocked"]: gate_failures.append("macd_bearish")
         if loss_circuit["blocked"]: gate_failures.append("loss_circuit")
-        reason = ("READY" if not blocked else
-                  f"{phase} / "+("; ".join(gate_failures[:2])+
-                  (": "+temporal["reason"] if not temporal["ready"] else "")))
+        extra=(
+            "temporal="+str(temporal["reason"])+
+            ("; fresh="+str(fresh_confirmation["reason"])
+             if PAPER_BUY_MODE=="temporal_recovery_plus" else "")
+        ) if paper_buy_lane=="NONE" else ""
+        reason="READY / "+paper_buy_lane if not blocked else (
+            f"{phase} / "+("; ".join(gate_failures[:3])+
+            (": "+extra if extra else ""))
+        )
     else:
         reason="READY" if not blocked else f"{phase} / "+"; ".join(failures[:3])
 
@@ -456,7 +487,7 @@ def decision(address,a,ws=None,persist=True):
     # The temporal policy accepts raw scores from 64; only for a verified
     # temporal-ready entry normalize the PAPER eligibility score to 68.
     # Keep the unmodified observed score in pump_score and trade snapshots.
-    eff=max(s,ENTRY_SCORE) if (PAPER_BUY_MODE=="temporal_recovery" and not blocked) else (s if not blocked else min(s,ENTRY_SCORE-1))
+    eff=max(s,ENTRY_SCORE) if (temporal_mode and not blocked) else (s if not blocked else min(s,ENTRY_SCORE-1))
     return {"score":eff,"confidence":eff,"buy_score":eff,"market_score":eff,
       "m1h":c["m1"],"m15":c["m15"],"m4h":c["m4"],"net_1h":c["flow"],"whale_net":c["flow"],
       "trades_1h":c["trades"],"volume_1h":c["vol"],"buy_ratio":c["buy_ratio"],"trade_ratio":c["trade_ratio"],
@@ -466,7 +497,9 @@ def decision(address,a,ws=None,persist=True):
       "paper_macd_filter":macd_gate,
       "paper_loss_circuit":loss_circuit,
       "paper_buy_mode":PAPER_BUY_MODE,
+      "paper_buy_lane":paper_buy_lane if not blocked else "NONE",
       "paper_temporal_recovery":temporal,
+      "paper_fresh_confirmation":fresh_confirmation,
       "shadow_snapshot_impulse":round(snapshot_impulse,1),
       "shadow_confirmation_ready":shadow_ready,
       "shadow_block_reason":shadow_reason,
