@@ -102,7 +102,7 @@ class ActivePaperEntryTests(unittest.TestCase):
             with self.subTest(trades=trades):
                 r=self.decide(trades=trades)
                 self.assertTrue(r["eligible_for_buy"],r)
-                self.assertEqual(r["confidence"],v30.ENTRY_SCORE if 76<68 else 76)
+                self.assertEqual(r["confidence"],76)
                 self.assertEqual(r["paper_temporal_recovery"]["lane"],
                                  "confirmed_continuation")
         r=self.decide(lane="temporal_recovery",trades=9)
