@@ -207,9 +207,16 @@ def step(ledger, source, at, main_risk):
 
 def summary(ledger):
     closed = ledger["closed_trades"]
-    win = sum(x["closed_profit_sda"] > 0 for x in closed)
-    realized = round(sum(x["closed_profit_sda"] for x in closed), 6)
-    valid = sum(x.get("valid_observed_quote") is True for x in closed)
+    # Performance must exclude unverifiable exits: they are NOT observed
+    # trading losses or wins. Keep their full-stake conservative assumption
+    # in the ledger for the independent loss circuit and safety monitoring.
+    valid_rows = [x for x in closed if x.get("valid_observed_quote") is True]
+    invalid_rows = [x for x in closed if x.get("valid_observed_quote") is not True]
+    win = sum(x["closed_profit_sda"] > 0 for x in valid_rows)
+    observed_pnl = round(sum(x["closed_profit_sda"] for x in valid_rows), 6)
+    conservative_pnl = round(sum(x["closed_profit_sda"] for x in closed), 6)
+    invalid_risk_pnl = round(sum(x["closed_profit_sda"] for x in invalid_rows), 6)
+    valid = len(valid_rows)
     return {
         "mode": ledger["mode"],
         "source_strategy": STRATEGY,
@@ -220,8 +227,13 @@ def summary(ledger):
         "historical_shadow_profit_imported": False,
         "source_execution": ledger["execution"],
         "closed_trades": len(closed), "valid_quote_closes": valid,
-        "wins": win, "win_rate_pct": round(100 * win / len(closed), 2) if closed else 0,
-        "realized_pnl_sda": realized,
+        "wins": win, "win_rate_pct": round(100 * win / valid, 2) if valid else 0,
+        "realized_pnl_sda": observed_pnl,
+        "observed_quote_model_pnl_sda": observed_pnl,
+        "invalid_quote_closes": len(invalid_rows),
+        "conservative_risk_pnl_sda": conservative_pnl,
+        "unverified_risk_assumption_sda": invalid_risk_pnl,
+        "performance_basis": "VALID_OBSERVED_QUOTES_ONLY_NOT_EXECUTABLE_FILLS",
         "open_positions": len(ledger["positions"]),
         "open_notional_sda": round(POSITION_SDA * len(ledger["positions"]), 2),
         "rejected_entries": ledger["rejected_entries"],

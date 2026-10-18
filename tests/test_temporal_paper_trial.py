@@ -90,8 +90,36 @@ class TemporalPaperTrialTests(unittest.TestCase):
         later = at + timedelta(minutes=5)
         step(trial, source(later, closes=[closed(at, later, 20, False)]),
              later, ALLOW)
-        self.assertEqual(summary(trial)["realized_pnl_sda"], -50)
-        self.assertEqual(summary(trial)["valid_quote_closes"], 0)
+        metrics = summary(trial)
+        self.assertEqual(metrics["realized_pnl_sda"], 0)
+        self.assertEqual(metrics["observed_quote_model_pnl_sda"], 0)
+        self.assertEqual(metrics["conservative_risk_pnl_sda"], -50)
+        self.assertEqual(metrics["unverified_risk_assumption_sda"], -50)
+        self.assertEqual(metrics["valid_quote_closes"], 0)
+        self.assertEqual(metrics["invalid_quote_closes"], 1)
+        self.assertEqual(metrics["win_rate_pct"], 0)
+        self.assertEqual(trial["closed_trades"][0]["closed_profit_sda"], -50)
+
+    def test_mixed_valid_and_unverified_exits_do_not_distort_win_rate(self):
+        trial = fresh_state(T0)
+        at = T0 + timedelta(minutes=1)
+        step(trial, source(at, opens=opened(at)), at, ALLOW)
+        finished = at + timedelta(minutes=2)
+        step(trial, source(finished, closes=[closed(at, finished, 6.5, True)]),
+             finished, ALLOW)
+        again = finished + timedelta(minutes=1)
+        step(trial, source(again, opens=opened(again)), again, ALLOW)
+        last = again + timedelta(minutes=2)
+        step(trial, source(last, closes=[closed(again, last, 12, False)]),
+             last, ALLOW)
+        metrics = summary(trial)
+        self.assertEqual(metrics["closed_trades"], 2)
+        self.assertEqual(metrics["valid_quote_closes"], 1)
+        self.assertEqual(metrics["invalid_quote_closes"], 1)
+        self.assertEqual(metrics["win_rate_pct"], 100)
+        self.assertEqual(metrics["realized_pnl_sda"], 6.5)
+        self.assertEqual(metrics["conservative_risk_pnl_sda"], -43.5)
+        self.assertEqual(metrics["unverified_risk_assumption_sda"], -50)
 
     def test_independent_24h_loss_circuit(self):
         trial = fresh_state(T0)

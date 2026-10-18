@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from tools.forward_shadow_agent import POLICIES, when, finite
@@ -118,6 +119,11 @@ def paper_realized_since(ledger, since):
 
 def report(state, config, real_ledger, now=None):
     now = now or datetime.now(timezone.utc)
+    # Match v30_pump_hunter.PAPER_BUY_MODE without importing the live engine
+    # (an optimizer must never initialize or mutate a trading worker).
+    active_buy_mode = os.environ.get("SDA_PAPER_BUY_MODE", "temporal_recovery")
+    if active_buy_mode not in ("baseline", "temporal_recovery"):
+        raise ValueError("Unrecognized active PAPER BUY mode")
     if config.get("version") != "V30-AUTO-CONFIG-1":
         raise ValueError("Unrecognized Champion config")
     current = config.get("filters")
@@ -128,7 +134,9 @@ def report(state, config, real_ledger, now=None):
         "updated_at": now.isoformat(),
         "mode": "PAPER_ONLY",
         "objective": "maximize accumulated net SDA subject to observed quote risk",
-        "real_trading": False, "paper_config_automatic": True,
+        "real_trading": False, "paper_config_automatic": active_buy_mode == "baseline",
+        "active_paper_buy_mode": active_buy_mode,
+        "optimizer_targets_active_buy": active_buy_mode == "baseline",
         "shadow_method": "forward observed quote fills, estimated friction, NOT real market execution",
         "v32_macd": {
             "mode": "RESEARCH_ONLY",
@@ -318,7 +326,10 @@ def report(state, config, real_ledger, now=None):
         model["status"] = "UNKNOWN_INCUMBENT_POLICY"
         model["reason"] = "Active paper filters have no matching forward shadow journal"
         return model, config
-    model["incumbent_policy"] = incumbent_name
+    model["incumbent_policy"] = (
+        "research_temporal_recovery" if active_buy_mode == "temporal_recovery"
+        else incumbent_name)
+    model["shadow_comparison_reference"] = incumbent_name
 
     strategies = state.get("strategies", {})
     if not isinstance(strategies, dict):
@@ -371,6 +382,24 @@ def report(state, config, real_ledger, now=None):
             "excluded_by_reason": breakdown,
             "open_virtual_positions": len(strategy.get("positions") or {}),
         }
+    if active_buy_mode == "temporal_recovery":
+        # The V30 numeric configuration only drives the baseline lane.
+        # Its policy optimizer cannot tune temporal entry/continuation rules.
+        # Show genuine temporal forward outcomes, never promote a baseline
+        # numeric challenger as though it improved the active PAPER BUY.
+        model["active_paper_evidence"] = {
+            "strategy": "research_temporal_recovery",
+            "valid_forward_closes": len(all_rows["research_temporal_recovery"]),
+            "observed_quote_model": summary(all_rows["research_temporal_recovery"]),
+            "quote_coverage_pct": coverage["research_temporal_recovery"],
+            "execution_parity_verified": False,
+        }
+        model["status"] = "ACTIVE_TEMPORAL_MODE_RESEARCH_ONLY"
+        model["reason"] = (
+            "PAPER uses temporal_recovery, but this optimizer only tunes baseline "
+            "numeric filters. Temporal forward evidence is diagnostic and lacks "
+            "execution parity; no unrelated filter promotion is permitted.")
+        return model, config
     unique_times = sorted({r["closed_at"] for rows in all_rows.values() for r in rows})
     if len(unique_times) < MIN_TRAIN + MIN_HOLDOUT:
         model["status"] = "COLLECTING_FORWARD_TRADES"
