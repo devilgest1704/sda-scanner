@@ -124,6 +124,22 @@ jobs:
             exit 0
           fi
 
+          # A failed scanner may hold newer unpublished PAPER trades than main.
+          # Do not restart from stale main after a failed checkpoint: require
+          # reconciliation first. A clean completion/cancellation may restart.
+          latest_scanner="$(timeout 30s gh run list \
+            --workflow scanner_v18.yml --repo "${{ github.repository }}" \
+            --branch main --limit 1 --json status,conclusion,databaseId \
+            --jq '.[0] // empty')"
+          if [ -n "$latest_scanner" ]; then
+            latest_status="$(echo "$latest_scanner" | jq -r '.status')"
+            latest_conclusion="$(echo "$latest_scanner" | jq -r '.conclusion // ""')"
+            if [ "$latest_status" = "completed" ] && [ "$latest_conclusion" != "success" ] && [ "$latest_conclusion" != "cancelled" ]; then
+              echo "::error::Latest scanner failed; refusing automatic restart until unpublished PAPER ledger is reconciled."
+              exit 1
+            fi
+          fi
+
           for attempt in 1 2 3; do
             echo "Dispatch attempt ${attempt}/3"
             if timeout 30s gh workflow run scanner_v18.yml \
