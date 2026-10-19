@@ -181,7 +181,9 @@ PY
     if ! git -c merge.directoryRenames=false rebase -X theirs origin/main; then
       echo "::error::STATE CHECKPOINT: rebase conflict; stopping to protect unpublished PAPER positions and trade history." >&2
       git rebase --abort || true
-      git stash pop >/dev/null 2>&1 || true
+      if ! git stash pop; then
+        echo '::error::STATE CHECKPOINT: stash retained for manual recovery after rebase conflict.' >&2
+      fi
       return 1
     fi
     if ! git stash pop; then
