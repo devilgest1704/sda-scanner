@@ -161,6 +161,9 @@ for path in ("positions.json", "paper_stats.json"):
 PY
     then
       echo "::error::STATE CHECKPOINT: unsafe concurrent PAPER state; stopping writer." >&2
+      if ! git stash pop; then
+        echo "::error::STATE CHECKPOINT: runtime stash retained for manual recovery." >&2
+      fi
       return 1
     fi
     # The scanner owns its runtime state; upstream changes to research JSON
