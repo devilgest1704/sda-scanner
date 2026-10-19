@@ -111,13 +111,19 @@ checkpoint_state() {
     # Runtime generates market_data.json but it is intentionally not versioned
     # by checkpoints. Stash all remaining worktree changes so they cannot block
     # rebasing the committed state onto a concurrently updated main.
+    checkpoint_stash_before="$(git rev-parse -q --verify refs/stash 2>/dev/null || true)"
     if ! git stash push -u -m scanner-checkpoint-rebase; then
       echo '::error::STATE CHECKPOINT: could not stash runtime state; stopping PAPER writer.' >&2
       return 1
     fi
+    checkpoint_stash_after="$(git rev-parse -q --verify refs/stash 2>/dev/null || true)"
+    checkpoint_stash_created=false
+    if [ "$checkpoint_stash_after" != "$checkpoint_stash_before" ]; then
+      checkpoint_stash_created=true
+    fi
     if ! git fetch origin main; then
       echo '::error::STATE CHECKPOINT: fetch failed; restoring runtime state.' >&2
-      if ! git stash pop; then
+      if [ "$checkpoint_stash_created" = true ] && ! git stash pop; then
         echo '::error::STATE CHECKPOINT: stash retained for recovery.' >&2
       fi
       return 1
@@ -170,7 +176,7 @@ for path in ("positions.json", "paper_stats.json"):
 PY
     then
       echo "::error::STATE CHECKPOINT: unsafe concurrent PAPER state; stopping writer." >&2
-      if ! git stash pop; then
+      if [ "$checkpoint_stash_created" = true ] && ! git stash pop; then
         echo "::error::STATE CHECKPOINT: runtime stash retained for manual recovery." >&2
       fi
       return 1
@@ -181,12 +187,12 @@ PY
     if ! git -c merge.directoryRenames=false rebase -X theirs origin/main; then
       echo "::error::STATE CHECKPOINT: rebase conflict; stopping to protect unpublished PAPER positions and trade history." >&2
       git rebase --abort || true
-      if ! git stash pop; then
+      if [ "$checkpoint_stash_created" = true ] && ! git stash pop; then
         echo '::error::STATE CHECKPOINT: stash retained for manual recovery after rebase conflict.' >&2
       fi
       return 1
     fi
-    if ! git stash pop; then
+    if [ "$checkpoint_stash_created" = true ] && ! git stash pop; then
       echo '::error::STATE CHECKPOINT: stash restore failed; stopping PAPER writer.' >&2
       return 1
     fi
