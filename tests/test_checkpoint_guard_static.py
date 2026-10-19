@@ -16,6 +16,9 @@ def test_checkpoint_safety_guards_present():
     assert 'git fetch origin main' in text
     assert 'git -c merge.directoryRenames=false rebase -X theirs origin/main' in text
     assert 'return 1' in text
+    assert 'checkpoint_stash_before=' in text
+    assert 'checkpoint_stash_created=false' in text
+    assert 'if [ "$checkpoint_stash_created" = true ] && ! git stash pop; then' in text
 
 if __name__ == '__main__':
     test_shell_syntax()
