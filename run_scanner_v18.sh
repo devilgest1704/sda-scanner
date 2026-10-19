@@ -103,9 +103,9 @@ checkpoint_state() {
     fi
 
     if [ "$attempt" = "5" ]; then
-      echo "STATE CHECKPOINT: push failed after 5 attempts; keeping scanner alive for next checkpoint." >&2
+      echo "::error::STATE CHECKPOINT: push failed after 5 attempts; stopping to protect unpublished PAPER state." >&2
       git reset -q HEAD -- market_data.json 2>/dev/null || true
-      return 0
+      return 1
     fi
 
     # Runtime generates market_data.json but it is intentionally not versioned
@@ -114,10 +114,10 @@ checkpoint_state() {
     git stash push -u -m scanner-checkpoint-rebase >/dev/null 2>&1 || true
     git fetch origin main
     if ! git rebase origin/main; then
-      echo "STATE CHECKPOINT: rebase conflict; aborting state push but keeping scanner alive." >&2
+      echo "::error::STATE CHECKPOINT: rebase conflict; stopping to protect unpublished PAPER positions and trade history." >&2
       git rebase --abort || true
       git stash pop >/dev/null 2>&1 || true
-      return 0
+      return 1
     fi
     git stash pop >/dev/null 2>&1 || true
     git reset -q HEAD -- market_data.json 2>/dev/null || true
