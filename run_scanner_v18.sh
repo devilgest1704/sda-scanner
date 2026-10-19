@@ -113,7 +113,57 @@ checkpoint_state() {
     # rebasing the committed state onto a concurrently updated main.
     git stash push -u -m scanner-checkpoint-rebase >/dev/null 2>&1 || true
     git fetch origin main
-    if ! git rebase origin/main; then
+    # Concurrent research/agent commits frequently change telemetry JSON.
+    # Rebase the scanner's checkpoint with the scanner snapshot winning on
+    # conflicting state files. This is only allowed if no newer PAPER ledger
+    # exists upstream; otherwise stop and require explicit reconciliation.
+    if ! python - <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+def read_at(ref, path):
+    try:
+        return json.loads(subprocess.check_output(
+            ["git", "show", f"{ref}:{path}"], stderr=subprocess.DEVNULL))
+    except (subprocess.CalledProcessError, ValueError):
+        return None
+
+def count_closed(data):
+    if not isinstance(data, dict):
+        return None
+    for key in ("closed_trades",):
+        value = data.get(key)
+        if isinstance(value, int):
+            return value
+    return None
+
+local = read_at("HEAD", "paper_stats.json")
+remote = read_at("origin/main", "paper_stats.json")
+lc, rc = count_closed(local), count_closed(remote)
+if lc is None or rc is None or lc < rc:
+    print("::error::CHECKPOINT: paper closed-trade count unavailable or upstream is newer; refuse automatic merge")
+    sys.exit(1)
+if lc == rc and local.get("realized_pnl_sda") != remote.get("realized_pnl_sda"):
+    print("::error::CHECKPOINT: same close count but differing realized P/L; refuse automatic merge")
+    sys.exit(1)
+# A newer upstream position ledger may have same closed count but changed
+# open positions. Never auto-resolve divergent positions or paper ledgers.
+base = subprocess.check_output(["git", "merge-base", "HEAD", "origin/main"], text=True).strip()
+for path in ("positions.json", "paper_stats.json"):
+    old = read_at(base, path)
+    upstream = read_at("origin/main", path)
+    local_now = read_at("HEAD", path)
+    if upstream != old and upstream != local_now:
+        print(f"::error::CHECKPOINT: upstream {path} diverged; refuse automatic merge")
+        sys.exit(1)
+PY
+    then
+      echo "::error::STATE CHECKPOINT: unsafe concurrent PAPER state; stopping writer." >&2
+      return 1
+    fi
+    if ! git -c merge.directoryRenames=false rebase -X ours origin/main; then
       echo "::error::STATE CHECKPOINT: rebase conflict; stopping to protect unpublished PAPER positions and trade history." >&2
       git rebase --abort || true
       git stash pop >/dev/null 2>&1 || true
