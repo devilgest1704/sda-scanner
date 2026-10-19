@@ -111,8 +111,17 @@ checkpoint_state() {
     # Runtime generates market_data.json but it is intentionally not versioned
     # by checkpoints. Stash all remaining worktree changes so they cannot block
     # rebasing the committed state onto a concurrently updated main.
-    git stash push -u -m scanner-checkpoint-rebase >/dev/null 2>&1 || true
-    git fetch origin main
+    if ! git stash push -u -m scanner-checkpoint-rebase; then
+      echo '::error::STATE CHECKPOINT: could not stash runtime state; stopping PAPER writer.' >&2
+      return 1
+    fi
+    if ! git fetch origin main; then
+      echo '::error::STATE CHECKPOINT: fetch failed; restoring runtime state.' >&2
+      if ! git stash pop; then
+        echo '::error::STATE CHECKPOINT: stash retained for recovery.' >&2
+      fi
+      return 1
+    fi
     # Concurrent research/agent commits frequently change telemetry JSON.
     # Rebase the scanner's checkpoint with the scanner snapshot winning on
     # conflicting state files. This is only allowed if no newer PAPER ledger
