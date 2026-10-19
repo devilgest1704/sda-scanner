@@ -163,7 +163,7 @@ PY
       echo "::error::STATE CHECKPOINT: unsafe concurrent PAPER state; stopping writer." >&2
       return 1
     fi
-    if ! git -c merge.directoryRenames=false rebase -X ours origin/main; then
+    if ! git rebase origin/main; then
       echo "::error::STATE CHECKPOINT: rebase conflict; stopping to protect unpublished PAPER positions and trade history." >&2
       git rebase --abort || true
       git stash pop >/dev/null 2>&1 || true
