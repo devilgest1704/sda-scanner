@@ -93,6 +93,11 @@ jobs:
                     echo "::error::PAPER checkpoint stale; refusing to cancel worker with unpublished state."
                     exit 1
                   fi
+                  # An updated timestamp is not proof that the live worker has
+                  # published its most recent positions. Never terminate a
+                  # running PAPER writer solely because source code changed.
+                  echo "::warning::Worker $run_id has outdated source; deferring restart until natural completion to preserve unpublished PAPER state."
+                  exit 0
                   echo "Worker $run_id has outdated source; requesting controlled replacement."
                   timeout 30s gh run cancel "$run_id" --repo "${{ github.repository }}"
                   # Wait for GitHub to confirm that the prior paper writer
