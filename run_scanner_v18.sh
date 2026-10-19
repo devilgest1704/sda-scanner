@@ -192,6 +192,28 @@ PY
       fi
       return 1
     fi
+    # Confirm that rebasing did not silently replace the scanner PAPER ledger.
+    if ! python - <<'PY'
+import json, subprocess, sys
+
+def at(ref, path):
+    try:
+        return json.loads(subprocess.check_output(["git", "show", f"{ref}:{path}"], stderr=subprocess.DEVNULL))
+    except (subprocess.CalledProcessError, ValueError):
+        return None
+
+# HEAD is the replayed scanner checkpoint; the parent is the upstream tip.
+scanner = at("HEAD", "paper_stats.json")
+upstream = at("HEAD^", "paper_stats.json")
+if not isinstance(scanner, dict) or not isinstance(upstream, dict):
+    sys.exit("CHECKPOINT: missing PAPER ledger after rebase")
+if scanner.get("closed_trades", -1) < upstream.get("closed_trades", -1):
+    sys.exit("CHECKPOINT: rebase lost newer PAPER closes")
+PY
+    then
+      echo "::error::STATE CHECKPOINT: PAPER ledger post-rebase validation failed." >&2
+      return 1
+    fi
     if [ "$checkpoint_stash_created" = true ] && ! git stash pop; then
       echo '::error::STATE CHECKPOINT: stash restore failed; stopping PAPER writer.' >&2
       return 1
