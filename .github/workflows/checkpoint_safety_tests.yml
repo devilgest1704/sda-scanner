@@ -1,0 +1,21 @@
+name: Checkpoint Safety Tests
+on:
+  pull_request:
+    paths:
+      - 'run_scanner_v18.sh'
+      - 'tests/test_checkpoint_*'
+      - '.github/workflows/checkpoint_safety_tests.yml'
+  workflow_dispatch:
+jobs:
+  checkpoint-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shell syntax
+        run: bash -n run_scanner_v18.sh
+      - name: Run offline checkpoint tests
+        run: |
+          python tests/test_checkpoint_guard_static.py
+          python tests/test_checkpoint_git_integration.py
