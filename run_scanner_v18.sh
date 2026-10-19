@@ -169,7 +169,14 @@ PY
       git stash pop >/dev/null 2>&1 || true
       return 1
     fi
-    git stash pop >/dev/null 2>&1 || true
+    if ! git stash pop; then
+      echo '::error::STATE CHECKPOINT: stash restore failed; stopping PAPER writer.' >&2
+      return 1
+    fi
+    if [ -n "$(git ls-files -u)" ]; then
+      echo '::error::STATE CHECKPOINT: unresolved index entries; stopping PAPER writer.' >&2
+      return 1
+    fi
     git reset -q HEAD -- market_data.json 2>/dev/null || true
     sleep 2
   done
