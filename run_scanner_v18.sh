@@ -163,7 +163,10 @@ PY
       echo "::error::STATE CHECKPOINT: unsafe concurrent PAPER state; stopping writer." >&2
       return 1
     fi
-    if ! git rebase origin/main; then
+    # The scanner owns its runtime state; upstream changes to research JSON
+    # must not silently override the scanner's snapshot. Only the guarded
+    # PAPER ledger may be published after a concurrent main update.
+    if ! git -c merge.directoryRenames=false rebase -X theirs origin/main; then
       echo "::error::STATE CHECKPOINT: rebase conflict; stopping to protect unpublished PAPER positions and trade history." >&2
       git rebase --abort || true
       git stash pop >/dev/null 2>&1 || true
