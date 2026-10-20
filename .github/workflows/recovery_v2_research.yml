@@ -6,6 +6,8 @@ on:
       - 'strategy_lab/research_recovery_v2.py'
       - 'strategy_lab/recovery_v2_snapshot_adapter.py'
       - 'strategy_lab/recovery_v2_shadow_diagnostic.py'
+      - 'strategy_lab/recovery_v2_frozen_export.py'
+      - 'tests/test_recovery_v2_frozen_export.py'
       - 'tests/test_research_recovery_v2.py'
       - 'tests/test_recovery_v2_shadow_diagnostic.py'
       - '.github/workflows/recovery_v2_research.yml'
@@ -24,11 +26,12 @@ jobs:
         with:
           python-version: '3.11'
       - name: Compile isolated research modules
-        run: python -m py_compile strategy_lab/research_recovery_v2.py strategy_lab/recovery_v2_snapshot_adapter.py strategy_lab/recovery_v2_shadow_diagnostic.py
+        run: python -m py_compile strategy_lab/research_recovery_v2.py strategy_lab/recovery_v2_snapshot_adapter.py strategy_lab/recovery_v2_shadow_diagnostic.py strategy_lab/recovery_v2_frozen_export.py
       - name: Unit tests
         run: |
           python -m unittest discover -s tests -p 'test_research_recovery_v2.py' -v
           python -m unittest discover -s tests -p 'test_recovery_v2_shadow_diagnostic.py' -v
+          python -m unittest discover -s tests -p 'test_recovery_v2_frozen_export.py' -v
       - name: Verify no production or paper integration
         run: |
           python - <<'PY'
