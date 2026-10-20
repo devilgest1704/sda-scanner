@@ -82,6 +82,22 @@ jobs:
                 # worker commit. That is a source change too; never treat an
                 # empty/missing worker fingerprint as "same version".
                 if [ -z "$worker_sources" ] || [ "$current_sources" != "$worker_sources" ]; then
+                  # Never cancel a worker if its latest PAPER checkpoint is stale.
+                  last_checkpoint="$(jq -r '.updated_at // empty' paper_stats.json 2>/dev/null || true)"
+                  if [ -z "$last_checkpoint" ]; then
+                    echo "::error::Missing PAPER checkpoint timestamp; refusing worker replacement."
+                    exit 1
+                  fi
+                  checkpoint_age=$(( $(date -u +%s) - $(date -u -d "$last_checkpoint" +%s) ))
+                  if [ "$checkpoint_age" -gt 900 ]; then
+                    echo "::error::PAPER checkpoint stale; refusing to cancel worker with unpublished state."
+                    exit 1
+                  fi
+                  # An updated timestamp is not proof that the live worker has
+                  # published its most recent positions. Never terminate a
+                  # running PAPER writer solely because source code changed.
+                  echo "::warning::Worker $run_id has outdated source; deferring restart until natural completion to preserve unpublished PAPER state."
+                  exit 0
                   echo "Worker $run_id has outdated source; requesting controlled replacement."
                   timeout 30s gh run cancel "$run_id" --repo "${{ github.repository }}"
                   # Wait for GitHub to confirm that the prior paper writer
@@ -122,6 +138,22 @@ jobs:
           if [ "${active_or_pending}" -gt 0 ]; then
             echo 'Scanner worker already active/pending; watchdog will not dispatch another run.'
             exit 0
+          fi
+
+          # A failed scanner may hold newer unpublished PAPER trades than main.
+          # Do not restart from stale main after a failed checkpoint: require
+          # reconciliation first. A clean completion/cancellation may restart.
+          latest_scanner="$(timeout 30s gh run list \
+            --workflow scanner_v18.yml --repo "${{ github.repository }}" \
+            --branch main --limit 1 --json status,conclusion,databaseId \
+            --jq '.[0] // empty')"
+          if [ -n "$latest_scanner" ]; then
+            latest_status="$(echo "$latest_scanner" | jq -r '.status')"
+            latest_conclusion="$(echo "$latest_scanner" | jq -r '.conclusion // ""')"
+            if [ "$latest_status" = "completed" ] && [ "$latest_conclusion" != "success" ] && [ "$latest_conclusion" != "cancelled" ]; then
+              echo "::error::Latest scanner failed; refusing automatic restart until unpublished PAPER ledger is reconciled."
+              exit 1
+            fi
           fi
 
           for attempt in 1 2 3; do

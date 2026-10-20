@@ -103,23 +103,125 @@ checkpoint_state() {
     fi
 
     if [ "$attempt" = "5" ]; then
-      echo "STATE CHECKPOINT: push failed after 5 attempts; keeping scanner alive for next checkpoint." >&2
+      echo "::error::STATE CHECKPOINT: push failed after 5 attempts; stopping to protect unpublished PAPER state." >&2
       git reset -q HEAD -- market_data.json 2>/dev/null || true
-      return 0
+      return 1
     fi
 
     # Runtime generates market_data.json but it is intentionally not versioned
     # by checkpoints. Stash all remaining worktree changes so they cannot block
     # rebasing the committed state onto a concurrently updated main.
-    git stash push -u -m scanner-checkpoint-rebase >/dev/null 2>&1 || true
-    git fetch origin main
-    if ! git rebase origin/main; then
-      echo "STATE CHECKPOINT: rebase conflict; aborting state push but keeping scanner alive." >&2
-      git rebase --abort || true
-      git stash pop >/dev/null 2>&1 || true
-      return 0
+    checkpoint_stash_before="$(git rev-parse -q --verify refs/stash 2>/dev/null || true)"
+    if ! git stash push -u -m scanner-checkpoint-rebase; then
+      echo '::error::STATE CHECKPOINT: could not stash runtime state; stopping PAPER writer.' >&2
+      return 1
     fi
-    git stash pop >/dev/null 2>&1 || true
+    checkpoint_stash_after="$(git rev-parse -q --verify refs/stash 2>/dev/null || true)"
+    checkpoint_stash_created=false
+    if [ "$checkpoint_stash_after" != "$checkpoint_stash_before" ]; then
+      checkpoint_stash_created=true
+    fi
+    if ! git fetch origin main; then
+      echo '::error::STATE CHECKPOINT: fetch failed; restoring runtime state.' >&2
+      if [ "$checkpoint_stash_created" = true ] && ! git stash pop; then
+        echo '::error::STATE CHECKPOINT: stash retained for recovery.' >&2
+      fi
+      return 1
+    fi
+    # Concurrent research/agent commits frequently change telemetry JSON.
+    # Rebase the scanner's checkpoint with the scanner snapshot winning on
+    # conflicting state files. This is only allowed if no newer PAPER ledger
+    # exists upstream; otherwise stop and require explicit reconciliation.
+    if ! python - <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+def read_at(ref, path):
+    try:
+        return json.loads(subprocess.check_output(
+            ["git", "show", f"{ref}:{path}"], stderr=subprocess.DEVNULL))
+    except (subprocess.CalledProcessError, ValueError):
+        return None
+
+def count_closed(data):
+    if not isinstance(data, dict):
+        return None
+    for key in ("closed_trades",):
+        value = data.get(key)
+        if isinstance(value, int):
+            return value
+    return None
+
+local = read_at("HEAD", "paper_stats.json")
+remote = read_at("origin/main", "paper_stats.json")
+lc, rc = count_closed(local), count_closed(remote)
+if lc is None or rc is None or lc < rc:
+    print("::error::CHECKPOINT: paper closed-trade count unavailable or upstream is newer; refuse automatic merge")
+    sys.exit(1)
+if lc == rc and local.get("realized_pnl_sda") != remote.get("realized_pnl_sda"):
+    print("::error::CHECKPOINT: same close count but differing realized P/L; refuse automatic merge")
+    sys.exit(1)
+# A newer upstream position ledger may have same closed count but changed
+# open positions. Never auto-resolve divergent positions or paper ledgers.
+base = subprocess.check_output(["git", "merge-base", "HEAD", "origin/main"], text=True).strip()
+for path in ("positions.json", "paper_stats.json"):
+    old = read_at(base, path)
+    upstream = read_at("origin/main", path)
+    local_now = read_at("HEAD", path)
+    if upstream != old and upstream != local_now:
+        print(f"::error::CHECKPOINT: upstream {path} diverged; refuse automatic merge")
+        sys.exit(1)
+PY
+    then
+      echo "::error::STATE CHECKPOINT: unsafe concurrent PAPER state; stopping writer." >&2
+      if [ "$checkpoint_stash_created" = true ] && ! git stash pop; then
+        echo "::error::STATE CHECKPOINT: runtime stash retained for manual recovery." >&2
+      fi
+      return 1
+    fi
+    # The scanner owns its runtime state; upstream changes to research JSON
+    # must not silently override the scanner's snapshot. Only the guarded
+    # PAPER ledger may be published after a concurrent main update.
+    if ! git -c merge.directoryRenames=false rebase -X theirs origin/main; then
+      echo "::error::STATE CHECKPOINT: rebase conflict; stopping to protect unpublished PAPER positions and trade history." >&2
+      git rebase --abort || true
+      if [ "$checkpoint_stash_created" = true ] && ! git stash pop; then
+        echo '::error::STATE CHECKPOINT: stash retained for manual recovery after rebase conflict.' >&2
+      fi
+      return 1
+    fi
+    # Confirm that rebasing did not silently replace the scanner PAPER ledger.
+    if ! python - <<'PY'
+import json, subprocess, sys
+
+def at(ref, path):
+    try:
+        return json.loads(subprocess.check_output(["git", "show", f"{ref}:{path}"], stderr=subprocess.DEVNULL))
+    except (subprocess.CalledProcessError, ValueError):
+        return None
+
+# HEAD is the replayed scanner checkpoint; the parent is the upstream tip.
+scanner = at("HEAD", "paper_stats.json")
+upstream = at("HEAD^", "paper_stats.json")
+if not isinstance(scanner, dict) or not isinstance(upstream, dict):
+    sys.exit("CHECKPOINT: missing PAPER ledger after rebase")
+if scanner.get("closed_trades", -1) < upstream.get("closed_trades", -1):
+    sys.exit("CHECKPOINT: rebase lost newer PAPER closes")
+PY
+    then
+      echo "::error::STATE CHECKPOINT: PAPER ledger post-rebase validation failed." >&2
+      return 1
+    fi
+    if [ "$checkpoint_stash_created" = true ] && ! git stash pop; then
+      echo '::error::STATE CHECKPOINT: stash restore failed; stopping PAPER writer.' >&2
+      return 1
+    fi
+    if [ -n "$(git ls-files -u)" ]; then
+      echo '::error::STATE CHECKPOINT: unresolved index entries; stopping PAPER writer.' >&2
+      return 1
+    fi
     git reset -q HEAD -- market_data.json 2>/dev/null || true
     sleep 2
   done
