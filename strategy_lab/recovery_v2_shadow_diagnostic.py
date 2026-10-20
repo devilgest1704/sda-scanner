@@ -13,9 +13,27 @@ from strategy_lab.recovery_v2_snapshot_adapter import inspect_snapshot
 
 
 def diagnose(market, funnel):
-    at = funnel.get("at") or funnel.get("checked_at")
+    # Accept the raw forward-agent funnel or the diagnostic wrapper.
+    source = funnel.get("funnel") if isinstance(funnel.get("funnel"), dict) else funnel
+    at = source.get("at") or source.get("checked_at")
     tokens = market.get("tokens", {})
-    candidates = funnel.get("candidate_snapshots", [])
+    candidates = source.get("candidate_snapshots", [])
+    # A summary-only diagnostic does not contain frozen candidate observations.
+    # Never misreport zero evaluated rows as zero BUY-ready opportunities.
+    if "candidate_snapshots" not in source:
+        return {"status": "missing_candidate_snapshots", "ready": None,
+                "evaluated": 0, "reasons": {}, "paper_unchanged": True,
+                "real_trading": False}
+    if not isinstance(at, str) or not isinstance(market.get("updated_at"), str):
+        return {"status": "missing_snapshot_timestamps", "ready": None,
+                "evaluated": 0, "reasons": {}, "paper_unchanged": True,
+                "real_trading": False}
+    from strategy_lab.recovery_v2_snapshot_adapter import _time
+    a, b = _time(at), _time(market["updated_at"])
+    if a is None or b is None or abs((a-b).total_seconds()) > 600:
+        return {"status": "unaligned_market_snapshot", "ready": None,
+                "evaluated": 0, "reasons": {}, "paper_unchanged": True,
+                "real_trading": False}
     if not isinstance(tokens, dict) or not isinstance(candidates, list):
         return {"status": "invalid_inputs", "ready": 0, "reasons": {}}
     reasons = Counter()
