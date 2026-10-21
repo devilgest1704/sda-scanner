@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import v30_pump_hunter as v30
-from tools.temporal_recovery_buy import evaluate
+from tools.temporal_recovery_buy import evaluate, evaluate_continuation
 
 T = datetime.now(timezone.utc).replace(microsecond=0)
 ADDRESS = "0xab"
@@ -116,6 +116,39 @@ class ActualPaperGateTests(unittest.TestCase):
         self.assertEqual(v30.SL_PCT,.025)
         self.assertEqual(v30.MAX_BUYS_PER_RUN,1)
         self.assertEqual(v30.MAX_OPEN,4)
+
+
+class ContinuationQuoteOrderingTests(unittest.TestCase):
+    def test_reject_quote_observed_before_previous_decision(self):
+        prior_at = T - timedelta(seconds=100)
+        old_quote = prior_at - timedelta(seconds=40)
+        previous = {
+            "decision_at": prior_at.isoformat(),
+            "quote_at": old_quote.isoformat(),
+            "data_age_sec": 40, "price_sda": 1.0,
+            "score": 75, "impulse": 8, "phase": "CONFIRMATION",
+        }
+        candidate = current(age=120, score=75, quality=70, impulse=8,
+                            price_sda=1.02, m1h=5, m15=2,
+                            volume_1h=1500, flow_1h=400, flow_15m=100,
+                            trades_1h=18, buy_ratio=2)
+        result = evaluate_continuation(ADDRESS, candidate, previous=previous, at=T)
+        self.assertFalse(result["ready"], result)
+        self.assertEqual(result["reason"], "no_new_fresh_price_followthrough")
+
+    def test_accept_quote_observed_after_previous_decision(self):
+        prior_at = T - timedelta(seconds=100)
+        previous = {
+            "decision_at": prior_at.isoformat(),
+            "quote_at": (prior_at - timedelta(seconds=40)).isoformat(),
+            "data_age_sec": 40, "price_sda": 1.0,
+            "score": 75, "impulse": 8, "phase": "CONFIRMATION",
+        }
+        candidate = current(age=20, score=75, quality=70, impulse=8,
+                            price_sda=1.02, m1h=5, m15=2,
+                            volume_1h=1500, flow_1h=400, flow_15m=100,
+                            trades_1h=18, buy_ratio=2)
+        self.assertTrue(evaluate_continuation(ADDRESS, candidate, previous=previous, at=T)["ready"])
 
 
 if __name__ == "__main__":
