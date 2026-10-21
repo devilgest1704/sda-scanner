@@ -779,6 +779,13 @@ def write_scan_funnel(market_file="market_analysis.json"):
                 "data_age_sec":round(n(d.get("data_age_sec")),1),
                 "eligible":bool(d.get("eligible_for_buy")),
                 "gates":list(dict.fromkeys(d.get("paper_buy_gate_failures") or [])),
+                # Persist the exact contemporaneous reason for rejecting each
+                # WATCH/IGNITION candidate. Forward outcome evaluation can
+                # attribute later observed prices to the original BUY gate,
+                # rather than retrospectively inventing an entry signal.
+                "paper_buy_mode":d.get("paper_buy_mode"),
+                "temporal_recovery_reason":(d.get("paper_temporal_recovery") or {}).get("reason"),
+                "continuation_reason":(d.get("paper_temporal_recovery") or {}).get("continuation_reason"),
                 # V32 research-only sampler metadata. BUY rules and V30
                 # numeric score are completely unaffected.
                 "research_breakout_ready":breakout.get("eligible") is True,
