@@ -723,6 +723,8 @@ def write_scan_funnel(market_file="market_analysis.json"):
         if not isinstance(metadata,dict): metadata={}
         total=fresh=champion=shadow=0
         fresh_gate_counts={}
+        temporal_lane_rejections={"temporal_recovery":{}, "confirmed_continuation":{}}
+        temporal_lane_ready={"temporal_recovery":0, "confirmed_continuation":0}
         near_ready=[]
         candidates=[]
         scan_at=datetime.now(timezone.utc).isoformat()
@@ -788,6 +790,19 @@ def write_scan_funnel(market_file="market_analysis.json"):
             fresh+=int(is_fresh)
             champion+=int(bool(d.get("eligible_for_buy")))
             shadow+=int(bool(d.get("shadow_confirmation_ready") or d.get("shadow_early_ready")))
+            if is_fresh and d.get("paper_buy_mode") == "temporal_recovery":
+                temporal_info=d.get("paper_temporal_recovery") or {}
+                lane=temporal_info.get("lane")
+                if temporal_info.get("ready") and lane in temporal_lane_ready:
+                    temporal_lane_ready[lane]+=1
+                elif not temporal_info.get("ready"):
+                    for lane, reason in (
+                        ("temporal_recovery", temporal_info.get("reason")),
+                        ("confirmed_continuation", temporal_info.get("continuation_reason")),
+                    ):
+                        reason=str(reason or "missing_reason")
+                        counts=temporal_lane_rejections[lane]
+                        counts[reason]=counts.get(reason,0)+1
             if is_fresh and not d.get("eligible_for_buy"):
                 reason=str(d.get("paper_buy_block_reason") or "")
                 # Consume structured decision gates; reason text is truncated and
@@ -867,6 +882,8 @@ def write_scan_funnel(market_file="market_analysis.json"):
             "champion_ready":champion,"shadow_ready":shadow,
             "paper_loss_circuit":paper_entry_risk_gate(),
             "fresh_gate_counts":dict(sorted(fresh_gate_counts.items(),key=lambda kv:(-kv[1],kv[0]))),
+            "temporal_lane_rejections":temporal_lane_rejections,
+            "temporal_lane_ready":temporal_lane_ready,
             "near_ready":near_ready[:5],
             "candidate_snapshots":selected,
             "all_candidate_phases":all_phase_counts,
