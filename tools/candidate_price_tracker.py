@@ -225,6 +225,11 @@ def update(state,market,max_observations=5000,history_market=None):
                     "score":item.get("score"),"quality":item.get("quality"),
                     "impulse":item.get("impulse"),
                     "gates":list(item.get("gates") or []),
+                    # Freeze original lane-level rejection evidence alongside
+                    # the entry quote. Later observed prices never rewrite it.
+                    "paper_buy_mode":item.get("paper_buy_mode"),
+                    "temporal_recovery_reason":item.get("temporal_recovery_reason"),
+                    "continuation_reason":item.get("continuation_reason"),
                     "features":features,
                     # A previously observed later quote remains valid
                     # ONLY when original entry price/timestamp agree.
