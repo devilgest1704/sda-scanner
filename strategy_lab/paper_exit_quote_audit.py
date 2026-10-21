@@ -28,19 +28,25 @@ def audit(data, threshold_sec=300):
             continue
         label = trade.get("label") or trade.get("symbol") or trade.get("address")
         closed_at = trade.get("closed_at")
-        quote_at = trade.get("exit_quote_at") or trade.get("quote_at")
+        quote_at = trade.get("exit_quote_at") or trade.get("quote_at") or (trade.get("pump_price_samples") or [{}])[-1].get("quote_at") if isinstance(trade.get("pump_price_samples"), list) and trade.get("pump_price_samples") else trade.get("exit_quote_at") or trade.get("quote_at")
         end, quote = _parse(closed_at), _parse(quote_at)
         derived_age = (end - quote).total_seconds() if end and quote else None
-        raw_age = trade.get("exit_quote_age_sec")
+        raw_age = trade.get("pump_exit_data_age_sec")
+        if raw_age is None:
+            raw_age = trade.get("exit_quote_age_sec")
         if raw_age is None:
             raw_age = trade.get("quote_age_seconds")
         age = derived_age if derived_age is not None else (
             float(raw_age) if isinstance(raw_age, (int, float)) and not isinstance(raw_age, bool) else None
         )
         stale_flag = trade.get("pump_exit_data_stale") is True
+        # Prefer explicit exit metadata over last monitoring sample, if available.
+        if isinstance(raw_age, (int, float)) and not isinstance(raw_age, bool):
+            age = float(raw_age)
+            derived_age = None
         if stale_flag or (age is not None and (age > threshold_sec or age < 0)):
             records.append({
-                "label": label, "closed_at": closed_at, "reason": trade.get("reason"),
+                "label": label, "closed_at": closed_at, "reason": trade.get("close_reason") or trade.get("reason"),
                 "stale_flag": stale_flag, "exit_quote_age_sec": age,
                 "age_source": "timestamps" if derived_age is not None else (
                     "exit_metadata" if age is not None else "unknown"),
