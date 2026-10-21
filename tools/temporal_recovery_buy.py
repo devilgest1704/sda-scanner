@@ -179,6 +179,7 @@ def evaluate_continuation(address, current, *, at=None, previous=None):
             or not 0 <= (now - current_quote).total_seconds() <= 180
             or abs((now - current_quote).total_seconds() - age) > 30
             or current_quote <= previous_quote
+            or current_quote <= previous_decision
             or not 0 < (current_quote - previous_quote).total_seconds() <= 480
             or not prior_price < price <= prior_price * 1.05):
         return {**answer, "reason": "no_new_fresh_price_followthrough"}
