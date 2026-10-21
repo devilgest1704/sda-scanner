@@ -28,7 +28,10 @@ def audit(data, threshold_sec=300):
             continue
         label = trade.get("label") or trade.get("symbol") or trade.get("address")
         closed_at = trade.get("closed_at")
-        quote_at = trade.get("exit_quote_at") or trade.get("quote_at") or (trade.get("pump_price_samples") or [{}])[-1].get("quote_at") if isinstance(trade.get("pump_price_samples"), list) and trade.get("pump_price_samples") else trade.get("exit_quote_at") or trade.get("quote_at")
+        quote_at = trade.get("exit_quote_at") or trade.get("quote_at")
+        samples = trade.get("pump_price_samples")
+        if not quote_at and isinstance(samples, list) and samples and isinstance(samples[-1], dict):
+            quote_at = samples[-1].get("quote_at")
         end, quote = _parse(closed_at), _parse(quote_at)
         derived_age = (end - quote).total_seconds() if end and quote else None
         raw_age = trade.get("pump_exit_data_age_sec")
