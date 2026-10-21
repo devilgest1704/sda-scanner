@@ -21,5 +21,15 @@ class QuoteAuditTests(unittest.TestCase):
         self.assertEqual(result["review_count"], 1)
 
 
+    def test_real_paper_close_metadata(self):
+        result = audit({"closed_trades": [{
+            "label": "TSLA/SDA", "close_reason": "SL",
+            "closed_at": "2026-10-21T02:39:03Z",
+            "pump_exit_data_stale": True, "pump_exit_data_age_sec": 1020.48,
+        }]})
+        self.assertEqual(result["review_count"], 1)
+        self.assertEqual(result["records"][0]["reason"], "SL")
+        self.assertEqual(result["records"][0]["exit_quote_age_sec"], 1020.48)
+
 if __name__ == "__main__":
     unittest.main()
