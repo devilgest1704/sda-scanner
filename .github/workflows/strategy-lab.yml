@@ -183,8 +183,26 @@ jobs:
           if git diff --cached --quiet; then
             echo 'No research archive changes'
           else
+            # The scanner updates main frequently. Rebase only this research
+            # commit onto the latest main; never force-push or overwrite scanner
+            # state files. Abort safely if a research archive itself conflicts.
             git commit -m 'chore: persist paper research archives [skip ci]'
-            git push origin HEAD:main
+            for attempt in 1 2 3 4 5; do
+              git fetch origin main
+              if ! git rebase origin/main; then
+                git rebase --abort || true
+                echo "::error::Research archive conflict; leaving scanner state untouched"
+                exit 1
+              fi
+              if git push origin HEAD:main; then
+                echo "Research archives persisted on attempt $attempt"
+                exit 0
+              fi
+              echo "Concurrent main update; retrying ($attempt/5)"
+              sleep $((attempt * 2))
+            done
+            echo "::error::Unable to persist research archives after 5 attempts"
+            exit 1
           fi
       - uses: actions/upload-artifact@v4
         if: always()
