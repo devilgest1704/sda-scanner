@@ -167,6 +167,8 @@ def diagnose(market, execution, ledger, at=None):
         "sampled_phases": dict(phase),
         "sampled_rejections": dict(gates.most_common(12)),
         "fresh_rejections": fresh_gates,
+        "temporal_lane_rejections": funnel.get("temporal_lane_rejections") if isinstance(funnel.get("temporal_lane_rejections"), dict) else {},
+        "temporal_lane_ready": funnel.get("temporal_lane_ready") if isinstance(funnel.get("temporal_lane_ready"), dict) else {},
         "risk_only_rejected_rows": risk_only,
         "would_buy_if_only_loss_circuit_cleared": risk_only > 0,
         "top_near_ready": (funnel.get("near_ready") or [])[:5],
