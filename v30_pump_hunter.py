@@ -349,11 +349,25 @@ def decision(address,a,ws=None,persist=True):
                        and temporal.get("lane") == "confirmed_continuation"
                        and v31_early_ok)
     temporal_activity_ok=v31_trades_ok or temporal_early_ok
+    # PAPER-only independent fresh-momentum lane. Never bypass risk controls.
+    fresh_momentum_ready=(
+        PAPER_BUY_MODE == "temporal_recovery"
+        and v31_age_ok and data_age <= 180
+        and v31_trades_ok and c["vol"] >= 500
+        and c["flow"] >= 200 and c["flow15"] >= 60
+        and c["buy_ratio"] >= 1.3
+        and 1.5 <= c["m15"] <= 8.0
+        and 0 < c["m1"] <= 8.0
+        and s >= 75 and q >= 70
+        and phase in ("IGNITION", "CONFIRMATION")
+        and fresh and entry_impulse >= 6
+        and liquidity_ok and price_flow_ok
+    )
     if PAPER_BUY_MODE == "temporal_recovery":
         # Keep immutable V31 quote/activity safety, paper per-token cooldown,
         # price/flow sanity, anti-chase and MACD veto, plus the 24h loss budget.
         # Don't silently permit the old baseline lane alongside this mode.
-        blocked = (not temporal["ready"] or cd or not v31_age_ok
+        blocked = (not (temporal["ready"] or fresh_momentum_ready) or cd or not v31_age_ok
                    or not temporal_activity_ok or not price_flow_ok or late_spike
                    or macd_gate["blocked"] or loss_circuit["blocked"])
     else:
@@ -406,7 +420,7 @@ def decision(address,a,ws=None,persist=True):
         # thresholds. Show actual temporal rejections, not spurious baseline
         # failures when a recovered signal is admissible.
         gate_failures = []
-        if not temporal["ready"]: gate_failures.append("temporal_recovery")
+        if not (temporal["ready"] or fresh_momentum_ready): gate_failures.append("temporal_recovery")
         if not v31_age_ok: gate_failures.append("v31_age")
         if not temporal_activity_ok: gate_failures.append("v31_activity")
         if not price_flow_ok: gate_failures.append("price_flow")
@@ -418,7 +432,7 @@ def decision(address,a,ws=None,persist=True):
                   f"{phase} / "+("; ".join(gate_failures[:2])+
                   (": "+temporal["reason"]+
                    " / "+str(temporal.get("continuation_reason") or "")
-                   if not temporal["ready"] else "")))
+                   if not (temporal["ready"] or fresh_momentum_ready) else "")))
     else:
         reason="READY" if not blocked else f"{phase} / "+"; ".join(failures[:3])
 
