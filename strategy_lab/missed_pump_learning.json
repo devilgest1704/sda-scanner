@@ -2,15 +2,15 @@
   "mode": "OBSERVED_QUOTE_HYPOTHESIS_NO_EXECUTION_PARITY",
   "paper_only": true,
   "can_promote_champion": false,
-  "sample_count": 531,
+  "sample_count": 533,
   "archived_candidate_snapshots": 5000,
-  "candidate_snapshots_with_60m_quote": 2519,
-  "excluded_from_causal_learning": 1988,
+  "candidate_snapshots_with_60m_quote": 2514,
+  "excluded_from_causal_learning": 1981,
   "input_quality": {
     "rejection_counts": {
-      "invalid_or_missing_quote_time": 2546,
-      "missing_frozen_features": 2546,
-      "no_60m_followup_observed": 1266,
+      "invalid_or_missing_quote_time": 2528,
+      "missing_frozen_features": 2528,
+      "no_60m_followup_observed": 1280,
       "late_followup_75_to_120_minutes": 54,
       "already_eligible_not_missed": 29
     },
@@ -19,14 +19,31 @@
     },
     "legacy_frozen_age_recoverable": 0,
     "maturity_stages": {
-      "with_original_quote_and_features": 2425,
-      "with_fresh_entry_quote": 2425,
-      "with_strict_60_to_75m_exit_quote": 1105,
-      "with_strict_exit_and_full_features": 1105
+      "with_original_quote_and_features": 2443,
+      "with_fresh_entry_quote": 2443,
+      "with_strict_60_to_75m_exit_quote": 1109,
+      "with_strict_exit_and_full_features": 1109
     },
-    "latest_original_candidate_at": "2026-10-22T16:47:30.289117+00:00",
-    "latest_strict_matured_candidate_at": "2026-10-22T15:30:23.195865+00:00",
+    "latest_original_candidate_at": "2026-10-22T17:52:29.989041+00:00",
+    "latest_strict_matured_candidate_at": "2026-10-22T16:34:19.771087+00:00",
     "missing_quote_schema_examples": [
+      {
+        "row_keys": [
+          "address",
+          "at",
+          "eligible",
+          "entry_price_sda",
+          "gates",
+          "id",
+          "impulse",
+          "outcomes",
+          "quality",
+          "score"
+        ],
+        "feature_keys": [],
+        "has_60m": false,
+        "has_original_age": false
+      },
       {
         "row_keys": [
           "address",
@@ -62,30 +79,12 @@
         "feature_keys": [],
         "has_60m": true,
         "has_original_age": false
-      },
-      {
-        "row_keys": [
-          "address",
-          "at",
-          "eligible",
-          "entry_price_sda",
-          "gates",
-          "id",
-          "impulse",
-          "observed_peak_240m",
-          "outcomes",
-          "quality",
-          "score"
-        ],
-        "feature_keys": [],
-        "has_60m": true,
-        "has_original_age": false
       }
     ]
   },
   "missed_pump_examples": 25,
   "positive_theoretical_60m_sda_model_not_fills": 190.2719,
-  "negative_theoretical_60m_sda_model_not_fills": -1056.7216,
+  "negative_theoretical_60m_sda_model_not_fills": -1059.0162,
   "gates_on_profitable_rejected_candidates": {
     "v31_activity": 15,
     "temporal_recovery": 13,
@@ -102,14 +101,14 @@
   },
   "gates_on_loss_making_rejected_candidates": {
     "v31_activity": 330,
-    "temporal_recovery": 284,
+    "temporal_recovery": 286,
     "score": 138,
     "lifecycle": 118,
     "loss_circuit": 103,
     "quality": 95,
     "liquidity": 73,
     "trades": 53,
-    "late_spike": 50,
+    "late_spike": 51,
     "impulse": 31,
     "buy_ratio": 15,
     "cooldown": 9
@@ -119,7 +118,7 @@
     "source": "actual_observed_swaps_original_frozen_rejected_decisions",
     "paper_only": true,
     "executable_peak_fills": false,
-    "distinct_observed_4h_peaks": 1043,
+    "distinct_observed_4h_peaks": 1050,
     "observed_peak_ge_10_pct": 102,
     "observed_peak_ge_25_pct": 37,
     "observed_peak_ge_50_pct": 16,
@@ -227,9 +226,9 @@
           5,
           10
         ],
-        "valid_distinct_cases": 452,
+        "valid_distinct_cases": 454,
         "model_positive_after_costs": 67,
-        "model_net_sda_total": -502.1056,
+        "model_net_sda_total": -508.0371,
         "positive_gate_counts": {
           "v31_activity": 48,
           "temporal_recovery": 42,
@@ -250,17 +249,17 @@
           15,
           25
         ],
-        "valid_distinct_cases": 530,
-        "model_positive_after_costs": 67,
-        "model_net_sda_total": -900.9489,
+        "valid_distinct_cases": 536,
+        "model_positive_after_costs": 69,
+        "model_net_sda_total": -917.225,
         "positive_gate_counts": {
           "v31_activity": 48,
-          "temporal_recovery": 43,
+          "temporal_recovery": 45,
           "score": 22,
           "quality": 19,
           "lifecycle": 18,
           "liquidity": 14,
-          "late_spike": 12,
+          "late_spike": 13,
           "loss_circuit": 12,
           "trades": 7,
           "impulse": 5
@@ -273,9 +272,9 @@
           60,
           75
         ],
-        "valid_distinct_cases": 526,
+        "valid_distinct_cases": 528,
         "model_positive_after_costs": 83,
-        "model_net_sda_total": -806.8979,
+        "model_net_sda_total": -809.1924,
         "positive_gate_counts": {
           "v31_activity": 56,
           "temporal_recovery": 51,
@@ -297,13 +296,13 @@
   "objective": "net SDA at first 60m observed quote after 2.2% roundtrip model cost",
   "limitation": "no fill or intrabar peak assumed; 4h/token de-correlation; new rule requires untouched forward shadow",
   "train": {
-    "samples": 360,
-    "unique_tokens": 84,
-    "net_sda_model": -602.33523,
-    "mean_sda_model": -1.67315,
-    "profit_factor_model": 0.209,
-    "max_drawdown_sda_model": 602.3352,
-    "win_rate_pct_model": 14.17
+    "samples": 372,
+    "unique_tokens": 87,
+    "net_sda_model": -624.68537,
+    "mean_sda_model": -1.67926,
+    "profit_factor_model": 0.2031,
+    "max_drawdown_sda_model": 624.6854,
+    "win_rate_pct_model": 13.71
   },
   "validation_sample_count": 160,
   "status": "NO_PROFITABLE_TRAIN_RULE",
@@ -327,7 +326,7 @@
     "win_rate_pct_model": 25.0
   },
   "tested_rules": 345,
-  "source_candidate_archive_updated_at": "2026-10-22T16:53:04.043289+00:00",
+  "source_candidate_archive_updated_at": "2026-10-22T17:59:04.026835+00:00",
   "source_candidate_archive_method": "paper_observed_quotes_not_executable_backtest",
-  "updated_at": "2026-10-22T16:53:37.931979+00:00"
+  "updated_at": "2026-10-22T17:59:39.362264+00:00"
 }
