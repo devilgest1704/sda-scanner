@@ -358,7 +358,7 @@ def decision(address,a,ws=None,persist=True):
         and c["buy_ratio"] >= 1.3
         and 1.5 <= c["m15"] <= 8.0
         and 0 < c["m1"] <= 8.0
-        and s >= 75 and q >= 70
+        and s >= 72 and q >= 65
         and phase in ("IGNITION", "CONFIRMATION")
         and fresh and entry_impulse >= 6
         and liquidity_ok and price_flow_ok
