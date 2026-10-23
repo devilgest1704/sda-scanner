@@ -2,30 +2,30 @@
   "mode": "OBSERVED_QUOTE_HYPOTHESIS_NO_EXECUTION_PARITY",
   "paper_only": true,
   "can_promote_champion": false,
-  "sample_count": 596,
+  "sample_count": 598,
   "archived_candidate_snapshots": 5000,
-  "candidate_snapshots_with_60m_quote": 2536,
-  "excluded_from_causal_learning": 1940,
+  "candidate_snapshots_with_60m_quote": 2535,
+  "excluded_from_causal_learning": 1937,
   "input_quality": {
     "rejection_counts": {
-      "invalid_or_missing_quote_time": 2258,
-      "missing_frozen_features": 2258,
-      "no_60m_followup_observed": 1413,
+      "invalid_or_missing_quote_time": 2247,
+      "missing_frozen_features": 2247,
+      "no_60m_followup_observed": 1422,
       "late_followup_75_to_120_minutes": 53,
       "already_eligible_not_missed": 33
     },
     "missing_feature_counts": {
-      "m4h": 69
+      "m4h": 68
     },
     "legacy_frozen_age_recoverable": 0,
     "maturity_stages": {
-      "with_original_quote_and_features": 2709,
-      "with_fresh_entry_quote": 2709,
-      "with_strict_60_to_75m_exit_quote": 1243,
-      "with_strict_exit_and_full_features": 1243
+      "with_original_quote_and_features": 2720,
+      "with_fresh_entry_quote": 2720,
+      "with_strict_60_to_75m_exit_quote": 1245,
+      "with_strict_exit_and_full_features": 1245
     },
-    "latest_original_candidate_at": "2026-10-23T17:12:56.949909+00:00",
-    "latest_strict_matured_candidate_at": "2026-10-23T16:07:01.271370+00:00",
+    "latest_original_candidate_at": "2026-10-23T18:35:56.686277+00:00",
+    "latest_strict_matured_candidate_at": "2026-10-23T17:12:56.949909+00:00",
     "missing_quote_schema_examples": [
       {
         "row_keys": [
@@ -36,23 +36,7 @@
           "gates",
           "id",
           "impulse",
-          "outcomes",
-          "quality",
-          "score"
-        ],
-        "feature_keys": [],
-        "has_60m": false,
-        "has_original_age": false
-      },
-      {
-        "row_keys": [
-          "address",
-          "at",
-          "eligible",
-          "entry_price_sda",
-          "gates",
-          "id",
-          "impulse",
+          "observed_peak_240m",
           "outcomes",
           "quality",
           "score"
@@ -76,14 +60,32 @@
           "score"
         ],
         "feature_keys": [],
-        "has_60m": false,
+        "has_60m": true,
+        "has_original_age": false
+      },
+      {
+        "row_keys": [
+          "address",
+          "at",
+          "eligible",
+          "entry_price_sda",
+          "gates",
+          "id",
+          "impulse",
+          "observed_peak_240m",
+          "outcomes",
+          "quality",
+          "score"
+        ],
+        "feature_keys": [],
+        "has_60m": true,
         "has_original_age": false
       }
     ]
   },
   "missed_pump_examples": 27,
   "positive_theoretical_60m_sda_model_not_fills": 200.9573,
-  "negative_theoretical_60m_sda_model_not_fills": -1168.0502,
+  "negative_theoretical_60m_sda_model_not_fills": -1172.1408,
   "gates_on_profitable_rejected_candidates": {
     "v31_activity": 17,
     "temporal_recovery": 15,
@@ -99,8 +101,8 @@
     "buy_ratio": 1
   },
   "gates_on_loss_making_rejected_candidates": {
-    "v31_activity": 372,
-    "temporal_recovery": 339,
+    "v31_activity": 373,
+    "temporal_recovery": 341,
     "score": 138,
     "lifecycle": 118,
     "loss_circuit": 103,
@@ -110,14 +112,14 @@
     "trades": 53,
     "impulse": 31,
     "buy_ratio": 15,
-    "cooldown": 10
+    "cooldown": 12
   },
   "potential_240m_peak_examples": 90,
   "observed_4h_pump_research": {
     "source": "actual_observed_swaps_original_frozen_rejected_decisions",
     "paper_only": true,
     "executable_peak_fills": false,
-    "distinct_observed_4h_peaks": 1180,
+    "distinct_observed_4h_peaks": 1186,
     "observed_peak_ge_10_pct": 121,
     "observed_peak_ge_25_pct": 42,
     "observed_peak_ge_50_pct": 17,
@@ -223,9 +225,9 @@
           5,
           10
         ],
-        "valid_distinct_cases": 511,
+        "valid_distinct_cases": 513,
         "model_positive_after_costs": 78,
-        "model_net_sda_total": -532.1248,
+        "model_net_sda_total": -537.9741,
         "positive_gate_counts": {
           "v31_activity": 55,
           "temporal_recovery": 53,
@@ -246,9 +248,9 @@
           15,
           25
         ],
-        "valid_distinct_cases": 599,
+        "valid_distinct_cases": 600,
         "model_positive_after_costs": 79,
-        "model_net_sda_total": -879.5299,
+        "model_net_sda_total": -879.89,
         "positive_gate_counts": {
           "temporal_recovery": 55,
           "v31_activity": 55,
@@ -269,9 +271,9 @@
           60,
           75
         ],
-        "valid_distinct_cases": 591,
+        "valid_distinct_cases": 593,
         "model_positive_after_costs": 93,
-        "model_net_sda_total": -896.6751,
+        "model_net_sda_total": -900.7657,
         "positive_gate_counts": {
           "temporal_recovery": 61,
           "v31_activity": 61,
@@ -293,15 +295,15 @@
   "objective": "net SDA at first 60m observed quote after 2.2% roundtrip model cost",
   "limitation": "no fill or intrabar peak assumed; 4h/token de-correlation; new rule requires untouched forward shadow",
   "train": {
-    "samples": 414,
+    "samples": 415,
     "unique_tokens": 92,
-    "net_sda_model": -699.35349,
-    "mean_sda_model": -1.68926,
-    "profit_factor_model": 0.1873,
+    "net_sda_model": -670.08694,
+    "mean_sda_model": -1.61467,
+    "profit_factor_model": 0.2213,
     "max_drawdown_sda_model": 699.3535,
-    "win_rate_pct_model": 13.29
+    "win_rate_pct_model": 13.49
   },
-  "validation_sample_count": 179,
+  "validation_sample_count": 180,
   "status": "NO_PROFITABLE_TRAIN_RULE",
   "candidate": null,
   "eligible_unmodified_train": {
@@ -323,7 +325,7 @@
     "win_rate_pct_model": 25.0
   },
   "tested_rules": 345,
-  "source_candidate_archive_updated_at": "2026-10-23T17:34:27.399807+00:00",
+  "source_candidate_archive_updated_at": "2026-10-23T18:39:27.514147+00:00",
   "source_candidate_archive_method": "paper_observed_quotes_not_executable_backtest",
-  "updated_at": "2026-10-23T17:34:53.408862+00:00"
+  "updated_at": "2026-10-23T18:40:04.612342+00:00"
 }
