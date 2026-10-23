@@ -44,6 +44,15 @@ class MarketWindowRegression(unittest.TestCase):
         self.assertEqual(sum(x["volume"] for x in previous), 20)
         self.assertEqual(sum(x["volume"] for x in current), 100)
 
+    def test_exact_bucket_boundary_counted_once(self):
+        boundary = tx(self.now - timedelta(minutes=15), volume=75)
+        previous = namespace["get_transactions_in_window"](
+            [boundary], self.now - timedelta(minutes=15), 15)
+        current = namespace["get_transactions_in_window"](
+            [boundary], self.now, 15)
+        self.assertEqual(len(previous), 1)
+        self.assertEqual(len(current), 0)
+
     def test_future_trade_does_not_set_price_or_volume(self):
         history = [tx(self.now - timedelta(minutes=70), price=1),
                    tx(self.now - timedelta(minutes=5), price=2, volume=30),
