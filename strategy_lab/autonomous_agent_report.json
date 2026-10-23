@@ -1,6 +1,6 @@
 {
   "version": "FORWARD-PAPER-AGENT-1",
-  "updated_at": "2026-10-23T07:26:38.416880+00:00",
+  "updated_at": "2026-10-23T07:56:11.532564+00:00",
   "mode": "PAPER_ONLY",
   "objective": "maximize accumulated net SDA subject to observed quote risk",
   "real_trading": false,
@@ -70,17 +70,17 @@
       "mode": "RESEARCH_ONLY",
       "paper_champion_unchanged": true,
       "measured": 40,
-      "has_observed_market_data": 1,
+      "has_observed_market_data": 0,
       "observed_pressure_ready": 0,
       "eligible_after_common_shadow_gates": 0,
       "fresh_price_quote_ready": 0,
       "rejections": {
-        "insufficient_observed_swaps": 40,
+        "stale_or_future_quote": 40,
+        "weak_trade_activity": 40,
+        "insufficient_observed_swaps": 39,
         "missing_or_overheated_momentum": 39,
-        "stale_or_future_quote": 39,
         "weak_recent_buy_pressure": 39,
-        "weak_trade_activity": 39,
-        "late_four_hour_chase": 8
+        "late_four_hour_chase": 4
       },
       "pool_liquidity_verified": false,
       "execution_parity_verified": false
@@ -107,10 +107,9 @@
       "rejections": {
         "missing_observed_breakout_features": 39,
         "missing_same_scan_breakout": 39,
-        "already_reversing": 1,
         "original_breakout_entry_not_eligible": 1,
         "too_late_or_no_early_breakout": 1,
-        "weak_buy_pressure": 1
+        "weak_activity_acceleration": 1
       },
       "modeled_friction_per_side_pct": 1.5,
       "execution_parity_verified": false
@@ -123,7 +122,7 @@
     "paper_exits": "V30 emergency stop, adaptive trailing, early weakness, pump breakdown and stale",
     "warning": "Unmatched exit models cannot validate promotion until independent parity tests pass"
   },
-  "source_last_scan_at": "2026-10-23T07:26:07.506083+00:00",
+  "source_last_scan_at": "2026-10-23T07:41:08.875284+00:00",
   "strategies": {},
   "champion": {
     "generation": 0,
@@ -139,17 +138,17 @@
   "rollback_applied": false,
   "missed_pump_learning": {
     "status": "NO_PROFITABLE_TRAIN_RULE",
-    "updated_at": "2026-10-23T07:26:37.728020+00:00",
-    "source_candidate_archive_at": "2026-10-23T07:25:39.285279+00:00",
-    "source_age_minutes": 1.0,
+    "updated_at": "2026-10-23T07:56:10.777826+00:00",
+    "source_candidate_archive_at": "2026-10-23T07:40:38.983660+00:00",
+    "source_age_minutes": 15.5,
     "source_fresh": true,
     "archived_candidates": 5000,
-    "with_60m_quote": 2522,
+    "with_60m_quote": 2521,
     "input_quality": {
       "rejection_counts": {
-        "invalid_or_missing_quote_time": 2345,
-        "missing_frozen_features": 2345,
-        "no_60m_followup_observed": 1375,
+        "invalid_or_missing_quote_time": 2344,
+        "missing_frozen_features": 2344,
+        "no_60m_followup_observed": 1376,
         "late_followup_75_to_120_minutes": 54,
         "already_eligible_not_missed": 30
       },
@@ -158,12 +157,12 @@
       },
       "legacy_frozen_age_recoverable": 0,
       "maturity_stages": {
-        "with_original_quote_and_features": 2625,
-        "with_fresh_entry_quote": 2625,
+        "with_original_quote_and_features": 2626,
+        "with_fresh_entry_quote": 2626,
         "with_strict_60_to_75m_exit_quote": 1196,
         "with_strict_exit_and_full_features": 1196
       },
-      "latest_original_candidate_at": "2026-10-23T07:16:09.727584+00:00",
+      "latest_original_candidate_at": "2026-10-23T07:36:08.564646+00:00",
       "latest_strict_matured_candidate_at": "2026-10-23T06:06:07.883309+00:00",
       "missing_quote_schema_examples": [
         {
@@ -181,7 +180,7 @@
             "score"
           ],
           "feature_keys": [],
-          "has_60m": true,
+          "has_60m": false,
           "has_original_age": false
         },
         {
@@ -408,7 +407,7 @@
     "reason": "Train/holdout selects a rule; new forward Shadow must prove net SDA; unmatched exits prohibit auto PAPER promotion."
   },
   "temporal_recovery_research": {
-    "source_at": "2026-10-23T07:26:07.506083+00:00",
+    "source_at": "2026-10-23T07:41:08.875284+00:00",
     "total_recovered": 10,
     "recent_examples": [
       {
@@ -461,15 +460,15 @@
   },
   "scanner_no_buy": {
     "assessment": "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED",
-    "checked_at": "2026-10-23T07:26:10.711676+00:00",
+    "checked_at": "2026-10-23T07:41:12.075559+00:00",
     "audit_fresh": true,
-    "audit_age_minutes": 0.5,
+    "audit_age_minutes": 15.0,
     "risk_blocked": false,
     "loss_last_24h_sda": -9.4021,
     "loss_window_closed": 5,
     "projected_recovery_at_no_new_closes": null,
     "risk_only_buy_ready": false,
-    "fresh_tokens": 8,
+    "fresh_tokens": 4,
     "champion_ready": 0,
     "paper_buy_rules_modified": false
   },
@@ -581,7 +580,7 @@
         "quote_gap_over_30m": 13,
         "holding_time_over_max_plus_30m": 2
       },
-      "open_virtual_positions": 0
+      "open_virtual_positions": 1
     },
     "research_watch_strict": {
       "total_closed": 15,
@@ -591,7 +590,7 @@
         "holding_time_over_4_5h": 1,
         "quote_gap_over_30m": 2
       },
-      "open_virtual_positions": 0
+      "open_virtual_positions": 1
     },
     "research_macd_antipump": {
       "total_closed": 3,
