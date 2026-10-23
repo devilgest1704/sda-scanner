@@ -41,6 +41,32 @@ class FreshMomentumExpansionTests(unittest.TestCase):
         ):
             self.assertIn(condition, lane)
 
+    def test_fresh_momentum_threshold_boundary_behavior(self):
+        """Execute the actual lane expression, not a reimplemented approximation."""
+        decision = next(node for node in TREE.body
+                        if isinstance(node, ast.FunctionDef) and node.name == "decision")
+        assign = next(node for node in ast.walk(decision)
+                      if isinstance(node, ast.Assign)
+                      and any(isinstance(t, ast.Name) and t.id == "fresh_momentum_ready"
+                              for t in node.targets))
+        expr = compile(ast.Expression(body=assign.value), str(SOURCE), "eval")
+        c = {"vol": 700, "flow": 250, "flow15": 80, "buy_ratio": 1.5,
+             "m15": 2.0, "m1": 2.0}
+        base = dict(PAPER_BUY_MODE="temporal_recovery", v31_age_ok=True,
+                    data_age=60, v31_trades_ok=True, c=c, s=72, q=65,
+                    phase="CONFIRMATION", fresh=True, entry_impulse=8,
+                    liquidity_ok=True, price_flow_ok=True,
+                    FRESH_MOMENTUM_MIN_SCORE=72,
+                    FRESH_MOMENTUM_MIN_QUALITY=65)
+        self.assertTrue(eval(expr, {"__builtins__": {}}, base))
+        for changes in ({"s": 71.9}, {"q": 64.9}, {"data_age": 181},
+                        {"fresh": False}, {"v31_trades_ok": False},
+                        {"liquidity_ok": False}, {"price_flow_ok": False},
+                        {"PAPER_BUY_MODE": "baseline"}):
+            candidate = dict(base, **changes)
+            self.assertFalse(eval(expr, {"__builtins__": {}}, candidate),
+                             changes)
+
     def test_global_safety_vetoes_still_apply(self):
         source = SOURCE.read_text(encoding="utf-8")
         self.assertIn('or macd_gate["blocked"] or loss_circuit["blocked"]', source)
