@@ -234,7 +234,7 @@ def get_transactions_in_window(history, current_time, minutes):
 
     for tx in history:
         timestamp = parse_timestamp(tx.get("timestamp"))
-        if timestamp is not None and cutoff <= timestamp <= current_time:
+        if timestamp is not None and cutoff < timestamp <= current_time:
             result.append(tx)
 
     return result
