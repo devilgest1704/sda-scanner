@@ -18,6 +18,9 @@ STATE_FILE="v30_pump_state.json"
 SL_PCT=0.025
 MAX_OPEN=4
 MAX_BUYS_PER_RUN=1
+# PAPER-only fresh momentum expansion; all other safety gates stay unchanged.
+FRESH_MOMENTUM_MIN_SCORE=72
+FRESH_MOMENTUM_MIN_QUALITY=65
 ENTRY_SCORE=68.0
 MIN_QUALITY=52.0
 MIN_IMPULSE=8.0
@@ -358,7 +361,7 @@ def decision(address,a,ws=None,persist=True):
         and c["buy_ratio"] >= 1.3
         and 1.5 <= c["m15"] <= 8.0
         and 0 < c["m1"] <= 8.0
-        and s >= 75 and q >= 70
+        and s >= FRESH_MOMENTUM_MIN_SCORE and q >= FRESH_MOMENTUM_MIN_QUALITY
         and phase in ("IGNITION", "CONFIRMATION")
         and fresh and entry_impulse >= 6
         and liquidity_ok and price_flow_ok
