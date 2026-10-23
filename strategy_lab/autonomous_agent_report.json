@@ -1,6 +1,6 @@
 {
   "version": "FORWARD-PAPER-AGENT-1",
-  "updated_at": "2026-10-22T23:48:49.701919+00:00",
+  "updated_at": "2026-10-23T01:56:53.560075+00:00",
   "mode": "PAPER_ONLY",
   "objective": "maximize accumulated net SDA subject to observed quote risk",
   "real_trading": false,
@@ -41,21 +41,7 @@
     "entry_reference": "same V30 baseline Shadow entry filters",
     "exit_reference": "take 50% at first observed >=+8% move, trail remaining 3.5% from observed peak, hard stop and max 12h after partial",
     "cost_accounting": "one full 50 SDA entry; separate 50% exit legs charged round-trip fees only once each; aggregate ONE completed trade",
-    "caveat": "No real fills, no historical hindsight, invalid quotes excluded, no verified profit or execution parity",
-    "paired_exit_comparison": {
-      "method": "same_address_and_opened_at_valid_forward_entries_only",
-      "paired_closed_trades": 56,
-      "unique_tokens": 22,
-      "baseline_paired_net_sda": -81.0713,
-      "runner_paired_net_sda": -91.5542,
-      "runner_minus_baseline_sda": -10.4829,
-      "runner_outperformed_pairs": 0,
-      "unpaired_baseline_valid": 39,
-      "unpaired_runner_valid": 1,
-      "paper_only": true,
-      "can_promote_champion": false,
-      "warning": "Descriptive paired exit comparison, not a randomized or proven-profitability test"
-    }
+    "caveat": "No real fills, no historical hindsight, invalid quotes excluded, no verified profit or execution parity"
   },
   "v33_flow_continuation": {
     "mode": "RESEARCH_ONLY",
@@ -75,12 +61,12 @@
       "eligible_after_common_shadow_gates": 0,
       "fresh_price_quote_ready": 0,
       "rejections": {
-        "missing_or_overheated_momentum": 39,
+        "missing_or_overheated_momentum": 40,
+        "weak_trade_activity": 40,
+        "insufficient_observed_swaps": 39,
         "stale_or_future_quote": 39,
-        "insufficient_observed_swaps": 38,
-        "weak_recent_buy_pressure": 38,
-        "weak_trade_activity": 38,
-        "late_four_hour_chase": 3
+        "weak_recent_buy_pressure": 39,
+        "late_four_hour_chase": 9
       },
       "pool_liquidity_verified": false,
       "execution_parity_verified": false
@@ -105,15 +91,14 @@
       "eligible_after_shadow_gates": 0,
       "fresh_quote_ready": 0,
       "rejections": {
-        "missing_observed_breakout_features": 35,
-        "missing_same_scan_breakout": 35,
-        "original_breakout_entry_not_eligible": 5,
-        "too_late_or_no_early_breakout": 5,
-        "weak_buy_pressure": 5,
-        "insufficient_observed_turnover": 4,
-        "weak_activity_acceleration": 4,
-        "already_reversing": 2,
-        "wide_consolidation": 2
+        "missing_observed_breakout_features": 37,
+        "missing_same_scan_breakout": 37,
+        "insufficient_observed_turnover": 3,
+        "original_breakout_entry_not_eligible": 3,
+        "too_late_or_no_early_breakout": 3,
+        "weak_activity_acceleration": 3,
+        "weak_buy_pressure": 3,
+        "wide_consolidation": 1
       },
       "modeled_friction_per_side_pct": 1.5,
       "execution_parity_verified": false
@@ -126,7 +111,7 @@
     "paper_exits": "V30 emergency stop, adaptive trailing, early weakness, pump breakdown and stale",
     "warning": "Unmatched exit models cannot validate promotion until independent parity tests pass"
   },
-  "source_last_scan_at": "2026-10-22T23:48:14.926276+00:00",
+  "source_last_scan_at": "2026-10-23T00:38:14.953463+00:00",
   "strategies": {},
   "champion": {
     "generation": 0,
@@ -142,17 +127,17 @@
   "rollback_applied": false,
   "missed_pump_learning": {
     "status": "NO_PROFITABLE_TRAIN_RULE",
-    "updated_at": "2026-10-22T23:48:48.554343+00:00",
-    "source_candidate_archive_at": "2026-10-22T23:47:48.444664+00:00",
-    "source_age_minutes": 1.0,
-    "source_fresh": true,
+    "updated_at": "2026-10-23T01:56:52.806512+00:00",
+    "source_candidate_archive_at": "2026-10-23T00:37:48.836719+00:00",
+    "source_age_minutes": 79.1,
+    "source_fresh": false,
     "archived_candidates": 5000,
-    "with_60m_quote": 2499,
+    "with_60m_quote": 2508,
     "input_quality": {
       "rejection_counts": {
-        "invalid_or_missing_quote_time": 2415,
-        "missing_frozen_features": 2415,
-        "no_60m_followup_observed": 1356,
+        "invalid_or_missing_quote_time": 2412,
+        "missing_frozen_features": 2412,
+        "no_60m_followup_observed": 1350,
         "late_followup_75_to_120_minutes": 54,
         "already_eligible_not_missed": 29
       },
@@ -161,13 +146,13 @@
       },
       "legacy_frozen_age_recoverable": 0,
       "maturity_stages": {
-        "with_original_quote_and_features": 2556,
-        "with_fresh_entry_quote": 2556,
-        "with_strict_60_to_75m_exit_quote": 1146,
-        "with_strict_exit_and_full_features": 1146
+        "with_original_quote_and_features": 2559,
+        "with_fresh_entry_quote": 2559,
+        "with_strict_60_to_75m_exit_quote": 1155,
+        "with_strict_exit_and_full_features": 1155
       },
-      "latest_original_candidate_at": "2026-10-22T23:47:13.937059+00:00",
-      "latest_strict_matured_candidate_at": "2026-10-22T22:03:15.421596+00:00",
+      "latest_original_candidate_at": "2026-10-23T00:32:20.256329+00:00",
+      "latest_strict_matured_candidate_at": "2026-10-22T23:30:16.115002+00:00",
       "missing_quote_schema_examples": [
         {
           "row_keys": [
@@ -223,13 +208,13 @@
         }
       ]
     },
-    "observed_candidates": 551,
+    "observed_candidates": 553,
     "missed_60m_positive_after_costs": 26,
     "observed_4h_pump_research": {
       "source": "actual_observed_swaps_original_frozen_rejected_decisions",
       "paper_only": true,
       "executable_peak_fills": false,
-      "distinct_observed_4h_peaks": 1102,
+      "distinct_observed_4h_peaks": 1105,
       "observed_peak_ge_10_pct": 113,
       "observed_peak_ge_25_pct": 41,
       "observed_peak_ge_50_pct": 17,
@@ -335,9 +320,9 @@
             5,
             10
           ],
-          "valid_distinct_cases": 473,
+          "valid_distinct_cases": 475,
           "model_positive_after_costs": 72,
-          "model_net_sda_total": -490.7024,
+          "model_net_sda_total": -492.8437,
           "positive_gate_counts": {
             "v31_activity": 51,
             "temporal_recovery": 47,
@@ -358,9 +343,9 @@
             15,
             25
           ],
-          "valid_distinct_cases": 555,
+          "valid_distinct_cases": 558,
           "model_positive_after_costs": 72,
-          "model_net_sda_total": -813.0593,
+          "model_net_sda_total": -816.9317,
           "positive_gate_counts": {
             "v31_activity": 50,
             "temporal_recovery": 48,
@@ -381,9 +366,9 @@
             60,
             75
           ],
-          "valid_distinct_cases": 546,
+          "valid_distinct_cases": 548,
           "model_positive_after_costs": 86,
-          "model_net_sda_total": -829.9551,
+          "model_net_sda_total": -838.3179,
           "positive_gate_counts": {
             "v31_activity": 59,
             "temporal_recovery": 54,
@@ -409,7 +394,7 @@
     "reason": "Train/holdout selects a rule; new forward Shadow must prove net SDA; unmatched exits prohibit auto PAPER promotion."
   },
   "temporal_recovery_research": {
-    "source_at": "2026-10-22T23:48:14.926276+00:00",
+    "source_at": "2026-10-23T00:38:14.953463+00:00",
     "total_recovered": 10,
     "recent_examples": [
       {
@@ -462,231 +447,18 @@
   },
   "scanner_no_buy": {
     "assessment": "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED",
-    "checked_at": "2026-10-22T23:48:18.067928+00:00",
-    "audit_fresh": true,
-    "audit_age_minutes": 0.5,
+    "checked_at": "2026-10-23T00:38:18.114675+00:00",
+    "audit_fresh": false,
+    "audit_age_minutes": 78.6,
     "risk_blocked": false,
     "loss_last_24h_sda": -10.1122,
     "loss_window_closed": 4,
     "projected_recovery_at_no_new_closes": null,
     "risk_only_buy_ready": false,
-    "fresh_tokens": 14,
+    "fresh_tokens": 9,
     "champion_ready": 0,
     "paper_buy_rules_modified": false
   },
-  "incumbent_policy": "research_temporal_recovery",
-  "shadow_comparison_reference": "baseline",
-  "quote_coverage_pct": {
-    "baseline": 72.52,
-    "quality": 71.88,
-    "momentum": 74.75,
-    "selective": 83.82,
-    "score": 78.65,
-    "quality_plus": 73.17,
-    "research_watch": 76.27,
-    "research_watch_strict": 86.67,
-    "research_macd_antipump": 0.0,
-    "research_macd_confirmation": 0.0,
-    "research_breakout_volume_trend": 88.37,
-    "research_sparse_volume_ignition": 0.0,
-    "research_trend_runner": 56.44,
-    "research_temporal_recovery": 66.67,
-    "research_v33_flow_continuation": 79.17,
-    "research_v33_cost_aware_breakout": 73.33
-  },
-  "learning_data_quality": {
-    "baseline": {
-      "total_closed": 131,
-      "valid_closed": 95,
-      "excluded_closed": 36,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 4,
-        "quote_gap_over_30m": 30,
-        "holding_time_over_4_5h": 5,
-        "holding_time_over_max_plus_30m": 6,
-        "stale_timeout_no_observed_exit_quote": 2
-      },
-      "open_virtual_positions": 0
-    },
-    "quality": {
-      "total_closed": 128,
-      "valid_closed": 92,
-      "excluded_closed": 36,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 4,
-        "quote_gap_over_30m": 30,
-        "holding_time_over_4_5h": 5,
-        "holding_time_over_max_plus_30m": 6,
-        "stale_timeout_no_observed_exit_quote": 2
-      },
-      "open_virtual_positions": 0
-    },
-    "momentum": {
-      "total_closed": 99,
-      "valid_closed": 74,
-      "excluded_closed": 25,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 4,
-        "quote_gap_over_30m": 20,
-        "holding_time_over_4_5h": 2,
-        "holding_time_over_max_plus_30m": 5,
-        "stale_timeout_no_observed_exit_quote": 1
-      },
-      "open_virtual_positions": 0
-    },
-    "selective": {
-      "total_closed": 68,
-      "valid_closed": 57,
-      "excluded_closed": 11,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 2,
-        "quote_gap_over_30m": 8,
-        "holding_time_over_4_5h": 1,
-        "stale_timeout_no_observed_exit_quote": 1,
-        "holding_time_over_max_plus_30m": 2
-      },
-      "open_virtual_positions": 0
-    },
-    "score": {
-      "total_closed": 89,
-      "valid_closed": 70,
-      "excluded_closed": 19,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 3,
-        "quote_gap_over_30m": 16,
-        "holding_time_over_4_5h": 2,
-        "holding_time_over_max_plus_30m": 3
-      },
-      "open_virtual_positions": 0
-    },
-    "quality_plus": {
-      "total_closed": 123,
-      "valid_closed": 90,
-      "excluded_closed": 33,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 3,
-        "quote_gap_over_30m": 28,
-        "holding_time_over_4_5h": 4,
-        "holding_time_over_max_plus_30m": 6,
-        "stale_timeout_no_observed_exit_quote": 2
-      },
-      "open_virtual_positions": 0
-    },
-    "research_watch": {
-      "total_closed": 59,
-      "valid_closed": 45,
-      "excluded_closed": 14,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 1,
-        "quote_gap_over_30m": 13,
-        "holding_time_over_4_5h": 2,
-        "holding_time_over_max_plus_30m": 2
-      },
-      "open_virtual_positions": 0
-    },
-    "research_watch_strict": {
-      "total_closed": 15,
-      "valid_closed": 13,
-      "excluded_closed": 2,
-      "excluded_by_reason": {
-        "quote_gap_over_30m": 2,
-        "holding_time_over_4_5h": 1
-      },
-      "open_virtual_positions": 0
-    },
-    "research_macd_antipump": {
-      "total_closed": 3,
-      "valid_closed": 0,
-      "excluded_closed": 3,
-      "excluded_by_reason": {
-        "quote_gap_over_30m": 3
-      },
-      "open_virtual_positions": 0
-    },
-    "research_macd_confirmation": {
-      "total_closed": 0,
-      "valid_closed": 0,
-      "excluded_closed": 0,
-      "excluded_by_reason": {},
-      "open_virtual_positions": 0
-    },
-    "research_breakout_volume_trend": {
-      "total_closed": 43,
-      "valid_closed": 38,
-      "excluded_closed": 5,
-      "excluded_by_reason": {
-        "quote_gap_over_30m": 5,
-        "holding_time_over_4_5h": 1,
-        "holding_time_over_max_plus_30m": 1
-      },
-      "open_virtual_positions": 0
-    },
-    "research_trend_runner": {
-      "total_closed": 101,
-      "valid_closed": 57,
-      "excluded_closed": 44,
-      "excluded_by_reason": {
-        "runner_observation_gap_over_30m": 44,
-        "runner_holding_time_overrun": 13
-      },
-      "open_virtual_positions": 0
-    },
-    "research_sparse_volume_ignition": {
-      "total_closed": 2,
-      "valid_closed": 0,
-      "excluded_closed": 2,
-      "excluded_by_reason": {
-        "quote_gap_over_30m": 2,
-        "holding_time_over_max_plus_30m": 2
-      },
-      "open_virtual_positions": 0
-    },
-    "research_temporal_recovery": {
-      "total_closed": 9,
-      "valid_closed": 6,
-      "excluded_closed": 3,
-      "excluded_by_reason": {
-        "quote_gap_over_30m": 3,
-        "holding_time_over_max_plus_30m": 2
-      },
-      "open_virtual_positions": 0
-    },
-    "research_v33_flow_continuation": {
-      "total_closed": 24,
-      "valid_closed": 19,
-      "excluded_closed": 5,
-      "excluded_by_reason": {
-        "quote_gap_over_30m": 5,
-        "holding_time_over_max_plus_30m": 2
-      },
-      "open_virtual_positions": 0
-    },
-    "research_v33_cost_aware_breakout": {
-      "total_closed": 15,
-      "valid_closed": 11,
-      "excluded_closed": 4,
-      "excluded_by_reason": {
-        "quote_gap_over_30m": 4,
-        "holding_time_over_max_plus_30m": 2
-      },
-      "open_virtual_positions": 0
-    }
-  },
-  "active_paper_evidence": {
-    "strategy": "research_temporal_recovery",
-    "valid_forward_closes": 6,
-    "observed_quote_model": {
-      "closed": 6,
-      "net_sda": 3.7098,
-      "max_drawdown_sda": 10.4518,
-      "win_rate_pct": 16.67,
-      "profit_factor": 1.2881,
-      "unique_tokens": 6,
-      "last_closed_at": "2026-10-18T23:06:38+00:00"
-    },
-    "quote_coverage_pct": 66.67,
-    "execution_parity_verified": false
-  },
-  "status": "ACTIVE_TEMPORAL_MODE_RESEARCH_ONLY",
-  "reason": "PAPER uses temporal_recovery, but this optimizer only tunes baseline numeric filters. Temporal forward evidence is diagnostic and lacks execution parity; no unrelated filter promotion is permitted."
+  "status": "WAITING_FOR_FRESH_SCANNER",
+  "reason": "Forward scanner observations older than 30 minutes"
 }
