@@ -1,17 +1,17 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-10-23T09:57:25.517609+00:00",
+  "checked_at": "2026-10-23T10:02:26.341871+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-10-23T09:56:57.633073+00:00",
+    "market_at": "2026-10-23T10:01:58.321159+00:00",
     "tokens": 168,
-    "quotes_last_5m": 4,
-    "quotes_last_15m": 9,
-    "quotes_last_60m": 41,
-    "fresh_with_8_trades_1h": 2,
-    "fresh_with_12_trades_1h": 1,
-    "fresh_m15_ge_1_5pct": 1,
-    "fresh_m15_ge_1_5pct_and_8_trades": 1,
+    "quotes_last_5m": 5,
+    "quotes_last_15m": 14,
+    "quotes_last_60m": 42,
+    "fresh_with_8_trades_1h": 4,
+    "fresh_with_12_trades_1h": 3,
+    "fresh_m15_ge_1_5pct": 4,
+    "fresh_m15_ge_1_5pct_and_8_trades": 3,
     "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 1
   },
   "paper_loss_circuit": {
@@ -32,39 +32,41 @@
   "last_paper_close_at": "2026-10-23T04:32:06.452330+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-10-23T09:57:22.351876+00:00",
+    "at": "2026-10-23T10:02:23.133038+00:00",
     "age_minutes": 0.1,
     "aligned_to_market": true,
     "tokens_scored": 168,
-    "fresh_tokens": 9,
+    "fresh_tokens": 14,
     "champion_ready": 0,
     "shadow_ready": 1,
     "sampled_rows": 40,
     "sampled_phases": {
-      "IGNITION": 1,
+      "IGNITION": 4,
       "WATCH": 2,
-      "NO": 37
+      "NO": 34
     },
     "sampled_rejections": {
       "temporal_recovery": 40,
-      "v31_age": 37,
-      "v31_activity": 37,
+      "v31_activity": 36,
+      "v31_age": 36,
       "cooldown": 1,
       "price_flow": 1,
       "late_spike": 1
     },
     "fresh_rejections": {
-      "temporal_recovery": 9,
-      "v31_activity": 6,
-      "v31_age": 6,
+      "temporal_recovery": 14,
+      "v31_activity": 10,
+      "v31_age": 10,
       "cooldown": 1
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "prior_signal_not_recoverable": 9
+        "prior_signal_not_recoverable": 13,
+        "missing_prior_frozen_signal": 1
       },
       "confirmed_continuation": {
-        "prior_continuation_not_confirmed": 9
+        "prior_continuation_not_confirmed": 13,
+        "missing_prior_frozen_signal": 1
       }
     },
     "temporal_lane_ready": {
@@ -75,13 +77,40 @@
     "would_buy_if_only_loss_circuit_cleared": false,
     "top_near_ready": [
       {
+        "address": "0x0683e98cfb3bb37239f45f390b7147746b20b74e",
+        "symbol": "NVDA",
+        "score": 22.6,
+        "quality": 22.6,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 94.1,
+        "gates": [
+          "temporal_recovery"
+        ],
+        "reason": "NO / temporal_recovery: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+      },
+      {
+        "address": "0x7a15ff7b396ec76268d9d0dd0e5821e41841f768",
+        "symbol": "TSLA",
+        "score": 76.3,
+        "quality": 76.3,
+        "impulse": 0.0,
+        "phase": "IGNITION",
+        "data_age_sec": 124.1,
+        "gates": [
+          "temporal_recovery",
+          "v31_activity"
+        ],
+        "reason": "IGNITION / temporal_recovery; v31_activity: missing_prior_frozen_signal / missing_prior_frozen_signal"
+      },
+      {
         "address": "0x4ae77f557c5aaca450eec79b929b5cd06a8b8e6d",
         "symbol": "IDM",
-        "score": 89.1,
-        "quality": 88.9,
-        "impulse": 0.3,
+        "score": 70.9,
+        "quality": 69.5,
+        "impulse": 1.4,
         "phase": "WATCH",
-        "data_age_sec": 76.3,
+        "data_age_sec": 279.0,
         "gates": [
           "temporal_recovery",
           "cooldown"
@@ -89,60 +118,32 @@
         "reason": "WATCH / temporal_recovery; cooldown: prior_signal_not_recoverable / prior_continuation_not_confirmed"
       },
       {
+        "address": "0x93449d7504772c59c426297bb6bffe0de6803cc1",
+        "symbol": "PI",
+        "score": 23.1,
+        "quality": 23.1,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 262.1,
+        "gates": [
+          "temporal_recovery",
+          "v31_activity"
+        ],
+        "reason": "NO / temporal_recovery; v31_activity: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+      },
+      {
         "address": "0xb8d7fb85c4bf32f418715dcb9ebf88107ee73cb7",
         "symbol": "IFC",
-        "score": 28.6,
-        "quality": 28.6,
+        "score": 19.7,
+        "quality": 19.7,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 498.2,
+        "data_age_sec": 321.0,
         "gates": [
           "temporal_recovery",
           "v31_age"
         ],
         "reason": "NO / temporal_recovery; v31_age: prior_signal_not_recoverable / prior_continuation_not_confirmed"
-      },
-      {
-        "address": "0xaaadd5d2bb88fbdaa426ffdb95b917b861fe94bb",
-        "symbol": "AITT",
-        "score": 19.0,
-        "quality": 19.0,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 413.3,
-        "gates": [
-          "temporal_recovery",
-          "v31_age"
-        ],
-        "reason": "NO / temporal_recovery; v31_age: prior_signal_not_recoverable / prior_continuation_not_confirmed"
-      },
-      {
-        "address": "0xb0040f8b957329bfb2615dc081c1666540a153bd",
-        "symbol": "DAN",
-        "score": 13.0,
-        "quality": 13.0,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 185.3,
-        "gates": [
-          "temporal_recovery",
-          "v31_activity"
-        ],
-        "reason": "NO / temporal_recovery; v31_activity: prior_signal_not_recoverable / prior_continuation_not_confirmed"
-      },
-      {
-        "address": "0x8c4f5a7e1f811b4d33ed4f0d567a5aa4b92312b7",
-        "symbol": "BTC",
-        "score": 6.4,
-        "quality": 6.4,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 149.3,
-        "gates": [
-          "temporal_recovery",
-          "v31_activity"
-        ],
-        "reason": "NO / temporal_recovery; v31_activity: prior_signal_not_recoverable / prior_continuation_not_confirmed"
       }
     ]
   },
