@@ -1,0 +1,24 @@
+name: Market window regression
+on:
+  pull_request:
+    paths:
+      - 'market_scanner.py'
+      - 'tests/test_market_time_windows.py'
+      - '.github/workflows/market-window-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  market-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile scanner and regression tests
+        run: python -m py_compile market_scanner.py tests/test_market_time_windows.py
+      - name: Run isolated market window regression tests
+        run: python -m unittest discover -s tests -p 'test_market_time_windows.py' -v
