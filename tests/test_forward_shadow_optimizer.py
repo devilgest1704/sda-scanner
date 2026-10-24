@@ -45,8 +45,18 @@ class ForwardOptimizerTests(unittest.TestCase):
         self.addCleanup(env.stop)
 
     def test_report_exposes_exit_parity_exclusions_without_unlocking_promotion(self):
-        from tests.test_v30_exit_parity import closed
-        valid = closed([0.98, 0.96], actual="V30.3 EMERGENCY/HARD STOP")
+        opened = (NOW - timedelta(minutes=4)).isoformat()
+        observed = (NOW - timedelta(minutes=3)).isoformat()
+        valid = {"status": "CLOSED", "v30_mode": "CLEAN-PUMP-HUNTER-V30.3",
+                 "opened_at": opened, "closed_at": (NOW - timedelta(minutes=2, seconds=59)).isoformat(),
+                 "entry_price": 1.0, "close_price": 0.96,
+                 "close_reason": "V30.3 EMERGENCY/HARD STOP",
+                 "pump_price_samples": [{
+                     "at": observed,
+                     "quote_at": (NOW - timedelta(minutes=3, seconds=30)).isoformat(),
+                     "quote_age_seconds": 30, "price_sda": 0.96,
+                     "score": 75, "m15": 1, "flow_1h": 250}]}
+
         invalid = copy.deepcopy(valid)
         invalid["pump_price_samples"][0].pop("quote_at")
         with patch.dict("os.environ", {"SDA_PAPER_BUY_MODE": "temporal_recovery"}):
