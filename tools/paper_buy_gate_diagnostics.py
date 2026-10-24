@@ -32,6 +32,19 @@ def analyze(state):
         "impulse_ge_6": lambda x, c: x.get("impulse", 0) >= 6,
     }
     counts = {name: sum(bool(fn(x, x.get("last") or {})) for x in rows) for name, fn in gates.items()}
+    impulse_gates = {
+        "previous_sample": lambda x,c: bool(x.get("prev")),
+        "trades_ge_5": lambda x,c: c.get("trades",0) >= 5,
+        "volume_ge_100": lambda x,c: c.get("vol",0) >= 100,
+        "positive_flow": lambda x,c: c.get("flow",0) > 0,
+        "positive_m1": lambda x,c: c.get("m1",0) > 0,
+        "positive_m15": lambda x,c: c.get("m15",0) > 0,
+    }
+    raw_positive = [x for x in rows if x.get("raw_impulse",0) > 0]
+    impulse_pass = {name:sum(bool(fn(x,x.get("last") or {})) for x in raw_positive)
+                    for name,fn in impulse_gates.items()}
+    raw_all = sum(all(fn(x,x.get("last") or {}) for fn in impulse_gates.values())
+                  for x in raw_positive)
     all_visible = sum(all(fn(x, x.get("last") or {}) for fn in gates.values()) for x in rows)
     return {
         "state_updated_at": state.get("updated_at"),
@@ -39,6 +52,9 @@ def analyze(state):
         "phase_counts": dict(stages),
         "gate_pass_counts": counts,
         "all_observable_gates_pass": all_visible,
+        "raw_impulse_positive": len(raw_positive),
+        "raw_impulse_gate_pass_counts": impulse_pass,
+        "raw_impulse_pass_all_gates": raw_all,
         "note": "Snapshot only. Does not evaluate fresh delta, liquidity_ok, price_flow_ok, temporal recovery, MACD, cooldown or loss circuit.",
     }
 
