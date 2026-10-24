@@ -44,6 +44,23 @@ class ForwardOptimizerTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
+    def test_report_exposes_exit_parity_exclusions_without_unlocking_promotion(self):
+        from tests.test_v30_exit_parity import closed
+        valid = closed([0.98, 0.96], actual="V30.3 EMERGENCY/HARD STOP")
+        invalid = copy.deepcopy(valid)
+        invalid["pump_price_samples"][0].pop("quote_at")
+        with patch.dict("os.environ", {"SDA_PAPER_BUY_MODE": "temporal_recovery"}):
+            result, unchanged = report(samples(), copy.deepcopy(BASE),
+                                       {"closed_trades": [valid, invalid]}, NOW)
+        audit = result["runtime_parity"]["observed_paper_exit_audit"]
+        self.assertEqual(audit["audited"], 2)
+        self.assertEqual(audit["matched"], 1)
+        self.assertEqual(audit["excluded"], 1)
+        self.assertFalse(audit["can_unlock_paper_autopromotion"])
+        self.assertFalse(result["runtime_parity"]["verified"])
+        self.assertFalse(result["promotion_applied"])
+        self.assertEqual(unchanged, BASE)
+
     def test_temporal_mode_rejects_numeric_champion_promotion(self):
         state = samples()
         state["strategies"]["research_temporal_recovery"]["trades"] = [
