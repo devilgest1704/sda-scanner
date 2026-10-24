@@ -44,6 +44,33 @@ class ForwardOptimizerTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
+    def test_report_exposes_exit_parity_exclusions_without_unlocking_promotion(self):
+        opened = (NOW - timedelta(minutes=4)).isoformat()
+        observed = (NOW - timedelta(minutes=3)).isoformat()
+        valid = {"status": "CLOSED", "v30_mode": "CLEAN-PUMP-HUNTER-V30.3",
+                 "opened_at": opened, "closed_at": (NOW - timedelta(minutes=2, seconds=59)).isoformat(),
+                 "entry_price": 1.0, "close_price": 0.96,
+                 "close_reason": "V30.3 EMERGENCY/HARD STOP",
+                 "pump_price_samples": [{
+                     "at": observed,
+                     "quote_at": (NOW - timedelta(minutes=3, seconds=30)).isoformat(),
+                     "quote_age_seconds": 30, "price_sda": 0.96,
+                     "score": 75, "m15": 1, "flow_1h": 250}]}
+
+        invalid = copy.deepcopy(valid)
+        invalid["pump_price_samples"][0].pop("quote_at")
+        with patch.dict("os.environ", {"SDA_PAPER_BUY_MODE": "temporal_recovery"}):
+            result, unchanged = report(samples(), copy.deepcopy(BASE),
+                                       {"closed_trades": [valid, invalid]}, NOW)
+        audit = result["runtime_parity"]["observed_paper_exit_audit"]
+        self.assertEqual(audit["audited"], 2)
+        self.assertEqual(audit["matched"], 1)
+        self.assertEqual(audit["excluded"], 1)
+        self.assertFalse(audit["can_unlock_paper_autopromotion"])
+        self.assertFalse(result["runtime_parity"]["verified"])
+        self.assertFalse(result["promotion_applied"])
+        self.assertEqual(unchanged, BASE)
+
     def test_temporal_mode_rejects_numeric_champion_promotion(self):
         state = samples()
         state["strategies"]["research_temporal_recovery"]["trades"] = [

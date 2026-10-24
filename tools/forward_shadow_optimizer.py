@@ -14,6 +14,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from tools.forward_shadow_agent import POLICIES, when, finite
+from tools.v30_exit_parity import audit_archive
 
 STATE_PATH = Path("strategy_lab/forward_shadow_state.json")
 CONFIG_PATH = Path("v30_agent_config.json")
@@ -129,6 +130,12 @@ def report(state, config, real_ledger, now=None):
     current = config.get("filters")
     if not isinstance(current, dict) or set(POLICIES["baseline"]) - set(current):
         raise ValueError("Invalid Champion filters")
+    # Evidence-only audit of actual recorded PAPER exits. This does NOT
+    # establish SHADOW execution parity or authorize any promotion.
+    closed_for_parity = real_ledger.get("closed_trades", []) if isinstance(real_ledger, dict) else []
+    if not isinstance(closed_for_parity, list):
+        closed_for_parity = []
+    exit_parity_evidence = audit_archive(closed_for_parity[-500:])
     model = {
         "version": "FORWARD-PAPER-AGENT-1",
         "updated_at": now.isoformat(),
@@ -196,6 +203,7 @@ def report(state, config, real_ledger, now=None):
         },
         "runtime_parity": {
             "verified": RUNTIME_EXECUTION_PARITY_VERIFIED,
+            "observed_paper_exit_audit": exit_parity_evidence,
             "shadow_exits": "fixed 2.5% stop, +8% take, -3.5% trailing, 4h timeout",
             "paper_exits": "V30 emergency stop, adaptive trailing, early weakness, pump breakdown and stale",
             "warning": "Unmatched exit models cannot validate promotion until independent parity tests pass",
