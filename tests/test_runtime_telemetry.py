@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 class RuntimeTelemetryTests(unittest.TestCase):
     def test_report_reads_runtime_positions_and_preserves_ledger(self):
@@ -18,7 +19,10 @@ class RuntimeTelemetryTests(unittest.TestCase):
                     "positions":{"0xabc":{"entry_price":1,"pump_price_samples":[]}},
                     "closed_trades":[]}),encoding="utf-8")
                 return "scan-complete"
-        ns={"engine":Engine()}
+        funnel_calls=[]
+        # Isolated function execution must supply the same _v30 global as main.py.
+        ns={"engine":Engine(), "_v30":SimpleNamespace(
+            write_scan_funnel=lambda path: funnel_calls.append(path))}
         exec(code,ns)
         old=os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
@@ -29,6 +33,7 @@ class RuntimeTelemetryTests(unittest.TestCase):
                 result=json.loads(Path("v30_paper_telemetry_report.json").read_text())
                 self.assertEqual(result["status"],"ok")
                 self.assertEqual(result["open_count"],1)
+                self.assertEqual(funnel_calls,["market_analysis.json"])
                 self.assertEqual(ledger["positions"]["0xabc"]["entry_price"],1)
                 self.assertIn("generated_at",result)
             finally:
