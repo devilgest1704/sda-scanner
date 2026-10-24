@@ -13,6 +13,7 @@ class DiagnosticsTests(unittest.TestCase):
         report = analyze(state)
         self.assertEqual(report["tokens"], 1)
         self.assertEqual(report["all_observable_gates_pass"], 1)
+        self.assertEqual(report["raw_impulse_positive"], 0)
         self.assertEqual(repr(state), before)
 
     def test_stale_low_impulse_is_blocked(self):
@@ -22,6 +23,7 @@ class DiagnosticsTests(unittest.TestCase):
         report = analyze(state)
         self.assertEqual(report["all_observable_gates_pass"], 0)
         self.assertEqual(report["gate_pass_counts"]["impulse_ge_6"], 0)
+        self.assertEqual(report["raw_impulse_pass_all_gates"], 0)
 
 
 if __name__ == "__main__":
