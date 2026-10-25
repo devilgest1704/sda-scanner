@@ -1,18 +1,18 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-10-25T15:02:23.280261+00:00",
+  "checked_at": "2026-10-25T15:07:23.682687+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-10-25T15:01:58.654879+00:00",
+    "market_at": "2026-10-25T15:06:58.884608+00:00",
     "tokens": 170,
-    "quotes_last_5m": 6,
-    "quotes_last_15m": 17,
-    "quotes_last_60m": 25,
-    "fresh_with_8_trades_1h": 4,
-    "fresh_with_12_trades_1h": 4,
-    "fresh_m15_ge_1_5pct": 2,
-    "fresh_m15_ge_1_5pct_and_8_trades": 2,
-    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 1
+    "quotes_last_5m": 3,
+    "quotes_last_15m": 20,
+    "quotes_last_60m": 30,
+    "fresh_with_8_trades_1h": 1,
+    "fresh_with_12_trades_1h": 1,
+    "fresh_m15_ge_1_5pct": 3,
+    "fresh_m15_ge_1_5pct_and_8_trades": 1,
+    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 0
   },
   "paper_loss_circuit": {
     "paper_only": true,
@@ -32,39 +32,44 @@
   "last_paper_close_at": "2026-10-25T14:48:20.389795+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-10-25T15:02:20.839065+00:00",
+    "at": "2026-10-25T15:07:21.323122+00:00",
     "age_minutes": 0.0,
     "aligned_to_market": true,
     "tokens_scored": 170,
-    "fresh_tokens": 17,
+    "fresh_tokens": 20,
     "champion_ready": 0,
     "shadow_ready": 0,
     "sampled_rows": 40,
     "sampled_phases": {
-      "IGNITION": 1,
+      "IGNITION": 2,
       "WATCH": 2,
-      "NO": 37
+      "NO": 36
     },
     "sampled_rejections": {
       "temporal_recovery": 40,
+      "v31_age": 37,
       "v31_activity": 35,
-      "v31_age": 34,
       "cooldown": 3,
-      "late_spike": 2
+      "late_spike": 2,
+      "price_flow": 1
     },
     "fresh_rejections": {
-      "temporal_recovery": 17,
-      "v31_activity": 12,
-      "v31_age": 11,
+      "temporal_recovery": 20,
+      "v31_age": 17,
+      "v31_activity": 15,
       "late_spike": 2,
-      "cooldown": 1
+      "cooldown": 1,
+      "price_flow": 1
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "prior_signal_not_recoverable": 17
+        "prior_signal_not_recoverable": 19,
+        "missing_prior_frozen_signal": 1
       },
       "confirmed_continuation": {
-        "prior_continuation_not_confirmed": 17
+        "prior_continuation_not_confirmed": 18,
+        "no_new_fresh_price_followthrough": 1,
+        "missing_prior_frozen_signal": 1
       }
     },
     "temporal_lane_ready": {
@@ -75,67 +80,69 @@
     "would_buy_if_only_loss_circuit_cleared": false,
     "top_near_ready": [
       {
+        "address": "0x91210544ff2218c2670693682b53d6362b9915ef",
+        "symbol": "SLND",
+        "score": 94.6,
+        "quality": 74.6,
+        "impulse": 20.0,
+        "phase": "IGNITION",
+        "data_age_sec": 221.3,
+        "gates": [
+          "temporal_recovery",
+          "v31_activity"
+        ],
+        "reason": "IGNITION / temporal_recovery; v31_activity: prior_signal_not_recoverable / no_new_fresh_price_followthrough"
+      },
+      {
         "address": "0x4ae77f557c5aaca450eec79b929b5cd06a8b8e6d",
         "symbol": "IDM",
-        "score": 70.5,
-        "quality": 70.5,
-        "impulse": 0.0,
+        "score": 69.6,
+        "quality": 68.5,
+        "impulse": 1.2,
         "phase": "IGNITION",
-        "data_age_sec": 286.8,
+        "data_age_sec": 587.3,
         "gates": [
-          "temporal_recovery"
+          "temporal_recovery",
+          "v31_age"
         ],
-        "reason": "IGNITION / temporal_recovery: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+        "reason": "IGNITION / temporal_recovery; v31_age: prior_signal_not_recoverable / prior_continuation_not_confirmed"
       },
       {
         "address": "0x4c41f1c7b0b25703cebabba40bd22f952fc1ffe0",
         "symbol": "USDT",
-        "score": 19.4,
-        "quality": 19.4,
+        "score": 19.2,
+        "quality": 19.2,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 267.8,
-        "gates": [
-          "temporal_recovery"
-        ],
-        "reason": "NO / temporal_recovery: prior_signal_not_recoverable / prior_continuation_not_confirmed"
-      },
-      {
-        "address": "0x8d7a3eefbc25187a229d442c20b443d7675b44cd",
-        "symbol": "XAUS",
-        "score": 59.8,
-        "quality": 59.8,
-        "impulse": 0.0,
-        "phase": "WATCH",
-        "data_age_sec": 50.8,
+        "data_age_sec": 568.3,
         "gates": [
           "temporal_recovery",
-          "late_spike"
+          "v31_age"
         ],
-        "reason": "WATCH / temporal_recovery; late_spike: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+        "reason": "NO / temporal_recovery; v31_age: prior_signal_not_recoverable / prior_continuation_not_confirmed"
       },
       {
-        "address": "0x5f37152b8bfdb758339a279a7fdf88e84bd30b6e",
-        "symbol": "OUSD",
-        "score": 47.2,
-        "quality": 47.2,
+        "address": "0x64c595d4c4063c49b8c3a8b291e6f5c3c205f496",
+        "symbol": "WPay",
+        "score": 16.3,
+        "quality": 16.3,
         "impulse": 0.0,
-        "phase": "WATCH",
-        "data_age_sec": 59.8,
+        "phase": "NO",
+        "data_age_sec": 58.3,
         "gates": [
           "temporal_recovery",
-          "late_spike"
+          "v31_activity"
         ],
-        "reason": "WATCH / temporal_recovery; late_spike: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+        "reason": "NO / temporal_recovery; v31_activity: missing_prior_frozen_signal / missing_prior_frozen_signal"
       },
       {
         "address": "0x7138aec74774946f1f62e2dca55a60d1cdaded95",
         "symbol": "ORB",
-        "score": 24.5,
-        "quality": 24.5,
+        "score": 15.6,
+        "quality": 15.6,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 588.8,
+        "data_age_sec": 889.3,
         "gates": [
           "temporal_recovery",
           "v31_age"
