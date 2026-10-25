@@ -67,6 +67,16 @@ def analyze(source_rows, stats=None):
     for row in rows:
         by_exit[row["exit_reason"]].append(row)
     latest=rows[-20:]
+    last50=rows[-50:]
+    score_bands={"below_70":[],"70_to_79":[],"80_to_89":[],"90_plus":[],"unknown":[]}
+    for trade in last50:
+        score=trade["entry_score"]
+        band=("unknown" if score is None else "below_70" if score<70
+              else "70_to_79" if score<80 else "80_to_89" if score<90 else "90_plus")
+        score_bands[band].append(trade)
+    recent_exits=defaultdict(list)
+    for trade in last50:
+        recent_exits[trade["exit_reason"]].append(trade)
     pine=[r for r in rows if r["label"].upper().split("/")[0].strip()=="PINE"]
     # Include the last trade even if label came from an address-only record?
     out={
@@ -83,6 +93,10 @@ def analyze(source_rows, stats=None):
                           for reason,group in sorted(by_exit.items(),
                              key=lambda pair:(sum(t["pnl_sda"] for t in pair[1]),pair[0]))],
         "recent":latest[::-1],
+        "recent_50":{"summary":summary(last50),
+                     "by_entry_score":[{"band":band,**summary(group)} for band,group in score_bands.items()],
+                     "by_exit_reason":[{"reason":reason,**summary(group)} for reason,group in sorted(recent_exits.items())],
+                     "limitations":"Observed trades only; no counterfactual BUY backtest"},
         "pine_recent":pine[-1] if pine else None,
     }
     if isinstance(stats,dict):
