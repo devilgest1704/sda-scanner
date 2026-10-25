@@ -288,6 +288,13 @@ jobs:
           assert x['active_paper_buy_mode'] in ('baseline', 'temporal_recovery')
           assert x['optimizer_targets_active_buy'] is (x['active_paper_buy_mode']=='baseline')
           assert x['paper_config_automatic'] is x['optimizer_targets_active_buy']
+          parity=x['runtime_parity']
+          audit=parity['observed_paper_exit_audit']
+          assert audit['audited'] == audit['matched'] + audit['mismatched'] + audit['excluded']
+          assert audit['can_unlock_paper_autopromotion'] is False
+          assert audit['runtime_entry_exit_parity_verified'] is False
+          print('OBSERVED PAPER EXIT AUDIT:', audit['audited'], 'MATCH:', audit['matched'],
+                'MISMATCH:', audit['mismatched'], 'EXCLUDED:', audit['excluded'])
           config=json.loads(Path('v30_agent_config.json').read_text())
           assert config['version']=='V30-AUTO-CONFIG-1'
           if x['promotion_applied'] or x['rollback_applied']:
