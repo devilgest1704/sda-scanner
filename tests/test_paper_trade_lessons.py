@@ -33,6 +33,22 @@ class HistoricalPaperLessonsTests(unittest.TestCase):
         self.assertEqual(analyze(rows)["overall"]["closed"],0)
         self.assertIsNone(normalize_trade(rows[0]))
 
+    def test_repeat_loss_tokens_group_by_address_only(self):
+        rows=[
+            {"status":"CLOSED","label":"AAA/SDA","address":"0xABC","closed_at":"2026-10-01T10:00:00Z","closed_profit_sda":-3},
+            {"status":"CLOSED","label":"AAA/SDA","address":"0xabc","closed_at":"2026-10-02T10:00:00Z","closed_profit_sda":-4},
+            {"status":"CLOSED","label":"AAA/SDA","address":"0xabc","closed_at":"2026-10-03T10:00:00Z","closed_profit_sda":2},
+            {"status":"CLOSED","label":"AAA/SDA","address":"0xDEF","closed_at":"2026-10-04T10:00:00Z","closed_profit_sda":-8},
+            {"status":"CLOSED","label":"AAA/SDA","closed_at":"2026-10-05T10:00:00Z","closed_profit_sda":-9},
+        ]
+        before=[dict(row) for row in rows]
+        report=analyze(rows)
+        self.assertEqual(report["recent_50"]["repeat_loss_tokens"],
+                         [{"address":"0xabc","trades":3,"losses":2,"net_pnl_sda":-5}])
+        self.assertEqual(report["recent_50"]["summary"]["closed"],5)
+        self.assertFalse(report["strategy_changed"])
+        self.assertEqual(rows,before)
+
     def test_break_even_win_rate(self):
         s=summary([{"pnl_sda":20},{"pnl_sda":-5}])
         self.assertEqual(s["breakeven_win_rate_pct"],20.0)
