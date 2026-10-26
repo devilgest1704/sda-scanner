@@ -74,6 +74,16 @@ def analyze(source_rows, stats=None):
         band=("unknown" if score is None else "below_70" if score<70
               else "70_to_79" if score<80 else "80_to_89" if score<90 else "90_plus")
         score_bands[band].append(trade)
+    token_groups=defaultdict(list)
+    for trade in last50:
+        if trade["address"]:
+            token_groups[trade["address"]].append(trade)
+    repeat_losses=[{"address":addr,"trades":len(group),
+                    "losses":sum(t["pnl_sda"]<0 for t in group),
+                    "net_pnl_sda":round(sum(t["pnl_sda"] for t in group),4)}
+                   for addr,group in token_groups.items()
+                   if len(group)>=2 and sum(t["pnl_sda"]<0 for t in group)>=2]
+    repeat_losses.sort(key=lambda x:(x["net_pnl_sda"],x["address"]))
     recent_exits=defaultdict(list)
     for trade in last50:
         recent_exits[trade["exit_reason"]].append(trade)
@@ -94,6 +104,7 @@ def analyze(source_rows, stats=None):
                              key=lambda pair:(sum(t["pnl_sda"] for t in pair[1]),pair[0]))],
         "recent":latest[::-1],
         "recent_50":{"summary":summary(last50),
+                     "repeat_loss_tokens":repeat_losses,
                      "by_entry_score":[{"band":band,**summary(group)} for band,group in score_bands.items()],
                      "by_exit_reason":[{"reason":reason,**summary(group)} for reason,group in sorted(recent_exits.items())],
                      "limitations":"Observed trades only; no counterfactual BUY backtest"},
