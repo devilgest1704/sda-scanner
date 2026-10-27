@@ -1,6 +1,6 @@
 {
   "version": "FORWARD-PAPER-AGENT-1",
-  "updated_at": "2026-10-26T22:30:17.557222+00:00",
+  "updated_at": "2026-10-27T00:04:43.781957+00:00",
   "mode": "PAPER_ONLY",
   "objective": "maximize accumulated net SDA subject to observed quote risk",
   "real_trading": false,
@@ -41,21 +41,7 @@
     "entry_reference": "same V30 baseline Shadow entry filters",
     "exit_reference": "take 50% at first observed >=+8% move, trail remaining 3.5% from observed peak, hard stop and max 12h after partial",
     "cost_accounting": "one full 50 SDA entry; separate 50% exit legs charged round-trip fees only once each; aggregate ONE completed trade",
-    "caveat": "No real fills, no historical hindsight, invalid quotes excluded, no verified profit or execution parity",
-    "paired_exit_comparison": {
-      "method": "same_address_and_opened_at_valid_forward_entries_only",
-      "paired_closed_trades": 77,
-      "unique_tokens": 31,
-      "baseline_paired_net_sda": -133.5675,
-      "runner_paired_net_sda": -149.5236,
-      "runner_minus_baseline_sda": -15.9561,
-      "runner_outperformed_pairs": 1,
-      "unpaired_baseline_valid": 49,
-      "unpaired_runner_valid": 1,
-      "paper_only": true,
-      "can_promote_champion": false,
-      "warning": "Descriptive paired exit comparison, not a randomized or proven-profitability test"
-    }
+    "caveat": "No real fills, no historical hindsight, invalid quotes excluded, no verified profit or execution parity"
   },
   "v33_flow_continuation": {
     "mode": "RESEARCH_ONLY",
@@ -70,17 +56,17 @@
       "mode": "RESEARCH_ONLY",
       "paper_champion_unchanged": true,
       "measured": 40,
-      "has_observed_market_data": 1,
+      "has_observed_market_data": 3,
       "observed_pressure_ready": 0,
       "eligible_after_common_shadow_gates": 0,
       "fresh_price_quote_ready": 0,
       "rejections": {
-        "insufficient_observed_swaps": 39,
+        "insufficient_observed_swaps": 40,
+        "weak_recent_buy_pressure": 40,
         "missing_or_overheated_momentum": 39,
-        "stale_or_future_quote": 39,
         "weak_trade_activity": 39,
-        "weak_recent_buy_pressure": 38,
-        "late_four_hour_chase": 5
+        "stale_or_future_quote": 37,
+        "late_four_hour_chase": 3
       },
       "pool_liquidity_verified": false,
       "execution_parity_verified": false
@@ -105,13 +91,15 @@
       "eligible_after_shadow_gates": 0,
       "fresh_quote_ready": 0,
       "rejections": {
-        "missing_observed_breakout_features": 38,
-        "missing_same_scan_breakout": 36,
-        "original_breakout_entry_not_eligible": 4,
-        "too_late_or_no_early_breakout": 2,
-        "weak_activity_acceleration": 2,
-        "insufficient_observed_turnover": 1,
-        "weak_buy_pressure": 1
+        "missing_observed_breakout_features": 36,
+        "missing_same_scan_breakout": 35,
+        "original_breakout_entry_not_eligible": 5,
+        "too_late_or_no_early_breakout": 4,
+        "weak_buy_pressure": 4,
+        "weak_activity_acceleration": 3,
+        "already_reversing": 2,
+        "insufficient_observed_turnover": 2,
+        "wide_consolidation": 1
       },
       "modeled_friction_per_side_pct": 1.5,
       "execution_parity_verified": false
@@ -144,7 +132,7 @@
     "paper_exits": "V30 emergency stop, adaptive trailing, early weakness, pump breakdown and stale",
     "warning": "Unmatched exit models cannot validate promotion until independent parity tests pass"
   },
-  "source_last_scan_at": "2026-10-26T22:29:45.565372+00:00",
+  "source_last_scan_at": "2026-10-26T22:41:43.703553+00:00",
   "strategies": {},
   "champion": {
     "generation": 0,
@@ -160,15 +148,15 @@
   "rollback_applied": false,
   "missed_pump_learning": {
     "status": "NO_PROFITABLE_TRAIN_RULE",
-    "updated_at": "2026-10-26T22:30:16.854519+00:00",
-    "source_candidate_archive_at": "2026-10-26T22:29:14.778249+00:00",
-    "source_age_minutes": 1.0,
-    "source_fresh": true,
+    "updated_at": "2026-10-27T00:04:42.863199+00:00",
+    "source_candidate_archive_at": "2026-10-26T22:41:14.414364+00:00",
+    "source_age_minutes": 83.5,
+    "source_fresh": false,
     "archived_candidates": 5000,
-    "with_60m_quote": 2534,
+    "with_60m_quote": 2538,
     "input_quality": {
       "rejection_counts": {
-        "no_60m_followup_observed": 1865,
+        "no_60m_followup_observed": 1861,
         "invalid_or_missing_quote_time": 1438,
         "missing_frozen_features": 1438,
         "late_followup_75_to_120_minutes": 50,
@@ -181,11 +169,11 @@
       "maturity_stages": {
         "with_original_quote_and_features": 3524,
         "with_fresh_entry_quote": 3524,
-        "with_strict_60_to_75m_exit_quote": 1609,
-        "with_strict_exit_and_full_features": 1609
+        "with_strict_60_to_75m_exit_quote": 1613,
+        "with_strict_exit_and_full_features": 1613
       },
       "latest_original_candidate_at": "2026-10-26T22:16:42.712112+00:00",
-      "latest_strict_matured_candidate_at": "2026-10-26T21:17:44.630514+00:00",
+      "latest_strict_matured_candidate_at": "2026-10-26T21:30:42.916086+00:00",
       "missing_quote_schema_examples": [
         {
           "row_keys": [
@@ -243,7 +231,7 @@
         }
       ]
     },
-    "observed_candidates": 785,
+    "observed_candidates": 786,
     "missed_60m_positive_after_costs": 38,
     "observed_4h_pump_research": {
       "source": "actual_observed_swaps_original_frozen_rejected_decisions",
@@ -395,9 +383,9 @@
             60,
             75
           ],
-          "valid_distinct_cases": 780,
+          "valid_distinct_cases": 781,
           "model_positive_after_costs": 134,
-          "model_net_sda_total": -947.9453,
+          "model_net_sda_total": -948.1847,
           "positive_gate_counts": {
             "temporal_recovery": 102,
             "v31_activity": 92,
@@ -423,7 +411,7 @@
     "reason": "Train/holdout selects a rule; new forward Shadow must prove net SDA; unmatched exits prohibit auto PAPER promotion."
   },
   "temporal_recovery_research": {
-    "source_at": "2026-10-26T22:29:45.565372+00:00",
+    "source_at": "2026-10-26T22:41:43.703553+00:00",
     "total_recovered": 12,
     "recent_examples": [
       {
@@ -478,231 +466,18 @@
   },
   "scanner_no_buy": {
     "assessment": "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED",
-    "checked_at": "2026-10-26T22:29:48.724552+00:00",
-    "audit_fresh": true,
-    "audit_age_minutes": 0.5,
+    "checked_at": "2026-10-26T22:41:46.863713+00:00",
+    "audit_fresh": false,
+    "audit_age_minutes": 82.9,
     "risk_blocked": false,
     "loss_last_24h_sda": -18.558,
     "loss_window_closed": 5,
     "projected_recovery_at_no_new_closes": null,
     "risk_only_buy_ready": false,
-    "fresh_tokens": 20,
+    "fresh_tokens": 19,
     "champion_ready": 0,
     "paper_buy_rules_modified": false
   },
-  "incumbent_policy": "research_temporal_recovery",
-  "shadow_comparison_reference": "baseline",
-  "quote_coverage_pct": {
-    "baseline": 73.26,
-    "quality": 73.21,
-    "momentum": 75.94,
-    "selective": 85.11,
-    "score": 81.15,
-    "quality_plus": 74.85,
-    "research_watch": 73.08,
-    "research_watch_strict": 81.82,
-    "research_macd_antipump": 40.0,
-    "research_macd_confirmation": 0.0,
-    "research_breakout_volume_trend": 88.89,
-    "research_sparse_volume_ignition": 60.0,
-    "research_trend_runner": 55.71,
-    "research_temporal_recovery": 72.73,
-    "research_v33_flow_continuation": 78.57,
-    "research_v33_cost_aware_breakout": 71.43
-  },
-  "learning_data_quality": {
-    "baseline": {
-      "total_closed": 172,
-      "valid_closed": 126,
-      "excluded_closed": 46,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 4,
-        "quote_gap_over_30m": 40,
-        "holding_time_over_4_5h": 5,
-        "holding_time_over_max_plus_30m": 9,
-        "stale_timeout_no_observed_exit_quote": 2
-      },
-      "open_virtual_positions": 1
-    },
-    "quality": {
-      "total_closed": 168,
-      "valid_closed": 123,
-      "excluded_closed": 45,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 4,
-        "quote_gap_over_30m": 39,
-        "holding_time_over_4_5h": 5,
-        "holding_time_over_max_plus_30m": 9,
-        "stale_timeout_no_observed_exit_quote": 2
-      },
-      "open_virtual_positions": 1
-    },
-    "momentum": {
-      "total_closed": 133,
-      "valid_closed": 101,
-      "excluded_closed": 32,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 4,
-        "quote_gap_over_30m": 27,
-        "holding_time_over_4_5h": 2,
-        "holding_time_over_max_plus_30m": 7,
-        "stale_timeout_no_observed_exit_quote": 1
-      },
-      "open_virtual_positions": 0
-    },
-    "selective": {
-      "total_closed": 94,
-      "valid_closed": 80,
-      "excluded_closed": 14,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 2,
-        "quote_gap_over_30m": 11,
-        "holding_time_over_4_5h": 1,
-        "stale_timeout_no_observed_exit_quote": 1,
-        "holding_time_over_max_plus_30m": 3
-      },
-      "open_virtual_positions": 0
-    },
-    "score": {
-      "total_closed": 122,
-      "valid_closed": 99,
-      "excluded_closed": 23,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 3,
-        "quote_gap_over_30m": 20,
-        "holding_time_over_4_5h": 2,
-        "holding_time_over_max_plus_30m": 5
-      },
-      "open_virtual_positions": 1
-    },
-    "quality_plus": {
-      "total_closed": 163,
-      "valid_closed": 122,
-      "excluded_closed": 41,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 3,
-        "quote_gap_over_30m": 36,
-        "holding_time_over_4_5h": 4,
-        "holding_time_over_max_plus_30m": 9,
-        "stale_timeout_no_observed_exit_quote": 2
-      },
-      "open_virtual_positions": 1
-    },
-    "research_watch": {
-      "total_closed": 78,
-      "valid_closed": 57,
-      "excluded_closed": 21,
-      "excluded_by_reason": {
-        "legacy_unknown_quote_quality": 1,
-        "holding_time_over_4_5h": 2,
-        "quote_gap_over_30m": 20,
-        "holding_time_over_max_plus_30m": 5
-      },
-      "open_virtual_positions": 0
-    },
-    "research_watch_strict": {
-      "total_closed": 22,
-      "valid_closed": 18,
-      "excluded_closed": 4,
-      "excluded_by_reason": {
-        "holding_time_over_4_5h": 1,
-        "quote_gap_over_30m": 4
-      },
-      "open_virtual_positions": 0
-    },
-    "research_macd_antipump": {
-      "total_closed": 5,
-      "valid_closed": 2,
-      "excluded_closed": 3,
-      "excluded_by_reason": {
-        "quote_gap_over_30m": 3
-      },
-      "open_virtual_positions": 0
-    },
-    "research_macd_confirmation": {
-      "total_closed": 0,
-      "valid_closed": 0,
-      "excluded_closed": 0,
-      "excluded_by_reason": {},
-      "open_virtual_positions": 0
-    },
-    "research_breakout_volume_trend": {
-      "total_closed": 63,
-      "valid_closed": 56,
-      "excluded_closed": 7,
-      "excluded_by_reason": {
-        "holding_time_over_4_5h": 1,
-        "quote_gap_over_30m": 7,
-        "holding_time_over_max_plus_30m": 2
-      },
-      "open_virtual_positions": 0
-    },
-    "research_trend_runner": {
-      "total_closed": 140,
-      "valid_closed": 78,
-      "excluded_closed": 62,
-      "excluded_by_reason": {
-        "runner_observation_gap_over_30m": 62,
-        "runner_holding_time_overrun": 20
-      },
-      "open_virtual_positions": 1
-    },
-    "research_sparse_volume_ignition": {
-      "total_closed": 5,
-      "valid_closed": 3,
-      "excluded_closed": 2,
-      "excluded_by_reason": {
-        "holding_time_over_max_plus_30m": 2,
-        "quote_gap_over_30m": 2
-      },
-      "open_virtual_positions": 0
-    },
-    "research_temporal_recovery": {
-      "total_closed": 11,
-      "valid_closed": 8,
-      "excluded_closed": 3,
-      "excluded_by_reason": {
-        "quote_gap_over_30m": 3,
-        "holding_time_over_max_plus_30m": 2
-      },
-      "open_virtual_positions": 0
-    },
-    "research_v33_flow_continuation": {
-      "total_closed": 42,
-      "valid_closed": 33,
-      "excluded_closed": 9,
-      "excluded_by_reason": {
-        "holding_time_over_max_plus_30m": 3,
-        "quote_gap_over_30m": 9
-      },
-      "open_virtual_positions": 0
-    },
-    "research_v33_cost_aware_breakout": {
-      "total_closed": 21,
-      "valid_closed": 15,
-      "excluded_closed": 6,
-      "excluded_by_reason": {
-        "holding_time_over_max_plus_30m": 4,
-        "quote_gap_over_30m": 6
-      },
-      "open_virtual_positions": 0
-    }
-  },
-  "active_paper_evidence": {
-    "strategy": "research_temporal_recovery",
-    "valid_forward_closes": 8,
-    "observed_quote_model": {
-      "closed": 8,
-      "net_sda": 7.9602,
-      "max_drawdown_sda": 10.4518,
-      "win_rate_pct": 25.0,
-      "profit_factor": 1.5203,
-      "unique_tokens": 7,
-      "last_closed_at": "2026-10-25T05:05:33+00:00"
-    },
-    "quote_coverage_pct": 72.73,
-    "execution_parity_verified": false
-  },
-  "status": "ACTIVE_TEMPORAL_MODE_RESEARCH_ONLY",
-  "reason": "PAPER uses temporal_recovery, but this optimizer only tunes baseline numeric filters. Temporal forward evidence is diagnostic and lacks execution parity; no unrelated filter promotion is permitted."
+  "status": "WAITING_FOR_FRESH_SCANNER",
+  "reason": "Forward scanner observations older than 30 minutes"
 }
