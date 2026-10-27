@@ -49,7 +49,7 @@ class TrendRunnerForwardTests(unittest.TestCase):
         sample(state, 0, 1.0)
         result = sample(state, 5, 1.10)
         runner = state["strategies"][RUNNER]
-        self.assertEqual(result["closed"], 6)  # the six original comparison arms
+        self.assertEqual(result["closed"], 10)  # six original arms + four cooldown research arms
         self.assertEqual(len(runner["trades"]), 0)
         self.assertEqual(len(runner["positions"]), 1)
         p = runner["positions"]["0xab"]
