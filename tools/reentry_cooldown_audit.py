@@ -54,9 +54,24 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ledger", default="positions.json")
     parser.add_argument("--output", default="strategy_lab/reentry_cooldown_audit.json")
+    parser.add_argument("--forward-start", default="2026-10-26T20:15:00+00:00",
+                        help="UTC ISO date: count only entries first opened after activation")
     args = parser.parse_args()
     ledger = json.loads(Path(args.ledger).read_text(encoding="utf-8"))
     result = audit(ledger["closed_trades"])
+    start = stamp(args.forward_start)
+    if start is None:
+        raise ValueError("Invalid --forward-start timestamp")
+    forward_rows = [row for row in ledger["closed_trades"]
+                    if isinstance(row, dict) and (stamp(row.get("opened_at")) or 0) >= start]
+    # The forward cohort is descriptive: do not pretend excluded trades were
+    # never executed or infer a replacement strategy P/L.
+    forward = audit(forward_rows)
+    result["forward_observed_since"] = args.forward_start
+    result["forward_observed"] = forward
+    result["forward_limitations"] = (
+        "Forward observed executed PAPER entries only; not a parallel simulated "
+        "portfolio. Prior closes before activation are not used for eligibility.")
     destination = Path(args.output)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
