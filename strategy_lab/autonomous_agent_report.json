@@ -1,6 +1,6 @@
 {
   "version": "FORWARD-PAPER-AGENT-1",
-  "updated_at": "2026-10-27T03:28:35.803843+00:00",
+  "updated_at": "2026-10-27T04:34:26.697375+00:00",
   "mode": "PAPER_ONLY",
   "objective": "maximize accumulated net SDA subject to observed quote risk",
   "real_trading": false,
@@ -70,17 +70,17 @@
       "mode": "RESEARCH_ONLY",
       "paper_champion_unchanged": true,
       "measured": 40,
-      "has_observed_market_data": 0,
+      "has_observed_market_data": 1,
       "observed_pressure_ready": 0,
       "eligible_after_common_shadow_gates": 0,
       "fresh_price_quote_ready": 0,
       "rejections": {
-        "insufficient_observed_swaps": 40,
         "missing_or_overheated_momentum": 40,
-        "stale_or_future_quote": 40,
-        "weak_trade_activity": 39,
-        "weak_recent_buy_pressure": 38,
-        "late_four_hour_chase": 6
+        "weak_trade_activity": 40,
+        "stale_or_future_quote": 39,
+        "weak_recent_buy_pressure": 39,
+        "insufficient_observed_swaps": 38,
+        "late_four_hour_chase": 4
       },
       "pool_liquidity_verified": false,
       "execution_parity_verified": false
@@ -107,8 +107,12 @@
       "rejections": {
         "missing_observed_breakout_features": 39,
         "missing_same_scan_breakout": 39,
+        "already_reversing": 1,
+        "insufficient_observed_turnover": 1,
         "original_breakout_entry_not_eligible": 1,
-        "weak_activity_acceleration": 1
+        "too_late_or_no_early_breakout": 1,
+        "weak_activity_acceleration": 1,
+        "weak_buy_pressure": 1
       },
       "modeled_friction_per_side_pct": 1.5,
       "execution_parity_verified": false
@@ -141,7 +145,7 @@
     "paper_exits": "V30 emergency stop, adaptive trailing, early weakness, pump breakdown and stale",
     "warning": "Unmatched exit models cannot validate promotion until independent parity tests pass"
   },
-  "source_last_scan_at": "2026-10-27T03:27:59.447158+00:00",
+  "source_last_scan_at": "2026-10-27T04:33:55.343255+00:00",
   "strategies": {},
   "champion": {
     "generation": 0,
@@ -157,17 +161,17 @@
   "rollback_applied": false,
   "missed_pump_learning": {
     "status": "NO_PROFITABLE_TRAIN_RULE",
-    "updated_at": "2026-10-27T03:28:35.039539+00:00",
-    "source_candidate_archive_at": "2026-10-27T03:27:29.720939+00:00",
-    "source_age_minutes": 1.1,
+    "updated_at": "2026-10-27T04:34:25.902156+00:00",
+    "source_candidate_archive_at": "2026-10-27T04:33:29.953395+00:00",
+    "source_age_minutes": 0.9,
     "source_fresh": true,
     "archived_candidates": 5000,
-    "with_60m_quote": 2532,
+    "with_60m_quote": 2528,
     "input_quality": {
       "rejection_counts": {
-        "no_60m_followup_observed": 1891,
-        "invalid_or_missing_quote_time": 1395,
-        "missing_frozen_features": 1395,
+        "no_60m_followup_observed": 1905,
+        "invalid_or_missing_quote_time": 1374,
+        "missing_frozen_features": 1374,
         "late_followup_75_to_120_minutes": 50,
         "already_eligible_not_missed": 38
       },
@@ -176,13 +180,13 @@
       },
       "legacy_frozen_age_recoverable": 0,
       "maturity_stages": {
-        "with_original_quote_and_features": 3567,
-        "with_fresh_entry_quote": 3567,
-        "with_strict_60_to_75m_exit_quote": 1626,
-        "with_strict_exit_and_full_features": 1626
+        "with_original_quote_and_features": 3588,
+        "with_fresh_entry_quote": 3588,
+        "with_strict_60_to_75m_exit_quote": 1633,
+        "with_strict_exit_and_full_features": 1633
       },
-      "latest_original_candidate_at": "2026-10-27T03:27:59.288322+00:00",
-      "latest_strict_matured_candidate_at": "2026-10-27T01:35:00.500757+00:00",
+      "latest_original_candidate_at": "2026-10-27T04:28:54.695132+00:00",
+      "latest_strict_matured_candidate_at": "2026-10-27T03:02:57.952246+00:00",
       "missing_quote_schema_examples": [
         {
           "row_keys": [
@@ -199,7 +203,7 @@
             "score"
           ],
           "feature_keys": [],
-          "has_60m": false,
+          "has_60m": true,
           "has_original_age": false
         },
         {
@@ -229,30 +233,31 @@
             "gates",
             "id",
             "impulse",
+            "observed_peak_240m",
             "outcomes",
             "quality",
             "score"
           ],
           "feature_keys": [],
-          "has_60m": false,
+          "has_60m": true,
           "has_original_age": false
         }
       ]
     },
-    "observed_candidates": 794,
-    "missed_60m_positive_after_costs": 38,
+    "observed_candidates": 797,
+    "missed_60m_positive_after_costs": 39,
     "observed_4h_pump_research": {
       "source": "actual_observed_swaps_original_frozen_rejected_decisions",
       "paper_only": true,
       "executable_peak_fills": false,
-      "distinct_observed_4h_peaks": 1600,
-      "observed_peak_ge_10_pct": 151,
-      "observed_peak_ge_25_pct": 59,
+      "distinct_observed_4h_peaks": 1607,
+      "observed_peak_ge_10_pct": 152,
+      "observed_peak_ge_25_pct": 60,
       "observed_peak_ge_50_pct": 26,
       "blocking_gates_ge_10_pct": {
-        "temporal_recovery": 107,
+        "temporal_recovery": 108,
         "v31_activity": 105,
-        "late_spike": 53,
+        "late_spike": 54,
         "score": 40,
         "lifecycle": 36,
         "liquidity": 35,
@@ -345,9 +350,9 @@
             5,
             10
           ],
-          "valid_distinct_cases": 656,
+          "valid_distinct_cases": 661,
           "model_positive_after_costs": 102,
-          "model_net_sda_total": -582.3004,
+          "model_net_sda_total": -588.384,
           "positive_gate_counts": {
             "temporal_recovery": 77,
             "v31_activity": 74,
@@ -368,13 +373,13 @@
             15,
             25
           ],
-          "valid_distinct_cases": 785,
-          "model_positive_after_costs": 109,
-          "model_net_sda_total": -1086.9314,
+          "valid_distinct_cases": 789,
+          "model_positive_after_costs": 111,
+          "model_net_sda_total": -1082.1054,
           "positive_gate_counts": {
-            "temporal_recovery": 85,
-            "v31_activity": 78,
-            "late_spike": 24,
+            "temporal_recovery": 87,
+            "v31_activity": 79,
+            "late_spike": 25,
             "score": 22,
             "quality": 19,
             "lifecycle": 18,
@@ -391,15 +396,15 @@
             60,
             75
           ],
-          "valid_distinct_cases": 789,
-          "model_positive_after_costs": 136,
-          "model_net_sda_total": -956.6391,
+          "valid_distinct_cases": 792,
+          "model_positive_after_costs": 137,
+          "model_net_sda_total": -944.8906,
           "positive_gate_counts": {
-            "temporal_recovery": 104,
-            "v31_activity": 94,
+            "temporal_recovery": 105,
+            "v31_activity": 95,
             "score": 27,
+            "late_spike": 24,
             "lifecycle": 24,
-            "late_spike": 23,
             "quality": 22,
             "liquidity": 19,
             "loss_circuit": 19,
@@ -419,7 +424,7 @@
     "reason": "Train/holdout selects a rule; new forward Shadow must prove net SDA; unmatched exits prohibit auto PAPER promotion."
   },
   "temporal_recovery_research": {
-    "source_at": "2026-10-27T03:27:59.447158+00:00",
+    "source_at": "2026-10-27T04:33:55.343255+00:00",
     "total_recovered": 13,
     "recent_examples": [
       {
@@ -474,15 +479,15 @@
   },
   "scanner_no_buy": {
     "assessment": "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED",
-    "checked_at": "2026-10-27T03:28:02.063579+00:00",
+    "checked_at": "2026-10-27T04:33:57.946993+00:00",
     "audit_fresh": true,
-    "audit_age_minutes": 0.6,
+    "audit_age_minutes": 0.5,
     "risk_blocked": false,
-    "loss_last_24h_sda": -19.107,
-    "loss_window_closed": 6,
+    "loss_last_24h_sda": -15.0169,
+    "loss_window_closed": 5,
     "projected_recovery_at_no_new_closes": null,
     "risk_only_buy_ready": false,
-    "fresh_tokens": 8,
+    "fresh_tokens": 13,
     "champion_ready": 0,
     "paper_buy_rules_modified": false
   },
