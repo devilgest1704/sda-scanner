@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 from datetime import datetime, timezone, timedelta
 from tools.forward_shadow_agent import (
-    POLICIES, default_state, eligible, step, exit_profit, MAX_HISTORY,
+    POLICIES, default_state, eligible, step, exit_profit, MAX_HISTORY, loss_cooldown_blocked,
 )
 
 T0 = datetime(2026, 10, 10, 10, 0, tzinfo=timezone.utc)
@@ -34,6 +34,18 @@ class ForwardPaperTests(unittest.TestCase):
                                       return_value={})
         self._evolution_patch.start()
         self.addCleanup(self._evolution_patch.stop)
+
+    def test_forward_loss_cooldown_uses_only_observed_closes(self):
+        close = T0 + timedelta(hours=1)
+        rows = [{"address": "0xAB", "closed_at": close.isoformat(), "pnl_sda": -2}]
+        self.assertFalse(loss_cooldown_blocked(rows, "0xab", T0, 48))
+        self.assertTrue(loss_cooldown_blocked(rows, "0xab", close + timedelta(hours=5), 6))
+        self.assertFalse(loss_cooldown_blocked(rows, "0xab", close + timedelta(hours=6), 6))
+        self.assertTrue(loss_cooldown_blocked(rows, "0xab", close + timedelta(hours=6), 12))
+        rows.append({"address": "0xab", "closed_at": (close + timedelta(hours=2)).isoformat(),
+                     "pnl_sda": 1})
+        self.assertFalse(loss_cooldown_blocked(rows, "0xab", close + timedelta(hours=3), 48))
+        self.assertEqual(len([p for p in POLICIES if p.startswith("research_loss_cooldown_")]), 4)
 
     def test_shadow_entries_do_not_execute_or_use_current_quote_as_exit(self):
         state = default_state()
