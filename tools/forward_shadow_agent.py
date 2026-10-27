@@ -85,6 +85,32 @@ POLICIES = {
     "research_v33_cost_aware_breakout": {"entry_score": 55, "quality": 48,
                                         "impulse": 4, "buy_ratio": 1.15, "trades": 8},
 }
+# Four independent forward-only virtual portfolios. All baseline gates,
+# costs and exits are identical; only loss-triggered re-entry differs.
+COOLDOWN_RESEARCH_HOURS = (6, 12, 24, 48)
+for _hours in COOLDOWN_RESEARCH_HOURS:
+    POLICIES[f"research_loss_cooldown_{_hours}h"] = POLICIES["baseline"].copy()
+
+
+def loss_cooldown_blocked(trades, address, now, hours):
+    """Use only already-observed closes, never future outcomes."""
+    latest = None
+    for trade in trades:
+        if str(trade.get("address") or "").lower() != address.lower():
+            continue
+        closed = when(trade.get("closed_at"))
+        if closed is None or closed > now:
+            continue
+        if latest is None or closed > latest[0]:
+            latest = (closed, trade)
+    if latest is None:
+        return False
+    closed, trade = latest
+    pnl = finite(trade.get("pnl_sda"))
+    return (pnl is not None and pnl < 0
+            and 0 <= (now - closed).total_seconds() < hours * 3600)
+
+
 BREAKOUT_RESEARCH_MODE = "research_breakout_volume_trend"
 SPARSE_VOLUME_RESEARCH_MODE = "research_sparse_volume_ignition"
 BREAKOUT_EVIDENCE_MODES = frozenset((BREAKOUT_RESEARCH_MODE, SPARSE_VOLUME_RESEARCH_MODE))
@@ -781,6 +807,11 @@ def step(data, market, funnel):
                 # Candidate and market prices are contemporaneous.
                 if abs(quote_price / entry - 1) > 0.015:
                     continue
+                if name.startswith("research_loss_cooldown_"):
+                    hours = int(name.rsplit("_", 1)[1][:-1])
+                    if loss_cooldown_blocked(trades, address, ts, hours):
+                        strategy["cooldown_rejections"] = strategy.get("cooldown_rejections", 0) + 1
+                        continue
                 previous_entry = when(last_entry.get(address))
                 if previous_entry and (ts - previous_entry).total_seconds() < COOLDOWN_HOURS * 3600:
                     continue
