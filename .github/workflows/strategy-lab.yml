@@ -11,6 +11,8 @@ on:
       - 'tests/test_strategy_lab.py'
       - 'tests/test_trade_cohort_research.py'
       - 'tools/paper_trade_lessons.py'
+      - 'tools/reentry_cooldown_audit.py'
+      - 'tests/test_reentry_cooldown_audit.py'
       - 'tests/test_paper_trade_lessons.py'
       - 'tools/v31_profit_learning.py'
       - 'tests/test_v31_profit_learning.py'
@@ -18,6 +20,8 @@ on:
       - 'tests/test_paper_reconciliation.py'
       - 'tests/test_paper_report_sources.py'
       - 'tools/paper_trade_lessons.py'
+      - 'tools/reentry_cooldown_audit.py'
+      - 'tests/test_reentry_cooldown_audit.py'
       - 'tools/export_paper_trades.py'
       - 'tools/v30_exit_parity.py'
       - 'tests/test_v30_exit_parity.py'
@@ -31,6 +35,8 @@ on:
       - 'tests/test_paper_reconciliation.py'
       - 'tests/test_paper_report_sources.py'
       - 'tools/paper_trade_lessons.py'
+      - 'tools/reentry_cooldown_audit.py'
+      - 'tests/test_reentry_cooldown_audit.py'
       - 'tools/export_paper_trades.py'
       - 'tools/v30_exit_parity.py'
       - 'tests/test_v30_exit_parity.py'
@@ -59,6 +65,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_trade_cohort_research.py' -v
       - name: Test historical SDA paper lessons
         run: python -m unittest discover -s tests -p 'test_paper_trade_lessons.py' -v
+      - name: Test cooldown event ordering and overlapping positions
+        run: python -m unittest discover -s tests -p 'test_reentry_cooldown_audit.py' -v
       - name: Test accounting identity, archive preservation and CLI report alignment
         run: |
           python -m py_compile tools/paper_reconciliation.py tools/paper_trade_lessons.py tools/v31_profit_learning.py
