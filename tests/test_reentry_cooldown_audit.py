@@ -21,6 +21,22 @@ class ReentryCooldownAuditTests(unittest.TestCase):
         self.assertTrue(result["not_counterfactual_portfolio_pnl"])
         self.assertEqual(rows,original)
 
+    def test_overlapping_closes_do_not_leak_into_earlier_entries(self):
+        def trade(opened, closed, pnl):
+            return {"status": "CLOSED", "address": "0xabc",
+                    "opened_at": f"2026-10-01T{opened}:00:00Z",
+                    "closed_at": f"2026-10-01T{closed}:00:00Z",
+                    "closed_profit_sda": pnl}
+        rows = [
+            trade("00", "10", -5),  # Not closed at 03 or 05.
+            trade("01", "02", 2),   # Latest known close at 03 is a win.
+            trade("03", "04", -2),  # Latest known close at 05 is a loss.
+            trade("05", "06", 1),   # Flagged by 04 loss.
+        ]
+        result = audit(rows, windows=(6,))
+        self.assertEqual(result["windows"][0]["historical_entries_flagged"], 1)
+        self.assertEqual(result["windows"][0]["flagged_observed_pnl_sda"], 1)
+
     def test_missing_or_invalid_rows_ignored(self):
         rows=[{"status":"OPEN","address":"a","opened_at":"2026-10-01T00:00:00Z",
                "closed_at":"2026-10-01T01:00:00Z","closed_profit_sda":-1},

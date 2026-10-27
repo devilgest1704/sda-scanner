@@ -5,6 +5,7 @@ This is NOT a portfolio backtest. The original ledger is never modified.
 """
 import argparse
 import json
+import heapq
 from datetime import datetime
 from pathlib import Path
 
@@ -32,16 +33,25 @@ def audit(trades, windows=(6, 12, 24, 48)):
         if address:
             rows.append((opened, closed, address, pnl))
     rows.sort()
+    # Heap tie-breaker is stable and avoids comparing token strings on ties.
     results = []
     for hours in windows:
+        close_sequence = 0
         latest_close = {}
+        pending_closes = []
         excluded = []
         for opened, closed, address, pnl in rows:
+            # A close cannot influence an entry that happened before it.
+            # Resolve completed closes in chronological order, including
+            # overlapping positions on the same token.
+            while pending_closes and pending_closes[0][0] <= opened:
+                prior_closed, _, prior_address, prior_pnl = heapq.heappop(pending_closes)
+                latest_close[prior_address] = (prior_closed, prior_pnl)
             prior = latest_close.get(address)
             if prior and prior[1] < 0 and 0 <= opened - prior[0] < hours * 3600:
                 excluded.append(pnl)
-            if prior is None or closed > prior[0]:
-                latest_close[address] = (closed, pnl)
+            heapq.heappush(pending_closes, (closed, close_sequence, address, pnl))
+            close_sequence += 1
         results.append({"cooldown_hours": hours, "historical_entries_flagged": len(excluded),
                         "flagged_observed_pnl_sda": round(sum(excluded), 4),
                         "flagged_winners": sum(p > 0 for p in excluded)})
