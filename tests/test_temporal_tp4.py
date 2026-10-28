@@ -89,6 +89,17 @@ class TemporalTP4Tests(unittest.TestCase):
                 if not valid:
                     self.assertEqual(result["conservative_closed_risk_sda"], -50)
 
+    def test_gap_during_hold_cannot_be_erased_by_later_fresh_exit(self):
+        state, now = self.opened()
+        step(state, *inputs(now+timedelta(minutes=40), price=1.01))
+        arm = state["strategies"][TEMPORAL_TP4_MODE]
+        self.assertFalse(arm["trades"])
+        step(state, *inputs(now+timedelta(minutes=45), price=1.05))
+        trade = arm["trades"][0]
+        self.assertFalse(trade["valid_for_learning"])
+        self.assertEqual(trade["max_quote_gap_minutes"], 40)
+        self.assertIn("quote_gap_over_30m", trade["learning_exclusion_reasons"])
+
     def test_trial_cannot_copy_parent_results_on_upgrade(self):
         import json
         import tempfile

@@ -136,8 +136,14 @@ def report(state, config, real_ledger, now=None):
     if not isinstance(closed_for_parity, list):
         closed_for_parity = []
     exit_parity_evidence = audit_archive(closed_for_parity[-500:])
+    try:
+        execution_audit = json.loads(Path("strategy_lab/execution_quote_audit.json").read_text())
+        if not isinstance(execution_audit, dict):
+            execution_audit = {}
+    except (OSError, ValueError):
+        execution_audit = {}
     model = {
-        "strategy_evidence": evidence_report(state),
+        "strategy_evidence": evidence_report(state, now, execution_audit),
         "version": "FORWARD-PAPER-AGENT-1",
         "updated_at": now.isoformat(),
         "mode": "PAPER_ONLY",

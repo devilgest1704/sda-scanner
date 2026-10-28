@@ -14,7 +14,8 @@ def number(value):
         return None
 
 
-def evidence_report(state):
+def evidence_report(state, now=None, execution_audit=None):
+    from tools.tp4_trial_review import review
     rows = []
     for name, group in sorted(state.get("strategies", {}).items()):
         journal = group.get("trades") or []
@@ -70,6 +71,8 @@ def evidence_report(state):
     parent_net = sum(float(parent[k]["pnl_sda"]) for k in paired)
     tp4_net = sum(float(tp4[k]["pnl_sda"]) for k in paired)
     return {
+        "trial_review": review(state, now, execution_audit),
+        "execution_quote_audit": execution_audit or {"status": "NOT_AVAILABLE"},
         "source_at": state.get("updated_at"),
         "mode": "DESCRIPTIVE_FORWARD_RESEARCH_ONLY", "can_promote": False,
         "comparison_limit": "Different inception dates and entries; totals do not rank causal superiority",
