@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 from datetime import datetime, timezone, timedelta
 from tools.forward_shadow_agent import (
-    POLICIES, default_state, eligible, step, exit_profit, MAX_HISTORY,
+    POLICIES, default_state, eligible, step, exit_profit, MAX_HISTORY, loss_cooldown_blocked,
 )
 
 T0 = datetime(2026, 10, 10, 10, 0, tzinfo=timezone.utc)
@@ -35,13 +35,25 @@ class ForwardPaperTests(unittest.TestCase):
         self._evolution_patch.start()
         self.addCleanup(self._evolution_patch.stop)
 
+    def test_forward_loss_cooldown_uses_only_observed_closes(self):
+        close = T0 + timedelta(hours=1)
+        rows = [{"address": "0xAB", "closed_at": close.isoformat(), "pnl_sda": -2}]
+        self.assertFalse(loss_cooldown_blocked(rows, "0xab", T0, 48))
+        self.assertTrue(loss_cooldown_blocked(rows, "0xab", close + timedelta(hours=5), 6))
+        self.assertFalse(loss_cooldown_blocked(rows, "0xab", close + timedelta(hours=6), 6))
+        self.assertTrue(loss_cooldown_blocked(rows, "0xab", close + timedelta(hours=6), 12))
+        rows.append({"address": "0xab", "closed_at": (close + timedelta(hours=2)).isoformat(),
+                     "pnl_sda": 1})
+        self.assertFalse(loss_cooldown_blocked(rows, "0xab", close + timedelta(hours=3), 48))
+        self.assertEqual(len([p for p in POLICIES if p.startswith("research_loss_cooldown_")]), 4)
+
     def test_shadow_entries_do_not_execute_or_use_current_quote_as_exit(self):
         state = default_state()
         result = step(state, market(T0), funnel(T0))
-        self.assertEqual(result["opened"], 1 + len([n for n in POLICIES if not n.startswith("research_")]))
+        self.assertEqual(result["opened"], 1 + len([n for n in POLICIES if (not n.startswith("research_") or n.startswith("research_loss_cooldown_"))]))
         self.assertEqual(result["closed"], 0)
         for name,st in state["strategies"].items():
-            self.assertEqual(len(st["positions"]), 1 if name == "research_trend_runner" or not name.startswith("research_") else 0)
+            self.assertEqual(len(st["positions"]), 1 if name == "research_trend_runner" or name.startswith("research_loss_cooldown_") or not name.startswith("research_") else 0)
             self.assertEqual(len(st["trades"]), 0)
         self.assertEqual(step(state, market(T0), funnel(T0))["status"], "already_processed")
 
@@ -64,9 +76,9 @@ class ForwardPaperTests(unittest.TestCase):
         step(state, market(T0), funnel(T0))
         t1 = T0 + timedelta(minutes=5)
         result = step(state, market(t1, 0.965), funnel(t1, price_sda=0.965))
-        self.assertEqual(result["closed"], 1 + len([n for n in POLICIES if not n.startswith("research_")]))
+        self.assertEqual(result["closed"], 1 + len([n for n in POLICIES if (not n.startswith("research_") or n.startswith("research_loss_cooldown_"))]))
         for name,st in state["strategies"].items():
-            if name.startswith("research_") and name != "research_trend_runner": continue
+            if name.startswith("research_") and name != "research_trend_runner" and not name.startswith("research_loss_cooldown_"): continue
             self.assertEqual(len(st["trades"]), 1)
             trade = st["trades"][0]
             self.assertEqual(trade["reason"], "STOP")
@@ -112,9 +124,9 @@ class ForwardPaperTests(unittest.TestCase):
         later = T0 + timedelta(hours=9)
         # Market snapshot is recent, but the token itself has not traded.
         outcome = step(state, market(later, price=1.0, txn=T0), funnel(later))
-        self.assertEqual(outcome["closed"], 6)
+        self.assertEqual(outcome["closed"], 10)
         for name, st in state["strategies"].items():
-            if name.startswith("research_"):
+            if name.startswith("research_") and not name.startswith("research_loss_cooldown_"):
                 continue
             self.assertFalse(st["positions"])
             self.assertEqual(st["trades"][0]["reason"], "STALE_TIMEOUT")
@@ -139,7 +151,7 @@ class ForwardPaperTests(unittest.TestCase):
                 self.assertIn("runner_observation_gap_over_30m",
                               st["trades"][0]["learning_exclusion_reasons"])
                 continue
-            if name.startswith("research_"):
+            if name.startswith("research_") and not name.startswith("research_loss_cooldown_"):
                 self.assertEqual(len(st["trades"]), 0)
                 continue
             self.assertEqual(len(st["trades"]), 1)
