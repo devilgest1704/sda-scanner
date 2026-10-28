@@ -12,6 +12,9 @@ on:
       - 'tests/test_optimizer_dashboard.py'
       - 'tools/forward_shadow_agent.py'
       - 'tools/strategy_evidence.py'
+      - 'tools/execution_quote_audit.py'
+      - 'tools/tp4_trial_review.py'
+      - 'tests/test_tp4_monitoring.py'
       - 'tests/test_temporal_tp4.py'
       - 'tools/v33_flow_continuation.py'
       - 'tests/test_v33_flow_continuation.py'
@@ -67,6 +70,9 @@ on:
       - 'tests/test_optimizer_dashboard.py'
       - 'tools/forward_shadow_agent.py'
       - 'tools/strategy_evidence.py'
+      - 'tools/execution_quote_audit.py'
+      - 'tools/tp4_trial_review.py'
+      - 'tests/test_tp4_monitoring.py'
       - 'tests/test_temporal_tp4.py'
       - 'tools/v33_flow_continuation.py'
       - 'tests/test_v33_flow_continuation.py'
@@ -162,7 +168,9 @@ jobs:
           python -m unittest discover -s tests -p 'test_optimizer_dashboard.py' -v
 
       - name: Verify temporal TP4 forward experiment and conservative evidence
-        run: python -m unittest discover -s tests -p 'test_temporal_tp4.py' -v
+        run: |
+          python -m unittest discover -s tests -p 'test_temporal_tp4.py' -v
+          python -m unittest discover -s tests -p 'test_tp4_monitoring.py' -v
 
       - name: Reject duplicate market transaction replays before trading analytics
         run: |

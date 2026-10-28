@@ -705,6 +705,11 @@ def step(data, market, funnel):
                 continue
             stamp, price = quote
             gap = (stamp - last).total_seconds() / 60
+            if name == TEMPORAL_TP4_MODE:
+                # A long gap while HOLDING must not disappear when a later,
+                # well-sampled quote eventually triggers the exit.
+                position["tp4_max_quote_gap_minutes"] = max(
+                    gap, finite(position.get("tp4_max_quote_gap_minutes")) or 0)
             duration = (stamp - start).total_seconds() / 3600
             entry = positive(position.get("entry_price_sda"))
             if entry is None:
@@ -755,7 +760,8 @@ def step(data, market, funnel):
             # Gapped or delayed observed prices are recorded but excluded from
             # trustworthy model selection.
             exclusion_reasons = []
-            if gap > MAX_QUOTE_GAP_MIN:
+            if (gap > MAX_QUOTE_GAP_MIN or name == TEMPORAL_TP4_MODE
+                    and position.get("tp4_max_quote_gap_minutes", 0) > MAX_QUOTE_GAP_MIN):
                 exclusion_reasons.append("quote_gap_over_30m")
             if duration > maximum_hours + 0.5:
                 exclusion_reasons.append("holding_time_over_max_plus_30m")
@@ -772,6 +778,11 @@ def step(data, market, funnel):
                 "learning_exclusion_reasons": exclusion_reasons,
                 "notional_sda": SIZE_SDA,
                 "model": "observed_quote_paper_not_executable_fill",
+                **({"tp4_entry_evidence": position.get("tp4_entry_evidence"),
+                    "exit_observed_at": ts.isoformat(),
+                    "peak_price_sda": position["peak_price_sda"],
+                    "max_quote_gap_minutes": position.get("tp4_max_quote_gap_minutes", gap)}
+                   if name == TEMPORAL_TP4_MODE else {}),
                 **({"v32_macd_at_entry": position.get("v32_macd_at_entry")}
                    if name in MACD_RESEARCH_MODES else {}),
                 **({"v32_breakout_at_entry": position.get("v32_breakout_at_entry")}
@@ -826,6 +837,13 @@ def step(data, market, funnel):
                 positions[address] = {
                     "opened_at": ts.isoformat(), "entry_price_sda": entry,
                     "last_quote_at": stamp.isoformat(), "peak_price_sda": entry,
+                    **({"tp4_max_quote_gap_minutes": 0.0,
+                        "tp4_entry_evidence": {k: c.get(k) for k in (
+                            "at", "quote_at", "data_age_sec", "phase", "score",
+                            "quality", "impulse", "trades_1h", "buy_ratio",
+                            "flow_1h", "volume_1h", "m15", "m1h",
+                            "research_temporal_recovery_ready")}}
+                       if name == TEMPORAL_TP4_MODE else {}),
                     **({"runner_legs": [], "runner_largest_quote_gap_min": 0.0,
                         "runner_entry_reference": "baseline_shadow_entry_gates"}
                        if name == TREND_RUNNER_RESEARCH_MODE else {}),
