@@ -1,18 +1,18 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-10-28T03:32:30.201746+00:00",
+  "checked_at": "2026-10-28T03:38:29.194142+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-10-28T03:32:00.186904+00:00",
+    "market_at": "2026-10-28T03:37:59.336602+00:00",
     "tokens": 173,
-    "quotes_last_5m": 1,
-    "quotes_last_15m": 9,
-    "quotes_last_60m": 35,
-    "fresh_with_8_trades_1h": 1,
-    "fresh_with_12_trades_1h": 1,
-    "fresh_m15_ge_1_5pct": 1,
-    "fresh_m15_ge_1_5pct_and_8_trades": 1,
-    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 1
+    "quotes_last_5m": 6,
+    "quotes_last_15m": 10,
+    "quotes_last_60m": 36,
+    "fresh_with_8_trades_1h": 2,
+    "fresh_with_12_trades_1h": 2,
+    "fresh_m15_ge_1_5pct": 2,
+    "fresh_m15_ge_1_5pct_and_8_trades": 0,
+    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 0
   },
   "paper_loss_circuit": {
     "paper_only": true,
@@ -32,38 +32,39 @@
   "last_paper_close_at": "2026-10-28T03:24:23.564139+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-10-28T03:32:26.850915+00:00",
+    "at": "2026-10-28T03:38:25.832265+00:00",
     "age_minutes": 0.1,
     "aligned_to_market": true,
     "tokens_scored": 173,
-    "fresh_tokens": 9,
+    "fresh_tokens": 10,
     "champion_ready": 0,
-    "shadow_ready": 1,
+    "shadow_ready": 0,
     "sampled_rows": 40,
     "sampled_phases": {
-      "WATCH": 5,
-      "NO": 35
+      "WATCH": 4,
+      "NO": 36
     },
     "sampled_rejections": {
       "temporal_recovery": 40,
-      "v31_age": 39,
+      "v31_age": 35,
       "v31_activity": 34,
-      "cooldown": 2,
-      "late_spike": 1
+      "late_spike": 1,
+      "cooldown": 1
     },
     "fresh_rejections": {
-      "temporal_recovery": 9,
-      "v31_age": 8,
-      "v31_activity": 6,
-      "cooldown": 2,
-      "late_spike": 1
+      "temporal_recovery": 10,
+      "v31_activity": 7,
+      "v31_age": 5,
+      "cooldown": 2
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "prior_signal_not_recoverable": 9
+        "prior_signal_not_recoverable": 8,
+        "missing_prior_frozen_signal": 2
       },
       "confirmed_continuation": {
-        "prior_continuation_not_confirmed": 9
+        "prior_continuation_not_confirmed": 8,
+        "missing_prior_frozen_signal": 2
       }
     },
     "temporal_lane_ready": {
@@ -74,76 +75,73 @@
     "would_buy_if_only_loss_circuit_cleared": false,
     "top_near_ready": [
       {
-        "address": "0xe2f49f86c02e627b2e86809424737b79b2651b8c",
-        "symbol": "VMB",
-        "score": 78.1,
-        "quality": 58.1,
-        "impulse": 20.0,
-        "phase": "WATCH",
-        "data_age_sec": 217.8,
-        "gates": [
-          "temporal_recovery"
-        ],
-        "reason": "WATCH / temporal_recovery: prior_signal_not_recoverable / prior_continuation_not_confirmed"
-      },
-      {
-        "address": "0x983428b824d8462de6240ba19e790bbf19703f33",
-        "symbol": "VPA",
+        "address": "0x9393e3cff4c010091bbf4de48f64417f0812bdbd",
+        "symbol": "HGM",
         "score": 19.0,
         "quality": 19.0,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 870.8,
+        "data_age_sec": 179.7,
+        "gates": [
+          "temporal_recovery"
+        ],
+        "reason": "NO / temporal_recovery: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+      },
+      {
+        "address": "0x641a328505134b16a2b385670a0062e911871df5",
+        "symbol": "SFAR",
+        "score": 58.0,
+        "quality": 38.0,
+        "impulse": 20.0,
+        "phase": "WATCH",
+        "data_age_sec": 239.7,
+        "gates": [
+          "temporal_recovery",
+          "v31_activity"
+        ],
+        "reason": "WATCH / temporal_recovery; v31_activity: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+      },
+      {
+        "address": "0xe2f49f86c02e627b2e86809424737b79b2651b8c",
+        "symbol": "VMB",
+        "score": 41.8,
+        "quality": 41.8,
+        "impulse": 0.0,
+        "phase": "WATCH",
+        "data_age_sec": 576.7,
         "gates": [
           "temporal_recovery",
           "v31_age"
         ],
-        "reason": "NO / temporal_recovery; v31_age: prior_signal_not_recoverable / prior_continuation_not_confirmed"
-      },
-      {
-        "address": "0xbcd27707f604f9f9be1a5f8c5c17fee0f9630b38",
-        "symbol": "sUSDT",
-        "score": 41.2,
-        "quality": 41.2,
-        "impulse": 0.0,
-        "phase": "WATCH",
-        "data_age_sec": 843.8,
-        "gates": [
-          "temporal_recovery",
-          "v31_age",
-          "v31_activity"
-        ],
         "reason": "WATCH / temporal_recovery; v31_age: prior_signal_not_recoverable / prior_continuation_not_confirmed"
       },
       {
-        "address": "0x5f37152b8bfdb758339a279a7fdf88e84bd30b6e",
-        "symbol": "OUSD",
-        "score": 27.8,
-        "quality": 27.8,
+        "address": "0xacb361fee5537c08b5504ccf936f5aa3e1c62f3d",
+        "symbol": "sUSDC",
+        "score": 31.5,
+        "quality": 31.5,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 555.8,
+        "data_age_sec": 85.8,
         "gates": [
           "temporal_recovery",
-          "v31_age",
           "v31_activity"
         ],
-        "reason": "NO / temporal_recovery; v31_age: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+        "reason": "NO / temporal_recovery; v31_activity: missing_prior_frozen_signal / missing_prior_frozen_signal"
       },
       {
         "address": "0xeb96cad0829c5c476f47eff8de622d1984f0451e",
         "symbol": "RIDEX",
-        "score": 18.6,
-        "quality": 18.6,
+        "score": 18.0,
+        "quality": 18.0,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 329.7,
+        "data_age_sec": 248.7,
         "gates": [
           "temporal_recovery",
-          "v31_age",
           "cooldown"
         ],
-        "reason": "NO / temporal_recovery; v31_age: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+        "reason": "NO / temporal_recovery; cooldown: prior_signal_not_recoverable / prior_continuation_not_confirmed"
       }
     ]
   },
