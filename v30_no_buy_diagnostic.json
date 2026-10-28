@@ -1,17 +1,17 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-10-28T03:55:27.163732+00:00",
+  "checked_at": "2026-10-28T04:00:27.371378+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-10-28T03:54:59.984953+00:00",
+    "market_at": "2026-10-28T03:59:59.790831+00:00",
     "tokens": 173,
     "quotes_last_5m": 4,
-    "quotes_last_15m": 10,
-    "quotes_last_60m": 36,
+    "quotes_last_15m": 11,
+    "quotes_last_60m": 38,
     "fresh_with_8_trades_1h": 3,
-    "fresh_with_12_trades_1h": 1,
-    "fresh_m15_ge_1_5pct": 0,
-    "fresh_m15_ge_1_5pct_and_8_trades": 0,
+    "fresh_with_12_trades_1h": 2,
+    "fresh_m15_ge_1_5pct": 1,
+    "fresh_m15_ge_1_5pct_and_8_trades": 1,
     "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 0
   },
   "paper_loss_circuit": {
@@ -32,37 +32,38 @@
   "last_paper_close_at": "2026-10-28T03:24:23.564139+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-10-28T03:55:23.799674+00:00",
+    "at": "2026-10-28T04:00:23.822890+00:00",
     "age_minutes": 0.1,
     "aligned_to_market": true,
     "tokens_scored": 173,
-    "fresh_tokens": 9,
+    "fresh_tokens": 11,
     "champion_ready": 0,
     "shadow_ready": 0,
     "sampled_rows": 40,
     "sampled_phases": {
-      "WATCH": 2,
-      "NO": 38
+      "WATCH": 3,
+      "NO": 37
     },
     "sampled_rejections": {
       "temporal_recovery": 40,
-      "v31_age": 37,
-      "v31_activity": 37,
-      "cooldown": 2,
-      "late_spike": 1
+      "v31_age": 36,
+      "v31_activity": 35,
+      "late_spike": 3,
+      "cooldown": 2
     },
     "fresh_rejections": {
-      "temporal_recovery": 9,
-      "v31_activity": 7,
-      "v31_age": 6,
-      "cooldown": 1
+      "temporal_recovery": 11,
+      "v31_activity": 8,
+      "v31_age": 7,
+      "cooldown": 1,
+      "late_spike": 1
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "prior_signal_not_recoverable": 9
+        "prior_signal_not_recoverable": 11
       },
       "confirmed_continuation": {
-        "prior_continuation_not_confirmed": 9
+        "prior_continuation_not_confirmed": 11
       }
     },
     "temporal_lane_ready": {
@@ -73,41 +74,54 @@
     "would_buy_if_only_loss_circuit_cleared": false,
     "top_near_ready": [
       {
-        "address": "0xbcd27707f604f9f9be1a5f8c5c17fee0f9630b38",
-        "symbol": "sUSDT",
-        "score": 28.3,
-        "quality": 28.3,
+        "address": "0x53167ff5810ff1886fc554e672994c232126383e",
+        "symbol": "XEN",
+        "score": 18.2,
+        "quality": 18.2,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 173.7,
+        "data_age_sec": 285.7,
+        "gates": [
+          "temporal_recovery"
+        ],
+        "reason": "NO / temporal_recovery: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+      },
+      {
+        "address": "0x5f37152b8bfdb758339a279a7fdf88e84bd30b6e",
+        "symbol": "OUSD",
+        "score": 46.5,
+        "quality": 46.5,
+        "impulse": 0.0,
+        "phase": "WATCH",
+        "data_age_sec": 202.8,
+        "gates": [
+          "temporal_recovery",
+          "late_spike"
+        ],
+        "reason": "WATCH / temporal_recovery; late_spike: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+      },
+      {
+        "address": "0xbcd27707f604f9f9be1a5f8c5c17fee0f9630b38",
+        "symbol": "sUSDT",
+        "score": 28.8,
+        "quality": 28.8,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 201.7,
         "gates": [
           "temporal_recovery",
           "v31_activity"
         ],
         "reason": "NO / temporal_recovery; v31_activity: prior_signal_not_recoverable / prior_continuation_not_confirmed"
-      },
-      {
-        "address": "0xcb13385a82565e2090b9275e49c5cbbdb1875aea",
-        "symbol": "LNH",
-        "score": 25.0,
-        "quality": 25.0,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 650.7,
-        "gates": [
-          "temporal_recovery",
-          "v31_age"
-        ],
-        "reason": "NO / temporal_recovery; v31_age: prior_signal_not_recoverable / prior_continuation_not_confirmed"
       },
       {
         "address": "0xd9b93affc9aaff741e1fc88284eac70fae5e0c13",
         "symbol": "USDX",
-        "score": 23.6,
-        "quality": 23.6,
+        "score": 12.3,
+        "quality": 12.3,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 91.7,
+        "data_age_sec": 293.7,
         "gates": [
           "temporal_recovery",
           "v31_activity"
@@ -115,33 +129,19 @@
         "reason": "NO / temporal_recovery; v31_activity: prior_signal_not_recoverable / prior_continuation_not_confirmed"
       },
       {
-        "address": "0xeb96cad0829c5c476f47eff8de622d1984f0451e",
-        "symbol": "RIDEX",
-        "score": 16.4,
-        "quality": 16.4,
+        "address": "0xcdaebb69973803be3b63fa33ac724346129b179c",
+        "symbol": "sXAU",
+        "score": 32.3,
+        "quality": 32.3,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 270.7,
-        "gates": [
-          "temporal_recovery",
-          "cooldown"
-        ],
-        "reason": "NO / temporal_recovery; cooldown: prior_signal_not_recoverable / prior_continuation_not_confirmed"
-      },
-      {
-        "address": "0x9393e3cff4c010091bbf4de48f64417f0812bdbd",
-        "symbol": "HGM",
-        "score": 41.0,
-        "quality": 41.0,
-        "impulse": 0.0,
-        "phase": "WATCH",
-        "data_age_sec": 791.7,
+        "data_age_sec": 688.8,
         "gates": [
           "temporal_recovery",
           "v31_age",
           "v31_activity"
         ],
-        "reason": "WATCH / temporal_recovery; v31_age: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+        "reason": "NO / temporal_recovery; v31_age: prior_signal_not_recoverable / prior_continuation_not_confirmed"
       }
     ]
   },
