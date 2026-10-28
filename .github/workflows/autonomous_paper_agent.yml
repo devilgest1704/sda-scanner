@@ -11,6 +11,8 @@ on:
       - 'telegram_callback_router.py'
       - 'tests/test_optimizer_dashboard.py'
       - 'tools/forward_shadow_agent.py'
+      - 'tools/strategy_evidence.py'
+      - 'tests/test_temporal_tp4.py'
       - 'tools/v33_flow_continuation.py'
       - 'tests/test_v33_flow_continuation.py'
       - 'tools/v33_cost_aware_breakout.py'
@@ -64,6 +66,8 @@ on:
       - 'telegram_callback_router.py'
       - 'tests/test_optimizer_dashboard.py'
       - 'tools/forward_shadow_agent.py'
+      - 'tools/strategy_evidence.py'
+      - 'tests/test_temporal_tp4.py'
       - 'tools/v33_flow_continuation.py'
       - 'tests/test_v33_flow_continuation.py'
       - 'tools/v33_cost_aware_breakout.py'
@@ -156,6 +160,9 @@ jobs:
         run: |
           python -m py_compile optimizer_dashboard.py telegram_dashboard.py telegram_callback_router.py
           python -m unittest discover -s tests -p 'test_optimizer_dashboard.py' -v
+
+      - name: Verify temporal TP4 forward experiment and conservative evidence
+        run: python -m unittest discover -s tests -p 'test_temporal_tp4.py' -v
 
       - name: Reject duplicate market transaction replays before trading analytics
         run: |

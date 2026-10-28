@@ -88,6 +88,9 @@ POLICIES = {
 # Four independent forward-only virtual portfolios. All baseline gates,
 # costs and exits are identical; only loss-triggered re-entry differs.
 COOLDOWN_RESEARCH_HOURS = (6, 12, 24, 48)
+TEMPORAL_TP4_MODE = "research_temporal_recovery_tp4"
+# New forward journal only: never import the parent lane's historical P/L.
+POLICIES[TEMPORAL_TP4_MODE] = POLICIES["research_temporal_recovery"].copy()
 for _hours in COOLDOWN_RESEARCH_HOURS:
     POLICIES[f"research_loss_cooldown_{_hours}h"] = POLICIES["baseline"].copy()
 
@@ -393,7 +396,7 @@ def eligible(c, filters, research_watch=False, macd_mode=None):
         return isinstance(c.get("v33_cost_breakout"), dict) and c["v33_cost_breakout"].get("eligible") is True
     if macd_mode == SPARSE_VOLUME_RESEARCH_MODE:
         return sparse_volume_research_eligible(c, filters)
-    if macd_mode == TEMPORAL_RESEARCH_MODE and c.get("research_temporal_recovery_ready") is not True:
+    if macd_mode in (TEMPORAL_RESEARCH_MODE, TEMPORAL_TP4_MODE) and c.get("research_temporal_recovery_ready") is not True:
         return False
     if macd_mode == FLOW_V33_RESEARCH_MODE and not (
             isinstance(c.get("v33_flow"), dict) and c["v33_flow"].get("eligible") is True):
@@ -654,6 +657,9 @@ def step(data, market, funnel):
         # opening quote as a future exit, and cannot use unseen future prices.
         for address, position in list(positions.items()):
             quote = quotes.get(address)
+            if (name == TEMPORAL_TP4_MODE and quote is not None
+                    and not 0 <= (ts-quote[0]).total_seconds() <= 300):
+                quote = None  # Research exit must be visible and fresh THIS scan.
             last = when(position.get("last_quote_at"))
             start = when(position.get("opened_at"))
             if start is None or last is None:
@@ -734,6 +740,8 @@ def step(data, market, funnel):
             move = price / entry - 1
             trailing = price / position["peak_price_sda"] - 1
             target = V33_TARGET if name == COST_BREAKOUT_V33_MODE else TAKE_PCT
+            if name == TEMPORAL_TP4_MODE:
+                target = 0.04
             trail = V33_TRAIL if name == COST_BREAKOUT_V33_MODE else TRAIL_PCT
             maximum_hours = V33_MAX_HOURS if name == COST_BREAKOUT_V33_MODE else MAX_HOURS
             reason = ("STOP" if move <= STOP_PCT else

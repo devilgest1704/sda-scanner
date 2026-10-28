@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tools.forward_shadow_agent import POLICIES, when, finite
 from tools.v30_exit_parity import audit_archive
+from tools.strategy_evidence import evidence_report
 
 STATE_PATH = Path("strategy_lab/forward_shadow_state.json")
 CONFIG_PATH = Path("v30_agent_config.json")
@@ -136,6 +137,7 @@ def report(state, config, real_ledger, now=None):
         closed_for_parity = []
     exit_parity_evidence = audit_archive(closed_for_parity[-500:])
     model = {
+        "strategy_evidence": evidence_report(state),
         "version": "FORWARD-PAPER-AGENT-1",
         "updated_at": now.isoformat(),
         "mode": "PAPER_ONLY",
