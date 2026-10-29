@@ -8,7 +8,7 @@ from tools.v32_hourly_macd import paper_macd_veto
 from tools.paper_loss_circuit import paper_entry_risk_gate
 from tools.temporal_recovery_buy import evaluate_paper as temporal_recovery_signal
 
-VERSION="V30.12-TEMPORAL-CONTINUATION-PAPER-BUY"
+VERSION="V30.13-EVIDENCE-GUARDED-PAPER-BUY"
 # Explicit strategy selector. It changes NEW PAPER entries only. Existing
 # V30 paper stops, close paths, 24h loss circuit and real-trading guards stay.
 PAPER_BUY_MODE=os.environ.get("SDA_PAPER_BUY_MODE","temporal_recovery")
@@ -352,7 +352,8 @@ def decision(address,a,ws=None,persist=True):
                        and temporal.get("lane") == "confirmed_continuation"
                        and v31_early_ok)
     temporal_activity_ok=v31_trades_ok or temporal_early_ok
-    # PAPER-only independent fresh-momentum lane. Never bypass risk controls.
+    # Observed unconfirmed entries lost money in both chronological cohorts.
+    # Keep collecting this exact hypothesis in SHADOW, not the PAPER account.
     fresh_momentum_ready=(
         PAPER_BUY_MODE == "temporal_recovery"
         and v31_age_ok and data_age <= 180
@@ -370,7 +371,7 @@ def decision(address,a,ws=None,persist=True):
         # Keep immutable V31 quote/activity safety, paper per-token cooldown,
         # price/flow sanity, anti-chase and MACD veto, plus the 24h loss budget.
         # Don't silently permit the old baseline lane alongside this mode.
-        blocked = (not (temporal["ready"] or fresh_momentum_ready) or cd or not v31_age_ok
+        blocked = (not temporal["ready"] or cd or not v31_age_ok
                    or not temporal_activity_ok or not price_flow_ok or late_spike
                    or macd_gate["blocked"] or loss_circuit["blocked"])
     else:
@@ -423,7 +424,9 @@ def decision(address,a,ws=None,persist=True):
         # thresholds. Show actual temporal rejections, not spurious baseline
         # failures when a recovered signal is admissible.
         gate_failures = []
-        if not (temporal["ready"] or fresh_momentum_ready): gate_failures.append("temporal_recovery")
+        if not temporal["ready"]: gate_failures.append("temporal_recovery")
+        if fresh_momentum_ready and not temporal["ready"]:
+            gate_failures.append("fresh_momentum_research_only")
         if not v31_age_ok: gate_failures.append("v31_age")
         if not temporal_activity_ok: gate_failures.append("v31_activity")
         if not price_flow_ok: gate_failures.append("price_flow")
@@ -435,7 +438,7 @@ def decision(address,a,ws=None,persist=True):
                   f"{phase} / "+("; ".join(gate_failures[:2])+
                   (": "+temporal["reason"]+
                    " / "+str(temporal.get("continuation_reason") or "")
-                   if not (temporal["ready"] or fresh_momentum_ready) else "")))
+                   if not temporal["ready"] else "")))
     else:
         reason="READY" if not blocked else f"{phase} / "+"; ".join(failures[:3])
 
@@ -491,6 +494,9 @@ def decision(address,a,ws=None,persist=True):
       "paper_loss_circuit":loss_circuit,
       "paper_buy_mode":PAPER_BUY_MODE,
       "paper_temporal_recovery":temporal,
+      "paper_entry_lane":(temporal.get("lane") if temporal.get("ready") else
+                          "fresh_momentum_research_only" if fresh_momentum_ready else None),
+      "fresh_momentum_research_ready":fresh_momentum_ready and not temporal["ready"],
       "shadow_snapshot_impulse":round(snapshot_impulse,1),
       "shadow_confirmation_ready":shadow_ready,
       "shadow_block_reason":shadow_reason,
@@ -795,6 +801,8 @@ def write_scan_funnel(market_file="market_analysis.json"):
                 "m1h":n(d.get("m1h")),
                 "data_age_sec":round(n(d.get("data_age_sec")),1),
                 "eligible":bool(d.get("eligible_for_buy")),
+                "fresh_momentum_research_ready":bool(d.get("fresh_momentum_research_ready")),
+                "paper_entry_lane":d.get("paper_entry_lane"),
                 "gates":list(dict.fromkeys(d.get("paper_buy_gate_failures") or [])),
                 # Persist the exact contemporaneous reason for rejecting each
                 # WATCH/IGNITION candidate. Forward outcome evaluation can

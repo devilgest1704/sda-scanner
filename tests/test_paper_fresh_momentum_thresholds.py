@@ -4,6 +4,8 @@ Run: python -m unittest discover -s tests -p 'test_paper_fresh_momentum_threshol
 """
 import ast
 import unittest
+from unittest.mock import patch
+from datetime import datetime, timezone
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1] / "v30_pump_hunter.py"
@@ -72,6 +74,41 @@ class FreshMomentumExpansionTests(unittest.TestCase):
         self.assertIn('or macd_gate["blocked"] or loss_circuit["blocked"]', source)
         self.assertIn('or cd or not v31_age_ok', source)
         self.assertIn('or not temporal_activity_ok or not price_flow_ok or late_spike', source)
+
+    def test_strong_unconfirmed_snapshot_is_research_only_in_actual_buy_path(self):
+        import v30_pump_hunter as v30
+        c = dict(price=1, m1=3, m15=2, m4=4, flow=500, flow15=100,
+                 vol=2000, trades=24, buy_ratio=3, trade_ratio=2,
+                 data_age_sec=30, last_transaction=datetime.now(timezone.utc).isoformat())
+        with (patch.object(v30, 'PAPER_BUY_MODE', 'temporal_recovery'),
+              patch.object(v30, 'score', return_value=(c,90,78,12,'IGNITION')),
+              patch.object(v30, 'entry_gate', return_value=dict(
+                  buy=True,entry_impulse=12,liquidity_ok=True,price_flow_ok=True,ratio=.25)),
+              patch.object(v30, 'load_state', return_value={'history':{'0xab':{'last':{
+                  'm1':1,'m15':1,'flow':100,'vol':500}}}}),
+              patch.object(v30, 'cooldown_active', return_value=False),
+              patch.object(v30, 'paper_macd_veto', return_value={'blocked':False}),
+              patch.object(v30, 'paper_entry_risk_gate', return_value={'blocked':False}),
+              patch.object(v30, 'temporal_recovery_signal', return_value={
+                  'ready':False,'reason':'missing_prior_frozen_signal'}) as signal):
+            result=v30.decision('0xab',{},persist=False)
+            signal.return_value={'ready':True,'lane':'temporal_recovery','reason':'NEW_FRESH_QUOTE_CONFIRMED'}
+            confirmed=v30.decision('0xab',{},persist=False)
+        self.assertTrue(result['fresh_momentum_research_ready'])
+        self.assertFalse(result['eligible_for_buy'])
+        self.assertLess(result['confidence'],v30.ENTRY_SCORE)
+        self.assertIn('fresh_momentum_research_only',result['paper_buy_gate_failures'])
+        self.assertTrue(confirmed['eligible_for_buy'])
+        self.assertFalse(confirmed['fresh_momentum_research_ready'])
+
+    def test_unconfirmed_shadow_requires_frozen_readiness_and_current_safety(self):
+        from tools.forward_shadow_agent import eligible,POLICIES,FRESH_MOMENTUM_RESEARCH_MODE as mode
+        row=dict(phase='IGNITION',data_age_sec=30,score=90,quality=78,impulse=12,
+                 trades_1h=24,buy_ratio=3,volume_1h=2000,flow_1h=500,m15=2,m1h=3)
+        self.assertFalse(eligible(row,POLICIES[mode],macd_mode=mode))
+        row['fresh_momentum_research_ready']=True
+        self.assertTrue(eligible(row,POLICIES[mode],macd_mode=mode))
+        self.assertFalse(eligible({**row,'data_age_sec':901},POLICIES[mode],macd_mode=mode))
 
 
 if __name__ == "__main__":

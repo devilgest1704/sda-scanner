@@ -88,6 +88,10 @@ POLICIES = {
 # Four independent forward-only virtual portfolios. All baseline gates,
 # costs and exits are identical; only loss-triggered re-entry differs.
 COOLDOWN_RESEARCH_HOURS = (6, 12, 24, 48)
+FRESH_MOMENTUM_RESEARCH_MODE = "research_unconfirmed_fresh_momentum"
+POLICIES[FRESH_MOMENTUM_RESEARCH_MODE] = {
+    "entry_score": 72, "quality": 65, "impulse": 6, "buy_ratio": 1.3, "trades": 12,
+}
 TEMPORAL_TP4_MODE = "research_temporal_recovery_tp4"
 # New forward journal only: never import the parent lane's historical P/L.
 POLICIES[TEMPORAL_TP4_MODE] = POLICIES["research_temporal_recovery"].copy()
@@ -384,6 +388,9 @@ def evaluate_temporal_recovery(state, candidates, at_time):
 
 def eligible(c, filters, research_watch=False, macd_mode=None):
     if not isinstance(c, dict):
+        return False
+    if (macd_mode == FRESH_MOMENTUM_RESEARCH_MODE
+            and c.get("fresh_momentum_research_ready") is not True):
         return False
     # The autonomous missed-pump learner discovers bounded early-entry
     # threshold experiments, using only features saved at decision time.
