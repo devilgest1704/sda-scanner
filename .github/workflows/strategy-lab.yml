@@ -178,6 +178,20 @@ jobs:
           assert x['candidate_evidence']['observed_60m'] <= x['candidate_evidence']['candidate_snapshots']
           print('Paper-only evidence gate OK:', x['cohort_evidence'], x['candidate_evidence'])
           PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: strategy-lab-report
+          path: |
+            strategy_lab/report.json
+            strategy_lab/research.json
+            strategy_lab/trade_lessons.json
+            strategy_lab/v31_profit_learning.json
+            strategy_lab/paper_reconciliation.json
+            strategy_lab/candidate_outcomes.json
+            strategy_lab/status.png
+          retention-days: 30
+
       - name: Persist research archives to repository
         if: github.ref == 'refs/heads/main'
         run: |
@@ -197,6 +211,9 @@ jobs:
             # commit onto the latest main; never force-push or overwrite scanner
             # state files. Abort safely if a research archive itself conflicts.
             git commit -m 'chore: persist paper research archives [skip ci]'
+            # Reports were uploaded above. Isolate uncommitted sampler/test
+            # changes before rebasing; never restore/push stale scanner state.
+            git stash push --include-untracked -m strategy-lab-unpublished-state
             for attempt in 1 2 3 4 5; do
               git fetch origin main
               if ! git rebase origin/main; then
@@ -214,16 +231,3 @@ jobs:
             echo "::error::Unable to persist research archives after 5 attempts"
             exit 1
           fi
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: strategy-lab-report
-          path: |
-            strategy_lab/report.json
-            strategy_lab/research.json
-            strategy_lab/trade_lessons.json
-            strategy_lab/v31_profit_learning.json
-            strategy_lab/paper_reconciliation.json
-            strategy_lab/candidate_outcomes.json
-            strategy_lab/status.png
-          retention-days: 30
