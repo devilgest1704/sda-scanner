@@ -7,8 +7,10 @@ from datetime import datetime, timezone, timedelta
 from tools.v32_hourly_macd import paper_macd_veto
 from tools.paper_loss_circuit import paper_entry_risk_gate
 from tools.temporal_recovery_buy import evaluate_paper as temporal_recovery_signal
+from tools.temporal_recovery_buy import evaluate as strict_temporal_signal
 
-VERSION="V30.13-EVIDENCE-GUARDED-PAPER-BUY"
+VERSION="V30.14-USER-REQUESTED-TP4-PAPER"
+PAPER_TP4 = os.environ.get("SDA_PAPER_TP4", "0") == "1"
 # Explicit strategy selector. It changes NEW PAPER entries only. Existing
 # V30 paper stops, close paths, 24h loss circuit and real-trading guards stay.
 PAPER_BUY_MODE=os.environ.get("SDA_PAPER_BUY_MODE","temporal_recovery")
@@ -336,7 +338,7 @@ def decision(address,a,ws=None,persist=True):
     # research_temporal_recovery, using the previous finished Shadow scan's
     # frozen signal AND the independently fresh current on-chain quote.
     # A stale score is never itself permission to trade.
-    temporal = temporal_recovery_signal(address, {
+    temporal = (strict_temporal_signal if PAPER_TP4 else temporal_recovery_signal)(address, {
         "phase": phase, "score": s, "quality": q,
         "impulse": entry_impulse,
         "quote_at": c.get("last_transaction"),
@@ -524,7 +526,10 @@ def patch(main_module,engine):
     original_create=getattr(engine,"create",None)
     # Ensure the clean strategy owns the actual paper engine decision.
     def create(a,an,s,meta,liq,investment=None):
-        z=original_create(a,an,s,meta,liq,investment) if callable(original_create) else {}
+        z=original_create(a,an,s,meta,liq,50.0 if PAPER_TP4 else investment) if callable(original_create) else {}
+        if PAPER_TP4:
+            z["paper_strategy"]="temporal_recovery_tp4"
+            z["paper_strategy_experimental"]=True
         e=n(z.get("entry_price"),n(an.get("price_in_sda")))
         z.update({"v30_mode":"CLEAN-PUMP-HUNTER-V30.3","pump_peak_price":e,"pump_mfe_pct":0.0,
                   "pump_weak_count":0,"pump_age_scans":0,"sl_pct":SL_PCT,
@@ -574,6 +579,8 @@ def patch(main_module,engine):
             # Never execute an exit or advance trailing-stop/weakness state using
             # a stale price. Emit a throttled warning and retain the position
             # until a new transaction gives us an observable execution price.
+            if pos.get("paper_strategy") == "temporal_recovery_tp4":
+                data_fresh_for_exit = data_fresh_for_exit and data_age <= 300
             if not data_fresh_for_exit:
                 pos["pump_exit_data_stale"]=True
                 pos["pump_exit_data_age_sec"]=data_age
@@ -614,30 +621,43 @@ def patch(main_module,engine):
             })
             if len(samples)>96:del samples[:-96]
             age=age_hours(pos)
-            # Profit protection: once positive, stop giving the trade back.
-            stop=n(pos.get("sl"),entry*(1-SL_PCT))
-            if mfe>=2.5: stop=max(stop,entry*1.002)
-            if mfe>=4: stop=max(stop,peak*0.975)
-            if mfe>=10: stop=max(stop,peak*0.95)
-            if mfe>=20: stop=max(stop,peak*0.92)
-            if mfe>=40: stop=max(stop,peak*0.90)
-            if mfe>=70: stop=max(stop,peak*0.88)
-            pos["sl"]=stop
-            weak=(s["m15"]<0 and s["net_1h"]<=0) or s["pump_score"]<38
-            pos["pump_weak_count"]=int(n(pos.get("pump_weak_count"))+1) if weak else max(0,int(n(pos.get("pump_weak_count")))-1)
-            if not data_fresh_for_exit:
-                r=None
-            elif (cur-entry)/entry*100<=-3.0:
-                r=engine.close(p,address,cur,"V30.3 EMERGENCY/HARD STOP")
-            elif cur<=stop:
-                r=engine.close(p,address,cur,"V30.3 TRAILING/STOP")
-            elif roi<=-1.75 and pos["pump_weak_count"]>=2:
-                r=engine.close(p,address,cur,"V30.3 EARLY WEAKNESS")
-            elif age>=2 and mfe<2 and pos["pump_weak_count"]>=3 and roi<0.5:
-                r=engine.close(p,address,cur,"V30.3 STALE")
-            elif roi>0.5 and mfe>=2.5 and pos["pump_weak_count"]>=3:
-                r=engine.close(p,address,cur,"V30.3 PUMP BREAKDOWN")
-            else:r=None
+            if pos.get("paper_strategy") == "temporal_recovery_tp4":
+                # Thresholds use observed reference quotes, not the entry price
+                # already adjusted for slippage. close() retains PAPER costs.
+                reference=n(pos.get("reference_price"),entry)
+                move=cur/reference-1
+                stop=reference*.975
+                reason=("STOP" if move <= -.025 else
+                        "TAKE" if move >= .04 else
+                        "TRAIL" if age >= .25 and cur/peak-1 <= -.035 else
+                        "TIME" if age >= 4 else None)
+                pos["sl"]=stop
+                r=engine.close(p,address,cur,"TP4 "+reason) if reason else None
+            else:
+                # Profit protection: once positive, stop giving the trade back.
+                stop=n(pos.get("sl"),entry*(1-SL_PCT))
+                if mfe>=2.5: stop=max(stop,entry*1.002)
+                if mfe>=4: stop=max(stop,peak*0.975)
+                if mfe>=10: stop=max(stop,peak*0.95)
+                if mfe>=20: stop=max(stop,peak*0.92)
+                if mfe>=40: stop=max(stop,peak*0.90)
+                if mfe>=70: stop=max(stop,peak*0.88)
+                pos["sl"]=stop
+                weak=(s["m15"]<0 and s["net_1h"]<=0) or s["pump_score"]<38
+                pos["pump_weak_count"]=int(n(pos.get("pump_weak_count"))+1) if weak else max(0,int(n(pos.get("pump_weak_count")))-1)
+                if not data_fresh_for_exit:
+                    r=None
+                elif (cur-entry)/entry*100<=-3.0:
+                    r=engine.close(p,address,cur,"V30.3 EMERGENCY/HARD STOP")
+                elif cur<=stop:
+                    r=engine.close(p,address,cur,"V30.3 TRAILING/STOP")
+                elif roi<=-1.75 and pos["pump_weak_count"]>=2:
+                    r=engine.close(p,address,cur,"V30.3 EARLY WEAKNESS")
+                elif age>=2 and mfe<2 and pos["pump_weak_count"]>=3 and roi<0.5:
+                    r=engine.close(p,address,cur,"V30.3 STALE")
+                elif roi>0.5 and mfe>=2.5 and pos["pump_weak_count"]>=3:
+                    r=engine.close(p,address,cur,"V30.3 PUMP BREAKDOWN")
+                else:r=None
             if r:
                 r['pump_exit_stop_price']=stop
                 r['pump_exit_stop_gap_pct']=round((cur/stop-1)*100,3) if stop>0 else None
