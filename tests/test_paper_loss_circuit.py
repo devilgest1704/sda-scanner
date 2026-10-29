@@ -58,6 +58,19 @@ class PaperLossCircuitTests(unittest.TestCase):
         self.assertFalse(gate["blocked"])
         self.assertEqual(gate["status"], "COLLECTING")
 
+    def test_absolute_loss_budget_blocks_before_eighth_close(self):
+        for rows in ([trade(-25)], [trade(-4) for _ in range(7)],
+                     [trade(-10),trade(-10)]):
+            gate=evaluate_closed(rows,AT)
+            self.assertTrue(gate['blocked'])
+            self.assertEqual(gate['status'],'LOSS_COOLDOWN')
+
+    def test_falling_below_sample_minimum_cannot_clear_exceeded_budget(self):
+        rows=[trade(-1,hours_ago=23)]+[trade(-4,hours_ago=2) for _ in range(7)]
+        self.assertTrue(evaluate_closed(rows,AT+timedelta(hours=1,seconds=1))['blocked'])
+        self.assertEqual(evaluate_closed(rows,AT)['projected_recovery_at_no_new_closes'],
+                         (AT+timedelta(hours=22,microseconds=1)).isoformat())
+
     def test_healthy_cohort_remains_allowed(self):
         gate = evaluate_closed([trade(-3) for _ in range(6)] +
                                [trade(4) for _ in range(2)], AT)

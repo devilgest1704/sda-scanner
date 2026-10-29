@@ -82,7 +82,9 @@ def evaluate_closed(rows, at):
     total = sum(pnl for _, pnl in recent)
     count = len(recent)
     last = max((stamp for stamp, _ in recent), default=None)
-    guard = count >= MIN_CLOSED_TRADES and total <= -LOSS_BUDGET_SDA
+    # A capital loss budget is absolute; sample sufficiency is diagnostic.
+    # Seven losses at -25 SDA must not admit an eighth new PAPER entry.
+    guard = total <= -LOSS_BUDGET_SDA
     # Deterministic projection from the ORIGINAL ledger, NOT a relaxation
     # of the 24h risk budget. A new close can move this time.
     recovery = None
@@ -92,7 +94,7 @@ def evaluate_closed(rows, at):
             expired = list(rows_at_time)
             remaining_count -= len(expired)
             remaining_pnl -= sum(pnl for _, pnl in expired)
-            if remaining_count < MIN_CLOSED_TRADES or remaining_pnl > -LOSS_BUDGET_SDA:
+            if remaining_pnl > -LOSS_BUDGET_SDA:
                 # Rows exactly 24 hours old are still included: use the
                 # first instant STRICTLY after their 24h expiry.
                 recovery = (closed_at + timedelta(

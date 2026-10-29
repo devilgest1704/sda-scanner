@@ -228,6 +228,8 @@ def update(state,market,max_observations=5000,history_market=None):
                     # Freeze original lane-level rejection evidence alongside
                     # the entry quote. Later observed prices never rewrite it.
                     "paper_buy_mode":item.get("paper_buy_mode"),
+                    "paper_entry_lane":item.get("paper_entry_lane"),
+                    "fresh_momentum_research_ready":item.get("fresh_momentum_research_ready") is True,
                     "temporal_recovery_reason":item.get("temporal_recovery_reason"),
                     "continuation_reason":item.get("continuation_reason"),
                     "features":features,
