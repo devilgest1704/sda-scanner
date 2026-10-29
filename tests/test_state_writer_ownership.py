@@ -111,6 +111,27 @@ class SingleWriterCheckpointTests(unittest.TestCase):
             self.assertIn('"source":"autonomous"',(
                 observer/"strategy_lab/autonomous_agent_report.json").read_text())
 
+            # The lab may modify a sampler checkpoint during research/tests.
+            # It must preserve that local work without rebasing or publishing
+            # it over a newer authoritative scanner checkpoint.
+            candidate = "strategy_lab/candidate_outcomes.json"
+            save(scanner, candidate, '{"version":2,"source":"scanner"}\n')
+            git(scanner, "add", candidate)
+            git(scanner, "commit", "-m", "new scanner checkpoint")
+            git(scanner, "push", "origin", "HEAD:main")
+            save(agent, candidate, '{"version":3,"source":"unpublished_lab"}\n')
+            save(agent, "strategy_lab/report.json", '{"research":true}\n')
+            git(agent, "add", "strategy_lab/report.json")
+            git(agent, "commit", "-m", "reviewed research")
+            git(agent, "stash", "push", "--include-untracked", "-m", "unpublished-state")
+            git(agent, "fetch", "origin", "main")
+            git(agent, "rebase", "origin/main")
+            git(agent, "push", "origin", "HEAD:main")
+            git(observer, "pull", "--ff-only")
+            self.assertIn('"source":"scanner"', (observer/candidate).read_text())
+            self.assertEqual((observer/"strategy_lab/report.json").read_text(), '{"research":true}\n')
+            self.assertIn('unpublished_lab', git(agent, "show", "stash:"+candidate))
+
 
 if __name__ == "__main__":
     unittest.main()
