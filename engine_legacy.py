@@ -302,6 +302,10 @@ def main():
     for a in list(p["positions"]):
         td=tokens.get(a,{}) or {};an=td.get("analysis",td);cur=num(an.get("price_in_sda"));pos=p["positions"].get(a)
         if not pos or cur<=0:continue
+        # The strategy callback already handled these positions, including
+        # refusing stale quotes. Never run legacy partial TP/SL afterwards.
+        if pos.get("paper_strategy") == "temporal_recovery_tp4" or str(pos.get("v30_mode", "")).startswith("CLEAN-PUMP-HUNTER-V30"):
+            continue
         e=num(pos.get("entry_price"));pos["updated_at"]=now()
         if not pos.get("tp1_hit") and cur>=num(pos.get("tp1")):
             inv=num(pos.get("investment_sda"))*.5;qty=inv/e if e else 0;value=qty*cur*(1-SLIPPAGE_RATE)*(1-FEE_RATE);cost=inv*(1+FEE_RATE);profit=value-cost;pos["tp1_hit"]=True;pos["remaining_fraction"]=.5;pos["sl"]=max(e*(1+FEE_RATE)/((1-SLIPPAGE_RATE)*(1-FEE_RATE)),e);events.append(f"💰 TAKE PROFIT 1/2 {pos['label']} | Profit: {profit:+.2f} SDA")

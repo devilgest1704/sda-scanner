@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'v30_pump_hunter.py'
+      - 'engine_legacy.py'
+      - 'tests/test_paper_exit_ownership.py'
       - 'tests/test_paper_fresh_momentum_thresholds.py'
       - 'tests/test_tp4_paper.py'
       - '.github/workflows/scanner_v18.yml'
@@ -25,3 +27,8 @@ jobs:
 
       - name: Verify TP4 PAPER exit lifecycle
         run: python -m unittest discover -s tests -p 'test_tp4_paper.py' -v
+
+      - name: Verify strategy owns all PAPER exits
+        run: |
+          pip install requests
+          python -m unittest discover -s tests -p test_paper_exit_ownership.py -v
