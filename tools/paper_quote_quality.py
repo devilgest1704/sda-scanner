@@ -39,12 +39,16 @@ def evaluate(transactions, at, quote_at):
 
 @lru_cache(maxsize=1)
 def market_snapshot():
- try:return json.loads(Path('market_data.json').read_text())
+ try:
+  data=json.loads(Path('market_data.json').read_text())
+  return data if isinstance(data,dict) else {}
  except (OSError,ValueError):return {}
 
 def entry_gate(address, quote_at, at=None):
  at=at or datetime.now(timezone.utc);data=market_snapshot();source=stamp(data.get('updated_at'))
  if source is None or not 0<=(at-source).total_seconds()<=MAX_AGE_SECONDS:
   return dict(ready=False,reason='stale_or_missing_market_snapshot',sellability_verified=False)
- token=(data.get('tokens') or {}).get(str(address).lower()) or {}
+ tokens=data.get('tokens')
+ token=tokens.get(str(address).lower()) if isinstance(tokens,dict) else {}
+ token=token if isinstance(token,dict) else {}
  return evaluate(token.get('transactions'),at,quote_at)
