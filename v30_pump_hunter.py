@@ -6,10 +6,11 @@ import json, os
 from datetime import datetime, timezone, timedelta
 from tools.v32_hourly_macd import paper_macd_veto
 from tools.paper_loss_circuit import paper_entry_risk_gate
+from tools.paper_quote_quality import entry_gate as quote_quality_gate
 from tools.temporal_recovery_buy import evaluate_paper as temporal_recovery_signal
 from tools.temporal_recovery_buy import evaluate as strict_temporal_signal
 
-VERSION="V30.14-USER-REQUESTED-TP4-PAPER"
+VERSION="V30.15-QUOTE-CONTINUITY-PAPER"
 PAPER_TP4 = os.environ.get("SDA_PAPER_TP4", "0") == "1"
 # Explicit strategy selector. It changes NEW PAPER entries only. Existing
 # V30 paper stops, close paths, 24h loss circuit and real-trading guards stay.
@@ -378,6 +379,8 @@ def decision(address,a,ws=None,persist=True):
                    or macd_gate["blocked"] or loss_circuit["blocked"])
     else:
         blocked=(not buy) or cd or s<entry_score_required or not data_fresh_for_entry or not v31_buy_ok or late_spike or macd_gate["blocked"] or loss_circuit["blocked"]
+    quote_quality = quote_quality_gate(address, c.get("last_transaction")) if PAPER_TP4 else {"ready":True,"reason":"not_tp4"}
+    if not quote_quality["ready"]: blocked=True
     failures=[]
     if macd_gate["blocked"]: failures.append("1h completed MACD bearish and weakening")
     if loss_circuit["blocked"]: failures.append("PAPER 24h loss circuit: "+str(loss_circuit["status"]))
@@ -443,6 +446,9 @@ def decision(address,a,ws=None,persist=True):
                    if not temporal["ready"] else "")))
     else:
         reason="READY" if not blocked else f"{phase} / "+"; ".join(failures[:3])
+    if not quote_quality["ready"]:
+        gate_failures.append("quote_continuity")
+        reason="quote_continuity: "+quote_quality["reason"]
 
     # V30.4 Shadow diagnostics: explain every failed confirmation gate.
     # Diagnostic only; this does not alter Champion or Shadow eligibility.
@@ -496,6 +502,7 @@ def decision(address,a,ws=None,persist=True):
       "paper_loss_circuit":loss_circuit,
       "paper_buy_mode":PAPER_BUY_MODE,
       "paper_temporal_recovery":temporal,
+      "paper_quote_quality":quote_quality,
       "paper_entry_lane":(temporal.get("lane") if temporal.get("ready") else
                           "fresh_momentum_research_only" if fresh_momentum_ready else None),
       "fresh_momentum_research_ready":fresh_momentum_ready and not temporal["ready"],
@@ -530,6 +537,8 @@ def patch(main_module,engine):
         if PAPER_TP4:
             z["paper_strategy"]="temporal_recovery_tp4"
             z["paper_strategy_experimental"]=True
+            z["paper_entry_quote_quality"]=s.get("paper_quote_quality")
+            z["paper_max_quote_gap_seconds"]=0.0
         e=n(z.get("entry_price"),n(an.get("price_in_sda")))
         z.update({"v30_mode":"CLEAN-PUMP-HUNTER-V30.3","pump_peak_price":e,"pump_mfe_pct":0.0,
                   "pump_weak_count":0,"pump_age_scans":0,"sl_pct":SL_PCT,
@@ -596,6 +605,17 @@ def patch(main_module,engine):
                     age_label=f"{data_age:.0f}s" if isinstance(data_age,(int,float)) and math.isfinite(data_age) else "unknown"
                     events.append(f"⚠️ PAPER EXIT DATA STALE {pos.get('label',address)} | age {age_label} | no simulated fill")
                 continue
+            if pos.get("paper_strategy") == "temporal_recovery_tp4":
+                from tools.paper_quote_quality import stamp
+                qt=stamp(a.get("last_transaction"))
+                previous_qt=stamp(pos.get("paper_last_quote_at")) or stamp(pos.get("opened_at"))
+                if not qt or qt>observed or abs((observed-qt).total_seconds()-float(data_age))>90:
+                    pos["paper_quote_evidence_error"]=True
+                if qt and previous_qt and qt<previous_qt:
+                    pos["paper_quote_evidence_error"]=True
+                if qt and previous_qt:
+                    pos["paper_max_quote_gap_seconds"]=max(n(pos.get("paper_max_quote_gap_seconds")),max(0,(qt-previous_qt).total_seconds()))
+                    pos["paper_last_quote_at"]=qt.isoformat()
             pos["pump_exit_data_stale"]=False
             pos["pump_exit_data_age_sec"]=data_age
             peak=max(n(pos.get("pump_peak_price"),entry),cur); pos["pump_peak_price"]=peak
@@ -659,6 +679,13 @@ def patch(main_module,engine):
                     r=engine.close(p,address,cur,"V30.3 PUMP BREAKDOWN")
                 else:r=None
             if r:
+                if pos.get("paper_strategy") == "temporal_recovery_tp4":
+                    r["paper_max_quote_gap_seconds"]=pos.get("paper_max_quote_gap_seconds")
+                    r["paper_quote_quality_valid"]=((n(pos.get("paper_max_quote_gap_seconds"))<=1800 and not pos.get("paper_quote_evidence_error")) if (pos.get("paper_entry_quote_quality") or {}).get("ready") is True else None)
+                    r["paper_sellability_verified"]=False
+                    closed_rows=p.get("closed_trades") or []
+                    if closed_rows and closed_rows[-1].get("address")==address:
+                        closed_rows[-1].update({k:r[k] for k in ("paper_max_quote_gap_seconds","paper_quote_quality_valid","paper_sellability_verified")})
                 r['pump_exit_stop_price']=stop
                 r['pump_exit_stop_gap_pct']=round((cur/stop-1)*100,3) if stop>0 else None
                 r['pump_exit_observation_gap_seconds']=round(gap_seconds,1) if gap_seconds is not None else None
