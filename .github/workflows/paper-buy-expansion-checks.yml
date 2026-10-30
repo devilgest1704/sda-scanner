@@ -3,6 +3,11 @@ on:
   pull_request:
     paths:
       - 'v30_pump_hunter.py'
+      - 'tools/paper_quote_quality.py'
+      - 'tools/paper_strategy_stats.py'
+      - 'paper_statistics_fix.py'
+      - 'paper_stats.py'
+      - 'tests/test_paper_quote_quality.py'
       - 'engine_legacy.py'
       - 'tests/test_paper_exit_ownership.py'
       - 'tests/test_paper_fresh_momentum_thresholds.py'
@@ -32,3 +37,6 @@ jobs:
         run: |
           pip install requests
           python -m unittest discover -s tests -p test_paper_exit_ownership.py -v
+
+      - name: Verify PAPER quote continuity and inclusive statistics
+        run: python -m unittest discover -s tests -p test_paper_quote_quality.py -v

@@ -74,6 +74,8 @@ def main():
         "win_rate_pct": wins / (wins + losses) * 100 if wins + losses else 0.0,
         "open_positions": len(positions),
     }
+    from tools.paper_strategy_stats import cohort
+    stats["tp4_paper"]=cohort(p)
     with open(STATS_FILE, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2, ensure_ascii=False)
 

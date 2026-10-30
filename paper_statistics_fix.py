@@ -145,6 +145,8 @@ def paper_statistics_report():
         f"🧮 Check: {realized:+.2f} + {open_pnl:+.2f} = {cumulative:+.2f} SDA",
     ]
 
+    from tools.paper_strategy_stats import cohort, lines as strategy_lines
+    lines += strategy_lines(cohort(p))
     lines += ["", "📌 CURRENT POSITIONS", "────────────────────────"]
     if not open_rows:
         lines.append("⚪ No open paper positions")
