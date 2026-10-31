@@ -8,9 +8,9 @@ from tools.v32_hourly_macd import paper_macd_veto
 from tools.paper_loss_circuit import paper_entry_risk_gate
 from tools.paper_quote_quality import entry_gate as quote_quality_gate
 from tools.temporal_recovery_buy import evaluate_paper as temporal_recovery_signal
-from tools.temporal_recovery_buy import evaluate as strict_temporal_signal
+from tools.temporal_recovery_buy import evaluate_tp4 as strict_temporal_signal
 
-VERSION="V30.15-QUOTE-CONTINUITY-PAPER"
+VERSION="V30.16-FLOW-ANTICHASE-PAPER"
 PAPER_TP4 = os.environ.get("SDA_PAPER_TP4", "0") == "1"
 # Explicit strategy selector. It changes NEW PAPER entries only. Existing
 # V30 paper stops, close paths, 24h loss circuit and real-trading guards stay.
@@ -493,7 +493,7 @@ def decision(address,a,ws=None,persist=True):
     # Keep the unmodified observed score in pump_score and trade snapshots.
     eff=max(s,ENTRY_SCORE) if (PAPER_BUY_MODE=="temporal_recovery" and not blocked) else (s if not blocked else min(s,ENTRY_SCORE-1))
     return {"score":eff,"confidence":eff,"buy_score":eff,"market_score":eff,
-      "m1h":c["m1"],"m15":c["m15"],"m4h":c["m4"],"net_1h":c["flow"],"whale_net":c["flow"],
+      "m1h":c["m1"],"m15":c["m15"],"m4h":c["m4"],"net_1h":c["flow"],"whale_net":c["flow"],"flow_15m":c["flow15"],
       "trades_1h":c["trades"],"volume_1h":c["vol"],"buy_ratio":c["buy_ratio"],"trade_ratio":c["trade_ratio"],
       "v31_buy_gate_passed":v31_buy_ok,"v31_early_exception_passed":v31_early_ok,"v31_buy_gate_age_passed":v31_age_ok,"v31_buy_gate_trades_passed":v31_trades_ok,
       "eligible_for_buy":not blocked,"pump_score":s,"pump_quality":q,"pump_change":entry_impulse,"pump_delta_impulse":delta_impulse,"pump_phase":phase,
