@@ -10,7 +10,7 @@ from tools.paper_quote_quality import entry_gate as quote_quality_gate
 from tools.temporal_recovery_buy import evaluate_paper as temporal_recovery_signal
 from tools.temporal_recovery_buy import evaluate_tp4 as strict_temporal_signal
 
-VERSION="V30.16-FLOW-ANTICHASE-PAPER"
+VERSION="V30.17-CONFIRMED-FLOW-PAPER"
 PAPER_TP4 = os.environ.get("SDA_PAPER_TP4", "0") == "1"
 # Explicit strategy selector. It changes NEW PAPER entries only. Existing
 # V30 paper stops, close paths, 24h loss circuit and real-trading guards stay.
