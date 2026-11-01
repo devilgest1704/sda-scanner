@@ -73,6 +73,9 @@ jobs:
             run_created="$(echo "$active_run" | jq -r '.createdAt')"
             run_age=$(( $(date -u +%s) - $(date -u -d "$run_created" +%s) ))
             if [ "$run_age" -ge 1200 ]; then
+              # A running job is not proof of a completed scan. Use the
+              # scanner-owned market checkpoint, never the agent report time.
+              stale_checkpoint="$(python -m tools.scanner_checkpoint_health)"
               # Shallow partial fetch avoids downloading many megabytes of
               # historical paper-state blobs on each watchdog run.
               if timeout 45s git fetch -q --filter=blob:none --depth=1 origin "$run_sha"; then
@@ -81,8 +84,8 @@ jobs:
                 # A watched source newly added to main is absent from the old
                 # worker commit. That is a source change too; never treat an
                 # empty/missing worker fingerprint as "same version".
-                if [ -z "$worker_sources" ] || [ "$current_sources" != "$worker_sources" ]; then
-                  echo "Worker $run_id has outdated source; requesting controlled replacement."
+                if [ "$stale_checkpoint" = "true" ] || [ -z "$worker_sources" ] || [ "$current_sources" != "$worker_sources" ]; then
+                  echo "Worker $run_id requires replacement (stale_checkpoint=$stale_checkpoint); requesting controlled replacement."
                   timeout 30s gh run cancel "$run_id" --repo "${{ github.repository }}"
                   # Wait for GitHub to confirm that the prior paper writer
                   # has stopped before dispatching. Leaving immediately here

@@ -255,7 +255,7 @@ run_one_scan() {
   set +e
   local whale_started whale_elapsed
   whale_started="$(date +%s)"
-  python whale_scanner.py
+  timeout --kill-after=15s 300s python whale_scanner.py
   local whale_rc=$?
   whale_elapsed=$(( $(date +%s) - whale_started ))
   echo "⏱️ SCAN STAGE whale_scanner: ${whale_elapsed}s (exit=${whale_rc})"
@@ -275,7 +275,7 @@ run_one_scan() {
     shift
     local stage_started stage_elapsed
     stage_started="$(date +%s)"
-    "$@"
+    timeout --kill-after=15s 300s "$@"
     stage_elapsed=$(( $(date +%s) - stage_started ))
     echo "⏱️ SCAN STAGE ${stage}: ${stage_elapsed}s"
     if [ "$stage_elapsed" -gt 120 ]; then
