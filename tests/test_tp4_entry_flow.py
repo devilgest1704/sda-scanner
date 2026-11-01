@@ -24,3 +24,25 @@ class TP4FlowTests(unittest.TestCase):
     def test_stale_and_missing_prior_still_rejected(self):
         self.assertFalse(self.check(age=301)["ready"])
         self.assertFalse(evaluate_tp4(ADDRESS, current(flow_15m=100), previous={}, at=T)["ready"])
+
+
+class TP4ContinuationTests(unittest.TestCase):
+    def test_two_fresh_quotes_admit_tp4_without_stale_recovery(self):
+        from datetime import timedelta
+        previous_at = T - timedelta(seconds=100)
+        previous = dict(decision_at=previous_at.isoformat(),
+                        quote_at=(previous_at-timedelta(seconds=40)).isoformat(),
+                        data_age_sec=40, price_sda=1, score=75, impulse=8,
+                        phase="CONFIRMATION")
+        c = current(age=20, score=75, quality=70, impulse=8, price_sda=1.02,
+                    m1h=5, m15=2, flow_15m=100)
+        self.assertFalse(evaluate(ADDRESS,c,previous=previous,at=T)["ready"])
+        result = evaluate_tp4(ADDRESS,c,previous=previous,at=T)
+        self.assertTrue(result["ready"], result)
+        self.assertEqual(result["lane"], "confirmed_continuation")
+        for changes in (dict(price_sda=1), dict(data_age_sec=301), dict(flow_15m=-1),
+                        dict(m15=9), dict(trades_1h=5)):
+            changed = current(age=20, score=75, quality=70, impulse=8,
+                              price_sda=1.02,m1h=5,m15=2,flow_15m=100)
+            changed.update(changes)
+            self.assertFalse(evaluate_tp4(ADDRESS,changed,previous=previous,at=T)["ready"])

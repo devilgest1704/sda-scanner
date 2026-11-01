@@ -232,7 +232,7 @@ def evaluate_tp4(address, current, *, at=None, previous=None):
     Experimental admission guard, not an estimated profit or executable quote.
     Independent research recovery/TP4 journals keep their original rules.
     """
-    result = evaluate(address, current, at=at, previous=previous)
+    result = evaluate_paper(address, current, at=at, previous=previous)
     if not result["ready"]:
         return result
     m15 = num(current.get("m15"))
@@ -241,5 +241,5 @@ def evaluate_tp4(address, current, *, at=None, previous=None):
         return {**result, "ready": False, "reason": "recovery_15m_overextended"}
     if flow15 is None or flow15 <= 0:
         return {**result, "ready": False, "reason": "recovery_no_current_buy_flow"}
-    return {**result, "lane": "temporal_recovery",
-            "paper_filter_revision": "tp4_flow_antichase_v1"}
+    return {**result, "lane": result.get("lane", "temporal_recovery"),
+            "paper_filter_revision": "tp4_confirmed_flow_v2"}
