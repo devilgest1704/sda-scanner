@@ -27,6 +27,21 @@ class TP4FlowTests(unittest.TestCase):
 
 
 class TP4ContinuationTests(unittest.TestCase):
+    def test_zero_previous_delta_requires_new_strong_price_confirmation(self):
+        from datetime import timedelta
+        previous_at = T - timedelta(seconds=100)
+        previous = dict(decision_at=previous_at.isoformat(),
+                        quote_at=(previous_at-timedelta(seconds=40)).isoformat(),
+                        data_age_sec=40, price_sda=1, score=65, impulse=0,
+                        phase="IGNITION")
+        c = current(age=20, score=75, quality=70, impulse=8,
+                    price_sda=1.02, m1h=5, m15=2, flow_15m=100)
+        self.assertTrue(evaluate_tp4(ADDRESS,c,previous=previous,at=T)["ready"])
+        for changes in (dict(impulse=0), dict(price_sda=1),
+                        dict(quote_at=previous["quote_at"]), dict(flow_15m=0)):
+            candidate = dict(c, **changes)
+            self.assertFalse(evaluate_tp4(ADDRESS,candidate,previous=previous,at=T)["ready"])
+
     def test_two_fresh_quotes_admit_tp4_without_stale_recovery(self):
         from datetime import timedelta
         previous_at = T - timedelta(seconds=100)

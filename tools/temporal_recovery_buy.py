@@ -126,11 +126,11 @@ def evaluate(address, current, *, at=None, previous=None):
     }
 
 
-def evaluate_continuation(address, current, *, at=None, previous=None):
+def evaluate_continuation(address, current, *, at=None, previous=None, allow_flat_prior=False):
     """Second PAPER entry lane: two independently observed, *fresh* swap quotes.
 
     The previous scanner scan must show an already forming IGNITION/CONFIRMATION
-    with positive impulse. The NEW scan must strengthen that signal, including
+    with sufficient score. The NEW scan must strengthen that signal, including
     price follow-through and current buy-side liquidity. Strictly forward-only:
     neither an earlier stale recovery signal nor a single isolated spike can
     authorize this lane. The main PAPER loss circuit, MACD veto and cooldown
@@ -168,7 +168,7 @@ def evaluate_continuation(address, current, *, at=None, previous=None):
             or any(value is None for value in v.values())):
         return {**answer, "reason": "incomplete_independent_quotes"}
     if (prior.get("phase") not in ("IGNITION", "CONFIRMATION")
-            or prior_score < 62 or prior_impulse < 4
+            or prior_score < 62 or prior_impulse < (0 if allow_flat_prior else 4)
             or not 0 <= prior_age <= 300
             or not 0 <= (previous_decision - previous_quote).total_seconds() <= 300
             or abs((previous_decision - previous_quote).total_seconds() - prior_age) > 30
@@ -211,7 +211,7 @@ def evaluate_continuation(address, current, *, at=None, previous=None):
     }
 
 
-def evaluate_paper(address, current, *, at=None, previous=None):
+def evaluate_paper(address, current, *, at=None, previous=None, allow_flat_prior=False):
     """Prefer original research recovery; otherwise test strong continuation.
 
     Fail-closed when neither hypothesis has an independently validated signal.
@@ -220,7 +220,8 @@ def evaluate_paper(address, current, *, at=None, previous=None):
     recovery = evaluate(address, current, at=at, previous=previous)
     if recovery["ready"]:
         return {**recovery, "lane": "temporal_recovery"}
-    continuation = evaluate_continuation(address, current, at=at, previous=previous)
+    continuation = evaluate_continuation(address, current, at=at, previous=previous,
+                                         allow_flat_prior=allow_flat_prior)
     if continuation["ready"]:
         return continuation
     return {**recovery, "continuation_reason": continuation["reason"]}
@@ -232,7 +233,7 @@ def evaluate_tp4(address, current, *, at=None, previous=None):
     Experimental admission guard, not an estimated profit or executable quote.
     Independent research recovery/TP4 journals keep their original rules.
     """
-    result = evaluate_paper(address, current, at=at, previous=previous)
+    result = evaluate_paper(address, current, at=at, previous=previous, allow_flat_prior=True)
     if not result["ready"]:
         return result
     m15 = num(current.get("m15"))
@@ -242,4 +243,4 @@ def evaluate_tp4(address, current, *, at=None, previous=None):
     if flow15 is None or flow15 <= 0:
         return {**result, "ready": False, "reason": "recovery_no_current_buy_flow"}
     return {**result, "lane": result.get("lane", "temporal_recovery"),
-            "paper_filter_revision": "tp4_confirmed_flow_v2"}
+            "paper_filter_revision": "tp4_current_impulse_v3"}
