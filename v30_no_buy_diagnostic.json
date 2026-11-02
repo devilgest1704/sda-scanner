@@ -1,18 +1,18 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-11-02T09:37:25.299599+00:00",
+  "checked_at": "2026-11-02T09:42:26.261529+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-11-02T09:36:54.173940+00:00",
+    "market_at": "2026-11-02T09:41:53.840966+00:00",
     "tokens": 167,
-    "quotes_last_5m": 6,
-    "quotes_last_15m": 14,
-    "quotes_last_60m": 43,
+    "quotes_last_5m": 1,
+    "quotes_last_15m": 11,
+    "quotes_last_60m": 42,
     "fresh_with_8_trades_1h": 1,
-    "fresh_with_12_trades_1h": 1,
+    "fresh_with_12_trades_1h": 0,
     "fresh_m15_ge_1_5pct": 1,
-    "fresh_m15_ge_1_5pct_and_8_trades": 0,
-    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 0
+    "fresh_m15_ge_1_5pct_and_8_trades": 1,
+    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 1
   },
   "paper_loss_circuit": {
     "paper_only": true,
@@ -32,39 +32,40 @@
   "last_paper_close_at": "2026-10-30T07:28:13.527855+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-11-02T09:37:21.301501+00:00",
+    "at": "2026-11-02T09:42:22.296450+00:00",
     "age_minutes": 0.1,
     "aligned_to_market": true,
     "tokens_scored": 167,
-    "fresh_tokens": 14,
+    "fresh_tokens": 11,
     "champion_ready": 0,
     "shadow_ready": 0,
     "sampled_rows": 40,
     "sampled_phases": {
-      "WATCH": 2,
-      "NO": 38
+      "WATCH": 3,
+      "NO": 37
     },
     "sampled_rejections": {
       "temporal_recovery": 40,
-      "quote_continuity": 39,
+      "quote_continuity": 40,
+      "v31_age": 39,
       "v31_activity": 38,
-      "v31_age": 34,
-      "late_spike": 3,
+      "late_spike": 4,
       "price_flow": 3
     },
     "fresh_rejections": {
-      "temporal_recovery": 14,
-      "quote_continuity": 13,
-      "v31_activity": 13,
-      "v31_age": 8
+      "quote_continuity": 11,
+      "temporal_recovery": 11,
+      "v31_activity": 10,
+      "v31_age": 10,
+      "late_spike": 1
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "prior_signal_not_recoverable": 13,
+        "prior_signal_not_recoverable": 10,
         "missing_prior_frozen_signal": 1
       },
       "confirmed_continuation": {
-        "prior_continuation_not_confirmed": 13,
+        "prior_continuation_not_confirmed": 10,
         "missing_prior_frozen_signal": 1
       }
     },
@@ -82,71 +83,77 @@
         "quality": 14.6,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 119.2,
+        "data_age_sec": 420.2,
         "gates": [
-          "temporal_recovery"
+          "temporal_recovery",
+          "v31_age",
+          "quote_continuity"
         ],
-        "reason": "NO / temporal_recovery: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
       },
       {
-        "address": "0x4ae77f557c5aaca450eec79b929b5cd06a8b8e6d",
-        "symbol": "IDM",
-        "score": 14.9,
-        "quality": 14.9,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 119.2,
+        "address": "0x7138aec74774946f1f62e2dca55a60d1cdaded95",
+        "symbol": "ORB",
+        "score": 91.1,
+        "quality": 71.1,
+        "impulse": 20.0,
+        "phase": "WATCH",
+        "data_age_sec": 104.2,
         "gates": [
           "temporal_recovery",
           "v31_activity",
+          "late_spike",
           "quote_continuity"
         ],
-        "reason": "quote_continuity: too_few_distinct_quotes"
+        "reason": "quote_continuity: quote_history_gap"
       },
       {
-        "address": "0x35cfa566301d239823e13a922116e55aedb37d2d",
-        "symbol": "SSMI",
-        "score": 6.4,
-        "quality": 6.4,
+        "address": "0x7a15ff7b396ec76268d9d0dd0e5821e41841f768",
+        "symbol": "TSLA",
+        "score": 28.6,
+        "quality": 28.6,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 182.2,
+        "data_age_sec": 708.2,
         "gates": [
           "temporal_recovery",
+          "v31_age",
           "v31_activity",
           "quote_continuity"
         ],
-        "reason": "quote_continuity: too_few_distinct_quotes"
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
       },
       {
-        "address": "0x4765561e63914e72168bbd2a7e2ce72f9057ca04",
-        "symbol": "GMAI",
-        "score": 6.1,
-        "quality": 6.1,
+        "address": "0xeb96cad0829c5c476f47eff8de622d1984f0451e",
+        "symbol": "RIDEX",
+        "score": 23.8,
+        "quality": 23.8,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 77.2,
+        "data_age_sec": 895.2,
         "gates": [
           "temporal_recovery",
+          "v31_age",
           "v31_activity",
           "quote_continuity"
         ],
-        "reason": "quote_continuity: too_few_distinct_quotes"
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
       },
       {
-        "address": "0x4ce5ef02f9aebb80bb4e327f76dfb95eac1b69a6",
-        "symbol": "AIR",
-        "score": 5.8,
-        "quality": 5.8,
+        "address": "0xa80c9a3b7a92f181648209cb98e1974d05cbe68f",
+        "symbol": "AILP",
+        "score": 10.0,
+        "quality": 10.0,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 236.2,
+        "data_age_sec": 371.2,
         "gates": [
           "temporal_recovery",
+          "v31_age",
           "v31_activity",
           "quote_continuity"
         ],
-        "reason": "quote_continuity: too_few_distinct_quotes"
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
       }
     ]
   },
