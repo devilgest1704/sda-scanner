@@ -362,6 +362,17 @@ def evaluate_temporal_recovery(state, candidates, at_time):
                 "quote_advanced":True,"research_only":True,
                 "current_gates":list(candidate.get("gates") or []),
             })
+        witness = prior.get("paper_confirmation") if isinstance(prior, dict) else None
+        if (isinstance(prior, dict) and prior.get("phase") in ("IGNITION", "CONFIRMATION")
+                and prior_score is not None and prior_score >= 62
+                and prior_impulse is not None and prior_impulse >= 0
+                and prior_age is not None and 0 <= prior_age <= 300):
+            witness = prior
+        if isinstance(witness, dict):
+            witness = {k:v for k,v in witness.items() if k != "paper_confirmation"}
+            witness_at = when(witness.get("decision_at"))
+            if witness_at is None or not 0 < (decision-witness_at).total_seconds() <= 480:
+                witness = None
         n_seen+=1
         last[address]={
             "decision_at":decision.isoformat(),
@@ -370,6 +381,7 @@ def evaluate_temporal_recovery(state, candidates, at_time):
             "score":present_score,"impulse":present_impulse,
             "price_sda":current_price,
             "phase":current_lane,
+            "paper_confirmation":witness,
         }
     last={address:row for address,row in last.items()
           if (stamp:=when(row.get("decision_at"))) is not None
