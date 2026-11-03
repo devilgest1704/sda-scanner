@@ -56,7 +56,7 @@ class TP4ContinuationTests(unittest.TestCase):
         self.assertTrue(result["ready"], result)
         self.assertEqual(result["lane"], "confirmed_continuation")
         for changes in (dict(price_sda=1), dict(data_age_sec=301), dict(flow_15m=-1),
-                        dict(m15=9), dict(trades_1h=3)):
+                        dict(m15=9), dict(trades_1h=2)):
             changed = current(age=20, score=75, quality=70, impulse=8,
                               price_sda=1.02,m1h=5,m15=2,flow_15m=100)
             changed.update(changes)

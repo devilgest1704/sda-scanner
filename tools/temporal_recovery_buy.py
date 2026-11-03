@@ -167,16 +167,16 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
             or age is None or price is None or price <= 0
             or any(value is None for value in v.values())):
         return {**answer, "reason": "incomplete_independent_quotes"}
-    if (prior.get("phase") not in ("IGNITION", "CONFIRMATION")
-            or prior_score < 62 or prior_impulse < (0 if allow_flat_prior else 4)
+    if (prior.get("phase") not in (("WATCH", "IGNITION", "CONFIRMATION") if allow_flat_prior else ("IGNITION", "CONFIRMATION"))
+            or prior_score < (55 if allow_flat_prior else 62) or prior_impulse < (0 if allow_flat_prior else 4)
             or not 0 <= prior_age <= 300
             or not 0 <= (previous_decision - previous_quote).total_seconds() <= 300
             or abs((previous_decision - previous_quote).total_seconds() - prior_age) > 30
             or not 0 < (now - previous_decision).total_seconds() <= 480):
         return {**answer, "reason": "prior_continuation_not_confirmed"}
     if (current.get("phase") not in ("IGNITION", "CONFIRMATION")
-            or not 0 <= age <= 180
-            or not 0 <= (now - current_quote).total_seconds() <= 180
+            or not 0 <= age <= (300 if allow_flat_prior else 180)
+            or not 0 <= (now - current_quote).total_seconds() <= (300 if allow_flat_prior else 180)
             or abs((now - current_quote).total_seconds() - age) > 30
             or current_quote <= previous_quote
             or current_quote <= previous_decision
@@ -187,7 +187,7 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
         v["score"] >= (65 if allow_flat_prior else 70) and v["quality"] >= 62 and v["impulse"] >= 6
         and (0 if allow_flat_prior else 1) <= v["m1h"] <= 10 and v["m15"] >= 1.5
         and v["volume_1h"] >= 700 and v["flow_1h"] >= 220
-        and v["flow_15m"] >= 60 and v["trades_1h"] >= (4 if allow_flat_prior else 8)
+        and v["flow_15m"] >= 60 and v["trades_1h"] >= (3 if allow_flat_prior else 8)
         and v["buy_ratio"] >= 1.4
     )
     # 8-11 trades are only admissible at materially stronger activity than
@@ -203,7 +203,7 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
     if not strong:
         return {**answer, "reason": "sparse_continuation_strength_insufficient"}
     return {
-        "sparse_activity_verified": bool(allow_flat_prior and 4 <= v["trades_1h"] < 8),
+        "sparse_activity_verified": bool(allow_flat_prior and 3 <= v["trades_1h"] < 8),
         "ready": True, "reason": "TWO_FRESH_QUOTES_CONFIRMED",
         "source": "research_temporal_recovery",
         "lane": "confirmed_continuation",
@@ -254,4 +254,4 @@ def evaluate_tp4(address, current, *, at=None, previous=None):
     if flow15 is None or flow15 <= 0:
         return {**result, "ready": False, "reason": "recovery_no_current_buy_flow"}
     return {**result, "lane": result.get("lane", "temporal_recovery"),
-            "paper_filter_revision": "tp4_confirmed_sparse_v4"}
+            "paper_filter_revision": "tp4_confirmed_sparse_v5"}
