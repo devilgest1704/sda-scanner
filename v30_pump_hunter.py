@@ -353,7 +353,7 @@ def decision(address,a,ws=None,persist=True):
     }
     temporal_early_ok=(temporal.get("ready") is True
                        and temporal.get("lane") == "confirmed_continuation"
-                       and v31_early_ok)
+                       and (v31_early_ok or (PAPER_TP4 and temporal.get("sparse_activity_verified") is True)))
     temporal_activity_ok=v31_trades_ok or temporal_early_ok
     # Observed unconfirmed entries lost money in both chronological cohorts.
     # Keep collecting this exact hypothesis in SHADOW, not the PAPER account.
@@ -379,7 +379,8 @@ def decision(address,a,ws=None,persist=True):
                    or macd_gate["blocked"] or loss_circuit["blocked"])
     else:
         blocked=(not buy) or cd or s<entry_score_required or not data_fresh_for_entry or not v31_buy_ok or late_spike or macd_gate["blocked"] or loss_circuit["blocked"]
-    quote_quality = quote_quality_gate(address, c.get("last_transaction")) if PAPER_TP4 else {"ready":True,"reason":"not_tp4"}
+    quote_quality = quote_quality_gate(address, c.get("last_transaction"),
+        confirmed_continuation=bool(temporal.get("ready") and temporal.get("lane") == "confirmed_continuation")) if PAPER_TP4 else {"ready":True,"reason":"not_tp4"}
     if not quote_quality["ready"]: blocked=True
     failures=[]
     if macd_gate["blocked"]: failures.append("1h completed MACD bearish and weakening")
