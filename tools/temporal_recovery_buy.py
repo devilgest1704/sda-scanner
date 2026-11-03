@@ -184,10 +184,10 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
             or not prior_price < price <= prior_price * 1.05):
         return {**answer, "reason": "no_new_fresh_price_followthrough"}
     strong = (
-        v["score"] >= 70 and v["quality"] >= 62 and v["impulse"] >= 6
-        and 1 <= v["m1h"] <= 10 and v["m15"] >= 1.5
+        v["score"] >= (65 if allow_flat_prior else 70) and v["quality"] >= 62 and v["impulse"] >= 6
+        and (0 if allow_flat_prior else 1) <= v["m1h"] <= 10 and v["m15"] >= 1.5
         and v["volume_1h"] >= 700 and v["flow_1h"] >= 220
-        and v["flow_15m"] >= 60 and v["trades_1h"] >= 8
+        and v["flow_15m"] >= 60 and v["trades_1h"] >= (4 if allow_flat_prior else 8)
         and v["buy_ratio"] >= 1.4
     )
     # 8-11 trades are only admissible at materially stronger activity than
@@ -198,7 +198,12 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
                   and v["flow_15m"] >= 80 and v["buy_ratio"] >= 1.6)
     if not strong:
         return {**answer, "reason": "continuation_strength_or_flow_insufficient"}
+    if v["trades_1h"] < 8:
+        strong = strong and v["volume_1h"] >= 1200 and v["flow_1h"] >= 400 and v["flow_15m"] >= 100 and v["buy_ratio"] >= 2
+    if not strong:
+        return {**answer, "reason": "sparse_continuation_strength_insufficient"}
     return {
+        "sparse_activity_verified": bool(allow_flat_prior and 4 <= v["trades_1h"] < 8),
         "ready": True, "reason": "TWO_FRESH_QUOTES_CONFIRMED",
         "source": "research_temporal_recovery",
         "lane": "confirmed_continuation",
@@ -249,4 +254,4 @@ def evaluate_tp4(address, current, *, at=None, previous=None):
     if flow15 is None or flow15 <= 0:
         return {**result, "ready": False, "reason": "recovery_no_current_buy_flow"}
     return {**result, "lane": result.get("lane", "temporal_recovery"),
-            "paper_filter_revision": "tp4_current_impulse_v3"}
+            "paper_filter_revision": "tp4_confirmed_sparse_v4"}
