@@ -233,7 +233,13 @@ def evaluate_tp4(address, current, *, at=None, previous=None):
     Experimental admission guard, not an estimated profit or executable quote.
     Independent research recovery/TP4 journals keep their original rules.
     """
-    result = evaluate_paper(address, current, at=at, previous=previous, allow_flat_prior=True)
+    prior = previous if previous is not None else previous_signals().get(str(address).lower())
+    result = evaluate_paper(address, current, at=at, previous=prior, allow_flat_prior=True)
+    if not result["ready"] and isinstance(prior, dict):
+        witness = prior.get("paper_confirmation")
+        if isinstance(witness, dict):
+            result = evaluate_continuation(address, current, at=at, previous=witness,
+                                           allow_flat_prior=True)
     if not result["ready"]:
         return result
     m15 = num(current.get("m15"))
