@@ -172,7 +172,7 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
             or not 0 <= prior_age <= 300
             or not 0 <= (previous_decision - previous_quote).total_seconds() <= 300
             or abs((previous_decision - previous_quote).total_seconds() - prior_age) > 30
-            or not 0 < (now - previous_decision).total_seconds() <= 480):
+            or not 0 < (now - previous_decision).total_seconds() <= (900 if allow_flat_prior else 480)):
         return {**answer, "reason": "prior_continuation_not_confirmed"}
     if (current.get("phase") not in (("WATCH", "IGNITION", "CONFIRMATION") if allow_flat_prior else ("IGNITION", "CONFIRMATION"))
             or not 0 <= age <= (300 if allow_flat_prior else 180)
@@ -180,12 +180,12 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
             or abs((now - current_quote).total_seconds() - age) > 30
             or current_quote <= previous_quote
             or current_quote <= previous_decision
-            or not 0 < (current_quote - previous_quote).total_seconds() <= 480
+            or not 0 < (current_quote - previous_quote).total_seconds() <= (900 if allow_flat_prior else 480)
             or not prior_price < price <= prior_price * 1.05):
         return {**answer, "reason": "no_new_fresh_price_followthrough"}
     strong = (
         v["score"] >= (60 if allow_flat_prior else 70) and v["quality"] >= (58 if allow_flat_prior else 62) and v["impulse"] >= (4 if allow_flat_prior else 6)
-        and (-5 if allow_flat_prior else 1) <= v["m1h"] <= 10 and v["m15"] >= (0.5 if allow_flat_prior else 1.5)
+        and (-5 if allow_flat_prior else 1) <= v["m1h"] <= 10 and v["m15"] >= (0 if allow_flat_prior else 1.5)
         and v["volume_1h"] >= (500 if allow_flat_prior else 700) and v["flow_1h"] >= (150 if allow_flat_prior else 220)
         and v["flow_15m"] >= (30 if allow_flat_prior else 60) and v["trades_1h"] >= (3 if allow_flat_prior else 8)
         and v["buy_ratio"] >= (1.3 if allow_flat_prior else 1.4)
@@ -261,4 +261,4 @@ def evaluate_tp4(address, current, *, at=None, previous=None):
     if flow15 is None or flow15 <= 0:
         return {**result, "ready": False, "reason": "recovery_no_current_buy_flow"}
     return {**result, "lane": result.get("lane", "temporal_recovery"),
-            "paper_filter_revision": "tp4_observed_rebound_v7"}
+            "paper_filter_revision": "tp4_observed_rebound_v8"}

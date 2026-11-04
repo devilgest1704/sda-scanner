@@ -17,6 +17,6 @@ class RetainedConfirmationTests(unittest.TestCase):
         for changes in (dict(impulse=0),dict(price_sda=1),dict(flow_15m=-1),
                         dict(data_age_sec=301),dict(m15=9)):
             self.assertFalse(evaluate_tp4(ADDRESS,dict(candidate,**changes),previous=prior,at=T)["ready"])
-        expired = dict(witness,decision_at=(T-timedelta(seconds=481)).isoformat())
+        expired = dict(witness,decision_at=(T-timedelta(seconds=901)).isoformat())
         self.assertFalse(evaluate_tp4(ADDRESS,candidate,
                                      previous=dict(prior,paper_confirmation=expired),at=T)["ready"])
