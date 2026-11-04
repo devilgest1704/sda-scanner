@@ -199,7 +199,11 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
     if not strong:
         return {**answer, "reason": "continuation_strength_or_flow_insufficient"}
     if v["trades_1h"] < 8:
-        strong = (strong and v["volume_1h"] >= (700 if allow_flat_prior else 1200)
+        # Five or more observed trades can support the 500 SDA PAPER floor;
+        # three/four trades retain the stricter 700 SDA requirement.
+        sparse_volume_min = (500 if allow_flat_prior and v["trades_1h"] >= 5
+                             else (700 if allow_flat_prior else 1200))
+        strong = (strong and v["volume_1h"] >= sparse_volume_min
                   and v["flow_1h"] >= (200 if allow_flat_prior else 400)
                   and v["flow_15m"] >= (60 if allow_flat_prior else 100)
                   and v["buy_ratio"] >= (1.5 if allow_flat_prior else 2))
@@ -257,4 +261,4 @@ def evaluate_tp4(address, current, *, at=None, previous=None):
     if flow15 is None or flow15 <= 0:
         return {**result, "ready": False, "reason": "recovery_no_current_buy_flow"}
     return {**result, "lane": result.get("lane", "temporal_recovery"),
-            "paper_filter_revision": "tp4_observed_rebound_v6"}
+            "paper_filter_revision": "tp4_observed_rebound_v7"}
