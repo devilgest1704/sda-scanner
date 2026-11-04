@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import engine_legacy as engine
 import v30_pump_hunter as v
-from tools.temporal_recovery_buy import evaluate_tp4,evaluate_tp4_legacy,evaluate_paper
+from tools.temporal_recovery_buy import evaluate_tp4_v10 as evaluate_tp4,evaluate_tp4_legacy,evaluate_paper
 from tests.test_paper_confirmed_continuation import NOW,ADDRESS,prior,candidate,ActivePaperEntryTests
 
 class SwingAdmissionTests(unittest.TestCase):

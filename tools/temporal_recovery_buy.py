@@ -299,7 +299,7 @@ def evaluate_tp4_legacy(address, current, *, at=None, previous=None):
             "paper_filter_revision": "tp4_two_trade_probe_v9"}
 
 
-def evaluate_tp4(address, current, *, at=None, previous=None):
+def evaluate_tp4_v10(address, current, *, at=None, previous=None):
     """Keep v9 admissions; additionally allow a slow, independently quoted rebound."""
     prior = previous if previous is not None else previous_signals().get(str(address).lower())
     result = evaluate_tp4_legacy(address, current, at=at, previous=prior)
@@ -312,3 +312,48 @@ def evaluate_tp4(address, current, *, at=None, previous=None):
                     result = swing
                     break
     return {**result, "paper_filter_revision": "tp4_swing_rebound_v10"}
+
+
+def evaluate_single_quote_swing(current, *, at=None):
+    """PAPER-only current-signal hypothesis; no prior quote or price-rise proof."""
+    result = {"ready": False, "reason": "single_quote_swing_filters_insufficient",
+              "source": "paper_swing", "lane": "swing_single_quote",
+              "entry_variant": "single_quote_swing", "continuity_verified": False,
+              "sellability_verified": False}
+    if not isinstance(current, dict):
+        return {**result, "reason": "missing_current_candidate"}
+    now = at if at is not None else datetime.now(timezone.utc)
+    quote = stamp(current.get("quote_at"))
+    age = num(current.get("data_age_sec"))
+    price = num(current.get("price_sda"))
+    if (not isinstance(now, datetime) or now.tzinfo is None or quote is None
+            or age is None or not 0 <= age <= 300
+            or not 0 <= (now-quote).total_seconds() <= 300
+            or abs((now-quote).total_seconds()-age) > 30
+            or price is None or price <= 0):
+        return {**result, "reason": "stale_or_invalid_current_quote"}
+    fields = ("score", "quality", "impulse", "m1h", "m15", "volume_1h",
+              "flow_1h", "flow_15m", "trades_1h", "buy_ratio")
+    v = {k: num(current.get(k)) for k in fields}
+    if any(x is None for x in v.values()):
+        return {**result, "reason": "incomplete_current_swing_signal"}
+    if (current.get("phase") in ("NO", "WATCH", "IGNITION", "CONFIRMATION")
+            and v["score"] >= 30 and v["quality"] >= 30 and v["impulse"] >= 0
+            and v["trades_1h"] >= 2 and v["volume_1h"] >= 250
+            and v["flow_1h"] >= 100 and v["flow_15m"] >= 10
+            and v["buy_ratio"] >= 1.3 and -12 <= v["m1h"] <= 10
+            and -.5 <= v["m15"] <= 8):
+        return {**result, "ready": True, "reason": "CURRENT_SWING_FILTER_PASSED",
+                "sparse_activity_verified": True, "current_quote_at": quote.isoformat()}
+    return result
+
+
+def evaluate_tp4(address, current, *, at=None, previous=None):
+    result = evaluate_tp4_v10(address, current, at=at, previous=previous)
+    if not result["ready"]:
+        single = evaluate_single_quote_swing(current, at=at)
+        if single["ready"]:
+            result = single
+        else:
+            result = {**single, "legacy_reason": result.get("reason")}
+    return {**result, "paper_filter_revision": "tp4_single_quote_swing_v11"}

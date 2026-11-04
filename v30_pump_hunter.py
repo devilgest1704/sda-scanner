@@ -352,7 +352,8 @@ def decision(address,a,ws=None,persist=True):
         "ready": False, "reason": "baseline_mode"
     }
     temporal_early_ok=(temporal.get("ready") is True
-                       and temporal.get("lane") == "confirmed_continuation"
+                       and (temporal.get("lane") == "confirmed_continuation"
+                            or (PAPER_TP4 and temporal.get("lane") == "swing_single_quote"))
                        and (v31_early_ok or (PAPER_TP4 and temporal.get("sparse_activity_verified") is True)))
     temporal_activity_ok=v31_trades_ok or temporal_early_ok
     # Observed unconfirmed entries lost money in both chronological cohorts.
@@ -380,7 +381,8 @@ def decision(address,a,ws=None,persist=True):
     else:
         blocked=(not buy) or cd or s<entry_score_required or not data_fresh_for_entry or not v31_buy_ok or late_spike or macd_gate["blocked"] or loss_circuit["blocked"]
     quote_quality = quote_quality_gate(address, c.get("last_transaction"),
-        confirmed_continuation=bool(temporal.get("ready") and temporal.get("lane") == "confirmed_continuation")) if PAPER_TP4 else {"ready":True,"reason":"not_tp4"}
+        confirmed_continuation=bool(temporal.get("ready") and temporal.get("lane") == "confirmed_continuation"),
+        require_continuity=False) if PAPER_TP4 else {"ready":True,"reason":"not_tp4"}
     if not quote_quality["ready"]: blocked=True
     failures=[]
     if macd_gate["blocked"]: failures.append("1h completed MACD bearish and weakening")
@@ -707,7 +709,8 @@ def patch(main_module,engine):
             if r:
                 if pos.get("paper_strategy") == "temporal_recovery_tp4":
                     r["paper_max_quote_gap_seconds"]=pos.get("paper_max_quote_gap_seconds")
-                    r["paper_quote_quality_valid"]=((n(pos.get("paper_max_quote_gap_seconds"))<=1800 and not pos.get("paper_quote_evidence_error")) if (pos.get("paper_entry_quote_quality") or {}).get("ready") is True else None)
+                    r["paper_quote_quality_valid"]=((n(pos.get("paper_max_quote_gap_seconds"))<=1800 and not pos.get("paper_quote_evidence_error")) if ((pos.get("paper_entry_quote_quality") or {}).get("ready") is True
+                            and (pos.get("paper_entry_quote_quality") or {}).get("continuity_verified",True) is True) else None)
                     r["paper_sellability_verified"]=False
                     closed_rows=p.get("closed_trades") or []
                     if closed_rows and closed_rows[-1].get("address")==address:

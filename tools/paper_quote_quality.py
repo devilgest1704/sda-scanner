@@ -48,8 +48,17 @@ def market_snapshot():
   return data if isinstance(data,dict) else {}
  except (OSError,ValueError):return {}
 
-def entry_gate(address, quote_at, at=None, *, confirmed_continuation=False):
- at=at or datetime.now(timezone.utc);data=market_snapshot();source=stamp(data.get('updated_at'))
+def entry_gate(address, quote_at, at=None, *, confirmed_continuation=False, require_continuity=True):
+ at=at or datetime.now(timezone.utc)
+ if not require_continuity:
+  # User-requested PAPER admission only; no history or SELL verification implied.
+  quote=stamp(quote_at)
+  fresh=(isinstance(at,datetime) and at.tzinfo is not None and quote is not None
+         and 0<=(at-quote).total_seconds()<=MAX_AGE_SECONDS)
+  return dict(ready=bool(fresh),reason='FRESH_CURRENT_QUOTE_ONLY' if fresh else 'stale_or_invalid_current_quote',
+              minimum_distinct_quotes=1,observed_quotes=1 if fresh else 0,
+              max_gap_seconds=None,continuity_verified=False,sellability_verified=False)
+ data=market_snapshot();source=stamp(data.get('updated_at'))
  if source is None or not 0<=(at-source).total_seconds()<=MAX_AGE_SECONDS:
   return dict(ready=False,reason='stale_or_missing_market_snapshot',sellability_verified=False)
  tokens=data.get('tokens')
