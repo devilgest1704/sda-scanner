@@ -371,7 +371,7 @@ def evaluate_temporal_recovery(state, candidates, at_time):
         if isinstance(witness, dict):
             witness = {k:v for k,v in witness.items() if k != "paper_confirmation"}
             witness_at = when(witness.get("decision_at"))
-            if witness_at is None or not 0 < (decision-witness_at).total_seconds() <= 480:
+            if witness_at is None or not 0 < (decision-witness_at).total_seconds() <= 900:
                 witness = None
         n_seen+=1
         last[address]={
@@ -385,7 +385,7 @@ def evaluate_temporal_recovery(state, candidates, at_time):
         }
     last={address:row for address,row in last.items()
           if (stamp:=when(row.get("decision_at"))) is not None
-          and 0<=(at_time-stamp).total_seconds()<=600}
+          and 0<=(at_time-stamp).total_seconds()<=900}
     store["last_signals"]=dict(list(last.items())[-200:])
     store["events"]=events[-100:]
     store["total_recovered"]=int(store.get("total_recovered") or 0)+n_recovered

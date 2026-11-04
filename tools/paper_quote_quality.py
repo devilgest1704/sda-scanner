@@ -16,8 +16,11 @@ def stamp(v):
 
 def evaluate(transactions, at, quote_at, *, confirmed_continuation=False):
  minimum = 2 if confirmed_continuation else MIN_QUOTES
- result=dict(ready=False,reason='missing_quote_history',window_seconds=WINDOW_SECONDS,
-             max_allowed_gap_seconds=MAX_GAP_SECONDS,minimum_distinct_quotes=minimum,
+ # Cover a 15-minute quote interval plus up to five minutes of current age.
+ window = 1200 if confirmed_continuation else WINDOW_SECONDS
+ max_gap = 900 if confirmed_continuation else MAX_GAP_SECONDS
+ result=dict(ready=False,reason='missing_quote_history',window_seconds=window,
+             max_allowed_gap_seconds=max_gap,minimum_distinct_quotes=minimum,
              observed_quotes=0,max_gap_seconds=None,sellability_verified=False)
  quote=stamp(quote_at)
  if not isinstance(at,datetime) or at.tzinfo is None or quote is None or not 0<=(at-quote).total_seconds()<=MAX_AGE_SECONDS:
@@ -28,14 +31,14 @@ def evaluate(transactions, at, quote_at, *, confirmed_continuation=False):
   t=stamp(tx.get('timestamp'))
   try:price=float(tx.get('price'))
   except (ValueError,TypeError):continue
-  if math.isfinite(price) and price>0 and t and at-timedelta(seconds=WINDOW_SECONDS)<=t<=at:times.add(t)
+  if math.isfinite(price) and price>0 and t and at-timedelta(seconds=window)<=t<=at:times.add(t)
  ordered=sorted(times);result['observed_quotes']=len(ordered)
  if not ordered:return result
  if ordered[-1]!=quote:return {**result,'reason':'current_quote_history_mismatch'}
- boundaries=[at-timedelta(seconds=WINDOW_SECONDS),*ordered,at]
+ boundaries=[at-timedelta(seconds=window),*ordered,at]
  result['max_gap_seconds']=round(max((b-a).total_seconds() for a,b in zip(boundaries,boundaries[1:])),3)
  if len(ordered)<minimum:return {**result,'reason':'too_few_distinct_quotes'}
- if result['max_gap_seconds']>MAX_GAP_SECONDS:return {**result,'reason':'quote_history_gap'}
+ if result['max_gap_seconds']>max_gap:return {**result,'reason':'quote_history_gap'}
  return {**result,'ready':True,'reason':'OBSERVED_CONTINUITY_PASSED'}
 
 @lru_cache(maxsize=1)

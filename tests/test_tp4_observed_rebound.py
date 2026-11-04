@@ -15,7 +15,7 @@ class ReboundAdmissionTests(unittest.TestCase):
   self.assertFalse(evaluate_paper(ADDRESS,c,at=NOW,previous=p)["ready"])
   for kw in [dict(score=59),dict(quality=57),dict(impulse=3),
              dict(trades_1h=2),dict(volume_1h=699),dict(flow_1h=199),
-             dict(flow_15m=59),dict(buy_ratio=1.49),dict(m15=.49),
+             dict(flow_15m=59),dict(buy_ratio=1.49),dict(m15=-.01),
              dict(m1h=-5.01),dict(m15=8.01),dict(price_sda=.98),
              dict(quote_at=p["quote_at"]),dict(data_age_sec=301),
              dict(phase="NO")]:
