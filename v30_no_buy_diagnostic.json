@@ -1,17 +1,17 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-11-04T06:11:01.520239+00:00",
+  "checked_at": "2026-11-04T06:16:01.723058+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-11-04T06:10:34.611776+00:00",
+    "market_at": "2026-11-04T06:15:34.877673+00:00",
     "tokens": 170,
-    "quotes_last_5m": 5,
-    "quotes_last_15m": 8,
+    "quotes_last_5m": 4,
+    "quotes_last_15m": 14,
     "quotes_last_60m": 35,
-    "fresh_with_8_trades_1h": 1,
-    "fresh_with_12_trades_1h": 1,
-    "fresh_m15_ge_1_5pct": 2,
-    "fresh_m15_ge_1_5pct_and_8_trades": 1,
+    "fresh_with_8_trades_1h": 0,
+    "fresh_with_12_trades_1h": 0,
+    "fresh_m15_ge_1_5pct": 1,
+    "fresh_m15_ge_1_5pct_and_8_trades": 0,
     "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 0
   },
   "paper_loss_circuit": {
@@ -32,42 +32,45 @@
   "last_paper_close_at": "2026-11-03T21:10:26.720339+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-11-04T06:10:58.631501+00:00",
+    "at": "2026-11-04T06:15:58.811092+00:00",
     "age_minutes": 0.0,
     "aligned_to_market": true,
     "tokens_scored": 170,
-    "fresh_tokens": 8,
+    "fresh_tokens": 14,
     "champion_ready": 0,
     "shadow_ready": 0,
     "sampled_rows": 40,
     "sampled_phases": {
       "IGNITION": 1,
-      "WATCH": 1,
-      "NO": 38
+      "BREAKOUT": 1,
+      "WATCH": 3,
+      "NO": 35
     },
     "sampled_rejections": {
+      "quote_continuity": 40,
       "temporal_recovery": 40,
-      "quote_continuity": 39,
       "v31_activity": 39,
-      "v31_age": 35,
-      "late_spike": 1,
+      "v31_age": 36,
+      "late_spike": 2,
       "price_flow": 1
     },
     "fresh_rejections": {
-      "temporal_recovery": 8,
-      "quote_continuity": 7,
-      "v31_activity": 7,
-      "v31_age": 3,
-      "late_spike": 1,
+      "quote_continuity": 14,
+      "temporal_recovery": 14,
+      "v31_activity": 13,
+      "v31_age": 10,
+      "late_spike": 2,
       "price_flow": 1
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "prior_signal_not_recoverable": 6,
+        "prior_signal_not_recoverable": 10,
+        "missing_prior_frozen_signal": 2,
         "no_new_fresh_price_followthrough": 2
       },
       "confirmed_continuation": {
-        "prior_continuation_not_confirmed": 6,
+        "prior_continuation_not_confirmed": 10,
+        "missing_prior_frozen_signal": 2,
         "missing_reason": 2
       }
     },
@@ -79,76 +82,78 @@
     "would_buy_if_only_loss_circuit_cleared": false,
     "top_near_ready": [
       {
-        "address": "0x4b306c1a642210b43cdd26ebcf549da7e2a4a7e2",
-        "symbol": "ETH",
-        "score": 64.6,
-        "quality": 46.5,
-        "impulse": 18.1,
+        "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
+        "symbol": "JSFT",
+        "score": 46.2,
+        "quality": 43.1,
+        "impulse": 3.1,
         "phase": "WATCH",
-        "data_age_sec": 113.6,
+        "data_age_sec": 295.7,
         "gates": [
           "temporal_recovery",
-          "price_flow",
-          "late_spike"
+          "v31_activity",
+          "quote_continuity"
         ],
-        "reason": "WATCH / temporal_recovery; price_flow: no_new_fresh_price_followthrough / "
+        "reason": "quote_continuity: too_few_distinct_quotes"
+      },
+      {
+        "address": "0x00313151a7e74ce5108ad12c1b444ed7b458947c",
+        "symbol": "SDIP",
+        "score": 35.8,
+        "quality": 35.8,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 103.7,
+        "gates": [
+          "temporal_recovery",
+          "v31_activity",
+          "quote_continuity"
+        ],
+        "reason": "quote_continuity: too_few_distinct_quotes"
+      },
+      {
+        "address": "0x4765561e63914e72168bbd2a7e2ce72f9057ca04",
+        "symbol": "GMAI",
+        "score": 5.4,
+        "quality": 5.4,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 226.8,
+        "gates": [
+          "temporal_recovery",
+          "v31_activity",
+          "quote_continuity"
+        ],
+        "reason": "quote_continuity: too_few_distinct_quotes"
       },
       {
         "address": "0xa082db3d32368fa4df443b17e092b790530b64e0",
         "symbol": "PINE",
-        "score": 63.8,
-        "quality": 63.8,
+        "score": 64.0,
+        "quality": 64.0,
         "impulse": 0.0,
         "phase": "IGNITION",
-        "data_age_sec": 127.6,
+        "data_age_sec": 427.8,
         "gates": [
           "temporal_recovery",
+          "v31_age",
           "v31_activity",
           "quote_continuity"
         ],
-        "reason": "quote_continuity: too_few_distinct_quotes"
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
       },
       {
-        "address": "0x3bdc0adba5ac8f68b977266ef308243443886cea",
-        "symbol": "EWM",
-        "score": 30.3,
-        "quality": 30.3,
+        "address": "0x4197589f68f83c8283901bf8d4980db8d6bae2d8",
+        "symbol": "FARMT",
+        "score": 53.3,
+        "quality": 53.3,
         "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 190.5,
+        "phase": "BREAKOUT",
+        "data_age_sec": 91.7,
         "gates": [
           "temporal_recovery",
           "v31_activity",
-          "quote_continuity"
-        ],
-        "reason": "quote_continuity: too_few_distinct_quotes"
-      },
-      {
-        "address": "0xbcda8739687c12eec3206d8aec80c32a3c545ae9",
-        "symbol": "HEC",
-        "score": 24.2,
-        "quality": 24.2,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 273.5,
-        "gates": [
-          "temporal_recovery",
-          "v31_activity",
-          "quote_continuity"
-        ],
-        "reason": "quote_continuity: too_few_distinct_quotes"
-      },
-      {
-        "address": "0x2ce9e7c168035d61cc3a3655949c147c063eecc4",
-        "symbol": "SMAf",
-        "score": 8.1,
-        "quality": 8.1,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 210.5,
-        "gates": [
-          "temporal_recovery",
-          "v31_activity",
+          "late_spike",
           "quote_continuity"
         ],
         "reason": "quote_continuity: too_few_distinct_quotes"
