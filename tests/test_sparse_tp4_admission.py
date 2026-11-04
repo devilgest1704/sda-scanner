@@ -11,7 +11,7 @@ class SparsePaperTests(unittest.TestCase):
   c=candidate(trades_1h=4,score=65,m1h=0)
   self.assertTrue(evaluate_tp4(ADDRESS,c,at=NOW,previous=prior())["ready"])
   self.assertFalse(evaluate_paper(ADDRESS,c,at=NOW,previous=prior())["ready"])
-  for changes in [dict(trades_1h=2),dict(volume_1h=1199),dict(flow_1h=399),dict(flow_15m=99),dict(impulse=0),dict(score=64),dict(m1h=-1),dict(price_sda=.98)]:
+  for changes in [dict(trades_1h=2),dict(volume_1h=699),dict(flow_1h=199),dict(flow_15m=59),dict(impulse=0),dict(score=59),dict(m1h=-6),dict(price_sda=.98)]:
    with self.subTest(changes=changes):
     self.assertFalse(evaluate_tp4(ADDRESS,dict(c,**changes),at=NOW,previous=prior())["ready"])
  def test_two_quotes_only_confirmed_lane_still_requires_continuity(self):
