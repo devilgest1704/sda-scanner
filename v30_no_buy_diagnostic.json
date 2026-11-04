@@ -1,18 +1,18 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-11-04T11:52:19.415335+00:00",
+  "checked_at": "2026-11-04T11:58:17.863872+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-11-04T11:51:49.728318+00:00",
+    "market_at": "2026-11-04T11:57:49.274360+00:00",
     "tokens": 168,
-    "quotes_last_5m": 13,
-    "quotes_last_15m": 19,
-    "quotes_last_60m": 43,
-    "fresh_with_8_trades_1h": 1,
-    "fresh_with_12_trades_1h": 1,
-    "fresh_m15_ge_1_5pct": 3,
-    "fresh_m15_ge_1_5pct_and_8_trades": 1,
-    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 1
+    "quotes_last_5m": 2,
+    "quotes_last_15m": 28,
+    "quotes_last_60m": 47,
+    "fresh_with_8_trades_1h": 0,
+    "fresh_with_12_trades_1h": 0,
+    "fresh_m15_ge_1_5pct": 2,
+    "fresh_m15_ge_1_5pct_and_8_trades": 0,
+    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 0
   },
   "paper_loss_circuit": {
     "paper_only": true,
@@ -32,40 +32,40 @@
   "last_paper_close_at": "2026-11-03T21:10:26.720339+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-11-04T11:52:15.692567+00:00",
+    "at": "2026-11-04T11:58:14.194111+00:00",
     "age_minutes": 0.1,
     "aligned_to_market": true,
     "tokens_scored": 168,
-    "fresh_tokens": 19,
+    "fresh_tokens": 28,
     "champion_ready": 0,
     "shadow_ready": 1,
     "sampled_rows": 40,
     "sampled_phases": {
+      "IGNITION": 2,
       "WATCH": 3,
-      "IGNITION": 1,
-      "NO": 36
+      "NO": 35
     },
     "sampled_rejections": {
+      "v31_age": 40,
+      "quote_continuity": 40,
       "temporal_recovery": 40,
-      "v31_activity": 37,
-      "quote_continuity": 37,
-      "v31_age": 28,
-      "price_flow": 2,
-      "late_spike": 2
+      "v31_activity": 38,
+      "late_spike": 2,
+      "price_flow": 2
     },
     "fresh_rejections": {
-      "temporal_recovery": 19,
-      "v31_activity": 17,
-      "quote_continuity": 16,
-      "v31_age": 7
+      "quote_continuity": 28,
+      "temporal_recovery": 28,
+      "v31_age": 28,
+      "v31_activity": 27
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "prior_signal_not_recoverable": 17,
+        "prior_signal_not_recoverable": 26,
         "no_new_fresh_price_followthrough": 2
       },
       "confirmed_continuation": {
-        "prior_continuation_not_confirmed": 17,
+        "prior_continuation_not_confirmed": 26,
         "missing_reason": 2
       }
     },
@@ -79,43 +79,17 @@
       {
         "address": "0xeb96cad0829c5c476f47eff8de622d1984f0451e",
         "symbol": "RIDEX",
-        "score": 65.1,
-        "quality": 65.1,
+        "score": 65.0,
+        "quality": 65.0,
         "impulse": 0.0,
         "phase": "WATCH",
-        "data_age_sec": 236.6,
-        "gates": [
-          "temporal_recovery"
-        ],
-        "reason": "WATCH / temporal_recovery: no_new_fresh_price_followthrough / "
-      },
-      {
-        "address": "0x3acd3c10d4c080ace3662153913833081684cbb8",
-        "symbol": "FBAY",
-        "score": 29.0,
-        "quality": 29.0,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 236.6,
+        "data_age_sec": 595.1,
         "gates": [
           "temporal_recovery",
-          "v31_activity"
+          "v31_age",
+          "quote_continuity"
         ],
-        "reason": "NO / temporal_recovery; v31_activity: prior_signal_not_recoverable / prior_continuation_not_confirmed"
-      },
-      {
-        "address": "0x2d74b8846ffe9442b158a6767199a47c0e655038",
-        "symbol": "REGS",
-        "score": 23.9,
-        "quality": 23.9,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 245.6,
-        "gates": [
-          "temporal_recovery",
-          "v31_activity"
-        ],
-        "reason": "NO / temporal_recovery; v31_activity: prior_signal_not_recoverable / prior_continuation_not_confirmed"
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
       },
       {
         "address": "0x0e3be99b510028ea10ee59e46819b4a0e14973d6",
@@ -124,25 +98,59 @@
         "quality": 72.9,
         "impulse": 12.7,
         "phase": "IGNITION",
-        "data_age_sec": 197.6,
-        "gates": [
-          "temporal_recovery",
-          "v31_activity",
-          "quote_continuity"
-        ],
-        "reason": "quote_continuity: too_few_distinct_quotes"
-      },
-      {
-        "address": "0x7a15ff7b396ec76268d9d0dd0e5821e41841f768",
-        "symbol": "TSLA",
-        "score": 15.8,
-        "quality": 15.8,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 359.6,
+        "data_age_sec": 556.1,
         "gates": [
           "temporal_recovery",
           "v31_age",
+          "v31_activity",
+          "quote_continuity"
+        ],
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
+      },
+      {
+        "address": "0x62bb34f84330075f0747623390f2c69a1b99749c",
+        "symbol": "TAMBN",
+        "score": 36.4,
+        "quality": 36.4,
+        "impulse": 0.0,
+        "phase": "IGNITION",
+        "data_age_sec": 301.1,
+        "gates": [
+          "temporal_recovery",
+          "v31_age",
+          "v31_activity",
+          "quote_continuity"
+        ],
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
+      },
+      {
+        "address": "0x49c27873e134a62231c8867f7f5d6b9ebfd7aa78",
+        "symbol": "CSF",
+        "score": 34.0,
+        "quality": 34.0,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 547.1,
+        "gates": [
+          "temporal_recovery",
+          "v31_age",
+          "v31_activity",
+          "quote_continuity"
+        ],
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
+      },
+      {
+        "address": "0x3acd3c10d4c080ace3662153913833081684cbb8",
+        "symbol": "FBAY",
+        "score": 29.0,
+        "quality": 29.0,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 595.1,
+        "gates": [
+          "temporal_recovery",
+          "v31_age",
+          "v31_activity",
           "quote_continuity"
         ],
         "reason": "quote_continuity: stale_or_invalid_current_quote"
