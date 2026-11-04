@@ -1,6 +1,6 @@
 import unittest
 from tests.test_temporal_recovery_paper_buy import T, ADDRESS, current, prior
-from tools.temporal_recovery_buy import evaluate, evaluate_tp4
+from tools.temporal_recovery_buy import evaluate, evaluate_tp4_legacy as evaluate_tp4
 
 class TP4FlowTests(unittest.TestCase):
     def check(self, **changes):

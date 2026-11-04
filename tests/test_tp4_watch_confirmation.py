@@ -1,7 +1,7 @@
 import unittest
 from datetime import timedelta
 from tests.test_paper_confirmed_continuation import NOW, ADDRESS, prior, candidate
-from tools.temporal_recovery_buy import evaluate_tp4, evaluate_paper
+from tools.temporal_recovery_buy import evaluate_tp4_legacy as evaluate_tp4, evaluate_paper
 
 class RelaxedConfirmationTests(unittest.TestCase):
  def test_three_strong_trades_and_watch_prior_can_confirm(self):

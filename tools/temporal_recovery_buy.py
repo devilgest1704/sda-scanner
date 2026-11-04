@@ -126,7 +126,7 @@ def evaluate(address, current, *, at=None, previous=None):
     }
 
 
-def evaluate_continuation(address, current, *, at=None, previous=None, allow_flat_prior=False, sparse_probe=False):
+def evaluate_continuation(address, current, *, at=None, previous=None, allow_flat_prior=False, sparse_probe=False, swing_probe=False):
     """Second PAPER entry lane: two independently observed, *fresh* swap quotes.
 
     The previous scanner scan must show an already forming IGNITION/CONFIRMATION
@@ -139,7 +139,7 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
     answer = {"ready": False, "reason": "no_confirmed_fresh_continuation",
               "source": "research_temporal_recovery",
               "lane": "confirmed_continuation", "prior_quote_at": None}
-    if sparse_probe and not allow_flat_prior:
+    if (sparse_probe or swing_probe) and not allow_flat_prior:
         return {**answer, "reason": "sparse_probe_paper_only"}
     if not isinstance(current, dict):
         return {**answer, "reason": "missing_current_candidate"}
@@ -169,14 +169,14 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
             or age is None or price is None or price <= 0
             or any(value is None for value in v.values())):
         return {**answer, "reason": "incomplete_independent_quotes"}
-    if (prior.get("phase") not in (("WATCH", "IGNITION", "CONFIRMATION") if allow_flat_prior else ("IGNITION", "CONFIRMATION"))
-            or prior_score < (40 if sparse_probe else (48 if allow_flat_prior else 62)) or prior_impulse < (0 if allow_flat_prior else 4)
+    if (prior.get("phase") not in (("NO", "WATCH", "IGNITION", "CONFIRMATION") if swing_probe else (("WATCH", "IGNITION", "CONFIRMATION") if allow_flat_prior else ("IGNITION", "CONFIRMATION")))
+            or prior_score < (30 if swing_probe else (40 if sparse_probe else (48 if allow_flat_prior else 62))) or prior_impulse < (0 if allow_flat_prior else 4)
             or not 0 <= prior_age <= 300
             or not 0 <= (previous_decision - previous_quote).total_seconds() <= 300
             or abs((previous_decision - previous_quote).total_seconds() - prior_age) > 30
             or not 0 < (now - previous_decision).total_seconds() <= (900 if allow_flat_prior else 480)):
         return {**answer, "reason": "prior_continuation_not_confirmed"}
-    if (current.get("phase") not in (("WATCH", "IGNITION", "CONFIRMATION") if allow_flat_prior else ("IGNITION", "CONFIRMATION"))
+    if (current.get("phase") not in (("NO", "WATCH", "IGNITION", "CONFIRMATION") if swing_probe else (("WATCH", "IGNITION", "CONFIRMATION") if allow_flat_prior else ("IGNITION", "CONFIRMATION")))
             or not 0 <= age <= (300 if allow_flat_prior else 180)
             or not 0 <= (now - current_quote).total_seconds() <= (300 if allow_flat_prior else 180)
             or abs((now - current_quote).total_seconds() - age) > 30
@@ -202,6 +202,16 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
             and v["flow_1h"] >= 200 and v["flow_15m"] >= 60
             and v["buy_ratio"] >= 2
         )
+    if swing_probe:
+        # Slow PAPER rebound: price follow-through replaces score acceleration.
+        # Quote chronology/freshness checks above and outer risk gates still apply.
+        strong = (
+            v["trades_1h"] >= 2 and v["score"] >= 30 and v["quality"] >= 30
+            and v["impulse"] >= 0 and -12 <= v["m1h"] <= 10
+            and -.5 <= v["m15"] <= 8 and v["volume_1h"] >= 250
+            and v["flow_1h"] >= 100 and v["flow_15m"] >= 10
+            and v["buy_ratio"] >= 1.3
+        )
     # Keep the default continuation strict. TP4 v6 is a user-authorized
     # PAPER experiment for forming WATCH/rebound signals, not a profit claim.
     if not allow_flat_prior and v["trades_1h"] < 12:
@@ -210,7 +220,7 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
                   and v["flow_15m"] >= 80 and v["buy_ratio"] >= 1.6)
     if not strong:
         return {**answer, "reason": "continuation_strength_or_flow_insufficient"}
-    if not sparse_probe and v["trades_1h"] < 8:
+    if not (sparse_probe or swing_probe) and v["trades_1h"] < 8:
         # Five or more observed trades can support the 500 SDA PAPER floor;
         # three/four trades retain the stricter 700 SDA requirement.
         sparse_volume_min = (500 if allow_flat_prior and v["trades_1h"] >= 5
@@ -222,8 +232,8 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
     if not strong:
         return {**answer, "reason": "sparse_continuation_strength_insufficient"}
     return {
-        "sparse_activity_verified": bool(allow_flat_prior and (sparse_probe or 3 <= v["trades_1h"] < 12)),
-        "entry_variant": "two_trade_probe" if sparse_probe else "standard",
+        "sparse_activity_verified": bool(allow_flat_prior and (sparse_probe or swing_probe or 3 <= v["trades_1h"] < 12)),
+        "entry_variant": "swing_rebound" if swing_probe else ("two_trade_probe" if sparse_probe else "standard"),
         "ready": True, "reason": "TWO_FRESH_QUOTES_CONFIRMED",
         "source": "research_temporal_recovery",
         "lane": "confirmed_continuation",
@@ -252,7 +262,7 @@ def evaluate_paper(address, current, *, at=None, previous=None, allow_flat_prior
     return {**recovery, "continuation_reason": continuation["reason"]}
 
 
-def evaluate_tp4(address, current, *, at=None, previous=None):
+def evaluate_tp4_legacy(address, current, *, at=None, previous=None):
     """PAPER TP4 recovery with anti-chase and current flow confirmation.
 
     Experimental admission guard, not an estimated profit or executable quote.
@@ -287,3 +297,18 @@ def evaluate_tp4(address, current, *, at=None, previous=None):
         return {**result, "ready": False, "reason": "recovery_no_current_buy_flow"}
     return {**result, "lane": result.get("lane", "temporal_recovery"),
             "paper_filter_revision": "tp4_two_trade_probe_v9"}
+
+
+def evaluate_tp4(address, current, *, at=None, previous=None):
+    """Keep v9 admissions; additionally allow a slow, independently quoted rebound."""
+    prior = previous if previous is not None else previous_signals().get(str(address).lower())
+    result = evaluate_tp4_legacy(address, current, at=at, previous=prior)
+    if not result["ready"]:
+        for evidence in ([prior, prior.get("paper_confirmation")] if isinstance(prior, dict) else []):
+            if isinstance(evidence, dict):
+                swing = evaluate_continuation(address, current, at=at, previous=evidence,
+                                              allow_flat_prior=True, swing_probe=True)
+                if swing["ready"]:
+                    result = swing
+                    break
+    return {**result, "paper_filter_revision": "tp4_swing_rebound_v10"}

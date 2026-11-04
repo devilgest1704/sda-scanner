@@ -12,6 +12,8 @@ on:
       - 'tests/test_paper_exit_ownership.py'
       - 'tests/test_paper_fresh_momentum_thresholds.py'
       - 'tests/test_tp4_paper.py'
+      - 'tests/test_paper_swing.py'
+      - 'tools/temporal_recovery_buy.py'
       - '.github/workflows/scanner_v18.yml'
       - '.github/workflows/paper-buy-expansion-checks.yml'
   workflow_dispatch:
@@ -40,3 +42,6 @@ jobs:
 
       - name: Verify PAPER quote continuity and inclusive statistics
         run: python -m unittest discover -s tests -p test_paper_quote_quality.py -v
+
+      - name: Verify swing admission, costs, sizing and frozen exit ownership
+        run: python -m unittest discover -s tests -p 'test_paper_swing.py' -v

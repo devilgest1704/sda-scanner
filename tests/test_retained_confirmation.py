@@ -1,7 +1,7 @@
 import unittest
 from datetime import timedelta
 from tests.test_temporal_recovery_paper_buy import T, ADDRESS, current
-from tools.temporal_recovery_buy import evaluate_tp4, evaluate_paper
+from tools.temporal_recovery_buy import evaluate_tp4_legacy as evaluate_tp4, evaluate_paper
 
 class RetainedConfirmationTests(unittest.TestCase):
     def test_retained_witness_requires_new_current_confirmation(self):
