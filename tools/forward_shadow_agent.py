@@ -363,8 +363,8 @@ def evaluate_temporal_recovery(state, candidates, at_time):
                 "current_gates":list(candidate.get("gates") or []),
             })
         witness = prior.get("paper_confirmation") if isinstance(prior, dict) else None
-        if (isinstance(prior, dict) and prior.get("phase") in ("IGNITION", "CONFIRMATION")
-                and prior_score is not None and prior_score >= 62
+        if (isinstance(prior, dict) and prior.get("phase") in ("WATCH", "IGNITION", "CONFIRMATION")
+                and prior_score is not None and prior_score >= 48
                 and prior_impulse is not None and prior_impulse >= 0
                 and prior_age is not None and 0 <= prior_age <= 300):
             witness = prior
