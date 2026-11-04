@@ -29,3 +29,18 @@ class ReboundAdmissionTests(unittest.TestCase):
    self.assertTrue(r["ready"],r)
    self.assertTrue(r["sparse_activity_verified"])
    self.assertFalse(evaluate_paper(ADDRESS,c,at=NOW,previous=prior())["ready"])
+
+ def test_five_to_seven_trade_volume_floor_keeps_other_guards(self):
+  p=prior(phase="WATCH",score=48,impulse=0)
+  for count in [3,4,5,7]:
+   c=candidate(phase="WATCH",score=60,quality=58,impulse=4,
+               trades_1h=count,volume_1h=500,flow_1h=200,flow_15m=60,
+               buy_ratio=1.5,m15=.5,m1h=0)
+   with self.subTest(count=count):
+    self.assertEqual(evaluate_tp4(ADDRESS,c,at=NOW,previous=p)["ready"],count>=5)
+    self.assertFalse(evaluate_paper(ADDRESS,c,at=NOW,previous=p)["ready"])
+    if count>=5:
+     for changes in [dict(volume_1h=499),dict(flow_1h=199),dict(flow_15m=59),
+                     dict(buy_ratio=1.49),dict(impulse=3),dict(price_sda=.98),
+                     dict(quote_at=p["quote_at"]),dict(data_age_sec=301)]:
+      self.assertFalse(evaluate_tp4(ADDRESS,dict(c,**changes),at=NOW,previous=p)["ready"])
