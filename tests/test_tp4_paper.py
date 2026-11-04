@@ -19,7 +19,8 @@ class TP4PaperTests(unittest.TestCase):
         with patch.object(v,'PAPER_TP4',True),patch.object(v,'decision',return_value=d),patch.object(v,'load_state',return_value={}),patch.object(v,'save_state'):
             v.patch(SimpleNamespace(),e)
             pos=e.create('x',{'price_in_sda':100},d,{}, {},100)
-            self.assertEqual(pos['investment_sda'],50)
+            self.assertEqual(pos['investment_sda'],20)
+            pos.pop('paper_exit_profile',None)
             pos['pump_peak_price']=peak
             if not tagged:pos.pop('paper_strategy')
             book=dict(positions={'x':pos},closed_trades=[])

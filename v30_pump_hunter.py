@@ -534,10 +534,16 @@ def patch(main_module,engine):
     original_create=getattr(engine,"create",None)
     # Ensure the clean strategy owns the actual paper engine decision.
     def create(a,an,s,meta,liq,investment=None):
-        z=original_create(a,an,s,meta,liq,50.0 if PAPER_TP4 else investment) if callable(original_create) else {}
+        z=original_create(a,an,s,meta,liq,20.0 if PAPER_TP4 else investment) if callable(original_create) else {}
         if PAPER_TP4:
             z["paper_strategy"]="temporal_recovery_tp4"
             z["paper_strategy_experimental"]=True
+            # Freeze exit ownership at entry; existing TP4 positions keep TP4 exits.
+            z["investment_sda"]=20.0  # override legacy engine minimum for PAPER swing risk
+            z["paper_exit_profile"]="swing_v1"
+            z["paper_exit_rules"]={"stop_pct": .08, "take_pct": .16,
+                                   "trail_pct": .06, "trail_activation_pct": .10,
+                                   "max_hold_hours": 48}
             z["paper_entry_quote_quality"]=s.get("paper_quote_quality")
             z["paper_max_quote_gap_seconds"]=0.0
         e=n(z.get("entry_price"),n(an.get("price_in_sda")))
@@ -549,6 +555,11 @@ def patch(main_module,engine):
                   "entry_pump_change":n(s.get("pump_change")),"entry_phase":s.get("pump_phase","NO"),
                   "entry_paper_buy_mode":s.get("paper_buy_mode","baseline"),
                   "entry_temporal_recovery":s.get("paper_temporal_recovery")})
+        if PAPER_TP4:
+            z.update({"sl_pct": .08, "sl": n(z.get("reference_price"),n(an.get("price_in_sda"),e)) * .92,
+                      "initial_sl": n(z.get("reference_price"),n(an.get("price_in_sda"),e)) * .92, "tp1_pct": .16, "tp2_pct": .16,
+                      "tp1": n(z.get("reference_price"),n(an.get("price_in_sda"),e)) * 1.16, "tp2": n(z.get("reference_price"),n(an.get("price_in_sda"),e)) * 1.16,
+                      "trail_pct": .06})
         z["pump_entry_snapshot"]={
             "at":z.get("opened_at"),"price_sda":e,"reference_price_sda":n(an.get("price_in_sda")),
             "score":n(s.get("pump_score",s.get("confidence"))),
@@ -647,13 +658,27 @@ def patch(main_module,engine):
                 # already adjusted for slippage. close() retains PAPER costs.
                 reference=n(pos.get("reference_price"),entry)
                 move=cur/reference-1
-                stop=reference*.975
-                reason=("STOP" if move <= -.025 else
-                        "TAKE" if move >= .04 else
-                        "TRAIL" if age >= .25 and cur/peak-1 <= -.035 else
-                        "TIME" if age >= 4 else None)
+                if pos.get("paper_exit_profile") == "swing_v1":
+                    # All thresholds are raw-reference moves; close() charges costs.
+                    # Never activate trailing on a small, still net-negative bounce.
+                    stop=reference*.92
+                    trailing_active=peak/reference >= 1.10
+                    if trailing_active:
+                        stop=max(stop, peak*.94)
+                    reason=("STOP" if cur <= reference*.92 else
+                            "TAKE" if cur >= reference*1.16 else
+                            "TRAIL" if trailing_active and cur <= stop else
+                            "TIME" if age >= 48 else None)
+                    prefix="SWING "
+                else:
+                    stop=reference*.975
+                    reason=("STOP" if move <= -.025 else
+                            "TAKE" if move >= .04 else
+                            "TRAIL" if age >= .25 and cur/peak-1 <= -.035 else
+                            "TIME" if age >= 4 else None)
+                    prefix="TP4 "
                 pos["sl"]=stop
-                r=engine.close(p,address,cur,"TP4 "+reason) if reason else None
+                r=engine.close(p,address,cur,prefix+reason) if reason else None
             else:
                 # Profit protection: once positive, stop giving the trade back.
                 stop=n(pos.get("sl"),entry*(1-SL_PCT))

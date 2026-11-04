@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 from tests.test_paper_confirmed_continuation import NOW, ADDRESS, prior, candidate, ActivePaperEntryTests
-from tools.temporal_recovery_buy import evaluate_tp4, evaluate_paper
+from tools.temporal_recovery_buy import evaluate_tp4_legacy as evaluate_tp4, evaluate_paper
 from tools.paper_quote_quality import evaluate
 from tests.test_paper_quote_quality import tx, T
 import v30_pump_hunter as v

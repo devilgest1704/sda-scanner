@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 from tests.test_paper_confirmed_continuation import NOW, ADDRESS, prior, candidate
 import tests.test_paper_confirmed_continuation as helpers
-from tools.temporal_recovery_buy import evaluate_tp4, evaluate_paper
+from tools.temporal_recovery_buy import evaluate_tp4_legacy as evaluate_tp4, evaluate_paper
 import v30_pump_hunter as v
 
 class TwoTradeProbeTests(unittest.TestCase):

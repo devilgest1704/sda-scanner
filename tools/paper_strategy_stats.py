@@ -6,9 +6,12 @@ def number(v):
   n=float(v);return n if math.isfinite(n) else None
  except (ValueError,TypeError):return None
 
-def cohort(ledger):
+def cohort(ledger, exit_profile=None):
  closed=[t for t in ledger.get('closed_trades',[]) if t.get('paper_strategy')=='temporal_recovery_tp4']
  opened=[t for t in (ledger.get('positions') or {}).values() if t.get('paper_strategy')=='temporal_recovery_tp4']
+ if exit_profile is not None:
+  closed=[t for t in closed if t.get('paper_exit_profile','tp4_legacy')==exit_profile]
+  opened=[t for t in opened if t.get('paper_exit_profile','tp4_legacy')==exit_profile]
  vals=[number(t.get('closed_profit_sda')) for t in sorted(closed,key=lambda t:t.get('closed_at',''))]
  eq=peak=dd=0
  for v in vals:
@@ -17,7 +20,7 @@ def cohort(ledger):
  valid=sum(t.get('paper_quote_quality_valid') is True for t in closed)
  invalid=sum(t.get('paper_quote_quality_valid') is False for t in closed)
  unknown=len(closed)-valid-invalid
- return dict(strategy='temporal_recovery_tp4',closed=len(closed),net_sda=round(eq,6),
+ result=dict(strategy='temporal_recovery_tp4',closed=len(closed),net_sda=round(eq,6),
              drawdown_sda=round(dd,6),wins=sum(v is not None and v>0 for v in vals),
              tokens=len({t.get('address') for t in closed}),open=len(opened),
              quality_valid=valid,quality_invalid=invalid,quality_unknown=unknown,
@@ -25,11 +28,19 @@ def cohort(ledger):
              unverified_sellability=len(closed),
              open_principal_at_risk_sda=round(sum((number(t.get('investment_sda')) or 0)*(number(t.get('remaining_fraction',1)) or 0) for t in opened),6),
              milestone_15_reached=valid>=15,includes_invalid_and_unknown_in_net=True)
+ if exit_profile is None:
+  result['swing_v1']=cohort(ledger,'swing_v1')
+ return result
 
 def lines(s):
- return ['', '🧪 MAIN PAPER TP4 — since deployment',
+ output=['', '🧪 MAIN PAPER TP4 — since deployment',
          f"Closed {s['closed']} • wins {s['wins']} • tokens {s['tokens']} • open {s['open']}",
          f"Net {s['net_sda']:+.2f} SDA • closed drawdown {s['drawdown_sda']:.2f} SDA",
          f"Quote quality: valid {s['quality_valid']} / invalid {s['quality_invalid']} / unknown {s['quality_unknown']}",
          f"Open principal at risk: {s['open_principal_at_risk_sda']:.2f} SDA",
          'Net includes invalid/unknown observations. Simulated trades; SELL fills unverified.']
+ if 'swing_v1' in s:
+  swing=s['swing_v1']
+  output.append(f"Swing v1: closed {swing['closed']} • open {swing['open']} • net {swing['net_sda']:+.2f} SDA")
+ return output
+

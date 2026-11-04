@@ -1,7 +1,7 @@
 """PAPER v6 causal admission and unchanged baseline coverage."""
 import unittest
 from tests.test_paper_confirmed_continuation import NOW, ADDRESS, prior, candidate
-from tools.temporal_recovery_buy import evaluate_tp4, evaluate_paper
+from tools.temporal_recovery_buy import evaluate_tp4_legacy as evaluate_tp4, evaluate_paper
 
 class ReboundAdmissionTests(unittest.TestCase):
  def test_forming_watch_rebound_can_enter_only_paper_tp4(self):
