@@ -11,7 +11,7 @@ class RelaxedConfirmationTests(unittest.TestCase):
   self.assertTrue(r["ready"],r)
   self.assertTrue(r["sparse_activity_verified"])
   self.assertFalse(evaluate_paper(ADDRESS,c,at=NOW,previous=p)["ready"])
-  for change in [dict(trades_1h=2),dict(volume_1h=699),dict(flow_1h=199),dict(flow_15m=59),dict(price_sda=.98),dict(impulse=0)]:
+  for change in [dict(trades_1h=1),dict(volume_1h=699),dict(flow_1h=199),dict(flow_15m=59),dict(price_sda=.98),dict(impulse=0)]:
    self.assertFalse(evaluate_tp4(ADDRESS,dict(c,**change),at=NOW,previous=p)["ready"])
  def test_older_current_quote_must_still_follow_prior_decision(self):
   p=prior(decision_at=(NOW-timedelta(seconds=400)).isoformat(),

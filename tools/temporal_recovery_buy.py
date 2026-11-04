@@ -126,7 +126,7 @@ def evaluate(address, current, *, at=None, previous=None):
     }
 
 
-def evaluate_continuation(address, current, *, at=None, previous=None, allow_flat_prior=False):
+def evaluate_continuation(address, current, *, at=None, previous=None, allow_flat_prior=False, sparse_probe=False):
     """Second PAPER entry lane: two independently observed, *fresh* swap quotes.
 
     The previous scanner scan must show an already forming IGNITION/CONFIRMATION
@@ -139,6 +139,8 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
     answer = {"ready": False, "reason": "no_confirmed_fresh_continuation",
               "source": "research_temporal_recovery",
               "lane": "confirmed_continuation", "prior_quote_at": None}
+    if sparse_probe and not allow_flat_prior:
+        return {**answer, "reason": "sparse_probe_paper_only"}
     if not isinstance(current, dict):
         return {**answer, "reason": "missing_current_candidate"}
     prior = previous if previous is not None else previous_signals().get(str(address).lower())
@@ -168,7 +170,7 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
             or any(value is None for value in v.values())):
         return {**answer, "reason": "incomplete_independent_quotes"}
     if (prior.get("phase") not in (("WATCH", "IGNITION", "CONFIRMATION") if allow_flat_prior else ("IGNITION", "CONFIRMATION"))
-            or prior_score < (48 if allow_flat_prior else 62) or prior_impulse < (0 if allow_flat_prior else 4)
+            or prior_score < (40 if sparse_probe else (48 if allow_flat_prior else 62)) or prior_impulse < (0 if allow_flat_prior else 4)
             or not 0 <= prior_age <= 300
             or not 0 <= (previous_decision - previous_quote).total_seconds() <= 300
             or abs((previous_decision - previous_quote).total_seconds() - prior_age) > 30
@@ -190,6 +192,16 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
         and v["flow_15m"] >= (30 if allow_flat_prior else 60) and v["trades_1h"] >= (3 if allow_flat_prior else 8)
         and v["buy_ratio"] >= (1.3 if allow_flat_prior else 1.4)
     )
+    if sparse_probe:
+        # User-requested PAPER hypothesis for exactly two observed trades.
+        # Quote chronology above remains mandatory; these are observed values.
+        strong = (
+            v["trades_1h"] == 2 and v["score"] >= 40 and v["quality"] >= 40
+            and v["impulse"] >= 2 and -5 <= v["m1h"] <= 10
+            and 0 <= v["m15"] <= 8 and v["volume_1h"] >= 300
+            and v["flow_1h"] >= 200 and v["flow_15m"] >= 60
+            and v["buy_ratio"] >= 2
+        )
     # Keep the default continuation strict. TP4 v6 is a user-authorized
     # PAPER experiment for forming WATCH/rebound signals, not a profit claim.
     if not allow_flat_prior and v["trades_1h"] < 12:
@@ -198,7 +210,7 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
                   and v["flow_15m"] >= 80 and v["buy_ratio"] >= 1.6)
     if not strong:
         return {**answer, "reason": "continuation_strength_or_flow_insufficient"}
-    if v["trades_1h"] < 8:
+    if not sparse_probe and v["trades_1h"] < 8:
         # Five or more observed trades can support the 500 SDA PAPER floor;
         # three/four trades retain the stricter 700 SDA requirement.
         sparse_volume_min = (500 if allow_flat_prior and v["trades_1h"] >= 5
@@ -210,7 +222,8 @@ def evaluate_continuation(address, current, *, at=None, previous=None, allow_fla
     if not strong:
         return {**answer, "reason": "sparse_continuation_strength_insufficient"}
     return {
-        "sparse_activity_verified": bool(allow_flat_prior and 3 <= v["trades_1h"] < 12),
+        "sparse_activity_verified": bool(allow_flat_prior and (sparse_probe or 3 <= v["trades_1h"] < 12)),
+        "entry_variant": "two_trade_probe" if sparse_probe else "standard",
         "ready": True, "reason": "TWO_FRESH_QUOTES_CONFIRMED",
         "source": "research_temporal_recovery",
         "lane": "confirmed_continuation",
@@ -253,6 +266,18 @@ def evaluate_tp4(address, current, *, at=None, previous=None):
             result = evaluate_continuation(address, current, at=at, previous=witness,
                                            allow_flat_prior=True)
     if not result["ready"]:
+        evidence_rows = [prior]
+        if isinstance(prior, dict):
+            evidence_rows.append(prior.get("paper_confirmation"))
+        for evidence in evidence_rows:
+            if not isinstance(evidence, dict):
+                continue
+            probe = evaluate_continuation(address, current, at=at, previous=evidence,
+                                          allow_flat_prior=True, sparse_probe=True)
+            if probe["ready"]:
+                result = probe
+                break
+    if not result["ready"]:
         return result
     m15 = num(current.get("m15"))
     flow15 = num(current.get("flow_15m"))
@@ -261,4 +286,4 @@ def evaluate_tp4(address, current, *, at=None, previous=None):
     if flow15 is None or flow15 <= 0:
         return {**result, "ready": False, "reason": "recovery_no_current_buy_flow"}
     return {**result, "lane": result.get("lane", "temporal_recovery"),
-            "paper_filter_revision": "tp4_observed_rebound_v8"}
+            "paper_filter_revision": "tp4_two_trade_probe_v9"}
