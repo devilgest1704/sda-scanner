@@ -150,6 +150,7 @@ def build_exact_input_single(token_in, token_out, fee, recipient, deadline, amou
     return (
         cfg.BUY_SELECTOR
         + address_word(token_in)
+        + address_word(token_out)
         + word(fee)
         + address_word(recipient)
         + word(deadline)
