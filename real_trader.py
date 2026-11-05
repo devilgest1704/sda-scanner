@@ -233,11 +233,28 @@ def persist_real_intent_before_broadcast():
         )
         if pushed.returncode == 0:
             return
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            check=False, timeout=10, capture_output=True, text=True,
+        )
+        if status.returncode != 0:
+            raise RuntimeError("Unable to inspect scanner worktree before state rebase")
+        stash_created = False
+        if status.stdout.strip():
+            stashed = subprocess.run(
+                ["git", "stash", "push", "-u", "-m", "real-intent-persist-rebase"],
+                check=False, timeout=30, capture_output=True, text=True,
+            )
+            if stashed.returncode != 0:
+                raise RuntimeError("Unable to protect scanner worktree before state rebase")
+            stash_created = "No local changes to save" not in (stashed.stdout + stashed.stderr)
         fetched = subprocess.run(
             ["git", "fetch", "origin", "main"],
             check=False, timeout=30, capture_output=True, text=True,
         )
         if fetched.returncode != 0:
+            if stash_created:
+                subprocess.run(["git", "stash", "pop"], check=False, timeout=30)
             raise RuntimeError("Unable to fetch main while persisting live transaction intent")
         rebased = subprocess.run(
             ["git", "rebase", "origin/main"],
@@ -245,7 +262,16 @@ def persist_real_intent_before_broadcast():
         )
         if rebased.returncode != 0:
             subprocess.run(["git", "rebase", "--abort"], check=False, timeout=10)
+            if stash_created:
+                subprocess.run(["git", "stash", "pop"], check=False, timeout=30)
             raise RuntimeError("Conflict while durably persisting live transaction intent; broadcast aborted")
+        if stash_created:
+            restored = subprocess.run(
+                ["git", "stash", "pop"],
+                check=False, timeout=30, capture_output=True, text=True,
+            )
+            if restored.returncode != 0:
+                raise RuntimeError("Unable to restore scanner worktree after state rebase; broadcast aborted")
     raise RuntimeError("Unable to durably persist live transaction intent after five attempts")
 
 
