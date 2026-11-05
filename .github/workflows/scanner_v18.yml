@@ -73,6 +73,46 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Verify dedicated REAL bot wallet before scanner startup
+        env:
+          REAL_TRADING_PRIVATE_KEY: ${{ secrets.REAL_TRADING_PRIVATE_KEY }}
+          REAL_TRADING_WALLET_ADDRESS: ${{ secrets.REAL_TRADING_WALLET_ADDRESS }}
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+          from eth_account import Account
+
+          expected = "0x9e3643f2ac15c91ee83aa2814015f15b18d573f2"
+          key = os.environ.get("REAL_TRADING_PRIVATE_KEY", "").strip()
+          configured = os.environ.get("REAL_TRADING_WALLET_ADDRESS", "").strip()
+          if not key or not configured:
+              raise SystemExit("REAL bot wallet preflight failed: required GitHub Secret is missing")
+          account = Account.from_key(key)
+          if account.address.lower() != expected.lower():
+              raise SystemExit("REAL bot wallet preflight failed: private key does not derive the dedicated bot address")
+          if configured.lower() != expected.lower():
+              raise SystemExit("REAL bot wallet preflight failed: configured wallet address is not the dedicated bot address")
+          rpc = "https://node.sidrachain.com"
+          def call(method, params):
+              response = requests.post(rpc, json={"jsonrpc":"2.0","id":1,"method":method,"params":params}, timeout=20)
+              response.raise_for_status()
+              data = response.json()
+              if data.get("error"):
+                  raise RuntimeError(str(data["error"]))
+              return data["result"]
+          chain = int(call("eth_chainId", []), 16)
+          if chain != 97453:
+              raise SystemExit(f"REAL bot wallet preflight failed: unexpected chain id {chain}")
+          balance = int(call("eth_getBalance", [expected, "latest"]), 16) / 10**18
+          if balance < 10:
+              raise SystemExit(f"REAL bot wallet preflight failed: insufficient SDA for minimum position and gas (balance {balance:.3f})")
+          print("REAL BOT WALLET PREFLIGHT: PASS")
+          print(f"Wallet: {expected[:10]}...{expected[-6:]} (private key MATCH)")
+          print(f"Chain ID: {chain} (Sidra)")
+          print(f"Native SDA balance: {balance:.3f} SDA")
+          PY
+
       - name: Ensure Telegram webhook is active
         run: |
           python - <<'PY'
