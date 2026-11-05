@@ -21,11 +21,14 @@ class BridgeTests(unittest.TestCase):
         self.state = root / "bridge_state.json"
         self.events = root / "bridge_events.json"
         self.paper.write_text(json.dumps({"positions": {}}), encoding="utf-8")
-        self.paths = patch.multiple(
-            bridge, PAPER_FILE=self.paper, STATE_FILE=self.state, EVENTS_FILE=self.events
-        )
-        self.paths.start()
-        self.addCleanup(self.paths.stop)
+        for name, value in (
+            ("PAPER_FILE", self.paper),
+            ("STATE_FILE", self.state),
+            ("EVENTS_FILE", self.events),
+        ):
+            p = patch.object(bridge, name, value)
+            p.start()
+            self.addCleanup(p.stop)
         self.addCleanup(self.tmp.cleanup)
         self.env = patch.dict(os.environ, {
             "REAL_TRADING_ENABLED": "true",
