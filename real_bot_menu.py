@@ -132,7 +132,7 @@ def bot_report(dashboard):
                   f"💼 Open cost: {open_cost:.2f} SDA", f"💹 Realized today: {daily:+.2f} SDA"]
     lines += ["", "P/L is quote-based estimate; excludes gas and may change before execution.",
               "Bot wallet is separate from the existing manual REAL wallet."]
-    return "\\n".join(lines)
+    return "\n".join(lines)
 def statistics_report(dashboard):
     state = _state(dashboard)
     positions = state.get("positions", {})
@@ -204,7 +204,7 @@ def statistics_report(dashboard):
                 lines.append(f"   tx {tx[:10]}...")
     lines += ["", f"👛 Bot wallet: {_wallet_short(wallet)}", "👛 Separate automated-trading wallet",
               "P/L estimates exclude gas and may differ from final realized results."]
-    return "\\n".join(lines)
+    return "\n".join(lines)
 def patch_dashboard(dashboard):
     if getattr(dashboard, "_sda_real_bot_menu_patched", False):
         return dashboard
