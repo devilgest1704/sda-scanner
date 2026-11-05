@@ -304,7 +304,13 @@ def _finalize_confirmed_buy(token, symbol, plan, tx_hash, gas, gp, token_balance
     except Exception:
         received_raw = 0
     if received_raw <= 0:
-        received_raw = int(plan["minimum_out_raw"])
+        # Never invent the acquired token amount from a quote: fees, transfer
+        # taxes, partial fills or stale RPC reads can differ from min-out.
+        # Keep the confirmed transaction pending for a later balance read.
+        raise RuntimeError(
+            f"BUY confirmed ({tx_hash}) but acquired token balance is unverified; "
+            "leaving pending intent for reconciliation"
+        )
     state = load_state()
     state.setdefault("pending_buys", {}).pop(addr(token), None)
     state["positions"][addr(token)] = {
