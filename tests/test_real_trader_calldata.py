@@ -2,6 +2,7 @@
 import unittest
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from datetime import datetime, timezone
 
@@ -54,6 +55,30 @@ class SwapCalldataTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(RuntimeError, "capital cap"):
             real_trader.safety_check(15.0, state)
+
+    def test_live_intent_is_committed_before_broadcast_gate_returns(self):
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            if args[:3] == ["git", "diff", "--cached"]:
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
+            if args[:2] == ["git", "status"]:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch.dict("os.environ", {
+            "GITHUB_ACTIONS": "true",
+            "GH_TOKEN": "test-token",
+            "GITHUB_REPOSITORY": "devilgest1704/sda-scanner",
+        }):
+            with patch.object(real_trader.subprocess, "run", side_effect=fake_run):
+                real_trader.persist_real_intent_before_broadcast()
+
+        commit_index = next(i for i, args in enumerate(calls) if args[:2] == ["git", "commit"])
+        push_index = next(i for i, args in enumerate(calls) if args[:2] == ["git", "push"])
+        self.assertLess(commit_index, push_index)
+        self.assertIn("Update SDA scanner state", calls[commit_index])
 
     def test_live_intent_persistence_refuses_non_actions_runtime(self):
         with patch.dict("os.environ", {"GITHUB_ACTIONS": "false"}, clear=False):
