@@ -46,6 +46,11 @@ def reconcile():
     dry_run = os.getenv("REAL_TRADING_DRY_RUN", "true").strip().lower() == "true"
     if not enabled:
         return {"status": "disabled", "actions": []}
+    if dry_run:
+        # The bridge must not reconcile or initialize state in dry-run mode.
+        # Use real_trader's explicit prepare_* routines separately for quote
+        # validation; reconciliation is reserved for live-enabled operation.
+        return {"status": "dry_run", "actions": []}
 
     current = _paper_positions()
     state = _load(STATE_FILE, {})
