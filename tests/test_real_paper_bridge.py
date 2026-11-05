@@ -33,10 +33,12 @@ class BridgeTests(unittest.TestCase):
         self.env = patch.dict(os.environ, {
             "REAL_TRADING_ENABLED": "true",
             "REAL_TRADING_DRY_RUN": "false",
+            "SDA_PAPER_BUY_MODE": "temporal_recovery",
+            "SDA_PAPER_TP4": "1",
         })
         self.env.start()
         self.addCleanup(self.env.stop)
-        self.cfg = SimpleNamespace(position_sda=lambda: 15.0)
+        self.cfg = SimpleNamespace(position_sda=lambda value=None: min(20.0, max(10.0, 20.0 if value is None else float(value))), POSITION_DEFAULT_SDA=20.0)
         self.trader = SimpleNamespace(
             execute_buy=unittest.mock.Mock(return_value={"status": "CONFIRMED", "tx": "buytx"}),
             execute_sell=unittest.mock.Mock(return_value={"status": "CONFIRMED", "tx": "selltx"}),
@@ -69,6 +71,17 @@ class BridgeTests(unittest.TestCase):
         self.trader.execute_buy.assert_not_called()
         self.trader.execute_sell.assert_not_called()
 
+    def test_real_bridge_refuses_strategy_drift(self):
+        with patch.dict(os.environ, {"SDA_PAPER_TP4": "0"}):
+            with self.assertRaisesRegex(RuntimeError, "requires the active PAPER profile"):
+                bridge.reconcile()
+
+    def test_real_buy_uses_committed_paper_position_size(self):
+        bridge.reconcile()
+        self.write_paper({TOKEN: {"symbol": "TEST", "investment_sda": 18.0}})
+        bridge.reconcile()
+        self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 18.0)
+
     def test_first_run_only_sets_baseline(self):
         self.write_paper({TOKEN: {"symbol": "TEST"}})
         result = bridge.reconcile()
@@ -80,7 +93,7 @@ class BridgeTests(unittest.TestCase):
         self.write_paper({TOKEN: {"symbol": "TEST"}})
         result = bridge.reconcile()
         self.assertEqual(result["opened"], 1)
-        self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 15.0)
+        self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 20.0)
         self.assertEqual(result["actions"][0]["status"], "CONFIRMED")
 
     def test_pending_buy_is_recovered_from_real_ledger_after_bridge_checkpoint_loss(self):
