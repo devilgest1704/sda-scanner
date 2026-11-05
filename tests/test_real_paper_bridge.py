@@ -83,6 +83,24 @@ class BridgeTests(unittest.TestCase):
         self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 15.0)
         self.assertEqual(result["actions"][0]["status"], "CONFIRMED")
 
+    def test_pending_buy_is_recovered_from_real_ledger_after_bridge_checkpoint_loss(self):
+        self.state.write_text(json.dumps({
+            "initialized": True,
+            "paper_positions": [TOKEN],
+            "pending_buy": [],
+            "pending_sell": [],
+        }), encoding="utf-8")
+        self.write_paper({})
+        self.trader.load_state.return_value = {
+            "positions": {TOKEN: {"symbol": "TEST", "token_amount_raw": 123}},
+            "pending_buys": {TOKEN: {"symbol": "TEST"}},
+            "pending_sells": {},
+        }
+        result = bridge.reconcile()
+        self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 15.0)
+        self.trader.execute_sell.assert_called_once_with(TOKEN, "TEST", 123)
+        self.assertEqual([a["action"] for a in result["actions"]], ["BUY", "SELL"])
+
     def test_pending_buy_is_reconciled_and_closed_if_paper_exits_first(self):
         self.state.write_text(json.dumps({
             "initialized": True,
