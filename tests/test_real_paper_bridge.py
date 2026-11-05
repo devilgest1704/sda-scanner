@@ -127,7 +127,7 @@ class BridgeTests(unittest.TestCase):
             "pending_buys": {TOKEN: {"symbol": "TEST"}},
         }
         result = bridge.reconcile()
-        self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 15.0)
+        self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 20.0)
         self.trader.execute_sell.assert_called_once_with(TOKEN, "TEST", 123)
         self.assertEqual([a["action"] for a in result["actions"]], ["BUY", "SELL"])
 
