@@ -55,6 +55,11 @@ class SwapCalldataTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "capital cap"):
             real_trader.safety_check(15.0, state)
 
+    def test_live_intent_persistence_refuses_non_actions_runtime(self):
+        with patch.dict("os.environ", {"GITHUB_ACTIONS": "false"}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "durable GitHub Actions state writer"):
+                real_trader.persist_real_intent_before_broadcast()
+
     def test_corrupt_real_state_is_not_silently_reset(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "real_trade_state.json"
