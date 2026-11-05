@@ -1,0 +1,27 @@
+name: Real bridge unit tests
+
+on:
+  pull_request:
+    paths:
+      - "real_paper_bridge.py"
+      - "tests/test_real_paper_bridge.py"
+      - ".github/workflows/real-bridge-tests.yml"
+  push:
+    branches:
+      - main
+      - "feature/paper-to-real-bridge"
+    paths:
+      - "real_paper_bridge.py"
+      - "tests/test_real_paper_bridge.py"
+      - ".github/workflows/real-bridge-tests.yml"
+
+jobs:
+  bridge-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run bridge tests
+        run: python -m unittest discover -s tests -p "test_real_paper_bridge.py" -v
