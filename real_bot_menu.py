@@ -88,18 +88,31 @@ def _token_label(token, pos):
 
 
 def _position_mark_to_market(token, pos):
-    """Read-only sell quote estimate for one open position."""
+    """Prefer a live router quote; fall back to scanner quote snapshot."""
+    amount_raw = int(pos.get("token_amount_raw") or 0)
+    if amount_raw <= 0:
+        return None, None, "token amount unavailable"
+    cost_sda = _num(pos.get("amount_sda", pos.get("cost_sda")))
     try:
         import real_trader
-        amount_raw = int(pos.get("token_amount_raw") or 0)
-        if amount_raw <= 0:
-            return None, None, "token amount unavailable"
         plan = real_trader.prepare_sell(token, str(pos.get("symbol") or token[:10]), amount_raw)
         value_sda = int(plan["quoted_wsda_raw"]) / 10**18
-        cost_sda = _num(pos.get("amount_sda", pos.get("cost_sda")))
         return value_sda, value_sda - cost_sda, None
-    except Exception as exc:
-        return None, None, str(exc)[:100]
+    except Exception as live_error:
+        try:
+            with open("liquidity_data.json", "r", encoding="utf-8") as handle:
+                liquidity = json.load(handle)
+            quotes = liquidity.get("quotes_50_sda", {})
+            quote = quotes.get(str(token).lower(), {}) if isinstance(quotes, dict) else {}
+            token_out = _num(quote.get("amount_out_token_18dec"))
+            quote_size = _num(quote.get("amount_in_sda")) or 50.0
+            if token_out > 0:
+                token_amount = amount_raw / 10**18
+                value_sda = token_amount * quote_size / token_out
+                return value_sda, value_sda - cost_sda, "snapshot"
+        except Exception:
+            pass
+        return None, None, str(live_error)[:100]
 
 
 def _pnl_text(value):
@@ -146,7 +159,8 @@ def bot_report(dashboard):
                 valid_count += 1
                 marks.append(pnl)
                 pct = pnl / cost * 100 if cost else 0.0
-                lines.append(f"• {symbol} • {pnl:+.2f} SDA ({pct:+.2f}%)")
+                marker = " ⚠️ snapshot" if error == "snapshot" else ""
+                lines.append(f"• {symbol} • {pnl:+.2f} SDA ({pct:+.2f}%){marker}")
                 lines.append(f"  Value {value:.2f} / cost {cost:.2f} SDA")
         unrealized = sum(marks) if valid_count == len([p for p in positions.values() if isinstance(p, dict)]) else None
         lines += ["────────────────────────", f"📈 Unrealized P/L: {_pnl_text(unrealized)}",
@@ -184,7 +198,8 @@ def statistics_report(dashboard):
         else:
             marks.append(pnl)
             pct = pnl / cost * 100 if cost else 0.0
-            position_rows.append(f"• {symbol}: {pnl:+.2f} SDA ({pct:+.2f}%)")
+            marker = " ⚠️ snapshot" if error == "snapshot" else ""
+            position_rows.append(f"• {symbol}: {pnl:+.2f} SDA ({pct:+.2f}%){marker}")
     valid_positions = len(position_rows)
     unrealized = sum(marks) if len(marks) == valid_positions else None
     combined = realized_total + unrealized if unrealized is not None else None
