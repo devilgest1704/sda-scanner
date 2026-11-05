@@ -269,7 +269,7 @@ def send_transaction(account, to, data, value=0, gas_limit=None, before_broadcas
         expected_hash = "0x" + expected_hash
     if before_broadcast:
         before_broadcast({"tx_hash": expected_hash, "nonce": nonce, "gas": gas, "gas_price": gp})
-    if cfg.REAL_TRADING_ENABLED and not cfg.REAL_TRADING_DRY_RUN:
+    if cfg.REAL_TRADING_ENABLED and not cfg.REAL_TRADING_DRY_RUN and before_broadcast:
         persist_real_intent_before_broadcast()
     tx_hash = rpc("eth_sendRawTransaction", ["0x" + raw])
     return tx_hash, gas, gp
