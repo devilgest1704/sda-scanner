@@ -62,10 +62,14 @@ def reconcile():
 
     previous = set(state.get("paper_positions", []))
     now_keys = set(current)
-    pending_buy = set(state.get("pending_buy", [])) & now_keys
+    # Keep reconciling an uncertain BUY even if PAPER has already exited it.
+    # Once its receipt confirms, immediately mirror that already-committed
+    # PAPER close with a real SELL rather than orphaning the real token lot.
+    pending_buy = set(state.get("pending_buy", []))
     pending_sell = set(state.get("pending_sell", []))
     opened = sorted((now_keys - previous) | pending_buy)
     closed = sorted((previous - now_keys) | pending_sell)
+    confirmed_after_paper_close = set()
     next_pending_buy = set()
     next_pending_sell = set()
     actions = []
@@ -74,8 +78,10 @@ def reconcile():
 
     # New PAPER positions become real buys only after the paper ledger commits.
     for token in opened:
-        pos = current[token]
-        symbol = str(pos.get("symbol") or pos.get("ticker") or token[:8])
+        pos = current.get(token, {})
+        existing_pending = real_trader.load_state().get("pending_buys", {}).get(token, {})
+        symbol = str(pos.get("symbol") or pos.get("ticker")
+                      or existing_pending.get("symbol") or token[:8])
         amount = cfg.position_sda()
         try:
             result = real_trader.execute_buy(token, symbol, amount)
@@ -83,11 +89,17 @@ def reconcile():
             actions.append({"action": "BUY", "token": token, "symbol": symbol,
                            "status": status, "tx": result.get("tx"), "at": _now()})
             if status not in ("CONFIRMED", "ALREADY_OPEN"):
-                next_pending_buy.add(token)
+                if token in now_keys:
+                    next_pending_buy.add(token)
+            elif token not in now_keys:
+                confirmed_after_paper_close.add(token)
         except Exception as exc:
             actions.append({"action": "BUY", "token": token, "symbol": symbol,
                            "status": "ERROR", "error": str(exc)[:500], "at": _now()})
-            next_pending_buy.add(token)
+            if token in now_keys:
+                next_pending_buy.add(token)
+
+    closed = sorted(set(closed) | confirmed_after_paper_close)
 
     # A PAPER close is mirrored only for a token that has a recorded real lot.
     real_state = real_trader.load_state()
