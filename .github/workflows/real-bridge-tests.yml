@@ -1,0 +1,35 @@
+name: Real bridge unit tests
+
+on:
+  pull_request:
+    paths:
+      - "real_paper_bridge.py"
+      - "tests/test_real_paper_bridge.py"
+      - "tests/test_real_trader_calldata.py"
+      - "real_trader.py"
+      - "run_scanner_v18.sh"
+      - ".github/workflows/real-bridge-tests.yml"
+  push:
+    branches:
+      - main
+      - "feature/paper-to-real-bridge"
+    paths:
+      - "real_paper_bridge.py"
+      - "real_trader.py"
+      - "tests/test_real_paper_bridge.py"
+      - "tests/test_real_trader_calldata.py"
+      - "run_scanner_v18.sh"
+      - ".github/workflows/real-bridge-tests.yml"
+
+jobs:
+  bridge-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install requests eth-account
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v

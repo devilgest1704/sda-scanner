@@ -77,14 +77,25 @@ def save_state(data):
     os.replace(tmp, path)
 
 
+def _reset_daily_pnl_if_needed(state):
+    today = datetime.now(timezone.utc).date().isoformat()
+    if state.get("daily_pnl_date") != today:
+        state["daily_pnl_date"] = today
+        state["daily_realized_pnl_sda"] = 0.0
+    return state
+
+
 def load_state():
     state = load_json(cfg.STATE_FILE, {})
     if not isinstance(state, dict):
         state = {}
     state.setdefault("positions", {})
+    state.setdefault("pending_buys", {})
+    state.setdefault("pending_sells", {})
     state.setdefault("trades", [])
     state.setdefault("daily_realized_pnl_sda", 0.0)
     state.setdefault("updated_at", None)
+    _reset_daily_pnl_if_needed(state)
     return state
 
 
@@ -150,6 +161,7 @@ def build_exact_input_single(token_in, token_out, fee, recipient, deadline, amou
     return (
         cfg.BUY_SELECTOR
         + address_word(token_in)
+        + address_word(token_out)
         + word(fee)
         + address_word(recipient)
         + word(deadline)
@@ -181,7 +193,7 @@ def estimate_gas(owner, to, data, value=0):
     return int(rpc("eth_estimateGas", [{"from": owner, "to": to, "data": data, "value": hex(value)}]), 16)
 
 
-def send_transaction(account, to, data, value=0, gas_limit=None):
+def send_transaction(account, to, data, value=0, gas_limit=None, before_broadcast=None):
     nonce = next_nonce(account.address)
     gp = gas_price()
     gas = gas_limit or estimate_gas(account.address, to, data, value)
@@ -196,6 +208,11 @@ def send_transaction(account, to, data, value=0, gas_limit=None):
     }
     signed = account.sign_transaction(tx)
     raw = signed.raw_transaction.hex()
+    expected_hash = signed.hash.hex()
+    if not expected_hash.startswith("0x"):
+        expected_hash = "0x" + expected_hash
+    if before_broadcast:
+        before_broadcast({"tx_hash": expected_hash, "nonce": nonce, "gas": gas, "gas_price": gp})
     tx_hash = rpc("eth_sendRawTransaction", ["0x" + raw])
     return tx_hash, gas, gp
 
@@ -230,14 +247,18 @@ def approve_if_needed(account, token, amount):
 
 
 def safety_check(position_sda, state):
+    _reset_daily_pnl_if_needed(state)
     position_sda = float(position_sda)
     if position_sda < cfg.POSITION_MIN_SDA or position_sda > cfg.POSITION_MAX_SDA:
         raise ValueError("Real position must be between 10 and 20 SDA")
-    open_count = len(state.get("positions", {}))
+    positions = state.get("positions", {})
+    pending_buys = state.get("pending_buys", {})
+    open_count = len(positions) + len(pending_buys)
     if open_count >= cfg.MAX_OPEN_POSITIONS:
         raise RuntimeError("Maximum real open positions reached")
-    open_cost = sum(float(x.get("cost_sda") or 0) for x in state.get("positions", {}).values())
-    if open_cost + position_sda > cfg.TRADING_WALLET_CAPITAL_SDA:
+    open_cost = sum(float(x.get("amount_sda") or x.get("cost_sda") or 0) for x in positions.values())
+    pending_cost = sum(float(x.get("position_sda") or 0) for x in pending_buys.values())
+    if open_cost + pending_cost + position_sda > cfg.TRADING_WALLET_CAPITAL_SDA:
         raise RuntimeError("Real trading capital cap of 200 SDA would be exceeded")
     if float(state.get("daily_realized_pnl_sda") or 0) <= -cfg.MAX_DAILY_LOSS_SDA:
         raise RuntimeError("Daily real-trading loss limit reached")
@@ -274,7 +295,60 @@ def prepare_buy(token, symbol, position_sda=None):
     }
 
 
+def _finalize_confirmed_buy(token, symbol, plan, tx_hash, gas, gp, token_balance_before=None):
+    account = private_account()
+    try:
+        token_balance_after = token_balance(token, account.address)
+        received_raw = (token_balance_after - token_balance_before
+                        if token_balance_before is not None else 0)
+    except Exception:
+        received_raw = 0
+    if received_raw <= 0:
+        received_raw = int(plan["minimum_out_raw"])
+    state = load_state()
+    state.setdefault("pending_buys", {}).pop(addr(token), None)
+    state["positions"][addr(token)] = {
+        "symbol": symbol, "token": addr(token), "amount_sda": plan["position_sda"],
+        "quoted_out_raw": plan["quoted_out_raw"], "minimum_out_raw": plan["minimum_out_raw"],
+        "token_amount_raw": received_raw, "opened_at": now(), "buy_tx": tx_hash,
+    }
+    state["trades"].append({"action": "BUY", "symbol": symbol, "token": addr(token),
+                            "amount_sda": plan["position_sda"], "tx": tx_hash, "at": now()})
+    state["updated_at"] = now()
+    save_state(state)
+    return {"action": "BUY", "status": "CONFIRMED", "token": addr(token),
+            "tx": tx_hash, "token_amount_raw": received_raw, "gas": gas, "gas_price": gp}
+
+
 def execute_buy(token, symbol, position_sda=None):
+    token = addr(token)
+    state = load_state()
+    existing = state.get("positions", {}).get(token)
+    if isinstance(existing, dict):
+        return {"action": "BUY", "symbol": symbol, "token": token,
+                "status": "ALREADY_OPEN", "existing_buy_tx": existing.get("buy_tx")}
+
+    # Persist the deterministic signed hash before broadcast. A lost RPC
+    # response must never cause a second BUY on the next scanner cycle.
+    pending = state.setdefault("pending_buys", {}).get(token)
+    if isinstance(pending, dict):
+        tx_hash = pending.get("tx_hash")
+        if not tx_hash:
+            return {"action": "BUY", "token": token, "status": "MANUAL_RECONCILIATION_REQUIRED"}
+        receipt = rpc("eth_getTransactionReceipt", [tx_hash])
+        if not receipt:
+            return {"action": "BUY", "token": token, "status": "PENDING_CONFIRMATION", "tx": tx_hash}
+        if int(receipt.get("status", "0x0"), 16) != 1:
+            state["pending_buys"].pop(token, None)
+            save_state(state)
+            raise RuntimeError(f"BUY failed: {tx_hash}")
+        account = private_account()
+        if chain_id() != cfg.CHAIN_ID or account.address.lower() != pending["wallet"].lower():
+            raise RuntimeError("Pending BUY wallet or chain mismatch")
+        return _finalize_confirmed_buy(token, pending.get("symbol") or symbol,
+            pending["plan"], tx_hash, pending.get("gas"), pending.get("gas_price"),
+            pending.get("token_balance_before"))
+
     plan = prepare_buy(token, symbol, position_sda)
     if not cfg.REAL_TRADING_ENABLED or cfg.REAL_TRADING_DRY_RUN:
         plan["status"] = "DRY_RUN"
@@ -286,24 +360,31 @@ def execute_buy(token, symbol, position_sda=None):
         raise RuntimeError("Wrong Sidra Chain ID")
     if native_balance(account.address) < plan["value_wei"]:
         raise RuntimeError("Insufficient SDA balance for BUY + gas")
-    tx_hash, gas, gp = send_transaction(account, cfg.ROUTER_ADDRESS, plan["calldata"], plan["value_wei"], cfg.GAS_LIMIT)
+    try:
+        balance_before = token_balance(token, account.address)
+    except Exception:
+        balance_before = None
+
+    def persist_intent(signed):
+        current = load_state()
+        current.setdefault("pending_buys", {})[token] = {
+            "stage": "broadcasting", "tx_hash": signed["tx_hash"], "nonce": signed["nonce"],
+            "gas": signed["gas"], "gas_price": signed["gas_price"], "symbol": symbol,
+            "wallet": account.address, "position_sda": plan["position_sda"], "plan": plan,
+            "token_balance_before": balance_before, "created_at": now(),
+        }
+        current["updated_at"] = now()
+        save_state(current)
+
+    tx_hash, gas, gp = send_transaction(account, cfg.ROUTER_ADDRESS, plan["calldata"],
+        plan["value_wei"], cfg.GAS_LIMIT, before_broadcast=persist_intent)
     receipt, ok = wait_receipt(tx_hash)
     if not ok:
+        current = load_state()
+        current.setdefault("pending_buys", {}).pop(token, None)
+        save_state(current)
         raise RuntimeError(f"BUY failed: {tx_hash}")
-    state = load_state()
-    state["positions"][addr(token)] = {
-        "symbol": symbol,
-        "token": addr(token),
-        "amount_sda": plan["position_sda"],
-        "quoted_out_raw": plan["quoted_out_raw"],
-        "minimum_out_raw": plan["minimum_out_raw"],
-        "opened_at": now(),
-        "buy_tx": tx_hash,
-    }
-    state["trades"].append({"action": "BUY", "symbol": symbol, "token": addr(token), "amount_sda": plan["position_sda"], "tx": tx_hash, "at": now()})
-    state["updated_at"] = now()
-    save_state(state)
-    return {**plan, "status": "CONFIRMED", "tx": tx_hash, "gas": gas, "gas_price": gp, "receipt": receipt}
+    return _finalize_confirmed_buy(token, symbol, plan, tx_hash, gas, gp, balance_before)
 
 
 def prepare_sell(token, symbol, token_amount_raw):
@@ -335,37 +416,155 @@ def prepare_sell(token, symbol, token_amount_raw):
     }
 
 
-def execute_sell(token, symbol, token_amount_raw):
-    plan = prepare_sell(token, symbol, token_amount_raw)
-    if not cfg.REAL_TRADING_ENABLED or cfg.REAL_TRADING_DRY_RUN:
-        plan["status"] = "DRY_RUN"
-        return plan
+def _finalize_confirmed_sell(token, pending):
     account = private_account()
-    if account.address.lower() != plan["wallet"].lower():
-        raise RuntimeError("Trading wallet mismatch")
-    if chain_id() != cfg.CHAIN_ID:
-        raise RuntimeError("Wrong Sidra Chain ID")
-    approval = approve_if_needed(account, token, plan["token_amount_raw"])
-    tx_hash, gas, gp = send_transaction(account, cfg.ROUTER_ADDRESS, plan["calldata"], 0, cfg.GAS_LIMIT)
-    receipt, ok = wait_receipt(tx_hash)
-    if not ok:
-        raise RuntimeError(f"SELL failed: {tx_hash}")
-
-    # Unwrap WSDA to native SDA only after the swap itself is confirmed.
-    unwrap_data = cfg.UNWRAP_SELECTOR + word(plan["minimum_wsda_raw"])
-    unwrap_tx = None
-    if plan["minimum_wsda_raw"] > 0:
-        unwrap_tx, ugas, ugp = send_transaction(account, cfg.WSDA_ADDRESS, unwrap_data, 0, 100000)
-        _, unwrap_ok = wait_receipt(unwrap_tx)
-        if not unwrap_ok:
-            raise RuntimeError(f"WSDA unwrap failed: {unwrap_tx}")
-
+    native_after = native_balance(account.address)
+    native_before = int(pending.get("native_balance_before") or native_after)
+    proceeds_net_sda = (native_after - native_before) / 10**18
+    cost_sda = float(pending.get("cost_sda") or 0)
+    realized_pnl = proceeds_net_sda - cost_sda
     state = load_state()
+    state.setdefault("pending_sells", {}).pop(addr(token), None)
     state["positions"].pop(addr(token), None)
-    state["trades"].append({"action": "SELL", "symbol": symbol, "token": addr(token), "tx": tx_hash, "unwrap_tx": unwrap_tx, "at": now()})
+    state["daily_realized_pnl_sda"] = float(state.get("daily_realized_pnl_sda") or 0) + realized_pnl
+    state["trades"].append({
+        "action": "SELL", "symbol": pending.get("symbol"), "token": addr(token),
+        "tx": pending.get("swap_tx"), "unwrap_tx": pending.get("unwrap_tx"),
+        "amount_sda": cost_sda, "realized_pnl_sda": realized_pnl, "at": now(),
+    })
     state["updated_at"] = now()
     save_state(state)
-    return {**plan, "status": "CONFIRMED", "tx": tx_hash, "unwrap_tx": unwrap_tx, "approval": approval, "gas": gas, "gas_price": gp}
+    return {
+        "action": "SELL", "status": "CONFIRMED", "token": addr(token),
+        "tx": pending.get("swap_tx"), "unwrap_tx": pending.get("unwrap_tx"),
+        "realized_pnl_sda": realized_pnl,
+    }
+
+
+def execute_sell(token, symbol, token_amount_raw):
+    token = addr(token)
+    state = load_state()
+    pending = state.setdefault("pending_sells", {}).get(token)
+
+    if pending:
+        tx_hash = pending.get("tx_hash")
+        stage = pending.get("stage")
+        if tx_hash:
+            receipt = rpc("eth_getTransactionReceipt", [tx_hash])
+            if not receipt:
+                return {"action": "SELL", "status": "PENDING_CONFIRMATION", "token": token, "tx": tx_hash}
+            ok = int(receipt.get("status", "0x0"), 16) == 1
+            if not ok:
+                if stage == "unwrap_broadcasting":
+                    pending["stage"] = "swap_confirmed"
+                    pending.pop("tx_hash", None)
+                    state["pending_sells"][token] = pending
+                    save_state(state)
+                else:
+                    state["pending_sells"].pop(token, None)
+                    save_state(state)
+                    raise RuntimeError(f"SELL swap failed: {tx_hash}")
+            elif stage == "swap_broadcasting":
+                pending["stage"] = "swap_confirmed"
+                pending["swap_tx"] = tx_hash
+                pending.pop("tx_hash", None)
+                state["pending_sells"][token] = pending
+                save_state(state)
+            elif stage == "unwrap_broadcasting":
+                pending["unwrap_tx"] = tx_hash
+                return _finalize_confirmed_sell(token, pending)
+
+    else:
+        plan = prepare_sell(token, symbol, token_amount_raw)
+        if not cfg.REAL_TRADING_ENABLED or cfg.REAL_TRADING_DRY_RUN:
+            plan["status"] = "DRY_RUN"
+            return plan
+        account = private_account()
+        if account.address.lower() != plan["wallet"].lower():
+            raise RuntimeError("Trading wallet mismatch")
+        if chain_id() != cfg.CHAIN_ID:
+            raise RuntimeError("Wrong Sidra Chain ID")
+        native_before = native_balance(account.address)
+        approval = approve_if_needed(account, token, plan["token_amount_raw"])
+        real_position = state.get("positions", {}).get(token, {})
+        pending = {
+            "stage": "swap_broadcasting", "symbol": symbol, "plan": plan,
+            "token_amount_raw": int(token_amount_raw),
+            "cost_sda": float(real_position.get("amount_sda") or real_position.get("cost_sda") or 0),
+            "native_balance_before": native_before, "approval": approval,
+            "created_at": now(),
+        }
+
+        def persist_swap_intent(signed):
+            current = load_state()
+            current.setdefault("pending_sells", {})[token] = {
+                **pending, "tx_hash": signed["tx_hash"], "nonce": signed["nonce"],
+                "gas": signed["gas"], "gas_price": signed["gas_price"],
+            }
+            current["updated_at"] = now()
+            save_state(current)
+
+        tx_hash, gas, gp = send_transaction(
+            account, cfg.ROUTER_ADDRESS, plan["calldata"], 0, cfg.GAS_LIMIT,
+            before_broadcast=persist_swap_intent,
+        )
+        pending["stage"] = "swap_broadcasting"
+        pending["tx_hash"] = tx_hash
+        pending["swap_tx"] = tx_hash
+        pending["gas"] = gas
+        pending["gas_price"] = gp
+        state = load_state()
+        state.setdefault("pending_sells", {})[token] = pending
+        save_state(state)
+        receipt, ok = wait_receipt(tx_hash)
+        if not ok:
+            state = load_state()
+            state["pending_sells"].pop(token, None)
+            save_state(state)
+            raise RuntimeError(f"SELL failed: {tx_hash}")
+        pending["stage"] = "swap_confirmed"
+        pending.pop("tx_hash", None)
+        state = load_state()
+        state.setdefault("pending_sells", {})[token] = pending
+        save_state(state)
+
+    # Swap is confirmed. Unwrap WSDA; a lost RPC response is tracked by the
+    # deterministic hash persisted before broadcast and never resubmitted.
+    account = private_account()
+    plan = pending["plan"]
+    if int(plan.get("minimum_wsda_raw") or 0) <= 0:
+        return _finalize_confirmed_sell(token, pending)
+    unwrap_data = cfg.UNWRAP_SELECTOR + word(int(plan["minimum_wsda_raw"]))
+
+    def persist_unwrap_intent(signed):
+        current = load_state()
+        current.setdefault("pending_sells", {})[token] = {
+            **pending, "stage": "unwrap_broadcasting", "tx_hash": signed["tx_hash"],
+            "nonce": signed["nonce"], "gas": signed["gas"], "gas_price": signed["gas_price"],
+        }
+        current["updated_at"] = now()
+        save_state(current)
+
+    unwrap_tx, _, _ = send_transaction(
+        account, cfg.WSDA_ADDRESS, unwrap_data, 0, 100000,
+        before_broadcast=persist_unwrap_intent,
+    )
+    pending["stage"] = "unwrap_broadcasting"
+    pending["tx_hash"] = unwrap_tx
+    pending["unwrap_tx"] = unwrap_tx
+    state = load_state()
+    state.setdefault("pending_sells", {})[token] = pending
+    save_state(state)
+    receipt, unwrap_ok = wait_receipt(unwrap_tx)
+    if not unwrap_ok:
+        state = load_state()
+        pending = state.setdefault("pending_sells", {}).get(token, pending)
+        pending["stage"] = "swap_confirmed"
+        pending.pop("tx_hash", None)
+        state["pending_sells"][token] = pending
+        save_state(state)
+        raise RuntimeError(f"WSDA unwrap failed: {unwrap_tx}")
+    return _finalize_confirmed_sell(token, pending)
 
 
 if __name__ == "__main__":

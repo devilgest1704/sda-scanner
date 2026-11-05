@@ -31,14 +31,14 @@ if ! [[ "$OPTIMIZER_INTERVAL" =~ ^[0-9]+$ ]] || [ "$OPTIMIZER_INTERVAL" -lt 900 
   exit 1
 fi
 
-STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json v30_no_buy_diagnostic.json strategy_lab/candidate_outcomes.json strategy_lab/missed_pump_learning.json strategy_lab/forward_shadow_state.json strategy_lab/execution_quote_audit.json strategy_lab/evolution_state.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json strategy_lab/temporal_paper_trial.json strategy_lab/temporal_paper_trial_report.json"
+STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json v30_no_buy_diagnostic.json strategy_lab/candidate_outcomes.json strategy_lab/missed_pump_learning.json strategy_lab/forward_shadow_state.json strategy_lab/execution_quote_audit.json strategy_lab/evolution_state.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json real_paper_bridge_state.json real_paper_bridge_events.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json strategy_lab/temporal_paper_trial.json strategy_lab/temporal_paper_trial_report.json"
 
 ensure_json_state() {
   python - <<'PY'
 import json
 from pathlib import Path
 
-files = '''state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json'''.split()
+files = '''state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json real_paper_bridge_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json'''.split()
 
 # Never reset the accounting source-of-truth, even if a scanner stage
 # wrote corrupt JSON. The dedicated paper_state_guard fails closed below.
@@ -290,6 +290,11 @@ run_one_scan() {
   run_timed_stage liquidity_scanner python liquidity_scanner.py
 
   run_timed_stage paper_engine env TELEGRAM_TOKEN="" python paper_engine_v19.py
+  # Mirror only committed PAPER position transitions. The bridge is strictly
+  # opt-in and returns disabled under the production defaults.
+  if ! python -c 'from real_paper_bridge import reconcile; print("PAPER->REAL bridge:", reconcile())'; then
+    echo "::warning::PAPER->REAL bridge failed; PAPER ledger and exits remain authoritative." >&2
+  fi
   run_timed_stage paper_stats env TELEGRAM_TOKEN="" python paper_stats.py
   # Read-only risk telemetry; must never interrupt exits or checkpoint safety.
   if ! python -m tools.paper_loss_circuit; then
