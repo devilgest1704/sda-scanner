@@ -77,6 +77,14 @@ def save_state(data):
     os.replace(tmp, path)
 
 
+def _reset_daily_pnl_if_needed(state):
+    today = datetime.now(timezone.utc).date().isoformat()
+    if state.get("daily_pnl_date") != today:
+        state["daily_pnl_date"] = today
+        state["daily_realized_pnl_sda"] = 0.0
+    return state
+
+
 def load_state():
     state = load_json(cfg.STATE_FILE, {})
     if not isinstance(state, dict):
@@ -86,6 +94,7 @@ def load_state():
     state.setdefault("trades", [])
     state.setdefault("daily_realized_pnl_sda", 0.0)
     state.setdefault("updated_at", None)
+    _reset_daily_pnl_if_needed(state)
     return state
 
 
@@ -151,6 +160,7 @@ def build_exact_input_single(token_in, token_out, fee, recipient, deadline, amou
     return (
         cfg.BUY_SELECTOR
         + address_word(token_in)
+        + address_word(token_out)
         + word(fee)
         + address_word(recipient)
         + word(deadline)
@@ -236,6 +246,7 @@ def approve_if_needed(account, token, amount):
 
 
 def safety_check(position_sda, state):
+    _reset_daily_pnl_if_needed(state)
     position_sda = float(position_sda)
     if position_sda < cfg.POSITION_MIN_SDA or position_sda > cfg.POSITION_MAX_SDA:
         raise ValueError("Real position must be between 10 and 20 SDA")
