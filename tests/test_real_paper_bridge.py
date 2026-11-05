@@ -60,6 +60,15 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(result["status"], "disabled")
         self.trader.execute_buy.assert_not_called()
 
+    def test_dry_run_bridge_does_not_reconcile_or_initialize(self):
+        self.write_paper({TOKEN: {"symbol": "TEST"}})
+        with patch.dict(os.environ, {"REAL_TRADING_DRY_RUN": "true"}):
+            result = bridge.reconcile()
+        self.assertEqual(result["status"], "dry_run")
+        self.assertFalse(self.state.exists())
+        self.trader.execute_buy.assert_not_called()
+        self.trader.execute_sell.assert_not_called()
+
     def test_first_run_only_sets_baseline(self):
         self.write_paper({TOKEN: {"symbol": "TEST"}})
         result = bridge.reconcile()
