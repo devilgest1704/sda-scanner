@@ -89,14 +89,17 @@ def reconcile():
             actions.append({"action": "BUY", "token": token, "symbol": symbol,
                            "status": status, "tx": result.get("tx"), "at": _now()})
             if status not in ("CONFIRMED", "ALREADY_OPEN"):
-                if token in now_keys:
-                    next_pending_buy.add(token)
+                # Keep polling a broadcast BUY even if PAPER has since closed.
+                next_pending_buy.add(token)
             elif token not in now_keys:
                 confirmed_after_paper_close.add(token)
         except Exception as exc:
             actions.append({"action": "BUY", "token": token, "symbol": symbol,
                            "status": "ERROR", "error": str(exc)[:500], "at": _now()})
-            if token in now_keys:
+            # Retain only a transaction that was actually persisted before
+            # broadcast; a preflight/quote rejection must not become a retry.
+            pending_state = real_trader.load_state().get("pending_buys", {})
+            if token in pending_state:
                 next_pending_buy.add(token)
 
     closed = sorted(set(closed) | confirmed_after_paper_close)
