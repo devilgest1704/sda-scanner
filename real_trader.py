@@ -84,6 +84,7 @@ def load_state():
     state.setdefault("positions", {})
     state.setdefault("trades", [])
     state.setdefault("daily_realized_pnl_sda", 0.0)
+    state.setdefault("daily_pnl_date", datetime.now(timezone.utc).date().isoformat())
     state.setdefault("updated_at", None)
     return state
 
@@ -230,7 +231,15 @@ def approve_if_needed(account, token, amount):
     return {"tx": tx_hash, "gas": gas, "gas_price": gp}
 
 
+def _reset_daily_pnl_if_needed(state):
+    today = datetime.now(timezone.utc).date().isoformat()
+    if state.get("daily_pnl_date") != today:
+        state["daily_pnl_date"] = today
+        state["daily_realized_pnl_sda"] = 0.0
+
+
 def safety_check(position_sda, state):
+    _reset_daily_pnl_if_needed(state)
     position_sda = float(position_sda)
     if position_sda < cfg.POSITION_MIN_SDA or position_sda > cfg.POSITION_MAX_SDA:
         raise ValueError("Real position must be between 10 and 20 SDA")
@@ -366,26 +375,44 @@ def execute_sell(token, symbol, token_amount_raw):
     if chain_id() != cfg.CHAIN_ID:
         raise RuntimeError("Wrong Sidra Chain ID")
     approval = approve_if_needed(account, token, plan["token_amount_raw"])
+    wsda_before = token_balance(cfg.WSDA_ADDRESS, account.address)
     tx_hash, gas, gp = send_transaction(account, cfg.ROUTER_ADDRESS, plan["calldata"], 0, cfg.GAS_LIMIT)
     receipt, ok = wait_receipt(tx_hash)
     if not ok:
         raise RuntimeError(f"SELL failed: {tx_hash}")
 
-    # Unwrap WSDA to native SDA only after the swap itself is confirmed.
-    unwrap_data = cfg.UNWRAP_SELECTOR + word(plan["minimum_wsda_raw"])
+    # Measure actual WSDA proceeds, not the slippage minimum. This avoids
+    # leaving the quote/minimum difference stranded in the wallet.
+    wsda_after = token_balance(cfg.WSDA_ADDRESS, account.address)
+    received_wsda_raw = max(0, wsda_after - wsda_before)
+    # Unwrap only the WSDA received by this swap; preserve any prior WSDA.
+    unwrap_data = cfg.UNWRAP_SELECTOR + word(received_wsda_raw)
     unwrap_tx = None
-    if plan["minimum_wsda_raw"] > 0:
+    if received_wsda_raw > 0:
         unwrap_tx, ugas, ugp = send_transaction(account, cfg.WSDA_ADDRESS, unwrap_data, 0, 100000)
         _, unwrap_ok = wait_receipt(unwrap_tx)
         if not unwrap_ok:
             raise RuntimeError(f"WSDA unwrap failed: {unwrap_tx}")
 
     state = load_state()
-    state["positions"].pop(addr(token), None)
-    state["trades"].append({"action": "SELL", "symbol": symbol, "token": addr(token), "tx": tx_hash, "unwrap_tx": unwrap_tx, "at": now()})
+    position = state["positions"].pop(addr(token), {})
+    proceeds_sda = float(Decimal(received_wsda_raw) / Decimal(10 ** 18))
+    cost_sda = float(position.get("amount_sda") or 0)
+    realized_pnl_sda = proceeds_sda - cost_sda
+    _reset_daily_pnl_if_needed(state)
+    state["daily_realized_pnl_sda"] = float(state.get("daily_realized_pnl_sda") or 0) + realized_pnl_sda
+    state["trades"].append({
+        "action": "SELL", "symbol": symbol, "token": addr(token), "tx": tx_hash,
+        "unwrap_tx": unwrap_tx, "received_wsda_raw": received_wsda_raw,
+        "proceeds_sda": proceeds_sda, "cost_sda": cost_sda,
+        "realized_pnl_sda": realized_pnl_sda, "at": now()
+    })
     state["updated_at"] = now()
     save_state(state)
-    return {**plan, "status": "CONFIRMED", "tx": tx_hash, "unwrap_tx": unwrap_tx, "approval": approval, "gas": gas, "gas_price": gp}
+    return {**plan, "status": "CONFIRMED", "tx": tx_hash, "unwrap_tx": unwrap_tx,
+            "received_wsda_raw": received_wsda_raw, "proceeds_sda": proceeds_sda,
+            "realized_pnl_sda": realized_pnl_sda, "approval": approval,
+            "gas": gas, "gas_price": gp}
 
 
 if __name__ == "__main__":
