@@ -364,41 +364,12 @@ def prepare_sell(token, symbol, token_amount_raw):
     }
 
 
-def execute_sell(token, symbol, token_amount_raw):
-    plan = prepare_sell(token, symbol, token_amount_raw)
-    if not cfg.REAL_TRADING_ENABLED or cfg.REAL_TRADING_DRY_RUN:
-        plan["status"] = "DRY_RUN"
-        return plan
-    account = private_account()
-    if account.address.lower() != plan["wallet"].lower():
-        raise RuntimeError("Trading wallet mismatch")
-    if chain_id() != cfg.CHAIN_ID:
-        raise RuntimeError("Wrong Sidra Chain ID")
-    approval = approve_if_needed(account, token, plan["token_amount_raw"])
-    wsda_before = token_balance(cfg.WSDA_ADDRESS, account.address)
-    tx_hash, gas, gp = send_transaction(account, cfg.ROUTER_ADDRESS, plan["calldata"], 0, cfg.GAS_LIMIT)
-    receipt, ok = wait_receipt(tx_hash)
-    if not ok:
-        raise RuntimeError(f"SELL failed: {tx_hash}")
-
-    # Measure actual WSDA proceeds, not the slippage minimum. This avoids
-    # leaving the quote/minimum difference stranded in the wallet.
-    wsda_after = token_balance(cfg.WSDA_ADDRESS, account.address)
-    received_wsda_raw = max(0, wsda_after - wsda_before)
-    # Unwrap only the WSDA received by this swap; preserve any prior WSDA.
-    unwrap_data = cfg.UNWRAP_SELECTOR + word(received_wsda_raw)
-    unwrap_tx = None
-    if received_wsda_raw > 0:
-        unwrap_tx, ugas, ugp = send_transaction(account, cfg.WSDA_ADDRESS, unwrap_data, 0, 100000)
-        _, unwrap_ok = wait_receipt(unwrap_tx)
-        if not unwrap_ok:
-            raise RuntimeError(f"WSDA unwrap failed: {unwrap_tx}")
-
-    state = load_state()
-    position = state["positions"].pop(addr(token), {})
+def _finalize_confirmed_sell(token, symbol, state, position, tx_hash, unwrap_tx,
+                              received_wsda_raw, approval=None, gas=None, gp=None):
     proceeds_sda = float(Decimal(received_wsda_raw) / Decimal(10 ** 18))
     cost_sda = float(position.get("amount_sda") or 0)
     realized_pnl_sda = proceeds_sda - cost_sda
+    state["positions"].pop(addr(token), None)
     _reset_daily_pnl_if_needed(state)
     state["daily_realized_pnl_sda"] = float(state.get("daily_realized_pnl_sda") or 0) + realized_pnl_sda
     state["trades"].append({
@@ -409,10 +380,112 @@ def execute_sell(token, symbol, token_amount_raw):
     })
     state["updated_at"] = now()
     save_state(state)
-    return {**plan, "status": "CONFIRMED", "tx": tx_hash, "unwrap_tx": unwrap_tx,
+    return {"action": "SELL", "status": "CONFIRMED", "token": addr(token),
+            "tx": tx_hash, "unwrap_tx": unwrap_tx,
             "received_wsda_raw": received_wsda_raw, "proceeds_sda": proceeds_sda,
             "realized_pnl_sda": realized_pnl_sda, "approval": approval,
             "gas": gas, "gas_price": gp}
+
+
+def execute_sell(token, symbol, token_amount_raw):
+    token = addr(token)
+    state = load_state()
+    position = state.get("positions", {}).get(token)
+    if not isinstance(position, dict):
+        return {"action": "SELL", "token": token, "status": "ALREADY_CLOSED"}
+
+    if not cfg.REAL_TRADING_ENABLED or cfg.REAL_TRADING_DRY_RUN:
+        plan = prepare_sell(token, symbol, token_amount_raw)
+        plan["status"] = "DRY_RUN"
+        return plan
+
+    account = private_account()
+    if chain_id() != cfg.CHAIN_ID:
+        raise RuntimeError("Wrong Sidra Chain ID")
+    if account.address.lower() != wallet_address().lower():
+        raise RuntimeError("Trading wallet mismatch")
+
+    pending = position.get("pending_sell")
+    approval = None
+    gas = gp = None
+
+    if not isinstance(pending, dict):
+        plan = prepare_sell(token, symbol, token_amount_raw)
+        approval = approve_if_needed(account, token, plan["token_amount_raw"])
+        wsda_before = token_balance(cfg.WSDA_ADDRESS, account.address)
+        # Persist an intent before broadcast. If the process dies in the
+        # broadcast/response gap, refuse an automatic second sell.
+        position["pending_sell"] = {
+            "stage": "submitting", "wsda_before_raw": wsda_before,
+            "token_amount_raw": plan["token_amount_raw"], "symbol": symbol,
+            "created_at": now(), "approval": approval,
+        }
+        state["positions"][token] = position
+        save_state(state)
+        tx_hash, gas, gp = send_transaction(
+            account, cfg.ROUTER_ADDRESS, plan["calldata"], 0, cfg.GAS_LIMIT
+        )
+        pending = position["pending_sell"]
+        pending.update({"stage": "swap_submitted", "tx": tx_hash,
+                        "gas": gas, "gas_price": gp})
+        save_state(state)
+    else:
+        if pending.get("stage") == "submitting" and not pending.get("tx"):
+            raise RuntimeError(
+                "SELL broadcast outcome is uncertain; automatic retry blocked. "
+                "Reconcile wallet nonce and transaction history before proceeding."
+            )
+        approval = pending.get("approval")
+        gas = pending.get("gas")
+        gp = pending.get("gas_price")
+
+    tx_hash = pending.get("tx")
+    if not tx_hash:
+        raise RuntimeError("Pending SELL has no transaction hash; manual reconciliation required")
+
+    received_wsda_raw = pending.get("received_wsda_raw")
+    if received_wsda_raw is None:
+        receipt, ok = wait_receipt(tx_hash)
+        if not ok:
+            position.pop("pending_sell", None)
+            state["positions"][token] = position
+            save_state(state)
+            raise RuntimeError(f"SELL failed: {tx_hash}")
+        wsda_after = token_balance(cfg.WSDA_ADDRESS, account.address)
+        received_wsda_raw = max(0, wsda_after - int(pending.get("wsda_before_raw") or 0))
+        pending["stage"] = "swap_confirmed"
+        pending["received_wsda_raw"] = received_wsda_raw
+        pending["receipt"] = receipt
+        save_state(state)
+
+    unwrap_tx = pending.get("unwrap_tx")
+    if received_wsda_raw > 0:
+        if unwrap_tx:
+            unwrap_receipt, unwrap_ok = wait_receipt(unwrap_tx)
+            if not unwrap_ok:
+                # The swap is already complete. Clear only the failed unwrap
+                # hash so a later retry unwraps the same proceeds, never swaps again.
+                pending.pop("unwrap_tx", None)
+                save_state(state)
+                raise RuntimeError(f"WSDA unwrap failed: {unwrap_tx}")
+        else:
+            unwrap_data = cfg.UNWRAP_SELECTOR + word(received_wsda_raw)
+            unwrap_tx, _, _ = send_transaction(
+                account, cfg.WSDA_ADDRESS, unwrap_data, 0, 100000
+            )
+            pending["unwrap_tx"] = unwrap_tx
+            pending["stage"] = "unwrap_submitted"
+            save_state(state)
+            _, unwrap_ok = wait_receipt(unwrap_tx)
+            if not unwrap_ok:
+                pending.pop("unwrap_tx", None)
+                save_state(state)
+                raise RuntimeError(f"WSDA unwrap failed: {unwrap_tx}")
+
+    return _finalize_confirmed_sell(
+        token, symbol, state, position, tx_hash, unwrap_tx,
+        int(received_wsda_raw), approval, gas, gp
+    )
 
 
 if __name__ == "__main__":
