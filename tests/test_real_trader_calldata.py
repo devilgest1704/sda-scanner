@@ -1,5 +1,8 @@
 """ABI encoding regression test for the real swap executor."""
 import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 from datetime import datetime, timezone
 
 import real_trader
@@ -51,6 +54,15 @@ class SwapCalldataTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(RuntimeError, "capital cap"):
             real_trader.safety_check(15.0, state)
+
+    def test_corrupt_real_state_is_not_silently_reset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "real_trade_state.json"
+            path.write_text("{broken", encoding="utf-8")
+            with patch.object(real_trader.cfg, "STATE_FILE", str(path)):
+                with self.assertRaisesRegex(RuntimeError, "Refusing to reset unreadable real trading state"):
+                    real_trader.load_state()
+            self.assertEqual(path.read_text(encoding="utf-8"), "{broken")
 
     def test_exact_input_single_encodes_both_tokens_and_all_eight_words(self):
         data = real_trader.build_exact_input_single(
