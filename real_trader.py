@@ -286,10 +286,24 @@ def execute_buy(token, symbol, position_sda=None):
         raise RuntimeError("Wrong Sidra Chain ID")
     if native_balance(account.address) < plan["value_wei"]:
         raise RuntimeError("Insufficient SDA balance for BUY + gas")
+    try:
+        token_balance_before = token_balance(token, account.address)
+    except Exception:
+        token_balance_before = None
     tx_hash, gas, gp = send_transaction(account, cfg.ROUTER_ADDRESS, plan["calldata"], plan["value_wei"], cfg.GAS_LIMIT)
     receipt, ok = wait_receipt(tx_hash)
     if not ok:
         raise RuntimeError(f"BUY failed: {tx_hash}")
+    # Record actual received tokens when the ERC-20 balance query succeeds.
+    # The on-chain minimum output is a conservative fallback, never the quote.
+    try:
+        token_balance_after = token_balance(token, account.address)
+        received_raw = (token_balance_after - token_balance_before
+                        if token_balance_before is not None else 0)
+    except Exception:
+        received_raw = 0
+    if received_raw <= 0:
+        received_raw = int(plan["minimum_out_raw"])
     state = load_state()
     state["positions"][addr(token)] = {
         "symbol": symbol,
@@ -297,6 +311,7 @@ def execute_buy(token, symbol, position_sda=None):
         "amount_sda": plan["position_sda"],
         "quoted_out_raw": plan["quoted_out_raw"],
         "minimum_out_raw": plan["minimum_out_raw"],
+        "token_amount_raw": received_raw,
         "opened_at": now(),
         "buy_tx": tx_hash,
     }
