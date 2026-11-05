@@ -66,6 +66,25 @@ def _wallet_short(wallet):
     return wallet[:10] + "..." + wallet[-6:] if len(wallet) > 20 else (wallet or "NOT CONFIGURED")
 
 
+def _position_mark_to_market(token, pos):
+    """Read-only sell quote estimate for one open position."""
+    try:
+        import real_trader
+        amount_raw = int(pos.get("token_amount_raw") or 0)
+        if amount_raw <= 0:
+            return None, None, "token amount unavailable"
+        plan = real_trader.prepare_sell(token, str(pos.get("symbol") or token[:10]), amount_raw)
+        value_sda = int(plan["quoted_wsda_raw"]) / 10**18
+        cost_sda = _num(pos.get("amount_sda", pos.get("cost_sda")))
+        return value_sda, value_sda - cost_sda, None
+    except Exception as exc:
+        return None, None, str(exc)[:100]
+
+
+def _pnl_text(value):
+    return f"{value:+.2f} SDA" if value is not None else "N/A"
+
+
 def bot_report(dashboard):
     state = _state(dashboard)
     positions = state.get("positions", {})
@@ -81,62 +100,111 @@ def bot_report(dashboard):
         f"🎯 Position size: {cfg.POSITION_MIN_SDA:.0f}–{cfg.POSITION_MAX_SDA:.0f} SDA",
         f"📦 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.0f} SDA",
         f"📊 Open positions: {len(positions)}/{cfg.MAX_OPEN_POSITIONS}",
-        f"📉 Daily realized P/L: {daily:+.2f} SDA", "────────────────────────",
+        f"📉 Daily realized P/L: {daily:+.2f} SDA",
     ]
     if not positions:
-        lines.append("⚪ No open bot positions")
+        lines += ["📈 Unrealized P/L: +0.00 SDA", "💼 Open cost: 0.00 SDA",
+                  "💹 Total P/L: N/A (no closed trades)", "────────────────────────",
+                  "⚪ No open bot positions"]
     else:
-        lines.append("🪙 OPEN BOT POSITIONS")
+        lines += ["🪙 OPEN BOT POSITIONS", "────────────────────────"]
+        marks = []
+        open_cost = 0.0
+        valid_count = 0
         for token, pos in positions.items():
             if not isinstance(pos, dict):
                 continue
             symbol = pos.get("symbol") or token[:10]
-            amount = _num(pos.get("amount_sda"))
-            lines.append(f"• {symbol} • {amount:.2f} SDA")
-    lines += ["", "Bot wallet is separate from the existing manual REAL wallet."]
-    return "\n".join(lines)
-
-
+            cost = _num(pos.get("amount_sda", pos.get("cost_sda")))
+            open_cost += cost
+            value, pnl, error = _position_mark_to_market(token, pos)
+            if pnl is None:
+                lines.append(f"• {symbol} • cost {cost:.2f} SDA • P/L N/A")
+                lines.append(f"  Quote unavailable: {error}")
+            else:
+                valid_count += 1
+                marks.append(pnl)
+                pct = pnl / cost * 100 if cost else 0.0
+                lines.append(f"• {symbol} • {pnl:+.2f} SDA ({pct:+.2f}%)")
+                lines.append(f"  Value {value:.2f} / cost {cost:.2f} SDA")
+        unrealized = sum(marks) if valid_count == len([p for p in positions.values() if isinstance(p, dict)]) else None
+        lines += ["────────────────────────", f"📈 Unrealized P/L: {_pnl_text(unrealized)}",
+                  f"💼 Open cost: {open_cost:.2f} SDA", f"💹 Realized today: {daily:+.2f} SDA"]
+    lines += ["", "P/L is quote-based estimate; excludes gas and may change before execution.",
+              "Bot wallet is separate from the existing manual REAL wallet."]
+    return "\\n".join(lines)
 def statistics_report(dashboard):
     state = _state(dashboard)
     positions = state.get("positions", {})
     trades = state.get("trades", [])
     positions = positions if isinstance(positions, dict) else {}
-    trades = trades if isinstance(trades, list) else []
-    buys = [x for x in trades if isinstance(x, dict) and str(x.get("action", "")).upper() == "BUY"]
-    sells = [x for x in trades if isinstance(x, dict) and str(x.get("action", "")).upper() == "SELL"]
+    trades = [x for x in trades if isinstance(x, dict)] if isinstance(trades, list) else []
+    buys = [x for x in trades if str(x.get("action", "")).upper() == "BUY"]
+    sells = [x for x in trades if str(x.get("action", "")).upper() == "SELL"]
+    realized_values = [_num(x.get("realized_pnl_sda")) for x in sells if x.get("realized_pnl_sda") is not None]
+    realized_total = sum(realized_values)
+    wins = [x for x in realized_values if x > 0]
+    losses = [x for x in realized_values if x < 0]
     daily = _num(state.get("daily_realized_pnl_sda"))
     balance, balance_error = _wallet_balance_sda()
     wallet = _wallet_address()
-    updated = state.get("updated_at")
-    updated = str(updated)[:16].replace("T", " ") if updated else "—"
+    updated = str(state.get("updated_at") or "—")[:16].replace("T", " ")
     balance_text = f"{balance:.3f}" if balance is not None else f"RPC ERROR: {balance_error}"
+    marks, position_rows, open_cost = [], [], 0.0
+    for token, pos in positions.items():
+        if not isinstance(pos, dict):
+            continue
+        symbol = pos.get("symbol") or token[:10]
+        cost = _num(pos.get("amount_sda", pos.get("cost_sda")))
+        open_cost += cost
+        value, pnl, error = _position_mark_to_market(token, pos)
+        if pnl is None:
+            position_rows.append(f"• {symbol}: P/L N/A ({error})")
+        else:
+            marks.append(pnl)
+            pct = pnl / cost * 100 if cost else 0.0
+            position_rows.append(f"• {symbol}: {pnl:+.2f} SDA ({pct:+.2f}%)")
+    valid_positions = len(position_rows)
+    unrealized = sum(marks) if len(marks) == valid_positions else None
+    combined = realized_total + unrealized if unrealized is not None else None
+    gross_wins, gross_losses = sum(wins), abs(sum(losses))
+    pf = gross_wins / gross_losses if gross_losses else (float("inf") if gross_wins else None)
+    closed_summary = (f"📊 Closed trades: {len(realized_values)} • Win rate: {len(wins)/len(realized_values)*100:.1f}%"
+                      if realized_values else "📊 Closed trades: 0 • Win rate: N/A")
     lines = [
-        "📈 REAL TRADING BOT • STATISTICS", "", f"🟢 Open positions: {len(positions)} / {cfg.MAX_OPEN_POSITIONS}",
-        f"📥 Bot BUYs: {len(buys)}", f"📤 Bot SELLs: {len(sells)}", "────────────────────────",
-        f"💰 Wallet SDA: {balance_text}", f"📊 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.2f} SDA",
+        "📈 REAL TRADING BOT • STATISTICS", "",
+        f"🟢 Open positions: {len(positions)} / {cfg.MAX_OPEN_POSITIONS}",
+        f"📥 Confirmed BUYs: {len(buys)}", f"📤 Confirmed SELLs: {len(sells)}", closed_summary,
+        f"💰 Realized P/L total: {realized_total:+.2f} SDA",
+        f"📈 Unrealized P/L: {_pnl_text(unrealized)}", f"💹 Combined P/L: {_pnl_text(combined)}",
+        f"🏆 Avg win: {sum(wins)/len(wins):+.2f} SDA" if wins else "🏆 Avg win: N/A",
+        f"🧯 Avg loss: {sum(losses)/len(losses):+.2f} SDA" if losses else "🧯 Avg loss: N/A",
+        f"⚖️ Profit factor: {pf:.2f}" if pf is not None and pf != float("inf") else ("⚖️ Profit factor: ∞" if pf == float("inf") else "⚖️ Profit factor: N/A"),
+        f"💼 Open cost: {open_cost:.2f} SDA", "────────────────────────",
+        f"💰 Wallet native SDA: {balance_text}", f"📊 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.2f} SDA",
         f"🎯 Position range: {cfg.POSITION_MIN_SDA:.0f}–{cfg.POSITION_MAX_SDA:.0f} SDA",
         f"📉 Daily realized P/L: {daily:+.2f} SDA", f"🕒 State updated: {updated}",
-        "", "📜 RECENT BOT TRADES", "────────────────────────",
+        "", "🪙 OPEN POSITION P/L", "────────────────────────",
     ]
+    lines.extend(position_rows or ["⚪ No open positions"])
+    lines += ["", "📜 RECENT BOT TRADES", "────────────────────────"]
     if not trades:
         lines.append("⚪ No bot trades yet")
     else:
         for trade in trades[-15:][::-1]:
-            if not isinstance(trade, dict):
-                continue
             action = str(trade.get("action") or "?").upper()
             symbol = trade.get("symbol") or str(trade.get("token") or "UNKNOWN")[:10]
             amount = trade.get("amount_sda")
             tx = str(trade.get("tx") or "")
             amount_text = f" • {float(amount):.2f} SDA" if amount is not None else ""
-            lines.append(f"{'🟢' if action == 'BUY' else '🔴' if action == 'SELL' else '⚪'} {action} {symbol}{amount_text}")
+            pnl = trade.get("realized_pnl_sda")
+            pnl_text = f" • P/L {float(pnl):+.2f} SDA" if pnl is not None else ""
+            lines.append(f"{'🟢' if action == 'BUY' else '🔴' if action == 'SELL' else '⚪'} {action} {symbol}{amount_text}{pnl_text}")
             if tx:
                 lines.append(f"   tx {tx[:10]}...")
-    lines += ["", f"👛 Bot wallet: {_wallet_short(wallet)}", "👛 Separate automated-trading wallet"]
-    return "\n".join(lines)
-
-
+    lines += ["", f"👛 Bot wallet: {_wallet_short(wallet)}", "👛 Separate automated-trading wallet",
+              "P/L estimates exclude gas and may differ from final realized results."]
+    return "\\n".join(lines)
 def patch_dashboard(dashboard):
     if getattr(dashboard, "_sda_real_bot_menu_patched", False):
         return dashboard
