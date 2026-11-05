@@ -1,4 +1,6 @@
 import json, os, requests
+from datetime import datetime, timezone
+import engine_legacy as engine
 
 POSITIONS_FILE = "positions.json"
 MARKET_FILE = "market_data.json"
@@ -42,6 +44,8 @@ def main():
     open_pnl = 0.0
     open_invested = 0.0
     open_rows = []
+    stale_open_quotes = 0
+    observed = datetime.now(timezone.utc)
     for address, pos in positions.items():
         token = str(address).lower()
         td = tokens.get(token, {}) if isinstance(tokens, dict) else {}
@@ -50,9 +54,19 @@ def main():
         entry = num(pos.get("entry_price"))
         fraction = num(pos.get("remaining_fraction", 1))
         investment = num(pos.get("investment_sda")) * fraction
+        try:
+            quoted = datetime.fromisoformat(str(an.get("last_transaction")).replace("Z", "+00:00"))
+            age = (observed-quoted).total_seconds()
+            stale_open_quotes += not 0 <= age <= 300
+        except (ValueError, TypeError):
+            stale_open_quotes += 1
         if cur > 0 and entry > 0:
-            roi = (cur - entry) / entry * 100
-            pnl = investment * roi / 100
+            # Match actual PAPER close(): both fees plus exit slippage.
+            # Entry slippage is already included in entry_price.
+            exit_value = investment / entry * cur * (1-engine.SLIPPAGE_RATE) * (1-engine.FEE_RATE)
+            entry_cost = investment * (1+engine.FEE_RATE)
+            pnl = exit_value - entry_cost
+            roi = pnl / entry_cost * 100 if entry_cost else 0.0
             open_pnl += pnl
             open_invested += investment
             open_rows.append((pos.get("label", token[:10]), pnl, roi))
@@ -65,6 +79,9 @@ def main():
         "updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
         "realized_pnl_sda": realized,
         "open_pnl_sda": open_pnl,
+        "open_pnl_after_model_costs": True,
+        "open_pnl_stale_quotes": stale_open_quotes,
+        "open_pnl_basis": "last_observed_quote_not_verified_sell_fill",
         "cumulative_pnl_sda": cumulative,
         "total_invested_sda": total_invested,
         "roi_pct": roi,
@@ -89,6 +106,7 @@ def main():
         pnl_line("CUMULATIVE P/L", cumulative),
         pnl_line("Realized P/L", realized),
         pnl_line("Open P/L", open_pnl),
+        f"Open valuation after model costs • stale/unknown quotes: {stale_open_quotes}",
         f"📈 ROI: {roi:+.2f}%",
         f"💰 Invested: {total_invested:.2f} SDA",
         "",

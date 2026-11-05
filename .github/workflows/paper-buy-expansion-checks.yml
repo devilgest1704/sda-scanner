@@ -14,6 +14,7 @@ on:
       - 'tests/test_tp4_paper.py'
       - 'tests/test_paper_swing.py'
       - 'tests/test_single_quote_swing.py'
+      - 'tests/test_paper_capacity_and_net_stats.py'
       - 'tools/temporal_recovery_buy.py'
       - '.github/workflows/scanner_v18.yml'
       - '.github/workflows/paper-buy-expansion-checks.yml'
@@ -49,3 +50,6 @@ jobs:
 
       - name: Verify single-quote PAPER admission and honest quality labeling
         run: python -m unittest discover -s tests -p 'test_single_quote_swing.py' -v
+
+      - name: Verify ten-position PAPER cap and net mark-to-market parity
+        run: python -m unittest discover -s tests -p 'test_paper_capacity_and_net_stats.py' -v

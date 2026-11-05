@@ -19,7 +19,7 @@ if PAPER_BUY_MODE not in ("temporal_recovery","baseline"):
     raise ValueError("Unsupported PAPER BUY mode: "+PAPER_BUY_MODE)
 STATE_FILE="v30_pump_state.json"
 SL_PCT=0.025
-MAX_OPEN=4
+MAX_OPEN=10 if PAPER_TP4 else 4
 MAX_BUYS_PER_RUN=1
 # PAPER-only fresh momentum expansion, independent of baseline thresholds.
 FRESH_MOMENTUM_MIN_SCORE=72
