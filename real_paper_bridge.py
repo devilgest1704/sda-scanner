@@ -52,6 +52,16 @@ def reconcile():
         # validation; reconciliation is reserved for live-enabled operation.
         return {"status": "dry_run", "actions": []}
 
+    # REAL must follow the exact active PAPER entry/exit profile. Fail closed
+    # rather than trading a different strategy after a workflow config drift.
+    paper_buy_mode = os.getenv("SDA_PAPER_BUY_MODE", "temporal_recovery").strip()
+    paper_tp4 = os.getenv("SDA_PAPER_TP4", "0").strip() == "1"
+    if paper_buy_mode != "temporal_recovery" or not paper_tp4:
+        raise RuntimeError(
+            "REAL bridge requires the active PAPER profile: "
+            "SDA_PAPER_BUY_MODE=temporal_recovery and SDA_PAPER_TP4=1"
+        )
+
     current = _paper_positions()
     if STATE_FILE.exists():
         state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
@@ -88,7 +98,13 @@ def reconcile():
         existing_pending = real_trader.load_state().get("pending_buys", {}).get(token, {})
         symbol = str(pos.get("symbol") or pos.get("ticker")
                       or existing_pending.get("symbol") or token[:8])
-        amount = cfg.position_sda()
+        # The committed PAPER position is the source of truth for sizing.
+        # TP4 currently opens 20 SDA; never silently substitute REAL's old
+        # 15-SDA default. Keep the configured min/max/capital guard in force.
+        paper_amount = pos.get("investment_sda", pos.get("amount_sda"))
+        if paper_amount is None:
+            paper_amount = cfg.POSITION_DEFAULT_SDA
+        amount = cfg.position_sda(float(paper_amount))
         try:
             result = real_trader.execute_buy(token, symbol, amount)
             status = result.get("status", "UNKNOWN")
