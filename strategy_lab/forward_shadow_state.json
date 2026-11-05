@@ -2,9 +2,9 @@
   "schema": 1,
   "paper_only": true,
   "method": "forward_observed_quote_shadow_simulation",
-  "last_snapshot_at": "2026-11-05T12:26:46.572708+00:00",
-  "updated_at": "2026-11-05T12:26:46.572708+00:00",
-  "runs": 29817,
+  "last_snapshot_at": "2026-11-05T12:32:46.807647+00:00",
+  "updated_at": "2026-11-05T12:32:46.807647+00:00",
+  "runs": 29823,
   "strategies": {
     "baseline": {
       "filters": {
@@ -40100,16 +40100,16 @@
     }
   },
   "last_diagnostic": {
-    "at": "2026-11-05T12:26:46.572708+00:00",
+    "at": "2026-11-05T12:32:46.807647+00:00",
     "market_tokens_with_quote": 169,
     "sampled_candidates": 40,
     "all_candidate_phases": {
-      "WATCH": 2,
-      "NO": 167
+      "WATCH": 3,
+      "NO": 166
     },
     "sampled_candidate_phases": {
-      "WATCH": 2,
-      "NO": 38
+      "WATCH": 3,
+      "NO": 37
     },
     "policy_qualified": {
       "baseline": 0,
@@ -40169,8 +40169,9 @@
       "sampled_candidates": 40,
       "market_unavailability_by_reason": {
         "5m": {
-          "insufficient_traded_bars": 167,
-          "missing_initial_price": 2
+          "insufficient_traded_bars": 166,
+          "missing_initial_price": 2,
+          "too_many_consecutive_missing_bars": 1
         },
         "15m": {
           "insufficient_traded_bars": 164,
@@ -40178,13 +40179,15 @@
         },
         "1h_completed": {
           "insufficient_completed_clock_hours": 5,
-          "sparse_recent_trade_hours": 70,
-          "stale_completed_hour": 94
+          "sparse_recent_trade_hours": 68,
+          "stale_completed_hour": 96
         }
       },
       "candidate_unavailability_by_reason": {
         "5m": {
-          "insufficient_traded_bars": 40
+          "insufficient_traded_bars": 38,
+          "missing_initial_price": 1,
+          "too_many_consecutive_missing_bars": 1
         },
         "15m": {
           "insufficient_traded_bars": 39,
@@ -40192,26 +40195,26 @@
         },
         "1h_completed": {
           "insufficient_completed_clock_hours": 1,
-          "sparse_recent_trade_hours": 37,
-          "stale_completed_hour": 2
+          "sparse_recent_trade_hours": 34,
+          "stale_completed_hour": 5
         }
       },
       "research_only": true,
       "thresholds_modified": false
     },
     "breakout_research": {
-      "measured": 3,
+      "measured": 4,
       "eligible_from_transactions": 0,
       "eligible_after_shadow_gates": 0,
       "rejection_reasons": {
+        "outside_early_breakout_zone": 4,
+        "volume_not_accelerating": 4,
+        "insufficient_base_trades": 3,
+        "insufficient_buy_transactions": 3,
+        "insufficient_recent_trades": 3,
         "insufficient_recent_volume": 3,
-        "outside_early_breakout_zone": 3,
-        "recent_price_momentum_not_confirmed": 3,
         "weak_buying_pressure": 3,
-        "insufficient_base_trades": 2,
-        "insufficient_buy_transactions": 2,
-        "insufficient_recent_trades": 2,
-        "volume_not_accelerating": 2
+        "recent_price_momentum_not_confirmed": 2
       },
       "qualified_samples": []
     },
@@ -40224,13 +40227,12 @@
       "fresh_quote_ready": 0,
       "rejections": {
         "missing_observed_breakout_features": 37,
-        "missing_same_scan_breakout": 37,
+        "missing_same_scan_breakout": 36,
+        "original_breakout_entry_not_eligible": 4,
         "insufficient_observed_turnover": 3,
-        "original_breakout_entry_not_eligible": 3,
         "too_late_or_no_early_breakout": 3,
         "weak_activity_acceleration": 3,
         "weak_buy_pressure": 3,
-        "already_reversing": 1,
         "wide_consolidation": 1
       },
       "modeled_friction_per_side_pct": 1.5,
@@ -40240,31 +40242,31 @@
       "mode": "RESEARCH_ONLY",
       "paper_champion_unchanged": true,
       "measured": 40,
-      "has_observed_market_data": 2,
+      "has_observed_market_data": 0,
       "observed_pressure_ready": 0,
       "eligible_after_common_shadow_gates": 0,
       "fresh_price_quote_ready": 0,
       "rejections": {
         "missing_or_overheated_momentum": 40,
-        "weak_trade_activity": 40,
-        "insufficient_observed_swaps": 39,
-        "stale_or_future_quote": 38,
-        "weak_recent_buy_pressure": 37,
-        "late_four_hour_chase": 9
+        "stale_or_future_quote": 40,
+        "weak_trade_activity": 39,
+        "insufficient_observed_swaps": 38,
+        "weak_recent_buy_pressure": 36,
+        "late_four_hour_chase": 11
       },
       "pool_liquidity_verified": false,
       "execution_parity_verified": false
     },
     "most_common_rejection_gates": {
-      "temporal_recovery": 40,
-      "quote_continuity": 37,
-      "v31_age": 37,
+      "temporal_recovery": 39,
+      "quote_continuity": 36,
       "v31_activity": 36,
-      "late_spike": 5,
-      "price_flow": 3
+      "v31_age": 36,
+      "late_spike": 6,
+      "price_flow": 4
     },
     "temporal_recovery_research": {
-      "compared_current_candidates": 9,
+      "compared_current_candidates": 13,
       "recovered_this_cycle": 0,
       "recovered_total": 20,
       "recent_examples": [
@@ -40341,1455 +40343,6 @@
     }
   },
   "diagnostic_history": [
-    {
-      "at": "2026-11-05T11:15:45.897655+00:00",
-      "market_tokens_with_quote": 168,
-      "sampled_candidates": 40,
-      "all_candidate_phases": {
-        "WATCH": 4,
-        "NO": 164
-      },
-      "sampled_candidate_phases": {
-        "WATCH": 4,
-        "NO": 36
-      },
-      "policy_qualified": {
-        "baseline": 0,
-        "quality": 0,
-        "momentum": 0,
-        "selective": 0,
-        "score": 0,
-        "quality_plus": 0,
-        "research_watch": 0,
-        "research_watch_strict": 0,
-        "research_macd_antipump": 0,
-        "research_macd_confirmation": 0,
-        "research_breakout_volume_trend": 0,
-        "research_sparse_volume_ignition": 0,
-        "research_trend_runner": 0,
-        "research_temporal_recovery": 0,
-        "research_v33_flow_continuation": 0,
-        "research_v33_cost_aware_breakout": 0,
-        "research_unconfirmed_fresh_momentum": 0,
-        "research_temporal_recovery_tp4": 0,
-        "research_loss_cooldown_6h": 0,
-        "research_loss_cooldown_12h": 0,
-        "research_loss_cooldown_24h": 0,
-        "research_loss_cooldown_48h": 0,
-        "research_evo_d4f99a5252": 0
-      },
-      "policy_quote_ready": {
-        "baseline": 0,
-        "quality": 0,
-        "momentum": 0,
-        "selective": 0,
-        "score": 0,
-        "quality_plus": 0,
-        "research_watch": 0,
-        "research_watch_strict": 0,
-        "research_macd_antipump": 0,
-        "research_macd_confirmation": 0,
-        "research_breakout_volume_trend": 0,
-        "research_sparse_volume_ignition": 0,
-        "research_trend_runner": 0,
-        "research_temporal_recovery": 0,
-        "research_v33_flow_continuation": 0,
-        "research_v33_cost_aware_breakout": 0,
-        "research_unconfirmed_fresh_momentum": 0,
-        "research_temporal_recovery_tp4": 0,
-        "research_loss_cooldown_6h": 0,
-        "research_loss_cooldown_12h": 0,
-        "research_loss_cooldown_24h": 0,
-        "research_loss_cooldown_48h": 0,
-        "research_evo_d4f99a5252": 0
-      },
-      "macd_research_coverage": {
-        "5m": 0,
-        "15m": 0,
-        "1h_completed": 0,
-        "market_tokens_analyzed": 168,
-        "sampled_candidates": 40,
-        "market_unavailability_by_reason": {
-          "5m": {
-            "insufficient_traded_bars": 167,
-            "missing_initial_price": 1
-          },
-          "15m": {
-            "insufficient_traded_bars": 164,
-            "missing_initial_price": 4
-          },
-          "1h_completed": {
-            "insufficient_completed_clock_hours": 4,
-            "sparse_recent_trade_hours": 83,
-            "stale_completed_hour": 81
-          }
-        },
-        "candidate_unavailability_by_reason": {
-          "5m": {
-            "insufficient_traded_bars": 40
-          },
-          "15m": {
-            "insufficient_traded_bars": 38,
-            "missing_initial_price": 2
-          },
-          "1h_completed": {
-            "insufficient_completed_clock_hours": 2,
-            "sparse_recent_trade_hours": 35,
-            "stale_completed_hour": 3
-          }
-        },
-        "research_only": true,
-        "thresholds_modified": false
-      },
-      "breakout_research": {
-        "measured": 5,
-        "eligible_from_transactions": 0,
-        "eligible_after_shadow_gates": 0,
-        "rejection_reasons": {
-          "insufficient_recent_volume": 4,
-          "outside_early_breakout_zone": 4,
-          "volume_not_accelerating": 4,
-          "weak_buying_pressure": 4,
-          "insufficient_buy_transactions": 3,
-          "insufficient_recent_trades": 3,
-          "recent_price_momentum_not_confirmed": 3,
-          "consolidation_too_wide": 2
-        },
-        "qualified_samples": []
-      },
-      "v33_cost_breakout_research": {
-        "mode": "RESEARCH_ONLY",
-        "paper_champion_unchanged": true,
-        "measured": 40,
-        "eligible_after_cost_gate": 0,
-        "eligible_after_shadow_gates": 0,
-        "fresh_quote_ready": 0,
-        "rejections": {
-          "missing_observed_breakout_features": 36,
-          "missing_same_scan_breakout": 35,
-          "original_breakout_entry_not_eligible": 5,
-          "too_late_or_no_early_breakout": 4,
-          "insufficient_observed_turnover": 3,
-          "weak_activity_acceleration": 3,
-          "weak_buy_pressure": 3,
-          "wide_consolidation": 2,
-          "already_reversing": 1
-        },
-        "modeled_friction_per_side_pct": 1.5,
-        "execution_parity_verified": false
-      },
-      "v33_flow_research": {
-        "mode": "RESEARCH_ONLY",
-        "paper_champion_unchanged": true,
-        "measured": 40,
-        "has_observed_market_data": 1,
-        "observed_pressure_ready": 0,
-        "eligible_after_common_shadow_gates": 0,
-        "fresh_price_quote_ready": 0,
-        "rejections": {
-          "insufficient_observed_swaps": 39,
-          "stale_or_future_quote": 39,
-          "weak_trade_activity": 39,
-          "missing_or_overheated_momentum": 37,
-          "weak_recent_buy_pressure": 37,
-          "late_four_hour_chase": 10
-        },
-        "pool_liquidity_verified": false,
-        "execution_parity_verified": false
-      },
-      "most_common_rejection_gates": {
-        "temporal_recovery": 40,
-        "v31_activity": 39,
-        "quote_continuity": 35,
-        "v31_age": 35,
-        "late_spike": 2
-      },
-      "temporal_recovery_research": {
-        "compared_current_candidates": 21,
-        "recovered_this_cycle": 0,
-        "recovered_total": 20,
-        "recent_examples": [
-          {
-            "at": "2026-10-30T03:27:26.020014+00:00",
-            "address": "0x91210544ff2218c2670693682b53d6362b9915ef",
-            "symbol": "SLND",
-            "previous_age_sec": 353.1,
-            "current_age_sec": 87.2,
-            "previous_score": 85.6,
-            "current_score": 90.1,
-            "previous_impulse": 9.8,
-            "current_impulse": 9.4,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          },
-          {
-            "at": "2026-11-03T20:24:28.785356+00:00",
-            "address": "0x719a2d9a0dfaf65d15ef48c730c5f64c75d439ef",
-            "symbol": "GTAP",
-            "previous_age_sec": 451.4,
-            "current_age_sec": 80.3,
-            "previous_score": 71.2,
-            "current_score": 69.4,
-            "previous_impulse": 18.4,
-            "current_impulse": 17.6,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          },
-          {
-            "at": "2026-11-05T06:25:16.573280+00:00",
-            "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
-            "symbol": "JSFT",
-            "previous_age_sec": 301.5,
-            "current_age_sec": 167.7,
-            "previous_score": 80.3,
-            "current_score": 88.9,
-            "previous_impulse": 20.0,
-            "current_impulse": 20.0,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          }
-        ],
-        "paper_only": true,
-        "changes_champion": false,
-        "entry_requires_current_fresh_quote": true
-      },
-      "missed_pump_learning": {
-        "research_only": true,
-        "active_policy_count": 0,
-        "forward_qualified": {},
-        "paper_champion_unchanged": true
-      },
-      "strategy_evolution": {
-        "active_experiments": 1,
-        "tracked_experiments": 1,
-        "qualified": {
-          "research_evo_d4f99a5252": 0
-        },
-        "research_only": true,
-        "paper_champion_unchanged": true
-      },
-      "trend_runner_research": {
-        "entry_reference": "same_entry_filters_as_baseline",
-        "open": 0,
-        "open_after_first_take": 0,
-        "closed_trade_rows": 192,
-        "valid_closed": 100,
-        "partial_legs_are_not_closed_trades": true,
-        "paper_only": true
-      }
-    },
-    {
-      "at": "2026-11-05T11:16:45.296110+00:00",
-      "market_tokens_with_quote": 168,
-      "sampled_candidates": 40,
-      "all_candidate_phases": {
-        "WATCH": 3,
-        "NO": 165
-      },
-      "sampled_candidate_phases": {
-        "WATCH": 3,
-        "NO": 37
-      },
-      "policy_qualified": {
-        "baseline": 0,
-        "quality": 0,
-        "momentum": 0,
-        "selective": 0,
-        "score": 0,
-        "quality_plus": 0,
-        "research_watch": 0,
-        "research_watch_strict": 0,
-        "research_macd_antipump": 0,
-        "research_macd_confirmation": 0,
-        "research_breakout_volume_trend": 0,
-        "research_sparse_volume_ignition": 0,
-        "research_trend_runner": 0,
-        "research_temporal_recovery": 0,
-        "research_v33_flow_continuation": 0,
-        "research_v33_cost_aware_breakout": 0,
-        "research_unconfirmed_fresh_momentum": 0,
-        "research_temporal_recovery_tp4": 0,
-        "research_loss_cooldown_6h": 0,
-        "research_loss_cooldown_12h": 0,
-        "research_loss_cooldown_24h": 0,
-        "research_loss_cooldown_48h": 0,
-        "research_evo_d4f99a5252": 0
-      },
-      "policy_quote_ready": {
-        "baseline": 0,
-        "quality": 0,
-        "momentum": 0,
-        "selective": 0,
-        "score": 0,
-        "quality_plus": 0,
-        "research_watch": 0,
-        "research_watch_strict": 0,
-        "research_macd_antipump": 0,
-        "research_macd_confirmation": 0,
-        "research_breakout_volume_trend": 0,
-        "research_sparse_volume_ignition": 0,
-        "research_trend_runner": 0,
-        "research_temporal_recovery": 0,
-        "research_v33_flow_continuation": 0,
-        "research_v33_cost_aware_breakout": 0,
-        "research_unconfirmed_fresh_momentum": 0,
-        "research_temporal_recovery_tp4": 0,
-        "research_loss_cooldown_6h": 0,
-        "research_loss_cooldown_12h": 0,
-        "research_loss_cooldown_24h": 0,
-        "research_loss_cooldown_48h": 0,
-        "research_evo_d4f99a5252": 0
-      },
-      "macd_research_coverage": {
-        "5m": 0,
-        "15m": 0,
-        "1h_completed": 0,
-        "market_tokens_analyzed": 168,
-        "sampled_candidates": 40,
-        "market_unavailability_by_reason": {
-          "5m": {
-            "insufficient_traded_bars": 167,
-            "missing_initial_price": 1
-          },
-          "15m": {
-            "insufficient_traded_bars": 164,
-            "missing_initial_price": 4
-          },
-          "1h_completed": {
-            "insufficient_completed_clock_hours": 4,
-            "sparse_recent_trade_hours": 82,
-            "stale_completed_hour": 82
-          }
-        },
-        "candidate_unavailability_by_reason": {
-          "5m": {
-            "insufficient_traded_bars": 40
-          },
-          "15m": {
-            "insufficient_traded_bars": 38,
-            "missing_initial_price": 2
-          },
-          "1h_completed": {
-            "insufficient_completed_clock_hours": 2,
-            "sparse_recent_trade_hours": 35,
-            "stale_completed_hour": 3
-          }
-        },
-        "research_only": true,
-        "thresholds_modified": false
-      },
-      "breakout_research": {
-        "measured": 9,
-        "eligible_from_transactions": 0,
-        "eligible_after_shadow_gates": 0,
-        "rejection_reasons": {
-          "outside_early_breakout_zone": 9,
-          "insufficient_recent_volume": 8,
-          "volume_not_accelerating": 8,
-          "weak_buying_pressure": 8,
-          "recent_price_momentum_not_confirmed": 7,
-          "insufficient_buy_transactions": 5,
-          "insufficient_recent_trades": 5,
-          "insufficient_base_trades": 4
-        },
-        "qualified_samples": []
-      },
-      "v33_cost_breakout_research": {
-        "mode": "RESEARCH_ONLY",
-        "paper_champion_unchanged": true,
-        "measured": 40,
-        "eligible_after_cost_gate": 0,
-        "eligible_after_shadow_gates": 0,
-        "fresh_quote_ready": 0,
-        "rejections": {
-          "missing_observed_breakout_features": 36,
-          "missing_same_scan_breakout": 31,
-          "original_breakout_entry_not_eligible": 9,
-          "too_late_or_no_early_breakout": 4,
-          "insufficient_observed_turnover": 3,
-          "weak_activity_acceleration": 3,
-          "weak_buy_pressure": 3,
-          "wide_consolidation": 2,
-          "already_reversing": 1
-        },
-        "modeled_friction_per_side_pct": 1.5,
-        "execution_parity_verified": false
-      },
-      "v33_flow_research": {
-        "mode": "RESEARCH_ONLY",
-        "paper_champion_unchanged": true,
-        "measured": 40,
-        "has_observed_market_data": 6,
-        "observed_pressure_ready": 0,
-        "eligible_after_common_shadow_gates": 0,
-        "fresh_price_quote_ready": 0,
-        "rejections": {
-          "insufficient_observed_swaps": 39,
-          "weak_trade_activity": 39,
-          "missing_or_overheated_momentum": 38,
-          "weak_recent_buy_pressure": 37,
-          "stale_or_future_quote": 34,
-          "late_four_hour_chase": 9
-        },
-        "pool_liquidity_verified": false,
-        "execution_parity_verified": false
-      },
-      "most_common_rejection_gates": {
-        "temporal_recovery": 40,
-        "v31_activity": 39,
-        "quote_continuity": 31,
-        "v31_age": 31,
-        "late_spike": 2
-      },
-      "temporal_recovery_research": {
-        "compared_current_candidates": 23,
-        "recovered_this_cycle": 0,
-        "recovered_total": 20,
-        "recent_examples": [
-          {
-            "at": "2026-10-30T03:27:26.020014+00:00",
-            "address": "0x91210544ff2218c2670693682b53d6362b9915ef",
-            "symbol": "SLND",
-            "previous_age_sec": 353.1,
-            "current_age_sec": 87.2,
-            "previous_score": 85.6,
-            "current_score": 90.1,
-            "previous_impulse": 9.8,
-            "current_impulse": 9.4,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          },
-          {
-            "at": "2026-11-03T20:24:28.785356+00:00",
-            "address": "0x719a2d9a0dfaf65d15ef48c730c5f64c75d439ef",
-            "symbol": "GTAP",
-            "previous_age_sec": 451.4,
-            "current_age_sec": 80.3,
-            "previous_score": 71.2,
-            "current_score": 69.4,
-            "previous_impulse": 18.4,
-            "current_impulse": 17.6,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          },
-          {
-            "at": "2026-11-05T06:25:16.573280+00:00",
-            "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
-            "symbol": "JSFT",
-            "previous_age_sec": 301.5,
-            "current_age_sec": 167.7,
-            "previous_score": 80.3,
-            "current_score": 88.9,
-            "previous_impulse": 20.0,
-            "current_impulse": 20.0,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          }
-        ],
-        "paper_only": true,
-        "changes_champion": false,
-        "entry_requires_current_fresh_quote": true
-      },
-      "missed_pump_learning": {
-        "research_only": true,
-        "active_policy_count": 0,
-        "forward_qualified": {},
-        "paper_champion_unchanged": true
-      },
-      "strategy_evolution": {
-        "active_experiments": 1,
-        "tracked_experiments": 1,
-        "qualified": {
-          "research_evo_d4f99a5252": 0
-        },
-        "research_only": true,
-        "paper_champion_unchanged": true
-      },
-      "trend_runner_research": {
-        "entry_reference": "same_entry_filters_as_baseline",
-        "open": 0,
-        "open_after_first_take": 0,
-        "closed_trade_rows": 192,
-        "valid_closed": 100,
-        "partial_legs_are_not_closed_trades": true,
-        "paper_only": true
-      }
-    },
-    {
-      "at": "2026-11-05T11:17:44.864281+00:00",
-      "market_tokens_with_quote": 168,
-      "sampled_candidates": 40,
-      "all_candidate_phases": {
-        "WATCH": 3,
-        "NO": 165
-      },
-      "sampled_candidate_phases": {
-        "WATCH": 3,
-        "NO": 37
-      },
-      "policy_qualified": {
-        "baseline": 0,
-        "quality": 0,
-        "momentum": 0,
-        "selective": 0,
-        "score": 0,
-        "quality_plus": 0,
-        "research_watch": 0,
-        "research_watch_strict": 0,
-        "research_macd_antipump": 0,
-        "research_macd_confirmation": 0,
-        "research_breakout_volume_trend": 0,
-        "research_sparse_volume_ignition": 0,
-        "research_trend_runner": 0,
-        "research_temporal_recovery": 0,
-        "research_v33_flow_continuation": 0,
-        "research_v33_cost_aware_breakout": 0,
-        "research_unconfirmed_fresh_momentum": 0,
-        "research_temporal_recovery_tp4": 0,
-        "research_loss_cooldown_6h": 0,
-        "research_loss_cooldown_12h": 0,
-        "research_loss_cooldown_24h": 0,
-        "research_loss_cooldown_48h": 0,
-        "research_evo_d4f99a5252": 0
-      },
-      "policy_quote_ready": {
-        "baseline": 0,
-        "quality": 0,
-        "momentum": 0,
-        "selective": 0,
-        "score": 0,
-        "quality_plus": 0,
-        "research_watch": 0,
-        "research_watch_strict": 0,
-        "research_macd_antipump": 0,
-        "research_macd_confirmation": 0,
-        "research_breakout_volume_trend": 0,
-        "research_sparse_volume_ignition": 0,
-        "research_trend_runner": 0,
-        "research_temporal_recovery": 0,
-        "research_v33_flow_continuation": 0,
-        "research_v33_cost_aware_breakout": 0,
-        "research_unconfirmed_fresh_momentum": 0,
-        "research_temporal_recovery_tp4": 0,
-        "research_loss_cooldown_6h": 0,
-        "research_loss_cooldown_12h": 0,
-        "research_loss_cooldown_24h": 0,
-        "research_loss_cooldown_48h": 0,
-        "research_evo_d4f99a5252": 0
-      },
-      "macd_research_coverage": {
-        "5m": 0,
-        "15m": 0,
-        "1h_completed": 0,
-        "market_tokens_analyzed": 168,
-        "sampled_candidates": 40,
-        "market_unavailability_by_reason": {
-          "5m": {
-            "insufficient_traded_bars": 167,
-            "missing_initial_price": 1
-          },
-          "15m": {
-            "insufficient_traded_bars": 164,
-            "missing_initial_price": 4
-          },
-          "1h_completed": {
-            "insufficient_completed_clock_hours": 4,
-            "sparse_recent_trade_hours": 82,
-            "stale_completed_hour": 82
-          }
-        },
-        "candidate_unavailability_by_reason": {
-          "5m": {
-            "insufficient_traded_bars": 40
-          },
-          "15m": {
-            "insufficient_traded_bars": 38,
-            "missing_initial_price": 2
-          },
-          "1h_completed": {
-            "insufficient_completed_clock_hours": 2,
-            "sparse_recent_trade_hours": 34,
-            "stale_completed_hour": 4
-          }
-        },
-        "research_only": true,
-        "thresholds_modified": false
-      },
-      "breakout_research": {
-        "measured": 7,
-        "eligible_from_transactions": 0,
-        "eligible_after_shadow_gates": 0,
-        "rejection_reasons": {
-          "outside_early_breakout_zone": 7,
-          "insufficient_recent_volume": 6,
-          "recent_price_momentum_not_confirmed": 6,
-          "volume_not_accelerating": 6,
-          "weak_buying_pressure": 6,
-          "insufficient_base_trades": 4,
-          "insufficient_buy_transactions": 4,
-          "insufficient_recent_trades": 4
-        },
-        "qualified_samples": []
-      },
-      "v33_cost_breakout_research": {
-        "mode": "RESEARCH_ONLY",
-        "paper_champion_unchanged": true,
-        "measured": 40,
-        "eligible_after_cost_gate": 0,
-        "eligible_after_shadow_gates": 0,
-        "fresh_quote_ready": 0,
-        "rejections": {
-          "missing_observed_breakout_features": 37,
-          "missing_same_scan_breakout": 33,
-          "original_breakout_entry_not_eligible": 7,
-          "too_late_or_no_early_breakout": 3,
-          "already_reversing": 2,
-          "insufficient_observed_turnover": 2,
-          "weak_buy_pressure": 2,
-          "wide_consolidation": 2,
-          "weak_activity_acceleration": 1
-        },
-        "modeled_friction_per_side_pct": 1.5,
-        "execution_parity_verified": false
-      },
-      "v33_flow_research": {
-        "mode": "RESEARCH_ONLY",
-        "paper_champion_unchanged": true,
-        "measured": 40,
-        "has_observed_market_data": 4,
-        "observed_pressure_ready": 0,
-        "eligible_after_common_shadow_gates": 0,
-        "fresh_price_quote_ready": 0,
-        "rejections": {
-          "insufficient_observed_swaps": 39,
-          "weak_trade_activity": 39,
-          "missing_or_overheated_momentum": 38,
-          "weak_recent_buy_pressure": 37,
-          "stale_or_future_quote": 36,
-          "late_four_hour_chase": 9
-        },
-        "pool_liquidity_verified": false,
-        "execution_parity_verified": false
-      },
-      "most_common_rejection_gates": {
-        "temporal_recovery": 40,
-        "v31_activity": 39,
-        "quote_continuity": 33,
-        "v31_age": 33,
-        "late_spike": 2
-      },
-      "temporal_recovery_research": {
-        "compared_current_candidates": 23,
-        "recovered_this_cycle": 0,
-        "recovered_total": 20,
-        "recent_examples": [
-          {
-            "at": "2026-10-30T03:27:26.020014+00:00",
-            "address": "0x91210544ff2218c2670693682b53d6362b9915ef",
-            "symbol": "SLND",
-            "previous_age_sec": 353.1,
-            "current_age_sec": 87.2,
-            "previous_score": 85.6,
-            "current_score": 90.1,
-            "previous_impulse": 9.8,
-            "current_impulse": 9.4,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          },
-          {
-            "at": "2026-11-03T20:24:28.785356+00:00",
-            "address": "0x719a2d9a0dfaf65d15ef48c730c5f64c75d439ef",
-            "symbol": "GTAP",
-            "previous_age_sec": 451.4,
-            "current_age_sec": 80.3,
-            "previous_score": 71.2,
-            "current_score": 69.4,
-            "previous_impulse": 18.4,
-            "current_impulse": 17.6,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          },
-          {
-            "at": "2026-11-05T06:25:16.573280+00:00",
-            "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
-            "symbol": "JSFT",
-            "previous_age_sec": 301.5,
-            "current_age_sec": 167.7,
-            "previous_score": 80.3,
-            "current_score": 88.9,
-            "previous_impulse": 20.0,
-            "current_impulse": 20.0,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          }
-        ],
-        "paper_only": true,
-        "changes_champion": false,
-        "entry_requires_current_fresh_quote": true
-      },
-      "missed_pump_learning": {
-        "research_only": true,
-        "active_policy_count": 0,
-        "forward_qualified": {},
-        "paper_champion_unchanged": true
-      },
-      "strategy_evolution": {
-        "active_experiments": 1,
-        "tracked_experiments": 1,
-        "qualified": {
-          "research_evo_d4f99a5252": 0
-        },
-        "research_only": true,
-        "paper_champion_unchanged": true
-      },
-      "trend_runner_research": {
-        "entry_reference": "same_entry_filters_as_baseline",
-        "open": 0,
-        "open_after_first_take": 0,
-        "closed_trade_rows": 192,
-        "valid_closed": 100,
-        "partial_legs_are_not_closed_trades": true,
-        "paper_only": true
-      }
-    },
-    {
-      "at": "2026-11-05T11:18:46.138309+00:00",
-      "market_tokens_with_quote": 168,
-      "sampled_candidates": 40,
-      "all_candidate_phases": {
-        "BREAKOUT": 1,
-        "WATCH": 2,
-        "NO": 165
-      },
-      "sampled_candidate_phases": {
-        "BREAKOUT": 1,
-        "WATCH": 2,
-        "NO": 37
-      },
-      "policy_qualified": {
-        "baseline": 0,
-        "quality": 0,
-        "momentum": 0,
-        "selective": 0,
-        "score": 0,
-        "quality_plus": 0,
-        "research_watch": 0,
-        "research_watch_strict": 0,
-        "research_macd_antipump": 0,
-        "research_macd_confirmation": 0,
-        "research_breakout_volume_trend": 0,
-        "research_sparse_volume_ignition": 0,
-        "research_trend_runner": 0,
-        "research_temporal_recovery": 0,
-        "research_v33_flow_continuation": 0,
-        "research_v33_cost_aware_breakout": 0,
-        "research_unconfirmed_fresh_momentum": 0,
-        "research_temporal_recovery_tp4": 0,
-        "research_loss_cooldown_6h": 0,
-        "research_loss_cooldown_12h": 0,
-        "research_loss_cooldown_24h": 0,
-        "research_loss_cooldown_48h": 0,
-        "research_evo_d4f99a5252": 0
-      },
-      "policy_quote_ready": {
-        "baseline": 0,
-        "quality": 0,
-        "momentum": 0,
-        "selective": 0,
-        "score": 0,
-        "quality_plus": 0,
-        "research_watch": 0,
-        "research_watch_strict": 0,
-        "research_macd_antipump": 0,
-        "research_macd_confirmation": 0,
-        "research_breakout_volume_trend": 0,
-        "research_sparse_volume_ignition": 0,
-        "research_trend_runner": 0,
-        "research_temporal_recovery": 0,
-        "research_v33_flow_continuation": 0,
-        "research_v33_cost_aware_breakout": 0,
-        "research_unconfirmed_fresh_momentum": 0,
-        "research_temporal_recovery_tp4": 0,
-        "research_loss_cooldown_6h": 0,
-        "research_loss_cooldown_12h": 0,
-        "research_loss_cooldown_24h": 0,
-        "research_loss_cooldown_48h": 0,
-        "research_evo_d4f99a5252": 0
-      },
-      "macd_research_coverage": {
-        "5m": 0,
-        "15m": 0,
-        "1h_completed": 0,
-        "market_tokens_analyzed": 168,
-        "sampled_candidates": 40,
-        "market_unavailability_by_reason": {
-          "5m": {
-            "insufficient_traded_bars": 167,
-            "missing_initial_price": 1
-          },
-          "15m": {
-            "insufficient_traded_bars": 164,
-            "missing_initial_price": 4
-          },
-          "1h_completed": {
-            "insufficient_completed_clock_hours": 4,
-            "sparse_recent_trade_hours": 82,
-            "stale_completed_hour": 82
-          }
-        },
-        "candidate_unavailability_by_reason": {
-          "5m": {
-            "insufficient_traded_bars": 40
-          },
-          "15m": {
-            "insufficient_traded_bars": 39,
-            "missing_initial_price": 1
-          },
-          "1h_completed": {
-            "insufficient_completed_clock_hours": 1,
-            "sparse_recent_trade_hours": 35,
-            "stale_completed_hour": 4
-          }
-        },
-        "research_only": true,
-        "thresholds_modified": false
-      },
-      "breakout_research": {
-        "measured": 7,
-        "eligible_from_transactions": 0,
-        "eligible_after_shadow_gates": 0,
-        "rejection_reasons": {
-          "outside_early_breakout_zone": 7,
-          "insufficient_recent_volume": 6,
-          "recent_price_momentum_not_confirmed": 6,
-          "volume_not_accelerating": 6,
-          "weak_buying_pressure": 6,
-          "insufficient_buy_transactions": 5,
-          "insufficient_recent_trades": 4,
-          "insufficient_base_trades": 3
-        },
-        "qualified_samples": []
-      },
-      "v33_cost_breakout_research": {
-        "mode": "RESEARCH_ONLY",
-        "paper_champion_unchanged": true,
-        "measured": 40,
-        "eligible_after_cost_gate": 0,
-        "eligible_after_shadow_gates": 0,
-        "fresh_quote_ready": 0,
-        "rejections": {
-          "missing_observed_breakout_features": 37,
-          "missing_same_scan_breakout": 33,
-          "original_breakout_entry_not_eligible": 7,
-          "too_late_or_no_early_breakout": 3,
-          "insufficient_observed_turnover": 2,
-          "weak_buy_pressure": 2,
-          "wide_consolidation": 2,
-          "already_reversing": 1,
-          "weak_activity_acceleration": 1
-        },
-        "modeled_friction_per_side_pct": 1.5,
-        "execution_parity_verified": false
-      },
-      "v33_flow_research": {
-        "mode": "RESEARCH_ONLY",
-        "paper_champion_unchanged": true,
-        "measured": 40,
-        "has_observed_market_data": 2,
-        "observed_pressure_ready": 0,
-        "eligible_after_common_shadow_gates": 0,
-        "fresh_price_quote_ready": 0,
-        "rejections": {
-          "insufficient_observed_swaps": 39,
-          "weak_trade_activity": 39,
-          "missing_or_overheated_momentum": 38,
-          "stale_or_future_quote": 38,
-          "weak_recent_buy_pressure": 38,
-          "late_four_hour_chase": 9
-        },
-        "pool_liquidity_verified": false,
-        "execution_parity_verified": false
-      },
-      "most_common_rejection_gates": {
-        "temporal_recovery": 40,
-        "v31_activity": 39,
-        "quote_continuity": 33,
-        "v31_age": 33,
-        "late_spike": 2
-      },
-      "temporal_recovery_research": {
-        "compared_current_candidates": 21,
-        "recovered_this_cycle": 0,
-        "recovered_total": 20,
-        "recent_examples": [
-          {
-            "at": "2026-10-30T03:27:26.020014+00:00",
-            "address": "0x91210544ff2218c2670693682b53d6362b9915ef",
-            "symbol": "SLND",
-            "previous_age_sec": 353.1,
-            "current_age_sec": 87.2,
-            "previous_score": 85.6,
-            "current_score": 90.1,
-            "previous_impulse": 9.8,
-            "current_impulse": 9.4,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          },
-          {
-            "at": "2026-11-03T20:24:28.785356+00:00",
-            "address": "0x719a2d9a0dfaf65d15ef48c730c5f64c75d439ef",
-            "symbol": "GTAP",
-            "previous_age_sec": 451.4,
-            "current_age_sec": 80.3,
-            "previous_score": 71.2,
-            "current_score": 69.4,
-            "previous_impulse": 18.4,
-            "current_impulse": 17.6,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          },
-          {
-            "at": "2026-11-05T06:25:16.573280+00:00",
-            "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
-            "symbol": "JSFT",
-            "previous_age_sec": 301.5,
-            "current_age_sec": 167.7,
-            "previous_score": 80.3,
-            "current_score": 88.9,
-            "previous_impulse": 20.0,
-            "current_impulse": 20.0,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          }
-        ],
-        "paper_only": true,
-        "changes_champion": false,
-        "entry_requires_current_fresh_quote": true
-      },
-      "missed_pump_learning": {
-        "research_only": true,
-        "active_policy_count": 0,
-        "forward_qualified": {},
-        "paper_champion_unchanged": true
-      },
-      "strategy_evolution": {
-        "active_experiments": 1,
-        "tracked_experiments": 1,
-        "qualified": {
-          "research_evo_d4f99a5252": 0
-        },
-        "research_only": true,
-        "paper_champion_unchanged": true
-      },
-      "trend_runner_research": {
-        "entry_reference": "same_entry_filters_as_baseline",
-        "open": 0,
-        "open_after_first_take": 0,
-        "closed_trade_rows": 192,
-        "valid_closed": 100,
-        "partial_legs_are_not_closed_trades": true,
-        "paper_only": true
-      }
-    },
-    {
-      "at": "2026-11-05T11:19:47.329035+00:00",
-      "market_tokens_with_quote": 168,
-      "sampled_candidates": 40,
-      "all_candidate_phases": {
-        "WATCH": 3,
-        "BREAKOUT": 1,
-        "NO": 163,
-        "IGNITION": 1
-      },
-      "sampled_candidate_phases": {
-        "WATCH": 3,
-        "BREAKOUT": 1,
-        "NO": 35,
-        "IGNITION": 1
-      },
-      "policy_qualified": {
-        "baseline": 0,
-        "quality": 0,
-        "momentum": 0,
-        "selective": 0,
-        "score": 0,
-        "quality_plus": 0,
-        "research_watch": 0,
-        "research_watch_strict": 0,
-        "research_macd_antipump": 0,
-        "research_macd_confirmation": 0,
-        "research_breakout_volume_trend": 0,
-        "research_sparse_volume_ignition": 0,
-        "research_trend_runner": 0,
-        "research_temporal_recovery": 0,
-        "research_v33_flow_continuation": 0,
-        "research_v33_cost_aware_breakout": 0,
-        "research_unconfirmed_fresh_momentum": 0,
-        "research_temporal_recovery_tp4": 0,
-        "research_loss_cooldown_6h": 0,
-        "research_loss_cooldown_12h": 0,
-        "research_loss_cooldown_24h": 0,
-        "research_loss_cooldown_48h": 0,
-        "research_evo_d4f99a5252": 0
-      },
-      "policy_quote_ready": {
-        "baseline": 0,
-        "quality": 0,
-        "momentum": 0,
-        "selective": 0,
-        "score": 0,
-        "quality_plus": 0,
-        "research_watch": 0,
-        "research_watch_strict": 0,
-        "research_macd_antipump": 0,
-        "research_macd_confirmation": 0,
-        "research_breakout_volume_trend": 0,
-        "research_sparse_volume_ignition": 0,
-        "research_trend_runner": 0,
-        "research_temporal_recovery": 0,
-        "research_v33_flow_continuation": 0,
-        "research_v33_cost_aware_breakout": 0,
-        "research_unconfirmed_fresh_momentum": 0,
-        "research_temporal_recovery_tp4": 0,
-        "research_loss_cooldown_6h": 0,
-        "research_loss_cooldown_12h": 0,
-        "research_loss_cooldown_24h": 0,
-        "research_loss_cooldown_48h": 0,
-        "research_evo_d4f99a5252": 0
-      },
-      "macd_research_coverage": {
-        "5m": 0,
-        "15m": 0,
-        "1h_completed": 0,
-        "market_tokens_analyzed": 168,
-        "sampled_candidates": 40,
-        "market_unavailability_by_reason": {
-          "5m": {
-            "insufficient_traded_bars": 167,
-            "missing_initial_price": 1
-          },
-          "15m": {
-            "insufficient_traded_bars": 164,
-            "missing_initial_price": 4
-          },
-          "1h_completed": {
-            "insufficient_completed_clock_hours": 4,
-            "sparse_recent_trade_hours": 82,
-            "stale_completed_hour": 82
-          }
-        },
-        "candidate_unavailability_by_reason": {
-          "5m": {
-            "insufficient_traded_bars": 40
-          },
-          "15m": {
-            "insufficient_traded_bars": 39,
-            "missing_initial_price": 1
-          },
-          "1h_completed": {
-            "insufficient_completed_clock_hours": 1,
-            "sparse_recent_trade_hours": 36,
-            "stale_completed_hour": 3
-          }
-        },
-        "research_only": true,
-        "thresholds_modified": false
-      },
-      "breakout_research": {
-        "measured": 10,
-        "eligible_from_transactions": 0,
-        "eligible_after_shadow_gates": 0,
-        "rejection_reasons": {
-          "insufficient_recent_trades": 8,
-          "insufficient_recent_volume": 8,
-          "outside_early_breakout_zone": 8,
-          "volume_not_accelerating": 8,
-          "weak_buying_pressure": 8,
-          "insufficient_buy_transactions": 7,
-          "recent_price_momentum_not_confirmed": 7,
-          "insufficient_base_trades": 6
-        },
-        "qualified_samples": []
-      },
-      "v33_cost_breakout_research": {
-        "mode": "RESEARCH_ONLY",
-        "paper_champion_unchanged": true,
-        "measured": 40,
-        "eligible_after_cost_gate": 0,
-        "eligible_after_shadow_gates": 0,
-        "fresh_quote_ready": 0,
-        "rejections": {
-          "missing_observed_breakout_features": 37,
-          "missing_same_scan_breakout": 30,
-          "original_breakout_entry_not_eligible": 10,
-          "too_late_or_no_early_breakout": 3,
-          "insufficient_observed_turnover": 2,
-          "weak_buy_pressure": 2,
-          "wide_consolidation": 2,
-          "already_reversing": 1,
-          "weak_activity_acceleration": 1
-        },
-        "modeled_friction_per_side_pct": 1.5,
-        "execution_parity_verified": false
-      },
-      "v33_flow_research": {
-        "mode": "RESEARCH_ONLY",
-        "paper_champion_unchanged": true,
-        "measured": 40,
-        "has_observed_market_data": 5,
-        "observed_pressure_ready": 0,
-        "eligible_after_common_shadow_gates": 0,
-        "fresh_price_quote_ready": 0,
-        "rejections": {
-          "insufficient_observed_swaps": 39,
-          "weak_trade_activity": 39,
-          "weak_recent_buy_pressure": 38,
-          "missing_or_overheated_momentum": 37,
-          "stale_or_future_quote": 35,
-          "late_four_hour_chase": 8
-        },
-        "pool_liquidity_verified": false,
-        "execution_parity_verified": false
-      },
-      "most_common_rejection_gates": {
-        "temporal_recovery": 40,
-        "v31_activity": 39,
-        "quote_continuity": 30,
-        "v31_age": 30,
-        "late_spike": 3
-      },
-      "temporal_recovery_research": {
-        "compared_current_candidates": 25,
-        "recovered_this_cycle": 0,
-        "recovered_total": 20,
-        "recent_examples": [
-          {
-            "at": "2026-10-30T03:27:26.020014+00:00",
-            "address": "0x91210544ff2218c2670693682b53d6362b9915ef",
-            "symbol": "SLND",
-            "previous_age_sec": 353.1,
-            "current_age_sec": 87.2,
-            "previous_score": 85.6,
-            "current_score": 90.1,
-            "previous_impulse": 9.8,
-            "current_impulse": 9.4,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          },
-          {
-            "at": "2026-11-03T20:24:28.785356+00:00",
-            "address": "0x719a2d9a0dfaf65d15ef48c730c5f64c75d439ef",
-            "symbol": "GTAP",
-            "previous_age_sec": 451.4,
-            "current_age_sec": 80.3,
-            "previous_score": 71.2,
-            "current_score": 69.4,
-            "previous_impulse": 18.4,
-            "current_impulse": 17.6,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          },
-          {
-            "at": "2026-11-05T06:25:16.573280+00:00",
-            "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
-            "symbol": "JSFT",
-            "previous_age_sec": 301.5,
-            "current_age_sec": 167.7,
-            "previous_score": 80.3,
-            "current_score": 88.9,
-            "previous_impulse": 20.0,
-            "current_impulse": 20.0,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          }
-        ],
-        "paper_only": true,
-        "changes_champion": false,
-        "entry_requires_current_fresh_quote": true
-      },
-      "missed_pump_learning": {
-        "research_only": true,
-        "active_policy_count": 0,
-        "forward_qualified": {},
-        "paper_champion_unchanged": true
-      },
-      "strategy_evolution": {
-        "active_experiments": 1,
-        "tracked_experiments": 1,
-        "qualified": {
-          "research_evo_d4f99a5252": 0
-        },
-        "research_only": true,
-        "paper_champion_unchanged": true
-      },
-      "trend_runner_research": {
-        "entry_reference": "same_entry_filters_as_baseline",
-        "open": 0,
-        "open_after_first_take": 0,
-        "closed_trade_rows": 192,
-        "valid_closed": 100,
-        "partial_legs_are_not_closed_trades": true,
-        "paper_only": true
-      }
-    },
-    {
-      "at": "2026-11-05T11:20:44.975341+00:00",
-      "market_tokens_with_quote": 168,
-      "sampled_candidates": 40,
-      "all_candidate_phases": {
-        "WATCH": 3,
-        "BREAKOUT": 1,
-        "NO": 163,
-        "IGNITION": 1
-      },
-      "sampled_candidate_phases": {
-        "WATCH": 3,
-        "BREAKOUT": 1,
-        "NO": 35,
-        "IGNITION": 1
-      },
-      "policy_qualified": {
-        "baseline": 0,
-        "quality": 0,
-        "momentum": 0,
-        "selective": 0,
-        "score": 0,
-        "quality_plus": 0,
-        "research_watch": 0,
-        "research_watch_strict": 0,
-        "research_macd_antipump": 0,
-        "research_macd_confirmation": 0,
-        "research_breakout_volume_trend": 0,
-        "research_sparse_volume_ignition": 0,
-        "research_trend_runner": 0,
-        "research_temporal_recovery": 0,
-        "research_v33_flow_continuation": 0,
-        "research_v33_cost_aware_breakout": 0,
-        "research_unconfirmed_fresh_momentum": 0,
-        "research_temporal_recovery_tp4": 0,
-        "research_loss_cooldown_6h": 0,
-        "research_loss_cooldown_12h": 0,
-        "research_loss_cooldown_24h": 0,
-        "research_loss_cooldown_48h": 0,
-        "research_evo_d4f99a5252": 0
-      },
-      "policy_quote_ready": {
-        "baseline": 0,
-        "quality": 0,
-        "momentum": 0,
-        "selective": 0,
-        "score": 0,
-        "quality_plus": 0,
-        "research_watch": 0,
-        "research_watch_strict": 0,
-        "research_macd_antipump": 0,
-        "research_macd_confirmation": 0,
-        "research_breakout_volume_trend": 0,
-        "research_sparse_volume_ignition": 0,
-        "research_trend_runner": 0,
-        "research_temporal_recovery": 0,
-        "research_v33_flow_continuation": 0,
-        "research_v33_cost_aware_breakout": 0,
-        "research_unconfirmed_fresh_momentum": 0,
-        "research_temporal_recovery_tp4": 0,
-        "research_loss_cooldown_6h": 0,
-        "research_loss_cooldown_12h": 0,
-        "research_loss_cooldown_24h": 0,
-        "research_loss_cooldown_48h": 0,
-        "research_evo_d4f99a5252": 0
-      },
-      "macd_research_coverage": {
-        "5m": 0,
-        "15m": 0,
-        "1h_completed": 0,
-        "market_tokens_analyzed": 168,
-        "sampled_candidates": 40,
-        "market_unavailability_by_reason": {
-          "5m": {
-            "insufficient_traded_bars": 167,
-            "missing_initial_price": 1
-          },
-          "15m": {
-            "insufficient_traded_bars": 164,
-            "missing_initial_price": 4
-          },
-          "1h_completed": {
-            "insufficient_completed_clock_hours": 4,
-            "sparse_recent_trade_hours": 82,
-            "stale_completed_hour": 82
-          }
-        },
-        "candidate_unavailability_by_reason": {
-          "5m": {
-            "insufficient_traded_bars": 40
-          },
-          "15m": {
-            "insufficient_traded_bars": 39,
-            "missing_initial_price": 1
-          },
-          "1h_completed": {
-            "insufficient_completed_clock_hours": 1,
-            "sparse_recent_trade_hours": 36,
-            "stale_completed_hour": 3
-          }
-        },
-        "research_only": true,
-        "thresholds_modified": false
-      },
-      "breakout_research": {
-        "measured": 7,
-        "eligible_from_transactions": 0,
-        "eligible_after_shadow_gates": 0,
-        "rejection_reasons": {
-          "insufficient_recent_trades": 6,
-          "insufficient_recent_volume": 5,
-          "outside_early_breakout_zone": 5,
-          "recent_price_momentum_not_confirmed": 5,
-          "volume_not_accelerating": 5,
-          "weak_buying_pressure": 5,
-          "insufficient_base_trades": 4,
-          "insufficient_buy_transactions": 4
-        },
-        "qualified_samples": []
-      },
-      "v33_cost_breakout_research": {
-        "mode": "RESEARCH_ONLY",
-        "paper_champion_unchanged": true,
-        "measured": 40,
-        "eligible_after_cost_gate": 0,
-        "eligible_after_shadow_gates": 0,
-        "fresh_quote_ready": 0,
-        "rejections": {
-          "missing_observed_breakout_features": 38,
-          "missing_same_scan_breakout": 33,
-          "original_breakout_entry_not_eligible": 7,
-          "too_late_or_no_early_breakout": 2,
-          "insufficient_observed_turnover": 1,
-          "weak_activity_acceleration": 1,
-          "weak_buy_pressure": 1,
-          "wide_consolidation": 1
-        },
-        "modeled_friction_per_side_pct": 1.5,
-        "execution_parity_verified": false
-      },
-      "v33_flow_research": {
-        "mode": "RESEARCH_ONLY",
-        "paper_champion_unchanged": true,
-        "measured": 40,
-        "has_observed_market_data": 3,
-        "observed_pressure_ready": 0,
-        "eligible_after_common_shadow_gates": 0,
-        "fresh_price_quote_ready": 0,
-        "rejections": {
-          "insufficient_observed_swaps": 39,
-          "weak_trade_activity": 39,
-          "missing_or_overheated_momentum": 38,
-          "weak_recent_buy_pressure": 38,
-          "stale_or_future_quote": 37,
-          "late_four_hour_chase": 9
-        },
-        "pool_liquidity_verified": false,
-        "execution_parity_verified": false
-      },
-      "most_common_rejection_gates": {
-        "temporal_recovery": 40,
-        "v31_activity": 39,
-        "quote_continuity": 33,
-        "v31_age": 33,
-        "late_spike": 3
-      },
-      "temporal_recovery_research": {
-        "compared_current_candidates": 26,
-        "recovered_this_cycle": 0,
-        "recovered_total": 20,
-        "recent_examples": [
-          {
-            "at": "2026-10-30T03:27:26.020014+00:00",
-            "address": "0x91210544ff2218c2670693682b53d6362b9915ef",
-            "symbol": "SLND",
-            "previous_age_sec": 353.1,
-            "current_age_sec": 87.2,
-            "previous_score": 85.6,
-            "current_score": 90.1,
-            "previous_impulse": 9.8,
-            "current_impulse": 9.4,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          },
-          {
-            "at": "2026-11-03T20:24:28.785356+00:00",
-            "address": "0x719a2d9a0dfaf65d15ef48c730c5f64c75d439ef",
-            "symbol": "GTAP",
-            "previous_age_sec": 451.4,
-            "current_age_sec": 80.3,
-            "previous_score": 71.2,
-            "current_score": 69.4,
-            "previous_impulse": 18.4,
-            "current_impulse": 17.6,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          },
-          {
-            "at": "2026-11-05T06:25:16.573280+00:00",
-            "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
-            "symbol": "JSFT",
-            "previous_age_sec": 301.5,
-            "current_age_sec": 167.7,
-            "previous_score": 80.3,
-            "current_score": 88.9,
-            "previous_impulse": 20.0,
-            "current_impulse": 20.0,
-            "quote_advanced": true,
-            "research_only": true,
-            "current_gates": []
-          }
-        ],
-        "paper_only": true,
-        "changes_champion": false,
-        "entry_requires_current_fresh_quote": true
-      },
-      "missed_pump_learning": {
-        "research_only": true,
-        "active_policy_count": 0,
-        "forward_qualified": {},
-        "paper_champion_unchanged": true
-      },
-      "strategy_evolution": {
-        "active_experiments": 1,
-        "tracked_experiments": 1,
-        "qualified": {
-          "research_evo_d4f99a5252": 0
-        },
-        "research_only": true,
-        "paper_champion_unchanged": true
-      },
-      "trend_runner_research": {
-        "entry_reference": "same_entry_filters_as_baseline",
-        "open": 0,
-        "open_after_first_take": 0,
-        "closed_trade_rows": 192,
-        "valid_closed": 100,
-        "partial_legs_are_not_closed_trades": true,
-        "paper_only": true
-      }
-    },
     {
       "at": "2026-11-05T11:21:44.858084+00:00",
       "market_tokens_with_quote": 168,
@@ -57570,47 +56123,1476 @@
         "partial_legs_are_not_closed_trades": true,
         "paper_only": true
       }
+    },
+    {
+      "at": "2026-11-05T12:27:47.685609+00:00",
+      "market_tokens_with_quote": 169,
+      "sampled_candidates": 40,
+      "all_candidate_phases": {
+        "WATCH": 2,
+        "NO": 167
+      },
+      "sampled_candidate_phases": {
+        "WATCH": 2,
+        "NO": 38
+      },
+      "policy_qualified": {
+        "baseline": 0,
+        "quality": 0,
+        "momentum": 0,
+        "selective": 0,
+        "score": 0,
+        "quality_plus": 0,
+        "research_watch": 0,
+        "research_watch_strict": 0,
+        "research_macd_antipump": 0,
+        "research_macd_confirmation": 0,
+        "research_breakout_volume_trend": 0,
+        "research_sparse_volume_ignition": 0,
+        "research_trend_runner": 0,
+        "research_temporal_recovery": 0,
+        "research_v33_flow_continuation": 0,
+        "research_v33_cost_aware_breakout": 0,
+        "research_unconfirmed_fresh_momentum": 0,
+        "research_temporal_recovery_tp4": 0,
+        "research_loss_cooldown_6h": 0,
+        "research_loss_cooldown_12h": 0,
+        "research_loss_cooldown_24h": 0,
+        "research_loss_cooldown_48h": 0,
+        "research_evo_d4f99a5252": 0
+      },
+      "policy_quote_ready": {
+        "baseline": 0,
+        "quality": 0,
+        "momentum": 0,
+        "selective": 0,
+        "score": 0,
+        "quality_plus": 0,
+        "research_watch": 0,
+        "research_watch_strict": 0,
+        "research_macd_antipump": 0,
+        "research_macd_confirmation": 0,
+        "research_breakout_volume_trend": 0,
+        "research_sparse_volume_ignition": 0,
+        "research_trend_runner": 0,
+        "research_temporal_recovery": 0,
+        "research_v33_flow_continuation": 0,
+        "research_v33_cost_aware_breakout": 0,
+        "research_unconfirmed_fresh_momentum": 0,
+        "research_temporal_recovery_tp4": 0,
+        "research_loss_cooldown_6h": 0,
+        "research_loss_cooldown_12h": 0,
+        "research_loss_cooldown_24h": 0,
+        "research_loss_cooldown_48h": 0,
+        "research_evo_d4f99a5252": 0
+      },
+      "macd_research_coverage": {
+        "5m": 0,
+        "15m": 0,
+        "1h_completed": 0,
+        "market_tokens_analyzed": 169,
+        "sampled_candidates": 40,
+        "market_unavailability_by_reason": {
+          "5m": {
+            "insufficient_traded_bars": 167,
+            "missing_initial_price": 2
+          },
+          "15m": {
+            "insufficient_traded_bars": 164,
+            "missing_initial_price": 5
+          },
+          "1h_completed": {
+            "insufficient_completed_clock_hours": 5,
+            "sparse_recent_trade_hours": 69,
+            "stale_completed_hour": 95
+          }
+        },
+        "candidate_unavailability_by_reason": {
+          "5m": {
+            "insufficient_traded_bars": 40
+          },
+          "15m": {
+            "insufficient_traded_bars": 40
+          },
+          "1h_completed": {
+            "sparse_recent_trade_hours": 38,
+            "stale_completed_hour": 2
+          }
+        },
+        "research_only": true,
+        "thresholds_modified": false
+      },
+      "breakout_research": {
+        "measured": 3,
+        "eligible_from_transactions": 0,
+        "eligible_after_shadow_gates": 0,
+        "rejection_reasons": {
+          "insufficient_recent_volume": 3,
+          "weak_buying_pressure": 3,
+          "insufficient_base_trades": 2,
+          "insufficient_buy_transactions": 2,
+          "insufficient_recent_trades": 2,
+          "outside_early_breakout_zone": 2,
+          "recent_price_momentum_not_confirmed": 2,
+          "volume_not_accelerating": 2
+        },
+        "qualified_samples": []
+      },
+      "v33_cost_breakout_research": {
+        "mode": "RESEARCH_ONLY",
+        "paper_champion_unchanged": true,
+        "measured": 40,
+        "eligible_after_cost_gate": 0,
+        "eligible_after_shadow_gates": 0,
+        "fresh_quote_ready": 0,
+        "rejections": {
+          "missing_observed_breakout_features": 38,
+          "missing_same_scan_breakout": 37,
+          "original_breakout_entry_not_eligible": 3,
+          "insufficient_observed_turnover": 2,
+          "too_late_or_no_early_breakout": 2,
+          "weak_activity_acceleration": 2,
+          "weak_buy_pressure": 2,
+          "already_reversing": 1,
+          "wide_consolidation": 1
+        },
+        "modeled_friction_per_side_pct": 1.5,
+        "execution_parity_verified": false
+      },
+      "v33_flow_research": {
+        "mode": "RESEARCH_ONLY",
+        "paper_champion_unchanged": true,
+        "measured": 40,
+        "has_observed_market_data": 2,
+        "observed_pressure_ready": 0,
+        "eligible_after_common_shadow_gates": 0,
+        "fresh_price_quote_ready": 0,
+        "rejections": {
+          "missing_or_overheated_momentum": 40,
+          "weak_trade_activity": 40,
+          "insufficient_observed_swaps": 39,
+          "stale_or_future_quote": 38,
+          "weak_recent_buy_pressure": 36,
+          "late_four_hour_chase": 9
+        },
+        "pool_liquidity_verified": false,
+        "execution_parity_verified": false
+      },
+      "most_common_rejection_gates": {
+        "temporal_recovery": 40,
+        "quote_continuity": 37,
+        "v31_activity": 37,
+        "v31_age": 37,
+        "late_spike": 5,
+        "price_flow": 3
+      },
+      "temporal_recovery_research": {
+        "compared_current_candidates": 10,
+        "recovered_this_cycle": 0,
+        "recovered_total": 20,
+        "recent_examples": [
+          {
+            "at": "2026-10-30T03:27:26.020014+00:00",
+            "address": "0x91210544ff2218c2670693682b53d6362b9915ef",
+            "symbol": "SLND",
+            "previous_age_sec": 353.1,
+            "current_age_sec": 87.2,
+            "previous_score": 85.6,
+            "current_score": 90.1,
+            "previous_impulse": 9.8,
+            "current_impulse": 9.4,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          },
+          {
+            "at": "2026-11-03T20:24:28.785356+00:00",
+            "address": "0x719a2d9a0dfaf65d15ef48c730c5f64c75d439ef",
+            "symbol": "GTAP",
+            "previous_age_sec": 451.4,
+            "current_age_sec": 80.3,
+            "previous_score": 71.2,
+            "current_score": 69.4,
+            "previous_impulse": 18.4,
+            "current_impulse": 17.6,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          },
+          {
+            "at": "2026-11-05T06:25:16.573280+00:00",
+            "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
+            "symbol": "JSFT",
+            "previous_age_sec": 301.5,
+            "current_age_sec": 167.7,
+            "previous_score": 80.3,
+            "current_score": 88.9,
+            "previous_impulse": 20.0,
+            "current_impulse": 20.0,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          }
+        ],
+        "paper_only": true,
+        "changes_champion": false,
+        "entry_requires_current_fresh_quote": true
+      },
+      "missed_pump_learning": {
+        "research_only": true,
+        "active_policy_count": 0,
+        "forward_qualified": {},
+        "paper_champion_unchanged": true
+      },
+      "strategy_evolution": {
+        "active_experiments": 1,
+        "tracked_experiments": 1,
+        "qualified": {
+          "research_evo_d4f99a5252": 0
+        },
+        "research_only": true,
+        "paper_champion_unchanged": true
+      },
+      "trend_runner_research": {
+        "entry_reference": "same_entry_filters_as_baseline",
+        "open": 0,
+        "open_after_first_take": 0,
+        "closed_trade_rows": 192,
+        "valid_closed": 100,
+        "partial_legs_are_not_closed_trades": true,
+        "paper_only": true
+      }
+    },
+    {
+      "at": "2026-11-05T12:28:47.586253+00:00",
+      "market_tokens_with_quote": 169,
+      "sampled_candidates": 40,
+      "all_candidate_phases": {
+        "WATCH": 2,
+        "NO": 167
+      },
+      "sampled_candidate_phases": {
+        "WATCH": 2,
+        "NO": 38
+      },
+      "policy_qualified": {
+        "baseline": 0,
+        "quality": 0,
+        "momentum": 0,
+        "selective": 0,
+        "score": 0,
+        "quality_plus": 0,
+        "research_watch": 0,
+        "research_watch_strict": 0,
+        "research_macd_antipump": 0,
+        "research_macd_confirmation": 0,
+        "research_breakout_volume_trend": 0,
+        "research_sparse_volume_ignition": 0,
+        "research_trend_runner": 0,
+        "research_temporal_recovery": 0,
+        "research_v33_flow_continuation": 0,
+        "research_v33_cost_aware_breakout": 0,
+        "research_unconfirmed_fresh_momentum": 0,
+        "research_temporal_recovery_tp4": 0,
+        "research_loss_cooldown_6h": 0,
+        "research_loss_cooldown_12h": 0,
+        "research_loss_cooldown_24h": 0,
+        "research_loss_cooldown_48h": 0,
+        "research_evo_d4f99a5252": 0
+      },
+      "policy_quote_ready": {
+        "baseline": 0,
+        "quality": 0,
+        "momentum": 0,
+        "selective": 0,
+        "score": 0,
+        "quality_plus": 0,
+        "research_watch": 0,
+        "research_watch_strict": 0,
+        "research_macd_antipump": 0,
+        "research_macd_confirmation": 0,
+        "research_breakout_volume_trend": 0,
+        "research_sparse_volume_ignition": 0,
+        "research_trend_runner": 0,
+        "research_temporal_recovery": 0,
+        "research_v33_flow_continuation": 0,
+        "research_v33_cost_aware_breakout": 0,
+        "research_unconfirmed_fresh_momentum": 0,
+        "research_temporal_recovery_tp4": 0,
+        "research_loss_cooldown_6h": 0,
+        "research_loss_cooldown_12h": 0,
+        "research_loss_cooldown_24h": 0,
+        "research_loss_cooldown_48h": 0,
+        "research_evo_d4f99a5252": 0
+      },
+      "macd_research_coverage": {
+        "5m": 0,
+        "15m": 0,
+        "1h_completed": 0,
+        "market_tokens_analyzed": 169,
+        "sampled_candidates": 40,
+        "market_unavailability_by_reason": {
+          "5m": {
+            "insufficient_traded_bars": 167,
+            "missing_initial_price": 2
+          },
+          "15m": {
+            "insufficient_traded_bars": 164,
+            "missing_initial_price": 5
+          },
+          "1h_completed": {
+            "insufficient_completed_clock_hours": 5,
+            "sparse_recent_trade_hours": 69,
+            "stale_completed_hour": 95
+          }
+        },
+        "candidate_unavailability_by_reason": {
+          "5m": {
+            "insufficient_traded_bars": 40
+          },
+          "15m": {
+            "insufficient_traded_bars": 40
+          },
+          "1h_completed": {
+            "sparse_recent_trade_hours": 36,
+            "stale_completed_hour": 4
+          }
+        },
+        "research_only": true,
+        "thresholds_modified": false
+      },
+      "breakout_research": {
+        "measured": 4,
+        "eligible_from_transactions": 0,
+        "eligible_after_shadow_gates": 0,
+        "rejection_reasons": {
+          "outside_early_breakout_zone": 3,
+          "recent_price_momentum_not_confirmed": 3,
+          "weak_buying_pressure": 3,
+          "consolidation_too_wide": 2,
+          "insufficient_base_trades": 2,
+          "insufficient_recent_trades": 2,
+          "insufficient_recent_volume": 2,
+          "already_reversing_from_peak": 1
+        },
+        "qualified_samples": []
+      },
+      "v33_cost_breakout_research": {
+        "mode": "RESEARCH_ONLY",
+        "paper_champion_unchanged": true,
+        "measured": 40,
+        "eligible_after_cost_gate": 0,
+        "eligible_after_shadow_gates": 0,
+        "fresh_quote_ready": 0,
+        "rejections": {
+          "missing_observed_breakout_features": 37,
+          "missing_same_scan_breakout": 36,
+          "original_breakout_entry_not_eligible": 4,
+          "too_late_or_no_early_breakout": 3,
+          "weak_activity_acceleration": 3,
+          "weak_buy_pressure": 3,
+          "insufficient_observed_turnover": 2,
+          "wide_consolidation": 2,
+          "already_reversing": 1
+        },
+        "modeled_friction_per_side_pct": 1.5,
+        "execution_parity_verified": false
+      },
+      "v33_flow_research": {
+        "mode": "RESEARCH_ONLY",
+        "paper_champion_unchanged": true,
+        "measured": 40,
+        "has_observed_market_data": 2,
+        "observed_pressure_ready": 0,
+        "eligible_after_common_shadow_gates": 0,
+        "fresh_price_quote_ready": 0,
+        "rejections": {
+          "missing_or_overheated_momentum": 40,
+          "weak_trade_activity": 39,
+          "insufficient_observed_swaps": 38,
+          "stale_or_future_quote": 38,
+          "weak_recent_buy_pressure": 36,
+          "late_four_hour_chase": 10
+        },
+        "pool_liquidity_verified": false,
+        "execution_parity_verified": false
+      },
+      "most_common_rejection_gates": {
+        "temporal_recovery": 40,
+        "v31_activity": 37,
+        "quote_continuity": 36,
+        "v31_age": 36,
+        "late_spike": 6,
+        "price_flow": 4
+      },
+      "temporal_recovery_research": {
+        "compared_current_candidates": 13,
+        "recovered_this_cycle": 0,
+        "recovered_total": 20,
+        "recent_examples": [
+          {
+            "at": "2026-10-30T03:27:26.020014+00:00",
+            "address": "0x91210544ff2218c2670693682b53d6362b9915ef",
+            "symbol": "SLND",
+            "previous_age_sec": 353.1,
+            "current_age_sec": 87.2,
+            "previous_score": 85.6,
+            "current_score": 90.1,
+            "previous_impulse": 9.8,
+            "current_impulse": 9.4,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          },
+          {
+            "at": "2026-11-03T20:24:28.785356+00:00",
+            "address": "0x719a2d9a0dfaf65d15ef48c730c5f64c75d439ef",
+            "symbol": "GTAP",
+            "previous_age_sec": 451.4,
+            "current_age_sec": 80.3,
+            "previous_score": 71.2,
+            "current_score": 69.4,
+            "previous_impulse": 18.4,
+            "current_impulse": 17.6,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          },
+          {
+            "at": "2026-11-05T06:25:16.573280+00:00",
+            "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
+            "symbol": "JSFT",
+            "previous_age_sec": 301.5,
+            "current_age_sec": 167.7,
+            "previous_score": 80.3,
+            "current_score": 88.9,
+            "previous_impulse": 20.0,
+            "current_impulse": 20.0,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          }
+        ],
+        "paper_only": true,
+        "changes_champion": false,
+        "entry_requires_current_fresh_quote": true
+      },
+      "missed_pump_learning": {
+        "research_only": true,
+        "active_policy_count": 0,
+        "forward_qualified": {},
+        "paper_champion_unchanged": true
+      },
+      "strategy_evolution": {
+        "active_experiments": 1,
+        "tracked_experiments": 1,
+        "qualified": {
+          "research_evo_d4f99a5252": 0
+        },
+        "research_only": true,
+        "paper_champion_unchanged": true
+      },
+      "trend_runner_research": {
+        "entry_reference": "same_entry_filters_as_baseline",
+        "open": 0,
+        "open_after_first_take": 0,
+        "closed_trade_rows": 192,
+        "valid_closed": 100,
+        "partial_legs_are_not_closed_trades": true,
+        "paper_only": true
+      }
+    },
+    {
+      "at": "2026-11-05T12:29:48.942260+00:00",
+      "market_tokens_with_quote": 169,
+      "sampled_candidates": 40,
+      "all_candidate_phases": {
+        "WATCH": 2,
+        "NO": 167
+      },
+      "sampled_candidate_phases": {
+        "WATCH": 2,
+        "NO": 38
+      },
+      "policy_qualified": {
+        "baseline": 0,
+        "quality": 0,
+        "momentum": 0,
+        "selective": 0,
+        "score": 0,
+        "quality_plus": 0,
+        "research_watch": 0,
+        "research_watch_strict": 0,
+        "research_macd_antipump": 0,
+        "research_macd_confirmation": 0,
+        "research_breakout_volume_trend": 0,
+        "research_sparse_volume_ignition": 0,
+        "research_trend_runner": 0,
+        "research_temporal_recovery": 0,
+        "research_v33_flow_continuation": 0,
+        "research_v33_cost_aware_breakout": 0,
+        "research_unconfirmed_fresh_momentum": 0,
+        "research_temporal_recovery_tp4": 0,
+        "research_loss_cooldown_6h": 0,
+        "research_loss_cooldown_12h": 0,
+        "research_loss_cooldown_24h": 0,
+        "research_loss_cooldown_48h": 0,
+        "research_evo_d4f99a5252": 0
+      },
+      "policy_quote_ready": {
+        "baseline": 0,
+        "quality": 0,
+        "momentum": 0,
+        "selective": 0,
+        "score": 0,
+        "quality_plus": 0,
+        "research_watch": 0,
+        "research_watch_strict": 0,
+        "research_macd_antipump": 0,
+        "research_macd_confirmation": 0,
+        "research_breakout_volume_trend": 0,
+        "research_sparse_volume_ignition": 0,
+        "research_trend_runner": 0,
+        "research_temporal_recovery": 0,
+        "research_v33_flow_continuation": 0,
+        "research_v33_cost_aware_breakout": 0,
+        "research_unconfirmed_fresh_momentum": 0,
+        "research_temporal_recovery_tp4": 0,
+        "research_loss_cooldown_6h": 0,
+        "research_loss_cooldown_12h": 0,
+        "research_loss_cooldown_24h": 0,
+        "research_loss_cooldown_48h": 0,
+        "research_evo_d4f99a5252": 0
+      },
+      "macd_research_coverage": {
+        "5m": 0,
+        "15m": 0,
+        "1h_completed": 0,
+        "market_tokens_analyzed": 169,
+        "sampled_candidates": 40,
+        "market_unavailability_by_reason": {
+          "5m": {
+            "insufficient_traded_bars": 167,
+            "missing_initial_price": 2
+          },
+          "15m": {
+            "insufficient_traded_bars": 164,
+            "missing_initial_price": 5
+          },
+          "1h_completed": {
+            "insufficient_completed_clock_hours": 5,
+            "sparse_recent_trade_hours": 69,
+            "stale_completed_hour": 95
+          }
+        },
+        "candidate_unavailability_by_reason": {
+          "5m": {
+            "insufficient_traded_bars": 40
+          },
+          "15m": {
+            "insufficient_traded_bars": 40
+          },
+          "1h_completed": {
+            "sparse_recent_trade_hours": 36,
+            "stale_completed_hour": 4
+          }
+        },
+        "research_only": true,
+        "thresholds_modified": false
+      },
+      "breakout_research": {
+        "measured": 4,
+        "eligible_from_transactions": 0,
+        "eligible_after_shadow_gates": 0,
+        "rejection_reasons": {
+          "outside_early_breakout_zone": 4,
+          "weak_buying_pressure": 4,
+          "insufficient_recent_volume": 3,
+          "recent_price_momentum_not_confirmed": 3,
+          "consolidation_too_wide": 2,
+          "insufficient_base_trades": 2,
+          "insufficient_buy_transactions": 2,
+          "insufficient_recent_trades": 2
+        },
+        "qualified_samples": []
+      },
+      "v33_cost_breakout_research": {
+        "mode": "RESEARCH_ONLY",
+        "paper_champion_unchanged": true,
+        "measured": 40,
+        "eligible_after_cost_gate": 0,
+        "eligible_after_shadow_gates": 0,
+        "fresh_quote_ready": 0,
+        "rejections": {
+          "missing_observed_breakout_features": 36,
+          "missing_same_scan_breakout": 36,
+          "original_breakout_entry_not_eligible": 4,
+          "too_late_or_no_early_breakout": 4,
+          "weak_activity_acceleration": 4,
+          "weak_buy_pressure": 4,
+          "insufficient_observed_turnover": 3,
+          "wide_consolidation": 2
+        },
+        "modeled_friction_per_side_pct": 1.5,
+        "execution_parity_verified": false
+      },
+      "v33_flow_research": {
+        "mode": "RESEARCH_ONLY",
+        "paper_champion_unchanged": true,
+        "measured": 40,
+        "has_observed_market_data": 3,
+        "observed_pressure_ready": 0,
+        "eligible_after_common_shadow_gates": 0,
+        "fresh_price_quote_ready": 0,
+        "rejections": {
+          "missing_or_overheated_momentum": 40,
+          "weak_trade_activity": 39,
+          "insufficient_observed_swaps": 38,
+          "stale_or_future_quote": 37,
+          "weak_recent_buy_pressure": 36,
+          "late_four_hour_chase": 11
+        },
+        "pool_liquidity_verified": false,
+        "execution_parity_verified": false
+      },
+      "most_common_rejection_gates": {
+        "temporal_recovery": 40,
+        "v31_activity": 37,
+        "quote_continuity": 36,
+        "v31_age": 36,
+        "late_spike": 6,
+        "price_flow": 4
+      },
+      "temporal_recovery_research": {
+        "compared_current_candidates": 13,
+        "recovered_this_cycle": 0,
+        "recovered_total": 20,
+        "recent_examples": [
+          {
+            "at": "2026-10-30T03:27:26.020014+00:00",
+            "address": "0x91210544ff2218c2670693682b53d6362b9915ef",
+            "symbol": "SLND",
+            "previous_age_sec": 353.1,
+            "current_age_sec": 87.2,
+            "previous_score": 85.6,
+            "current_score": 90.1,
+            "previous_impulse": 9.8,
+            "current_impulse": 9.4,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          },
+          {
+            "at": "2026-11-03T20:24:28.785356+00:00",
+            "address": "0x719a2d9a0dfaf65d15ef48c730c5f64c75d439ef",
+            "symbol": "GTAP",
+            "previous_age_sec": 451.4,
+            "current_age_sec": 80.3,
+            "previous_score": 71.2,
+            "current_score": 69.4,
+            "previous_impulse": 18.4,
+            "current_impulse": 17.6,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          },
+          {
+            "at": "2026-11-05T06:25:16.573280+00:00",
+            "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
+            "symbol": "JSFT",
+            "previous_age_sec": 301.5,
+            "current_age_sec": 167.7,
+            "previous_score": 80.3,
+            "current_score": 88.9,
+            "previous_impulse": 20.0,
+            "current_impulse": 20.0,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          }
+        ],
+        "paper_only": true,
+        "changes_champion": false,
+        "entry_requires_current_fresh_quote": true
+      },
+      "missed_pump_learning": {
+        "research_only": true,
+        "active_policy_count": 0,
+        "forward_qualified": {},
+        "paper_champion_unchanged": true
+      },
+      "strategy_evolution": {
+        "active_experiments": 1,
+        "tracked_experiments": 1,
+        "qualified": {
+          "research_evo_d4f99a5252": 0
+        },
+        "research_only": true,
+        "paper_champion_unchanged": true
+      },
+      "trend_runner_research": {
+        "entry_reference": "same_entry_filters_as_baseline",
+        "open": 0,
+        "open_after_first_take": 0,
+        "closed_trade_rows": 192,
+        "valid_closed": 100,
+        "partial_legs_are_not_closed_trades": true,
+        "paper_only": true
+      }
+    },
+    {
+      "at": "2026-11-05T12:30:48.043706+00:00",
+      "market_tokens_with_quote": 169,
+      "sampled_candidates": 40,
+      "all_candidate_phases": {
+        "WATCH": 2,
+        "NO": 167
+      },
+      "sampled_candidate_phases": {
+        "WATCH": 2,
+        "NO": 38
+      },
+      "policy_qualified": {
+        "baseline": 0,
+        "quality": 0,
+        "momentum": 0,
+        "selective": 0,
+        "score": 0,
+        "quality_plus": 0,
+        "research_watch": 0,
+        "research_watch_strict": 0,
+        "research_macd_antipump": 0,
+        "research_macd_confirmation": 0,
+        "research_breakout_volume_trend": 0,
+        "research_sparse_volume_ignition": 0,
+        "research_trend_runner": 0,
+        "research_temporal_recovery": 0,
+        "research_v33_flow_continuation": 0,
+        "research_v33_cost_aware_breakout": 0,
+        "research_unconfirmed_fresh_momentum": 0,
+        "research_temporal_recovery_tp4": 0,
+        "research_loss_cooldown_6h": 0,
+        "research_loss_cooldown_12h": 0,
+        "research_loss_cooldown_24h": 0,
+        "research_loss_cooldown_48h": 0,
+        "research_evo_d4f99a5252": 0
+      },
+      "policy_quote_ready": {
+        "baseline": 0,
+        "quality": 0,
+        "momentum": 0,
+        "selective": 0,
+        "score": 0,
+        "quality_plus": 0,
+        "research_watch": 0,
+        "research_watch_strict": 0,
+        "research_macd_antipump": 0,
+        "research_macd_confirmation": 0,
+        "research_breakout_volume_trend": 0,
+        "research_sparse_volume_ignition": 0,
+        "research_trend_runner": 0,
+        "research_temporal_recovery": 0,
+        "research_v33_flow_continuation": 0,
+        "research_v33_cost_aware_breakout": 0,
+        "research_unconfirmed_fresh_momentum": 0,
+        "research_temporal_recovery_tp4": 0,
+        "research_loss_cooldown_6h": 0,
+        "research_loss_cooldown_12h": 0,
+        "research_loss_cooldown_24h": 0,
+        "research_loss_cooldown_48h": 0,
+        "research_evo_d4f99a5252": 0
+      },
+      "macd_research_coverage": {
+        "5m": 0,
+        "15m": 0,
+        "1h_completed": 0,
+        "market_tokens_analyzed": 169,
+        "sampled_candidates": 40,
+        "market_unavailability_by_reason": {
+          "5m": {
+            "insufficient_traded_bars": 166,
+            "missing_initial_price": 2,
+            "too_many_consecutive_missing_bars": 1
+          },
+          "15m": {
+            "insufficient_traded_bars": 164,
+            "missing_initial_price": 5
+          },
+          "1h_completed": {
+            "insufficient_completed_clock_hours": 5,
+            "sparse_recent_trade_hours": 68,
+            "stale_completed_hour": 96
+          }
+        },
+        "candidate_unavailability_by_reason": {
+          "5m": {
+            "insufficient_traded_bars": 39,
+            "too_many_consecutive_missing_bars": 1
+          },
+          "15m": {
+            "insufficient_traded_bars": 40
+          },
+          "1h_completed": {
+            "sparse_recent_trade_hours": 36,
+            "stale_completed_hour": 4
+          }
+        },
+        "research_only": true,
+        "thresholds_modified": false
+      },
+      "breakout_research": {
+        "measured": 5,
+        "eligible_from_transactions": 0,
+        "eligible_after_shadow_gates": 0,
+        "rejection_reasons": {
+          "outside_early_breakout_zone": 5,
+          "volume_not_accelerating": 4,
+          "weak_buying_pressure": 4,
+          "insufficient_base_trades": 3,
+          "insufficient_buy_transactions": 3,
+          "insufficient_recent_trades": 3,
+          "insufficient_recent_volume": 3,
+          "recent_price_momentum_not_confirmed": 3
+        },
+        "qualified_samples": []
+      },
+      "v33_cost_breakout_research": {
+        "mode": "RESEARCH_ONLY",
+        "paper_champion_unchanged": true,
+        "measured": 40,
+        "eligible_after_cost_gate": 0,
+        "eligible_after_shadow_gates": 0,
+        "fresh_quote_ready": 0,
+        "rejections": {
+          "missing_observed_breakout_features": 36,
+          "missing_same_scan_breakout": 35,
+          "original_breakout_entry_not_eligible": 5,
+          "too_late_or_no_early_breakout": 4,
+          "weak_activity_acceleration": 4,
+          "weak_buy_pressure": 4,
+          "insufficient_observed_turnover": 3,
+          "wide_consolidation": 2
+        },
+        "modeled_friction_per_side_pct": 1.5,
+        "execution_parity_verified": false
+      },
+      "v33_flow_research": {
+        "mode": "RESEARCH_ONLY",
+        "paper_champion_unchanged": true,
+        "measured": 40,
+        "has_observed_market_data": 3,
+        "observed_pressure_ready": 0,
+        "eligible_after_common_shadow_gates": 0,
+        "fresh_price_quote_ready": 0,
+        "rejections": {
+          "missing_or_overheated_momentum": 40,
+          "weak_trade_activity": 39,
+          "insufficient_observed_swaps": 38,
+          "stale_or_future_quote": 37,
+          "weak_recent_buy_pressure": 35,
+          "late_four_hour_chase": 11
+        },
+        "pool_liquidity_verified": false,
+        "execution_parity_verified": false
+      },
+      "most_common_rejection_gates": {
+        "temporal_recovery": 39,
+        "v31_activity": 36,
+        "quote_continuity": 35,
+        "v31_age": 35,
+        "late_spike": 6,
+        "price_flow": 4
+      },
+      "temporal_recovery_research": {
+        "compared_current_candidates": 13,
+        "recovered_this_cycle": 0,
+        "recovered_total": 20,
+        "recent_examples": [
+          {
+            "at": "2026-10-30T03:27:26.020014+00:00",
+            "address": "0x91210544ff2218c2670693682b53d6362b9915ef",
+            "symbol": "SLND",
+            "previous_age_sec": 353.1,
+            "current_age_sec": 87.2,
+            "previous_score": 85.6,
+            "current_score": 90.1,
+            "previous_impulse": 9.8,
+            "current_impulse": 9.4,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          },
+          {
+            "at": "2026-11-03T20:24:28.785356+00:00",
+            "address": "0x719a2d9a0dfaf65d15ef48c730c5f64c75d439ef",
+            "symbol": "GTAP",
+            "previous_age_sec": 451.4,
+            "current_age_sec": 80.3,
+            "previous_score": 71.2,
+            "current_score": 69.4,
+            "previous_impulse": 18.4,
+            "current_impulse": 17.6,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          },
+          {
+            "at": "2026-11-05T06:25:16.573280+00:00",
+            "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
+            "symbol": "JSFT",
+            "previous_age_sec": 301.5,
+            "current_age_sec": 167.7,
+            "previous_score": 80.3,
+            "current_score": 88.9,
+            "previous_impulse": 20.0,
+            "current_impulse": 20.0,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          }
+        ],
+        "paper_only": true,
+        "changes_champion": false,
+        "entry_requires_current_fresh_quote": true
+      },
+      "missed_pump_learning": {
+        "research_only": true,
+        "active_policy_count": 0,
+        "forward_qualified": {},
+        "paper_champion_unchanged": true
+      },
+      "strategy_evolution": {
+        "active_experiments": 1,
+        "tracked_experiments": 1,
+        "qualified": {
+          "research_evo_d4f99a5252": 0
+        },
+        "research_only": true,
+        "paper_champion_unchanged": true
+      },
+      "trend_runner_research": {
+        "entry_reference": "same_entry_filters_as_baseline",
+        "open": 0,
+        "open_after_first_take": 0,
+        "closed_trade_rows": 192,
+        "valid_closed": 100,
+        "partial_legs_are_not_closed_trades": true,
+        "paper_only": true
+      }
+    },
+    {
+      "at": "2026-11-05T12:31:45.766543+00:00",
+      "market_tokens_with_quote": 169,
+      "sampled_candidates": 40,
+      "all_candidate_phases": {
+        "WATCH": 3,
+        "NO": 166
+      },
+      "sampled_candidate_phases": {
+        "WATCH": 3,
+        "NO": 37
+      },
+      "policy_qualified": {
+        "baseline": 0,
+        "quality": 0,
+        "momentum": 0,
+        "selective": 0,
+        "score": 0,
+        "quality_plus": 0,
+        "research_watch": 0,
+        "research_watch_strict": 0,
+        "research_macd_antipump": 0,
+        "research_macd_confirmation": 0,
+        "research_breakout_volume_trend": 0,
+        "research_sparse_volume_ignition": 0,
+        "research_trend_runner": 0,
+        "research_temporal_recovery": 0,
+        "research_v33_flow_continuation": 0,
+        "research_v33_cost_aware_breakout": 0,
+        "research_unconfirmed_fresh_momentum": 0,
+        "research_temporal_recovery_tp4": 0,
+        "research_loss_cooldown_6h": 0,
+        "research_loss_cooldown_12h": 0,
+        "research_loss_cooldown_24h": 0,
+        "research_loss_cooldown_48h": 0,
+        "research_evo_d4f99a5252": 0
+      },
+      "policy_quote_ready": {
+        "baseline": 0,
+        "quality": 0,
+        "momentum": 0,
+        "selective": 0,
+        "score": 0,
+        "quality_plus": 0,
+        "research_watch": 0,
+        "research_watch_strict": 0,
+        "research_macd_antipump": 0,
+        "research_macd_confirmation": 0,
+        "research_breakout_volume_trend": 0,
+        "research_sparse_volume_ignition": 0,
+        "research_trend_runner": 0,
+        "research_temporal_recovery": 0,
+        "research_v33_flow_continuation": 0,
+        "research_v33_cost_aware_breakout": 0,
+        "research_unconfirmed_fresh_momentum": 0,
+        "research_temporal_recovery_tp4": 0,
+        "research_loss_cooldown_6h": 0,
+        "research_loss_cooldown_12h": 0,
+        "research_loss_cooldown_24h": 0,
+        "research_loss_cooldown_48h": 0,
+        "research_evo_d4f99a5252": 0
+      },
+      "macd_research_coverage": {
+        "5m": 0,
+        "15m": 0,
+        "1h_completed": 0,
+        "market_tokens_analyzed": 169,
+        "sampled_candidates": 40,
+        "market_unavailability_by_reason": {
+          "5m": {
+            "insufficient_traded_bars": 166,
+            "missing_initial_price": 2,
+            "too_many_consecutive_missing_bars": 1
+          },
+          "15m": {
+            "insufficient_traded_bars": 164,
+            "missing_initial_price": 5
+          },
+          "1h_completed": {
+            "insufficient_completed_clock_hours": 5,
+            "sparse_recent_trade_hours": 68,
+            "stale_completed_hour": 96
+          }
+        },
+        "candidate_unavailability_by_reason": {
+          "5m": {
+            "insufficient_traded_bars": 39,
+            "too_many_consecutive_missing_bars": 1
+          },
+          "15m": {
+            "insufficient_traded_bars": 40
+          },
+          "1h_completed": {
+            "sparse_recent_trade_hours": 35,
+            "stale_completed_hour": 5
+          }
+        },
+        "research_only": true,
+        "thresholds_modified": false
+      },
+      "breakout_research": {
+        "measured": 5,
+        "eligible_from_transactions": 0,
+        "eligible_after_shadow_gates": 0,
+        "rejection_reasons": {
+          "outside_early_breakout_zone": 5,
+          "volume_not_accelerating": 4,
+          "weak_buying_pressure": 4,
+          "insufficient_base_trades": 3,
+          "insufficient_buy_transactions": 3,
+          "insufficient_recent_trades": 3,
+          "insufficient_recent_volume": 3,
+          "recent_price_momentum_not_confirmed": 3
+        },
+        "qualified_samples": []
+      },
+      "v33_cost_breakout_research": {
+        "mode": "RESEARCH_ONLY",
+        "paper_champion_unchanged": true,
+        "measured": 40,
+        "eligible_after_cost_gate": 0,
+        "eligible_after_shadow_gates": 0,
+        "fresh_quote_ready": 0,
+        "rejections": {
+          "missing_observed_breakout_features": 36,
+          "missing_same_scan_breakout": 35,
+          "original_breakout_entry_not_eligible": 5,
+          "too_late_or_no_early_breakout": 4,
+          "weak_activity_acceleration": 4,
+          "weak_buy_pressure": 4,
+          "insufficient_observed_turnover": 3,
+          "wide_consolidation": 2
+        },
+        "modeled_friction_per_side_pct": 1.5,
+        "execution_parity_verified": false
+      },
+      "v33_flow_research": {
+        "mode": "RESEARCH_ONLY",
+        "paper_champion_unchanged": true,
+        "measured": 40,
+        "has_observed_market_data": 2,
+        "observed_pressure_ready": 0,
+        "eligible_after_common_shadow_gates": 0,
+        "fresh_price_quote_ready": 0,
+        "rejections": {
+          "missing_or_overheated_momentum": 40,
+          "weak_trade_activity": 39,
+          "insufficient_observed_swaps": 38,
+          "stale_or_future_quote": 38,
+          "weak_recent_buy_pressure": 35,
+          "late_four_hour_chase": 11
+        },
+        "pool_liquidity_verified": false,
+        "execution_parity_verified": false
+      },
+      "most_common_rejection_gates": {
+        "temporal_recovery": 39,
+        "v31_activity": 36,
+        "quote_continuity": 35,
+        "v31_age": 35,
+        "late_spike": 6,
+        "price_flow": 4
+      },
+      "temporal_recovery_research": {
+        "compared_current_candidates": 12,
+        "recovered_this_cycle": 0,
+        "recovered_total": 20,
+        "recent_examples": [
+          {
+            "at": "2026-10-30T03:27:26.020014+00:00",
+            "address": "0x91210544ff2218c2670693682b53d6362b9915ef",
+            "symbol": "SLND",
+            "previous_age_sec": 353.1,
+            "current_age_sec": 87.2,
+            "previous_score": 85.6,
+            "current_score": 90.1,
+            "previous_impulse": 9.8,
+            "current_impulse": 9.4,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          },
+          {
+            "at": "2026-11-03T20:24:28.785356+00:00",
+            "address": "0x719a2d9a0dfaf65d15ef48c730c5f64c75d439ef",
+            "symbol": "GTAP",
+            "previous_age_sec": 451.4,
+            "current_age_sec": 80.3,
+            "previous_score": 71.2,
+            "current_score": 69.4,
+            "previous_impulse": 18.4,
+            "current_impulse": 17.6,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          },
+          {
+            "at": "2026-11-05T06:25:16.573280+00:00",
+            "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
+            "symbol": "JSFT",
+            "previous_age_sec": 301.5,
+            "current_age_sec": 167.7,
+            "previous_score": 80.3,
+            "current_score": 88.9,
+            "previous_impulse": 20.0,
+            "current_impulse": 20.0,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          }
+        ],
+        "paper_only": true,
+        "changes_champion": false,
+        "entry_requires_current_fresh_quote": true
+      },
+      "missed_pump_learning": {
+        "research_only": true,
+        "active_policy_count": 0,
+        "forward_qualified": {},
+        "paper_champion_unchanged": true
+      },
+      "strategy_evolution": {
+        "active_experiments": 1,
+        "tracked_experiments": 1,
+        "qualified": {
+          "research_evo_d4f99a5252": 0
+        },
+        "research_only": true,
+        "paper_champion_unchanged": true
+      },
+      "trend_runner_research": {
+        "entry_reference": "same_entry_filters_as_baseline",
+        "open": 0,
+        "open_after_first_take": 0,
+        "closed_trade_rows": 192,
+        "valid_closed": 100,
+        "partial_legs_are_not_closed_trades": true,
+        "paper_only": true
+      }
+    },
+    {
+      "at": "2026-11-05T12:32:46.807647+00:00",
+      "market_tokens_with_quote": 169,
+      "sampled_candidates": 40,
+      "all_candidate_phases": {
+        "WATCH": 3,
+        "NO": 166
+      },
+      "sampled_candidate_phases": {
+        "WATCH": 3,
+        "NO": 37
+      },
+      "policy_qualified": {
+        "baseline": 0,
+        "quality": 0,
+        "momentum": 0,
+        "selective": 0,
+        "score": 0,
+        "quality_plus": 0,
+        "research_watch": 0,
+        "research_watch_strict": 0,
+        "research_macd_antipump": 0,
+        "research_macd_confirmation": 0,
+        "research_breakout_volume_trend": 0,
+        "research_sparse_volume_ignition": 0,
+        "research_trend_runner": 0,
+        "research_temporal_recovery": 0,
+        "research_v33_flow_continuation": 0,
+        "research_v33_cost_aware_breakout": 0,
+        "research_unconfirmed_fresh_momentum": 0,
+        "research_temporal_recovery_tp4": 0,
+        "research_loss_cooldown_6h": 0,
+        "research_loss_cooldown_12h": 0,
+        "research_loss_cooldown_24h": 0,
+        "research_loss_cooldown_48h": 0,
+        "research_evo_d4f99a5252": 0
+      },
+      "policy_quote_ready": {
+        "baseline": 0,
+        "quality": 0,
+        "momentum": 0,
+        "selective": 0,
+        "score": 0,
+        "quality_plus": 0,
+        "research_watch": 0,
+        "research_watch_strict": 0,
+        "research_macd_antipump": 0,
+        "research_macd_confirmation": 0,
+        "research_breakout_volume_trend": 0,
+        "research_sparse_volume_ignition": 0,
+        "research_trend_runner": 0,
+        "research_temporal_recovery": 0,
+        "research_v33_flow_continuation": 0,
+        "research_v33_cost_aware_breakout": 0,
+        "research_unconfirmed_fresh_momentum": 0,
+        "research_temporal_recovery_tp4": 0,
+        "research_loss_cooldown_6h": 0,
+        "research_loss_cooldown_12h": 0,
+        "research_loss_cooldown_24h": 0,
+        "research_loss_cooldown_48h": 0,
+        "research_evo_d4f99a5252": 0
+      },
+      "macd_research_coverage": {
+        "5m": 0,
+        "15m": 0,
+        "1h_completed": 0,
+        "market_tokens_analyzed": 169,
+        "sampled_candidates": 40,
+        "market_unavailability_by_reason": {
+          "5m": {
+            "insufficient_traded_bars": 166,
+            "missing_initial_price": 2,
+            "too_many_consecutive_missing_bars": 1
+          },
+          "15m": {
+            "insufficient_traded_bars": 164,
+            "missing_initial_price": 5
+          },
+          "1h_completed": {
+            "insufficient_completed_clock_hours": 5,
+            "sparse_recent_trade_hours": 68,
+            "stale_completed_hour": 96
+          }
+        },
+        "candidate_unavailability_by_reason": {
+          "5m": {
+            "insufficient_traded_bars": 38,
+            "missing_initial_price": 1,
+            "too_many_consecutive_missing_bars": 1
+          },
+          "15m": {
+            "insufficient_traded_bars": 39,
+            "missing_initial_price": 1
+          },
+          "1h_completed": {
+            "insufficient_completed_clock_hours": 1,
+            "sparse_recent_trade_hours": 34,
+            "stale_completed_hour": 5
+          }
+        },
+        "research_only": true,
+        "thresholds_modified": false
+      },
+      "breakout_research": {
+        "measured": 4,
+        "eligible_from_transactions": 0,
+        "eligible_after_shadow_gates": 0,
+        "rejection_reasons": {
+          "outside_early_breakout_zone": 4,
+          "volume_not_accelerating": 4,
+          "insufficient_base_trades": 3,
+          "insufficient_buy_transactions": 3,
+          "insufficient_recent_trades": 3,
+          "insufficient_recent_volume": 3,
+          "weak_buying_pressure": 3,
+          "recent_price_momentum_not_confirmed": 2
+        },
+        "qualified_samples": []
+      },
+      "v33_cost_breakout_research": {
+        "mode": "RESEARCH_ONLY",
+        "paper_champion_unchanged": true,
+        "measured": 40,
+        "eligible_after_cost_gate": 0,
+        "eligible_after_shadow_gates": 0,
+        "fresh_quote_ready": 0,
+        "rejections": {
+          "missing_observed_breakout_features": 37,
+          "missing_same_scan_breakout": 36,
+          "original_breakout_entry_not_eligible": 4,
+          "insufficient_observed_turnover": 3,
+          "too_late_or_no_early_breakout": 3,
+          "weak_activity_acceleration": 3,
+          "weak_buy_pressure": 3,
+          "wide_consolidation": 1
+        },
+        "modeled_friction_per_side_pct": 1.5,
+        "execution_parity_verified": false
+      },
+      "v33_flow_research": {
+        "mode": "RESEARCH_ONLY",
+        "paper_champion_unchanged": true,
+        "measured": 40,
+        "has_observed_market_data": 0,
+        "observed_pressure_ready": 0,
+        "eligible_after_common_shadow_gates": 0,
+        "fresh_price_quote_ready": 0,
+        "rejections": {
+          "missing_or_overheated_momentum": 40,
+          "stale_or_future_quote": 40,
+          "weak_trade_activity": 39,
+          "insufficient_observed_swaps": 38,
+          "weak_recent_buy_pressure": 36,
+          "late_four_hour_chase": 11
+        },
+        "pool_liquidity_verified": false,
+        "execution_parity_verified": false
+      },
+      "most_common_rejection_gates": {
+        "temporal_recovery": 39,
+        "quote_continuity": 36,
+        "v31_activity": 36,
+        "v31_age": 36,
+        "late_spike": 6,
+        "price_flow": 4
+      },
+      "temporal_recovery_research": {
+        "compared_current_candidates": 13,
+        "recovered_this_cycle": 0,
+        "recovered_total": 20,
+        "recent_examples": [
+          {
+            "at": "2026-10-30T03:27:26.020014+00:00",
+            "address": "0x91210544ff2218c2670693682b53d6362b9915ef",
+            "symbol": "SLND",
+            "previous_age_sec": 353.1,
+            "current_age_sec": 87.2,
+            "previous_score": 85.6,
+            "current_score": 90.1,
+            "previous_impulse": 9.8,
+            "current_impulse": 9.4,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          },
+          {
+            "at": "2026-11-03T20:24:28.785356+00:00",
+            "address": "0x719a2d9a0dfaf65d15ef48c730c5f64c75d439ef",
+            "symbol": "GTAP",
+            "previous_age_sec": 451.4,
+            "current_age_sec": 80.3,
+            "previous_score": 71.2,
+            "current_score": 69.4,
+            "previous_impulse": 18.4,
+            "current_impulse": 17.6,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          },
+          {
+            "at": "2026-11-05T06:25:16.573280+00:00",
+            "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
+            "symbol": "JSFT",
+            "previous_age_sec": 301.5,
+            "current_age_sec": 167.7,
+            "previous_score": 80.3,
+            "current_score": 88.9,
+            "previous_impulse": 20.0,
+            "current_impulse": 20.0,
+            "quote_advanced": true,
+            "research_only": true,
+            "current_gates": []
+          }
+        ],
+        "paper_only": true,
+        "changes_champion": false,
+        "entry_requires_current_fresh_quote": true
+      },
+      "missed_pump_learning": {
+        "research_only": true,
+        "active_policy_count": 0,
+        "forward_qualified": {},
+        "paper_champion_unchanged": true
+      },
+      "strategy_evolution": {
+        "active_experiments": 1,
+        "tracked_experiments": 1,
+        "qualified": {
+          "research_evo_d4f99a5252": 0
+        },
+        "research_only": true,
+        "paper_champion_unchanged": true
+      },
+      "trend_runner_research": {
+        "entry_reference": "same_entry_filters_as_baseline",
+        "open": 0,
+        "open_after_first_take": 0,
+        "closed_trade_rows": 192,
+        "valid_closed": 100,
+        "partial_legs_are_not_closed_trades": true,
+        "paper_only": true
+      }
     }
   ],
   "timing_research": {
     "last_signals": {
       "0x2d74b8846ffe9442b158a6767199a47c0e655038": {
-        "decision_at": "2026-11-05T12:26:46.316090+00:00",
+        "decision_at": "2026-11-05T12:32:46.548241+00:00",
         "quote_at": "2026-11-05T12:19:40+00:00",
-        "data_age_sec": 426.5,
-        "score": 17.3,
+        "data_age_sec": 786.7,
+        "score": 60.7,
         "impulse": 0.0,
         "price_sda": 2.250708254489839,
-        "phase": "NO",
+        "phase": "WATCH",
         "paper_confirmation": null
       },
       "0x4c41f1c7b0b25703cebabba40bd22f952fc1ffe0": {
-        "decision_at": "2026-11-05T12:26:46.316090+00:00",
-        "quote_at": "2026-11-05T12:24:50+00:00",
-        "data_age_sec": 116.5,
-        "score": 10.4,
+        "decision_at": "2026-11-05T12:32:46.548241+00:00",
+        "quote_at": "2026-11-05T12:29:31+00:00",
+        "data_age_sec": 195.7,
+        "score": 12.3,
         "impulse": 0.0,
-        "price_sda": 4.323952697615648e-05,
+        "price_sda": 5.386251095123549e-05,
         "phase": "NO",
         "paper_confirmation": null
       },
       "0x7a15ff7b396ec76268d9d0dd0e5821e41841f768": {
-        "decision_at": "2026-11-05T12:26:46.316090+00:00",
+        "decision_at": "2026-11-05T12:29:48.682830+00:00",
         "quote_at": "2026-11-05T12:15:16+00:00",
-        "data_age_sec": 690.5,
-        "score": 10.4,
+        "data_age_sec": 872.9,
+        "score": 9.7,
         "impulse": 0.0,
         "price_sda": 0.004857351108408637,
-        "phase": "NO",
-        "paper_confirmation": null
-      },
-      "0xfbd1d703cf65b89b9bb4a80ed7be42c01d184178": {
-        "decision_at": "2026-11-05T12:15:48.070721+00:00",
-        "quote_at": "2026-11-05T12:09:12+00:00",
-        "data_age_sec": 396.3,
-        "score": 5.8,
-        "impulse": 0.0,
-        "price_sda": 0.15425465992423,
         "phase": "NO",
         "paper_confirmation": null
       },
@@ -57625,10 +57607,10 @@
         "paper_confirmation": null
       },
       "0xf94a744807da1e4f933c3d31e1d93a0a026fd21d": {
-        "decision_at": "2026-11-05T12:26:46.316090+00:00",
+        "decision_at": "2026-11-05T12:30:47.783707+00:00",
         "quote_at": "2026-11-05T12:16:22+00:00",
-        "data_age_sec": 624.5,
-        "score": 36.8,
+        "data_age_sec": 865.9,
+        "score": 36.1,
         "impulse": 0.0,
         "price_sda": 0.971618119268917,
         "phase": "NO",
@@ -57653,9 +57635,9 @@
         "paper_confirmation": null
       },
       "0xd1e6528d10398502677dfcb3ccd2fd4a657edf99": {
-        "decision_at": "2026-11-05T12:26:46.316090+00:00",
+        "decision_at": "2026-11-05T12:28:47.328357+00:00",
         "quote_at": "2026-11-05T12:14:43+00:00",
-        "data_age_sec": 723.5,
+        "data_age_sec": 844.5,
         "score": 33.7,
         "impulse": 0.0,
         "price_sda": 1.0981416335539929e-05,
@@ -57663,19 +57645,27 @@
         "paper_confirmation": null
       },
       "0x4ce5ef02f9aebb80bb4e327f76dfb95eac1b69a6": {
-        "decision_at": "2026-11-05T12:26:46.316090+00:00",
-        "quote_at": "2026-11-05T12:21:24+00:00",
-        "data_age_sec": 322.5,
-        "score": 11.5,
+        "decision_at": "2026-11-05T12:32:46.548241+00:00",
+        "quote_at": "2026-11-05T12:27:48+00:00",
+        "data_age_sec": 298.7,
+        "score": 32.5,
         "impulse": 0.0,
-        "price_sda": 1.4176601608926094,
+        "price_sda": 1.4235775549103393,
         "phase": "NO",
-        "paper_confirmation": null
+        "paper_confirmation": {
+          "decision_at": "2026-11-05T12:31:45.505828+00:00",
+          "quote_at": "2026-11-05T12:27:48+00:00",
+          "data_age_sec": 237.7,
+          "score": 32.5,
+          "impulse": 0.0,
+          "price_sda": 1.4235775549103393,
+          "phase": "NO"
+        }
       },
       "0xe1a8ffd7280d5a278a9e8c6daff6d391b59081b4": {
-        "decision_at": "2026-11-05T12:26:46.316090+00:00",
+        "decision_at": "2026-11-05T12:32:46.548241+00:00",
         "quote_at": "2026-11-05T12:21:24+00:00",
-        "data_age_sec": 322.5,
+        "data_age_sec": 682.7,
         "score": 19.1,
         "impulse": 0.0,
         "price_sda": 2.0601164077876306,
@@ -57683,9 +57673,9 @@
         "paper_confirmation": null
       },
       "0x99c03af034e5b471adb0536be65632b12492f991": {
-        "decision_at": "2026-11-05T12:26:46.316090+00:00",
+        "decision_at": "2026-11-05T12:32:46.548241+00:00",
         "quote_at": "2026-11-05T12:21:49+00:00",
-        "data_age_sec": 297.4,
+        "data_age_sec": 657.7,
         "score": 8.7,
         "impulse": 0.0,
         "price_sda": 0.3714178034237239,
@@ -57693,12 +57683,106 @@
         "paper_confirmation": null
       },
       "0x8f2e99691855a5663beb39deb9075f28b3dcc51b": {
-        "decision_at": "2026-11-05T12:26:46.316090+00:00",
+        "decision_at": "2026-11-05T12:32:46.548241+00:00",
         "quote_at": "2026-11-05T12:24:59+00:00",
-        "data_age_sec": 107.5,
+        "data_age_sec": 467.7,
         "score": 7.2,
         "impulse": 0.0,
         "price_sda": 0.18542835978863814,
+        "phase": "NO",
+        "paper_confirmation": null
+      },
+      "0xc716d2d396298d061f4cbd78dc00590a2638e825": {
+        "decision_at": "2026-11-05T12:32:46.548241+00:00",
+        "quote_at": "2026-11-05T12:23:32+00:00",
+        "data_age_sec": 554.7,
+        "score": 32.9,
+        "impulse": 0.0,
+        "price_sda": 0.08300064955233474,
+        "phase": "NO",
+        "paper_confirmation": {
+          "decision_at": "2026-11-05T12:27:47.427211+00:00",
+          "quote_at": "2026-11-05T12:23:32+00:00",
+          "data_age_sec": 255.6,
+          "score": 32.9,
+          "impulse": 0.0,
+          "price_sda": 0.08300064955233474,
+          "phase": "NO"
+        }
+      },
+      "0x4b7ded7fa9f3d96854c7c14874dfc5ad4ce8236c": {
+        "decision_at": "2026-11-05T12:32:46.548241+00:00",
+        "quote_at": "2026-11-05T12:24:29+00:00",
+        "data_age_sec": 497.7,
+        "score": 34.4,
+        "impulse": 0.0,
+        "price_sda": 0.004289975559046708,
+        "phase": "NO",
+        "paper_confirmation": {
+          "decision_at": "2026-11-05T12:28:47.328357+00:00",
+          "quote_at": "2026-11-05T12:24:29+00:00",
+          "data_age_sec": 258.5,
+          "score": 34.4,
+          "impulse": 0.0,
+          "price_sda": 0.004289975559046708,
+          "phase": "NO"
+        }
+      },
+      "0xb4ac5dd62f700e271bffb52aeae1dba40135427f": {
+        "decision_at": "2026-11-05T12:32:46.548241+00:00",
+        "quote_at": "2026-11-05T12:27:07+00:00",
+        "data_age_sec": 339.7,
+        "score": 19.0,
+        "impulse": 0.0,
+        "price_sda": 0.06355779978305279,
+        "phase": "NO",
+        "paper_confirmation": null
+      },
+      "0xd4d56e6e2d5f983dbad57c0dbcfb371e03a56362": {
+        "decision_at": "2026-11-05T12:32:46.548241+00:00",
+        "quote_at": "2026-11-05T12:22:38+00:00",
+        "data_age_sec": 608.7,
+        "score": 6.2,
+        "impulse": 0.0,
+        "price_sda": 0.01009991255588115,
+        "phase": "NO",
+        "paper_confirmation": null
+      },
+      "0xacb361fee5537c08b5504ccf936f5aa3e1c62f3d": {
+        "decision_at": "2026-11-05T12:32:46.548241+00:00",
+        "quote_at": "2026-11-05T12:28:09+00:00",
+        "data_age_sec": 277.7,
+        "score": 7.8,
+        "impulse": 0.0,
+        "price_sda": 8.84474737666115e-05,
+        "phase": "NO",
+        "paper_confirmation": null
+      },
+      "0xf7a974534d87da63e205f087fb9b817c0322abb3": {
+        "decision_at": "2026-11-05T12:32:46.548241+00:00",
+        "quote_at": "2026-11-05T12:28:48+00:00",
+        "data_age_sec": 238.7,
+        "score": 35.4,
+        "impulse": 0.0,
+        "price_sda": 0.08406147577844893,
+        "phase": "NO",
+        "paper_confirmation": {
+          "decision_at": "2026-11-05T12:31:45.505828+00:00",
+          "quote_at": "2026-11-05T12:28:48+00:00",
+          "data_age_sec": 177.7,
+          "score": 35.4,
+          "impulse": 0.0,
+          "price_sda": 0.08406147577844893,
+          "phase": "NO"
+        }
+      },
+      "0xf1b5e15c3aab202205f1161f7fc67d6e84629e11": {
+        "decision_at": "2026-11-05T12:32:46.548241+00:00",
+        "quote_at": "2026-11-05T12:20:31+00:00",
+        "data_age_sec": 735.7,
+        "score": 5.7,
+        "impulse": 0.0,
+        "price_sda": 0.038372020085971015,
         "phase": "NO",
         "paper_confirmation": null
       }
@@ -57996,6 +58080,6 @@
       }
     ],
     "total_recovered": 20,
-    "last_at": "2026-11-05T12:26:46.572708+00:00"
+    "last_at": "2026-11-05T12:32:46.807647+00:00"
   }
 }
