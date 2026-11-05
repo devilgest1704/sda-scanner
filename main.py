@@ -19,7 +19,14 @@ engine=_paper
 def _run_with_paper_telemetry():
     """Generate diagnostics from the SAME runtime ledger the paper engine uses."""
     try:
-        return engine.main()
+        result = engine.main()
+        # Mirror only committed PAPER position transitions; disabled by default.
+        try:
+            from real_paper_bridge import reconcile
+            print("PAPER->REAL bridge:", reconcile())
+        except Exception as exc:
+            print("::error::PAPER->REAL bridge failed:", repr(exc))
+        return result
     finally:
         # Persist scored eligible AND rejected candidate snapshots after each
         # scanner cycle. Diagnostics are paper-only and never block trading.
