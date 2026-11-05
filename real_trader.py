@@ -275,6 +275,10 @@ def prepare_buy(token, symbol, position_sda=None):
 
 
 def execute_buy(token, symbol, position_sda=None):
+    existing = load_state().get("positions", {}).get(addr(token))
+    if isinstance(existing, dict):
+        return {"action": "BUY", "symbol": symbol, "token": addr(token),
+                "status": "ALREADY_OPEN", "existing_buy_tx": existing.get("buy_tx")}
     plan = prepare_buy(token, symbol, position_sda)
     if not cfg.REAL_TRADING_ENABLED or cfg.REAL_TRADING_DRY_RUN:
         plan["status"] = "DRY_RUN"
