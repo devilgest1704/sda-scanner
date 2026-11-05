@@ -1,5 +1,6 @@
 """ABI encoding regression test for the real swap executor."""
 import unittest
+from datetime import datetime, timezone
 
 import real_trader
 
@@ -10,6 +11,27 @@ RECIPIENT = "0x" + "33" * 20
 
 
 class SwapCalldataTests(unittest.TestCase):
+    def test_daily_pnl_resets_when_utc_date_changes(self):
+        state = {"daily_pnl_date": "2000-01-01", "daily_realized_pnl_sda": -12.5}
+        real_trader._reset_daily_pnl_if_needed(state)
+        self.assertEqual(state["daily_pnl_date"], datetime.now(timezone.utc).date().isoformat())
+        self.assertEqual(state["daily_realized_pnl_sda"], 0.0)
+
+    def test_daily_pnl_is_preserved_on_same_utc_date(self):
+        today = datetime.now(timezone.utc).date().isoformat()
+        state = {"daily_pnl_date": today, "daily_realized_pnl_sda": -12.5}
+        real_trader._reset_daily_pnl_if_needed(state)
+        self.assertEqual(state["daily_realized_pnl_sda"], -12.5)
+
+    def test_daily_loss_guard_blocks_new_buy(self):
+        state = {
+            "positions": {},
+            "daily_pnl_date": datetime.now(timezone.utc).date().isoformat(),
+            "daily_realized_pnl_sda": -real_trader.cfg.MAX_DAILY_LOSS_SDA,
+        }
+        with self.assertRaisesRegex(RuntimeError, "Daily real-trading loss limit"):
+            real_trader.safety_check(real_trader.cfg.POSITION_DEFAULT_SDA, state)
+
     def test_exact_input_single_encodes_both_tokens_and_all_eight_words(self):
         data = real_trader.build_exact_input_single(
             TOKEN_IN, TOKEN_OUT, 3000, RECIPIENT, 123456, 789, 654
