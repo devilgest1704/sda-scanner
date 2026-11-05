@@ -4,6 +4,7 @@ The existing REAL menu remains the user's manual real-wallet dashboard.
 This module only reports the dedicated automated bot wallet/state; it does not
 execute orders.
 """
+import json
 import os
 
 import real_trading_config as cfg
@@ -66,6 +67,26 @@ def _wallet_short(wallet):
     return wallet[:10] + "..." + wallet[-6:] if len(wallet) > 20 else (wallet or "NOT CONFIGURED")
 
 
+def _token_label(token, pos):
+    """Prefer saved position metadata, then the scanner's token catalog."""
+    symbol = str(pos.get("symbol") or "").strip()
+    name = str(pos.get("name") or pos.get("token_name") or "").strip()
+    if not symbol or symbol.lower().startswith("0x"):
+        try:
+            with open("token_metadata.json", "r", encoding="utf-8") as handle:
+                metadata = json.load(handle)
+            item = metadata.get(str(token).lower(), {}) if isinstance(metadata, dict) else {}
+            if isinstance(item, dict):
+                if not symbol or symbol.lower().startswith("0x"):
+                    symbol = str(item.get("symbol") or "").strip()
+                name = name or str(item.get("name") or "").strip()
+        except Exception:
+            pass
+    if symbol and name and symbol.casefold() != name.casefold():
+        return f"{symbol} — {name}"
+    return symbol or name or str(token)[:10]
+
+
 def _position_mark_to_market(token, pos):
     """Read-only sell quote estimate for one open position."""
     try:
@@ -114,7 +135,7 @@ def bot_report(dashboard):
         for token, pos in positions.items():
             if not isinstance(pos, dict):
                 continue
-            symbol = pos.get("symbol") or token[:10]
+            symbol = _token_label(token, pos)
             cost = _num(pos.get("amount_sda", pos.get("cost_sda")))
             open_cost += cost
             value, pnl, error = _position_mark_to_market(token, pos)
@@ -154,7 +175,7 @@ def statistics_report(dashboard):
     for token, pos in positions.items():
         if not isinstance(pos, dict):
             continue
-        symbol = pos.get("symbol") or token[:10]
+        symbol = _token_label(token, pos)
         cost = _num(pos.get("amount_sda", pos.get("cost_sda")))
         open_cost += cost
         value, pnl, error = _position_mark_to_market(token, pos)
