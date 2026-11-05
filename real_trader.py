@@ -127,6 +127,10 @@ def wallet_address():
     key = os.getenv(cfg.PRIVATE_KEY_ENV, "").strip()
     if key:
         return Account.from_key(key).address
+    # Read-only eth_call quotes in dry-run can use the dedicated bot wallet.
+    # This fallback is never used to sign or broadcast transactions.
+    if cfg.REAL_TRADING_DRY_RUN or not cfg.REAL_TRADING_ENABLED:
+        return "0x9e3643f2ac15c91ee83aa2814015f15b18d573f2"
     return ""
 
 
