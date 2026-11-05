@@ -14,6 +14,7 @@ until the real-trading integration is explicitly enabled later.
 
 import json
 import os
+import subprocess
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -202,6 +203,78 @@ def estimate_gas(owner, to, data, value=0):
     return int(rpc("eth_estimateGas", [{"from": owner, "to": to, "data": data, "value": hex(value)}]), 16)
 
 
+def persist_real_intent_before_broadcast():
+    """Commit the pending signed transaction intent before any live RPC broadcast."""
+    if os.getenv("GITHUB_ACTIONS", "").strip().lower() != "true":
+        raise RuntimeError("Live trading requires the durable GitHub Actions state writer")
+    if not os.getenv("GH_TOKEN") or not os.getenv("GITHUB_REPOSITORY"):
+        raise RuntimeError("Live trading requires GH_TOKEN and GITHUB_REPOSITORY")
+
+    subprocess.run(["git", "config", "user.name", "sda-scanner-bot"], check=True, timeout=10)
+    subprocess.run(["git", "config", "user.email", "scanner@github.local"], check=True, timeout=10)
+    subprocess.run(["git", "add", "--", cfg.STATE_FILE], check=True, timeout=10)
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--quiet", "--", cfg.STATE_FILE],
+        check=False, timeout=10,
+    )
+    if staged.returncode == 0:
+        raise RuntimeError("Refusing live broadcast without a newly staged durable transaction intent")
+    if staged.returncode != 1:
+        raise RuntimeError("Unable to inspect staged real transaction intent")
+
+    subprocess.run(
+        ["git", "commit", "-m", "Update SDA scanner state", "--", cfg.STATE_FILE],
+        check=True, timeout=20, capture_output=True, text=True,
+    )
+    for attempt in range(5):
+        pushed = subprocess.run(
+            ["git", "push", "origin", "HEAD:main"],
+            check=False, timeout=30, capture_output=True, text=True,
+        )
+        if pushed.returncode == 0:
+            return
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            check=False, timeout=10, capture_output=True, text=True,
+        )
+        if status.returncode != 0:
+            raise RuntimeError("Unable to inspect scanner worktree before state rebase")
+        stash_created = False
+        if status.stdout.strip():
+            stashed = subprocess.run(
+                ["git", "stash", "push", "-u", "-m", "real-intent-persist-rebase"],
+                check=False, timeout=30, capture_output=True, text=True,
+            )
+            if stashed.returncode != 0:
+                raise RuntimeError("Unable to protect scanner worktree before state rebase")
+            stash_created = "No local changes to save" not in (stashed.stdout + stashed.stderr)
+        fetched = subprocess.run(
+            ["git", "fetch", "origin", "main"],
+            check=False, timeout=30, capture_output=True, text=True,
+        )
+        if fetched.returncode != 0:
+            if stash_created:
+                subprocess.run(["git", "stash", "pop"], check=False, timeout=30)
+            raise RuntimeError("Unable to fetch main while persisting live transaction intent")
+        rebased = subprocess.run(
+            ["git", "rebase", "origin/main"],
+            check=False, timeout=30, capture_output=True, text=True,
+        )
+        if rebased.returncode != 0:
+            subprocess.run(["git", "rebase", "--abort"], check=False, timeout=10)
+            if stash_created:
+                subprocess.run(["git", "stash", "pop"], check=False, timeout=30)
+            raise RuntimeError("Conflict while durably persisting live transaction intent; broadcast aborted")
+        if stash_created:
+            restored = subprocess.run(
+                ["git", "stash", "pop"],
+                check=False, timeout=30, capture_output=True, text=True,
+            )
+            if restored.returncode != 0:
+                raise RuntimeError("Unable to restore scanner worktree after state rebase; broadcast aborted")
+    raise RuntimeError("Unable to durably persist live transaction intent after five attempts")
+
+
 def send_transaction(account, to, data, value=0, gas_limit=None, before_broadcast=None):
     nonce = next_nonce(account.address)
     gp = gas_price()
@@ -222,6 +295,8 @@ def send_transaction(account, to, data, value=0, gas_limit=None, before_broadcas
         expected_hash = "0x" + expected_hash
     if before_broadcast:
         before_broadcast({"tx_hash": expected_hash, "nonce": nonce, "gas": gas, "gas_price": gp})
+    if cfg.REAL_TRADING_ENABLED and not cfg.REAL_TRADING_DRY_RUN and before_broadcast:
+        persist_real_intent_before_broadcast()
     tx_hash = rpc("eth_sendRawTransaction", ["0x" + raw])
     return tx_hash, gas, gp
 

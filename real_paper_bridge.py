@@ -67,19 +67,20 @@ def reconcile():
 
     previous = set(state.get("paper_positions", []))
     now_keys = set(current)
-    # Keep reconciling an uncertain BUY even if PAPER has already exited it.
-    # Once its receipt confirms, immediately mirror that already-committed
-    # PAPER close with a real SELL rather than orphaning the real token lot.
-    pending_buy = set(state.get("pending_buy", []))
-    pending_sell = set(state.get("pending_sell", []))
+    import real_trading_config as cfg
+    import real_trader
+    # The real ledger is durably committed before every swap broadcast.
+    # Rebuild pending work from it too, so a crash before the bridge's
+    # five-minute checkpoint cannot orphan an in-flight BUY or SELL.
+    real_snapshot = real_trader.load_state()
+    pending_buy = set(state.get("pending_buy", [])) | set(real_snapshot.get("pending_buys", {}))
+    pending_sell = set(state.get("pending_sell", [])) | set(real_snapshot.get("pending_sells", {}))
     opened = sorted((now_keys - previous) | pending_buy)
     closed = sorted((previous - now_keys) | pending_sell)
     confirmed_after_paper_close = set()
     next_pending_buy = set()
     next_pending_sell = set()
     actions = []
-    import real_trading_config as cfg
-    import real_trader
 
     # New PAPER positions become real buys only after the paper ledger commits.
     for token in opened:
