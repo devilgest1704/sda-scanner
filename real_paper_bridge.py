@@ -53,7 +53,12 @@ def reconcile():
         return {"status": "dry_run", "actions": []}
 
     current = _paper_positions()
-    state = _load(STATE_FILE, {})
+    if STATE_FILE.exists():
+        state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        if not isinstance(state, dict):
+            raise RuntimeError("Invalid bridge state; refusing to overwrite it")
+    else:
+        state = {}
     if not state.get("initialized"):
         state = {"initialized": True, "paper_positions": sorted(current),
                  "initialized_at": _now(), "last_run": _now()}
