@@ -86,8 +86,17 @@ def _reset_daily_pnl_if_needed(state):
 
 
 def load_state():
-    state = load_json(cfg.STATE_FILE, {})
-    if not isinstance(state, dict):
+    path = Path(cfg.STATE_FILE)
+    if path.exists():
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise RuntimeError(
+                f"Refusing to reset unreadable real trading state {path}: {exc}"
+            ) from exc
+        if not isinstance(state, dict):
+            raise RuntimeError(f"Refusing to reset invalid real trading state {path}")
+    else:
         state = {}
     state.setdefault("positions", {})
     state.setdefault("pending_buys", {})
