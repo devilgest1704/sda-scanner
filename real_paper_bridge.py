@@ -57,7 +57,7 @@ def reconcile():
 
     previous = set(state.get("paper_positions", []))
     now_keys = set(current)
-    pending_buy = set(state.get("pending_buy", []))
+    pending_buy = set(state.get("pending_buy", [])) & now_keys
     pending_sell = set(state.get("pending_sell", []))
     opened = sorted((now_keys - previous) | pending_buy)
     closed = sorted((previous - now_keys) | pending_sell)
@@ -77,7 +77,7 @@ def reconcile():
             status = result.get("status", "UNKNOWN")
             actions.append({"action": "BUY", "token": token, "symbol": symbol,
                            "status": status, "tx": result.get("tx"), "at": _now()})
-            if status != "CONFIRMED":
+            if status not in ("CONFIRMED", "ALREADY_OPEN"):
                 next_pending_buy.add(token)
         except Exception as exc:
             actions.append({"action": "BUY", "token": token, "symbol": symbol,
