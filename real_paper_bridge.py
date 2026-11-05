@@ -57,8 +57,12 @@ def reconcile():
 
     previous = set(state.get("paper_positions", []))
     now_keys = set(current)
-    opened = sorted(now_keys - previous)
-    closed = sorted(previous - now_keys)
+    pending_buy = set(state.get("pending_buy", []))
+    pending_sell = set(state.get("pending_sell", []))
+    opened = sorted((now_keys - previous) | pending_buy)
+    closed = sorted((previous - now_keys) | pending_sell)
+    next_pending_buy = set()
+    next_pending_sell = set()
     actions = []
     import real_trading_config as cfg
     import real_trader
@@ -70,12 +74,15 @@ def reconcile():
         amount = cfg.position_sda()
         try:
             result = real_trader.execute_buy(token, symbol, amount)
+            status = result.get("status", "UNKNOWN")
             actions.append({"action": "BUY", "token": token, "symbol": symbol,
-                           "status": result.get("status", "UNKNOWN"),
-                           "tx": result.get("tx"), "at": _now()})
+                           "status": status, "tx": result.get("tx"), "at": _now()})
+            if status != "CONFIRMED":
+                next_pending_buy.add(token)
         except Exception as exc:
             actions.append({"action": "BUY", "token": token, "symbol": symbol,
                            "status": "ERROR", "error": str(exc)[:500], "at": _now()})
+            next_pending_buy.add(token)
 
     # A PAPER close is mirrored only for a token that has a recorded real lot.
     real_state = real_trader.load_state()
@@ -89,18 +96,24 @@ def reconcile():
         if amount_raw <= 0:
             actions.append({"action": "SELL", "token": token,
                            "status": "MISSING_TOKEN_AMOUNT", "at": _now()})
+            next_pending_sell.add(token)
             continue
         try:
             result = real_trader.execute_sell(
                 token, str(real_pos.get("symbol") or token[:8]), amount_raw)
-            actions.append({"action": "SELL", "token": token,
-                           "status": result.get("status", "UNKNOWN"),
+            status = result.get("status", "UNKNOWN")
+            actions.append({"action": "SELL", "token": token, "status": status,
                            "tx": result.get("tx"), "at": _now()})
+            if status != "CONFIRMED":
+                next_pending_sell.add(token)
         except Exception as exc:
             actions.append({"action": "SELL", "token": token,
                            "status": "ERROR", "error": str(exc)[:500], "at": _now()})
+            next_pending_sell.add(token)
 
     state["paper_positions"] = sorted(now_keys)
+    state["pending_buy"] = sorted(next_pending_buy)
+    state["pending_sell"] = sorted(next_pending_sell)
     state["last_run"] = _now()
     state["last_actions"] = actions
     _save(STATE_FILE, state)
