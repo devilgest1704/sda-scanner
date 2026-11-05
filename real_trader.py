@@ -82,6 +82,7 @@ def load_state():
     if not isinstance(state, dict):
         state = {}
     state.setdefault("positions", {})
+    state.setdefault("pending_buys", {})
     state.setdefault("trades", [])
     state.setdefault("daily_realized_pnl_sda", 0.0)
     state.setdefault("updated_at", None)
@@ -181,7 +182,7 @@ def estimate_gas(owner, to, data, value=0):
     return int(rpc("eth_estimateGas", [{"from": owner, "to": to, "data": data, "value": hex(value)}]), 16)
 
 
-def send_transaction(account, to, data, value=0, gas_limit=None):
+def send_transaction(account, to, data, value=0, gas_limit=None, before_broadcast=None):
     nonce = next_nonce(account.address)
     gp = gas_price()
     gas = gas_limit or estimate_gas(account.address, to, data, value)
@@ -196,6 +197,11 @@ def send_transaction(account, to, data, value=0, gas_limit=None):
     }
     signed = account.sign_transaction(tx)
     raw = signed.raw_transaction.hex()
+    expected_hash = signed.hash.hex()
+    if not expected_hash.startswith("0x"):
+        expected_hash = "0x" + expected_hash
+    if before_broadcast:
+        before_broadcast({"tx_hash": expected_hash, "nonce": nonce, "gas": gas, "gas_price": gp})
     tx_hash = rpc("eth_sendRawTransaction", ["0x" + raw])
     return tx_hash, gas, gp
 
@@ -233,11 +239,14 @@ def safety_check(position_sda, state):
     position_sda = float(position_sda)
     if position_sda < cfg.POSITION_MIN_SDA or position_sda > cfg.POSITION_MAX_SDA:
         raise ValueError("Real position must be between 10 and 20 SDA")
-    open_count = len(state.get("positions", {}))
+    positions = state.get("positions", {})
+    pending_buys = state.get("pending_buys", {})
+    open_count = len(positions) + len(pending_buys)
     if open_count >= cfg.MAX_OPEN_POSITIONS:
         raise RuntimeError("Maximum real open positions reached")
-    open_cost = sum(float(x.get("cost_sda") or 0) for x in state.get("positions", {}).values())
-    if open_cost + position_sda > cfg.TRADING_WALLET_CAPITAL_SDA:
+    open_cost = sum(float(x.get("amount_sda") or x.get("cost_sda") or 0) for x in positions.values())
+    pending_cost = sum(float(x.get("position_sda") or 0) for x in pending_buys.values())
+    if open_cost + pending_cost + position_sda > cfg.TRADING_WALLET_CAPITAL_SDA:
         raise RuntimeError("Real trading capital cap of 200 SDA would be exceeded")
     if float(state.get("daily_realized_pnl_sda") or 0) <= -cfg.MAX_DAILY_LOSS_SDA:
         raise RuntimeError("Daily real-trading loss limit reached")
@@ -274,7 +283,60 @@ def prepare_buy(token, symbol, position_sda=None):
     }
 
 
+def _finalize_confirmed_buy(token, symbol, plan, tx_hash, gas, gp, token_balance_before=None):
+    account = private_account()
+    try:
+        token_balance_after = token_balance(token, account.address)
+        received_raw = (token_balance_after - token_balance_before
+                        if token_balance_before is not None else 0)
+    except Exception:
+        received_raw = 0
+    if received_raw <= 0:
+        received_raw = int(plan["minimum_out_raw"])
+    state = load_state()
+    state.setdefault("pending_buys", {}).pop(addr(token), None)
+    state["positions"][addr(token)] = {
+        "symbol": symbol, "token": addr(token), "amount_sda": plan["position_sda"],
+        "quoted_out_raw": plan["quoted_out_raw"], "minimum_out_raw": plan["minimum_out_raw"],
+        "token_amount_raw": received_raw, "opened_at": now(), "buy_tx": tx_hash,
+    }
+    state["trades"].append({"action": "BUY", "symbol": symbol, "token": addr(token),
+                            "amount_sda": plan["position_sda"], "tx": tx_hash, "at": now()})
+    state["updated_at"] = now()
+    save_state(state)
+    return {"action": "BUY", "status": "CONFIRMED", "token": addr(token),
+            "tx": tx_hash, "token_amount_raw": received_raw, "gas": gas, "gas_price": gp}
+
+
 def execute_buy(token, symbol, position_sda=None):
+    token = addr(token)
+    state = load_state()
+    existing = state.get("positions", {}).get(token)
+    if isinstance(existing, dict):
+        return {"action": "BUY", "symbol": symbol, "token": token,
+                "status": "ALREADY_OPEN", "existing_buy_tx": existing.get("buy_tx")}
+
+    # Persist the deterministic signed hash before broadcast. A lost RPC
+    # response must never cause a second BUY on the next scanner cycle.
+    pending = state.setdefault("pending_buys", {}).get(token)
+    if isinstance(pending, dict):
+        tx_hash = pending.get("tx_hash")
+        if not tx_hash:
+            return {"action": "BUY", "token": token, "status": "MANUAL_RECONCILIATION_REQUIRED"}
+        receipt = rpc("eth_getTransactionReceipt", [tx_hash])
+        if not receipt:
+            return {"action": "BUY", "token": token, "status": "PENDING_CONFIRMATION", "tx": tx_hash}
+        if int(receipt.get("status", "0x0"), 16) != 1:
+            state["pending_buys"].pop(token, None)
+            save_state(state)
+            raise RuntimeError(f"BUY failed: {tx_hash}")
+        account = private_account()
+        if chain_id() != cfg.CHAIN_ID or account.address.lower() != pending["wallet"].lower():
+            raise RuntimeError("Pending BUY wallet or chain mismatch")
+        return _finalize_confirmed_buy(token, pending.get("symbol") or symbol,
+            pending["plan"], tx_hash, pending.get("gas"), pending.get("gas_price"),
+            pending.get("token_balance_before"))
+
     plan = prepare_buy(token, symbol, position_sda)
     if not cfg.REAL_TRADING_ENABLED or cfg.REAL_TRADING_DRY_RUN:
         plan["status"] = "DRY_RUN"
@@ -286,24 +348,31 @@ def execute_buy(token, symbol, position_sda=None):
         raise RuntimeError("Wrong Sidra Chain ID")
     if native_balance(account.address) < plan["value_wei"]:
         raise RuntimeError("Insufficient SDA balance for BUY + gas")
-    tx_hash, gas, gp = send_transaction(account, cfg.ROUTER_ADDRESS, plan["calldata"], plan["value_wei"], cfg.GAS_LIMIT)
+    try:
+        balance_before = token_balance(token, account.address)
+    except Exception:
+        balance_before = None
+
+    def persist_intent(signed):
+        current = load_state()
+        current.setdefault("pending_buys", {})[token] = {
+            "stage": "broadcasting", "tx_hash": signed["tx_hash"], "nonce": signed["nonce"],
+            "gas": signed["gas"], "gas_price": signed["gas_price"], "symbol": symbol,
+            "wallet": account.address, "position_sda": plan["position_sda"], "plan": plan,
+            "token_balance_before": balance_before, "created_at": now(),
+        }
+        current["updated_at"] = now()
+        save_state(current)
+
+    tx_hash, gas, gp = send_transaction(account, cfg.ROUTER_ADDRESS, plan["calldata"],
+        plan["value_wei"], cfg.GAS_LIMIT, before_broadcast=persist_intent)
     receipt, ok = wait_receipt(tx_hash)
     if not ok:
+        current = load_state()
+        current.setdefault("pending_buys", {}).pop(token, None)
+        save_state(current)
         raise RuntimeError(f"BUY failed: {tx_hash}")
-    state = load_state()
-    state["positions"][addr(token)] = {
-        "symbol": symbol,
-        "token": addr(token),
-        "amount_sda": plan["position_sda"],
-        "quoted_out_raw": plan["quoted_out_raw"],
-        "minimum_out_raw": plan["minimum_out_raw"],
-        "opened_at": now(),
-        "buy_tx": tx_hash,
-    }
-    state["trades"].append({"action": "BUY", "symbol": symbol, "token": addr(token), "amount_sda": plan["position_sda"], "tx": tx_hash, "at": now()})
-    state["updated_at"] = now()
-    save_state(state)
-    return {**plan, "status": "CONFIRMED", "tx": tx_hash, "gas": gas, "gas_price": gp, "receipt": receipt}
+    return _finalize_confirmed_buy(token, symbol, plan, tx_hash, gas, gp, balance_before)
 
 
 def prepare_sell(token, symbol, token_amount_raw):
