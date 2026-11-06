@@ -5,7 +5,9 @@ This module only reports the dedicated automated bot wallet/state; it does not
 execute orders.
 """
 import json
+import math
 import os
+from datetime import datetime, timezone
 
 import real_trading_config as cfg
 
@@ -87,51 +89,187 @@ def _token_label(token, pos):
     return symbol or name or str(token)[:10]
 
 
-def _position_mark_to_market(token, pos):
-    """Value the actual wallet balance using a fresh executable PinetSwap SELL quote.
+def _finite_number(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
 
-    A last observed trade price is not a reliable mark for the amount held:
-    it can be stale and ignores price impact. Missing token-specific fee data,
-    balance data, or a current router quote therefore produces N/A, never a
-    fabricated fallback price.
-    """
-    from datetime import datetime, timezone
+
+def _quote_age(quoted_at):
+    if not quoted_at:
+        return "quote age unknown"
+    try:
+        stamp = datetime.fromisoformat(str(quoted_at).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        age_seconds = (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()
+        if age_seconds < 0:
+            return "quote timestamp is in the future"
+        if age_seconds < 3600:
+            return f"quote age {int(age_seconds // 60)}m"
+        hours, remainder = divmod(int(age_seconds), 3600)
+        if hours < 48:
+            return f"quote age {hours}h {remainder // 60}m"
+        return f"quote age {hours // 24}d {hours % 24}h"
+    except (TypeError, ValueError, OverflowError):
+        return "quote age unknown"
+
+
+def _market_price(dashboard, token):
+    market = dashboard.load("market_data.json", {"tokens": {}})
+    tokens = market.get("tokens", {}) if isinstance(market, dict) else {}
+    row = tokens.get(str(token).lower(), {}) if isinstance(tokens, dict) else {}
+    if not isinstance(row, dict) and isinstance(tokens, dict):
+        row = next((value for key, value in tokens.items()
+                    if str(key).lower() == str(token).lower()), {})
+    if not isinstance(row, dict):
+        return None, "quote age unknown"
+    analysis = row.get("analysis") if isinstance(row.get("analysis"), dict) else row
+    price = _finite_number(analysis.get("price_in_sda"))
+    if price is None or price <= 0:
+        return None, "quote age unknown"
+    return price, _quote_age(analysis.get("last_transaction"))
+
+
+def _short_sell_quote_error(exc):
+    text = str(exc).upper()
+    if "STF" in text:
+        return "STF"
+    if "INSUFFICIENT_OUTPUT_AMOUNT" in text:
+        return "slippage"
+    if "EXPIRED" in text:
+        return "expired"
+    if "TIMEOUT" in text:
+        return "timeout"
+    if "REVERT" in text:
+        return "reverted"
+    if "NO LIVE PINETSWAP QUOTE" in text:
+        return "no route"
+    return "quote error"
+
+
+def _position_mark_to_market(dashboard, token, pos):
+    """Return a market valuation and an independent executable-sell status."""
     token = str(token).lower()
+    cost_sda = _finite_number(pos.get("amount_sda", pos.get("cost_sda")))
+    mark = {
+        "amount_raw": None,
+        "cost_sda": cost_sda,
+        "value_sda": None,
+        "pnl_sda": None,
+        "pnl_pct": None,
+        "price_sda": None,
+        "quote_age": "quote age unknown",
+        "sellable": False,
+        "sell_error": "wallet balance unavailable",
+    }
     try:
         import real_trader
         amount_raw = int(real_trader.token_balance(token, _wallet_address()))
-        decimals = int(real_trader.token_decimals(token))
-    except Exception as exc:
-        return None, None, f"wallet balance/decimals unavailable: {str(exc)[:70]}", None
+    except Exception:
+        return mark
+    mark["amount_raw"] = amount_raw
     if amount_raw <= 0:
-        return None, None, "wallet token balance is zero; position needs reconciliation", None
-
-    cost_sda = _num(pos.get("amount_sda", pos.get("cost_sda")))
-    bought_raw = int(pos.get("token_amount_raw") or 0)
-    if cost_sda <= 0 or bought_raw <= 0:
-        return None, None, "confirmed BUY cost basis or received token amount missing", None
+        mark["sell_error"] = "zero wallet balance"
+        return mark
 
     try:
-        # prepare_sell performs a fresh eth_call against the live PinetSwap
-        # router for the entire token quantity currently held by this wallet.
+        decimals = int(real_trader.token_decimals(token))
+        if not 0 <= decimals <= 36:
+            raise ValueError("unsupported token decimals")
+        price, quote_age = _market_price(dashboard, token)
+        mark["quote_age"] = quote_age
+        if price is not None:
+            token_amount = amount_raw / (10 ** decimals)
+            mark["price_sda"] = price
+            mark["value_sda"] = token_amount * price
+            if cost_sda is not None and cost_sda > 0:
+                mark["pnl_sda"] = mark["value_sda"] - cost_sda
+                mark["pnl_pct"] = mark["pnl_sda"] / cost_sda * 100
+    except Exception:
+        pass
+
+    try:
         quote = real_trader.prepare_sell(token, _token_label(token, pos), amount_raw)
-        proceeds_raw = int(quote.get("quoted_wsda_raw") or 0)
-        if proceeds_raw <= 0:
-            return None, None, "PinetSwap returned an empty SELL quote", None
-        value_sda = proceeds_raw / 10**18
-        token_amount = amount_raw / (10**decimals)
-        bought_amount = bought_raw / (10**decimals)
-        entry_price = cost_sda / bought_amount
-        current_price = value_sda / token_amount
-        pnl_sda = value_sda - cost_sda
-        quoted_at = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-        return value_sda, pnl_sda, f"LIVE PinetSwap SELL quote • {quoted_at} • price impact included", (entry_price, current_price)
+        proceeds_raw = _finite_number(quote.get("quoted_wsda_raw"))
+        mark["sellable"] = proceeds_raw is not None and proceeds_raw > 0
+        if not mark["sellable"]:
+            mark["sell_error"] = "empty quote"
+        else:
+            mark["sell_error"] = None
     except Exception as exc:
-        return None, None, f"live PinetSwap SELL quote unavailable: {str(exc)[:180]}", None
+        mark["sell_error"] = _short_sell_quote_error(exc)
+    return mark
 
 
-def _pnl_text(value):
-    return f"{value:+.2f} SDA" if value is not None else "N/A"
+def _position_marks(dashboard, positions):
+    marks = []
+    for token, pos in positions.items():
+        if isinstance(pos, dict):
+            marks.append((_token_label(token, pos), _position_mark_to_market(dashboard, token, pos)))
+    return marks
+
+
+def _realized_total(state):
+    trades = state.get("trades", []) if isinstance(state, dict) else []
+    sells = [trade for trade in trades if isinstance(trade, dict)
+             and str(trade.get("action", "")).upper() == "SELL"]
+    if not sells:
+        return 0.0
+    values = [_finite_number(trade.get("realized_pnl_sda")
+                             if trade.get("realized_pnl_sda") is not None
+                             else trade.get("pnl_sda")) for trade in sells]
+    return sum(values) if all(value is not None for value in values) else None
+
+
+def _portfolio_summary_lines(balance, balance_error, marks, realized, daily):
+    total = len(marks)
+    valued = sum(mark["value_sda"] is not None for _, mark in marks)
+    cost_known = sum(mark["cost_sda"] is not None and mark["cost_sda"] >= 0
+                     for _, mark in marks)
+    pnl_known = sum(mark["pnl_sda"] is not None for _, mark in marks)
+    sellable = sum(mark["sellable"] for _, mark in marks)
+    open_cost = sum(mark["cost_sda"] for _, mark in marks
+                    if mark["cost_sda"] is not None and mark["cost_sda"] >= 0)
+    open_value = sum(mark["value_sda"] for _, mark in marks if mark["value_sda"] is not None)
+    known_pnl = sum(mark["pnl_sda"] for _, mark in marks if mark["pnl_sda"] is not None)
+    complete = valued == total and cost_known == total and pnl_known == total
+    balance_text = f"{balance:.3f} SDA" if balance is not None else f"N/A ({balance_error})"
+    cost_text = (f"{open_cost:.2f} SDA" if cost_known == total
+                 else f"{open_cost:.2f} SDA (known {cost_known}/{total})")
+    value_label = "Estimated open value" if valued == total else "Known open value subtotal"
+    pnl_label = "Unrealized P/L" if complete else "Known unrealized P/L subtotal"
+    lines = [
+        f"💰 SDA wallet balance: {balance_text}",
+        f"💼 Open cost basis: {cost_text}",
+        f"📊 {value_label}: {open_value:.2f} SDA (valued {valued}/{total})",
+        f"📈 {pnl_label}: {known_pnl:+.2f} SDA (valued {pnl_known}/{total})",
+        f"💹 Realized P/L: {realized:+.2f} SDA" if realized is not None else "💹 Realized P/L: N/A",
+        f"📉 Daily realized P/L: {daily:+.2f} SDA",
+        f"✅ Executable SELL quotes: {sellable}/{total}",
+    ]
+    if complete and realized is not None:
+        lines.append(f"💰 Combined portfolio P/L: {realized + known_pnl:+.2f} SDA")
+    else:
+        lines.append("💰 Combined portfolio P/L: N/A (open valuation or cost basis incomplete)")
+    return lines
+
+
+def _position_lines(symbol, mark):
+    value = f"{mark['value_sda']:.2f} SDA" if mark["value_sda"] is not None else "UNPRICED"
+    cost = f"{mark['cost_sda']:.2f} SDA" if mark["cost_sda"] is not None else "UNKNOWN"
+    pnl = (f"{mark['pnl_sda']:+.2f} SDA ({mark['pnl_pct']:+.2f}%)"
+           if mark["pnl_sda"] is not None else "N/A")
+    if mark["price_sda"] is not None:
+        price_line = f"Price: market valuation ({mark['price_sda']:.8g} SDA; {mark['quote_age']})"
+    else:
+        price_line = "Price: unpriced (no valid market mark)"
+    sell_line = ("Sell: ✅ executable quote" if mark["sellable"]
+                 else f"Sell: ⚠ quote unavailable ({mark['sell_error'] or 'unknown'})")
+    return [f"• {symbol}", f"  Value: {value}", f"  Cost: {cost}",
+            f"  P/L: {pnl}", f"  {price_line}", f"  {sell_line}"]
 
 
 def bot_report(dashboard):
@@ -143,57 +281,28 @@ def bot_report(dashboard):
     balance, balance_error = _wallet_balance_sda()
     daily = _num(state.get("daily_realized_pnl_sda"))
     state_updated = str(state.get("updated_at") or "—")[:19].replace("T", " ")
-    balance_text = f"{balance:.3f} SDA" if balance is not None else f"RPC ERROR: {balance_error}"
+    marks = _position_marks(dashboard, positions)
     lines = [
         "🤖 REAL TRADING BOT", "", f"Status: {_status()}",
-        f"👛 Bot wallet: {_wallet_short(wallet)}", f"💰 SDA balance: {balance_text}",
+        f"👛 Bot wallet: {_wallet_short(wallet)}",
         f"🎯 Position size: {cfg.POSITION_MIN_SDA:.0f}–{cfg.POSITION_MAX_SDA:.0f} SDA",
         f"📦 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.0f} SDA",
         f"📊 Open positions: {len(positions)}/{cfg.MAX_OPEN_POSITIONS}",
-        f"📉 Daily realized P/L: {daily:+.2f} SDA",
         f"🕒 Position ledger updated: {state_updated} UTC",
     ]
-    if not positions:
-        lines += ["📈 Unrealized P/L: +0.00 SDA", "💼 Open cost: 0.00 SDA",
-                  "💹 Total P/L: N/A (no closed trades)", "────────────────────────",
+    lines += _portfolio_summary_lines(balance, balance_error, marks, _realized_total(state), daily)
+    if not marks:
+        lines += ["────────────────────────",
                   "⚪ No open bot positions"]
     else:
         lines += ["🪙 OPEN BOT POSITIONS", "────────────────────────"]
-        marks = []
-        open_cost = 0.0
-        valid_count = 0
-        for token, pos in positions.items():
-            if not isinstance(pos, dict):
-                continue
-            symbol = _token_label(token, pos)
-            cost = _num(pos.get("amount_sda", pos.get("cost_sda")))
-            open_cost += cost
-            value, pnl, error, prices = _position_mark_to_market(token, pos)
-            if pnl is None:
-                lines.append(f"• {symbol} • cost {cost:.2f} SDA • P/L N/A")
-                lines.append(f"  Quote unavailable: {error}")
-            else:
-                valid_count += 1
-                marks.append(pnl)
-                pct = pnl / cost * 100 if cost else 0.0
-                marker = f" • {error}" if str(error or "").lower().startswith("live pinetswap") else (" ⚠️ snapshot" if str(error or "").startswith("snapshot") else (" ⚠️ ledger amount" if error == "ledger amount" else ""))
-                lines.append(f"• {symbol} • {pnl:+.2f} SDA ({pct:+.2f}%){marker}")
-                if prices:
-                    entry_price, current_price = prices
-                    lines.append(f"  Buy {entry_price:.10f} → Now {current_price:.10f} SDA")
-                lines.append(f"  Value {value:.2f} / cost {cost:.2f} SDA")
-        total_positions = len([p for p in positions.values() if isinstance(p, dict)])
-        partial_unrealized = sum(marks)
-        unrealized_text = (
-            f"{partial_unrealized:+.2f} SDA ({valid_count}/{total_positions} priced)"
-            if valid_count == total_positions
-            else f"{partial_unrealized:+.2f} SDA PARTIAL ({valid_count}/{total_positions} priced); rest N/A"
-        )
-        lines += ["────────────────────────", f"📈 Unrealized P/L: {unrealized_text}",
-                  f"💼 Open cost: {open_cost:.2f} SDA", f"💹 Realized today: {daily:+.2f} SDA"]
-    lines += ["", "P/L is quote-based estimate; excludes gas and may change before execution.",
+        for symbol, mark in marks:
+            lines.extend(_position_lines(symbol, mark))
+    lines += ["", "Market values use last observed market prices; SELL quotes are separate and may change before execution.",
               "Bot wallet is separate from the existing manual REAL wallet."]
     return "\n".join(lines)
+
+
 def statistics_report(dashboard):
     state = _state(dashboard)
     positions = state.get("positions", {})
@@ -202,60 +311,43 @@ def statistics_report(dashboard):
     trades = [x for x in trades if isinstance(x, dict)] if isinstance(trades, list) else []
     buys = [x for x in trades if str(x.get("action", "")).upper() == "BUY"]
     sells = [x for x in trades if str(x.get("action", "")).upper() == "SELL"]
-    realized_values = [_num(x.get("realized_pnl_sda")) for x in sells if x.get("realized_pnl_sda") is not None]
-    realized_total = sum(realized_values)
-    wins = [x for x in realized_values if x > 0]
-    losses = [x for x in realized_values if x < 0]
+    realized_values = [_finite_number(x.get("realized_pnl_sda")
+                                      if x.get("realized_pnl_sda") is not None
+                                      else x.get("pnl_sda")) for x in sells]
+    known_realized_values = [value for value in realized_values if value is not None]
+    realized_total = _realized_total(state)
+    wins = [x for x in realized_values if x is not None and x > 0]
+    losses = [x for x in realized_values if x is not None and x < 0]
     daily = _num(state.get("daily_realized_pnl_sda"))
     balance, balance_error = _wallet_balance_sda()
     wallet = _wallet_address()
     updated = str(state.get("updated_at") or "—")[:16].replace("T", " ")
-    balance_text = f"{balance:.3f}" if balance is not None else f"RPC ERROR: {balance_error}"
-    marks, position_rows, open_cost = [], [], 0.0
-    for token, pos in positions.items():
-        if not isinstance(pos, dict):
-            continue
-        symbol = _token_label(token, pos)
-        cost = _num(pos.get("amount_sda", pos.get("cost_sda")))
-        open_cost += cost
-        value, pnl, error, prices = _position_mark_to_market(token, pos)
-        if pnl is None:
-            position_rows.append(f"• {symbol}: P/L N/A ({error})")
-        else:
-            marks.append(pnl)
-            pct = pnl / cost * 100 if cost else 0.0
-            marker = f" • {error}" if str(error or "").startswith("live PinetSwap") else (" ⚠️ snapshot" if str(error or "").startswith("snapshot") else "")
-            if prices:
-                entry_price, current_price = prices
-                position_rows.append(f"• {symbol}: {pnl:+.2f} SDA ({pct:+.2f}%) | buy {entry_price:.10f} → now {current_price:.10f} SDA{marker}")
-            else:
-                position_rows.append(f"• {symbol}: {pnl:+.2f} SDA ({pct:+.2f}%){marker}")
-    total_positions = len([p for p in positions.values() if isinstance(p, dict)])
-    priced_positions = len(marks)
-    unrealized = sum(marks) if priced_positions == total_positions else None
-    partial_unrealized = sum(marks)
+    marks = _position_marks(dashboard, positions)
     gross_wins, gross_losses = sum(wins), abs(sum(losses))
     pf = gross_wins / gross_losses if gross_losses else (float("inf") if gross_wins else None)
-    closed_summary = (f"📊 Closed trades: {len(realized_values)} • Win rate: {len(wins)/len(realized_values)*100:.1f}%"
-                      if realized_values else "📊 Closed trades: 0 • Win rate: N/A")
+    win_rate = len(wins) / len(known_realized_values) * 100 if known_realized_values else None
+    closed_summary = (f"📊 Closed trades: {len(sells)} • Win rate: {win_rate:.1f}% ({len(known_realized_values)}/{len(sells)} valued)"
+                      if win_rate is not None else f"📊 Closed trades: {len(sells)} • Win rate: N/A")
     lines = [
         "📈 REAL TRADING BOT • STATISTICS", "",
         f"🟢 Open positions: {len(positions)} / {cfg.MAX_OPEN_POSITIONS}",
         f"📥 Confirmed BUYs: {len(buys)}", f"📤 Confirmed SELLs: {len(sells)}", closed_summary,
-        f"💰 Realized P/L total: {realized_total:+.2f} SDA",
-        (f"📈 Unrealized P/L: {_pnl_text(unrealized)}" if unrealized is not None
-         else f"📈 Unrealized P/L: {partial_unrealized:+.2f} SDA PARTIAL ({priced_positions}/{total_positions} priced)"),
-        f"💹 Combined P/L: {_pnl_text(realized_total + unrealized if unrealized is not None else None)}",
+        f"💰 Realized P/L total: {realized_total:+.2f} SDA" if realized_total is not None else "💰 Realized P/L total: N/A",
         f"🏆 Avg win: {sum(wins)/len(wins):+.2f} SDA" if wins else "🏆 Avg win: N/A",
         f"🧯 Avg loss: {sum(losses)/len(losses):+.2f} SDA" if losses else "🧯 Avg loss: N/A",
         f"⚖️ Profit factor: {pf:.2f}" if pf is not None and pf != float("inf") else ("⚖️ Profit factor: ∞" if pf == float("inf") else "⚖️ Profit factor: N/A"),
-        f"💼 Open cost: {open_cost:.2f} SDA", "────────────────────────",
-        f"💰 Wallet native SDA: {balance_text}", f"📊 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.2f} SDA",
+        f"📊 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.2f} SDA",
         f"🎯 Position range: {cfg.POSITION_MIN_SDA:.0f}–{cfg.POSITION_MAX_SDA:.0f} SDA",
-        f"📉 Daily realized P/L: {daily:+.2f} SDA", f"🕒 State updated: {updated}",
+        f"🕒 State updated: {updated}",
+    ]
+    lines += _portfolio_summary_lines(balance, balance_error, marks, realized_total, daily)
+    lines += [
         "", "🪙 OPEN POSITION P/L", "────────────────────────",
     ]
-    lines.extend(position_rows or ["⚪ No open positions"])
+    for symbol, mark in marks:
+        lines.extend(_position_lines(symbol, mark))
+    if not marks:
+        lines.append("⚪ No open positions")
     lines += ["", "📜 RECENT BOT TRADES", "────────────────────────"]
     if not trades:
         lines.append("⚪ No bot trades yet")

@@ -1,11 +1,25 @@
+from datetime import datetime, timezone
+
 import pytest
 
 import real_bot_menu
 import real_trader
 
 
-def test_mark_to_market_uses_actual_wallet_balance_and_live_sell_quote(monkeypatch):
+class MarketDashboard:
+    def __init__(self, token, price):
+        self.market = {"tokens": {token: {"analysis": {
+            "price_in_sda": price,
+            "last_transaction": datetime.now(timezone.utc).isoformat(),
+        }}}}
+
+    def load(self, path, default):
+        return self.market if path == "market_data.json" else default
+
+
+def test_mark_to_market_uses_market_price_and_separate_live_sell_quote(monkeypatch):
     token = "0x" + "a" * 40
+    dashboard = MarketDashboard(token, 0.1912)
     monkeypatch.setattr(real_bot_menu, "_wallet_address", lambda: "0x" + "b" * 40)
     monkeypatch.setattr(real_trader, "token_balance", lambda token, wallet: 100 * 10**18)
     monkeypatch.setattr(real_trader, "token_decimals", lambda token: 18)
@@ -15,37 +29,60 @@ def test_mark_to_market_uses_actual_wallet_balance_and_live_sell_quote(monkeypat
         lambda token, symbol, amount: {"quoted_wsda_raw": 19_120_000_000_000_000_000},
     )
 
-    value, pnl, source, prices = real_bot_menu._position_mark_to_market(
+    mark = real_bot_menu._position_mark_to_market(
+        dashboard,
         token,
         {"symbol": "AAA", "amount_sda": 20, "token_amount_raw": 100 * 10**18},
     )
 
-    assert value == pytest.approx(19.12)
-    assert pnl == pytest.approx(-0.88)
-    assert "LIVE PinetSwap SELL quote" in source
-    assert prices[0] == pytest.approx(0.2)
-    assert prices[1] == pytest.approx(0.1912)
+    assert mark["value_sda"] == pytest.approx(19.12)
+    assert mark["pnl_sda"] == pytest.approx(-0.88)
+    assert mark["pnl_pct"] == pytest.approx(-4.4)
+    assert mark["price_sda"] == pytest.approx(0.1912)
+    assert mark["sellable"] is True
+    assert mark["sell_error"] is None
 
 
-def test_mark_to_market_never_uses_quote_without_confirmed_buy_amount(monkeypatch):
+def test_failed_sell_quote_does_not_remove_market_valuation(monkeypatch):
     token = "0x" + "a" * 40
+    dashboard = MarketDashboard(token, 0.187)
     monkeypatch.setattr(real_bot_menu, "_wallet_address", lambda: "0x" + "b" * 40)
     monkeypatch.setattr(real_trader, "token_balance", lambda token, wallet: 100 * 10**18)
     monkeypatch.setattr(real_trader, "token_decimals", lambda token: 18)
+
+    def failed_sell_quote(*args):
+        raise RuntimeError("No live PinetSwap quote: {'message': 'execution reverted: STF', 'data': '0xsecret-calldata'}")
+
     monkeypatch.setattr(
         real_trader,
         "prepare_sell",
-        lambda token, symbol, amount: {"quoted_wsda_raw": 20 * 10**18},
+        failed_sell_quote,
     )
 
-    value, pnl, reason, prices = real_bot_menu._position_mark_to_market(
-        token, {"symbol": "AAA", "amount_sda": 20, "quoted_out_raw": 100 * 10**18}
+    mark = real_bot_menu._position_mark_to_market(
+        dashboard, token, {"symbol": "AAA", "amount_sda": 20, "token_amount_raw": 100 * 10**18}
     )
 
-    assert value is None
-    assert pnl is None
-    assert "confirmed BUY cost basis" in reason
-    assert prices is None
+    assert mark["value_sda"] == pytest.approx(18.7)
+    assert mark["pnl_sda"] == pytest.approx(-1.3)
+    assert mark["pnl_pct"] == pytest.approx(-6.5)
+    assert mark["sellable"] is False
+    assert mark["sell_error"] == "STF"
+
+
+def test_market_value_can_be_shown_without_cost_basis(monkeypatch):
+    token = "0x" + "a" * 40
+    dashboard = MarketDashboard(token, 0.2)
+    monkeypatch.setattr(real_bot_menu, "_wallet_address", lambda: "0x" + "b" * 40)
+    monkeypatch.setattr(real_trader, "token_balance", lambda token, wallet: 100 * 10**18)
+    monkeypatch.setattr(real_trader, "token_decimals", lambda token: 18)
+    monkeypatch.setattr(real_trader, "prepare_sell", lambda *args: {"quoted_wsda_raw": 20 * 10**18})
+
+    mark = real_bot_menu._position_mark_to_market(token=token, pos={}, dashboard=dashboard)
+
+    assert mark["value_sda"] == pytest.approx(20)
+    assert mark["pnl_sda"] is None
+    assert mark["sellable"] is True
 
 
 def test_fee_tier_rejects_fallback_fee_source(monkeypatch):
