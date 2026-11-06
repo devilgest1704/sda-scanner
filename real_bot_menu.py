@@ -127,7 +127,7 @@ def _position_mark_to_market(token, pos):
         quoted_at = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
         return value_sda, pnl_sda, f"LIVE PinetSwap SELL quote • {quoted_at} • price impact included", (entry_price, current_price)
     except Exception as exc:
-        return None, None, f"live PinetSwap SELL quote unavailable: {str(exc)[:75]}", None
+        return None, None, f"live PinetSwap SELL quote unavailable: {str(exc)[:180]}", None
 
 
 def _pnl_text(value):
@@ -230,9 +230,10 @@ def statistics_report(dashboard):
                 position_rows.append(f"• {symbol}: {pnl:+.2f} SDA ({pct:+.2f}%) | buy {entry_price:.10f} → now {current_price:.10f} SDA{marker}")
             else:
                 position_rows.append(f"• {symbol}: {pnl:+.2f} SDA ({pct:+.2f}%){marker}")
-    valid_positions = len(position_rows)
-    unrealized = sum(marks) if len(marks) == valid_positions else None
-    combined = realized_total + unrealized if unrealized is not None else None
+    total_positions = len([p for p in positions.values() if isinstance(p, dict)])
+    priced_positions = len(marks)
+    unrealized = sum(marks) if priced_positions == total_positions else None
+    partial_unrealized = sum(marks)
     gross_wins, gross_losses = sum(wins), abs(sum(losses))
     pf = gross_wins / gross_losses if gross_losses else (float("inf") if gross_wins else None)
     closed_summary = (f"📊 Closed trades: {len(realized_values)} • Win rate: {len(wins)/len(realized_values)*100:.1f}%"
@@ -242,7 +243,9 @@ def statistics_report(dashboard):
         f"🟢 Open positions: {len(positions)} / {cfg.MAX_OPEN_POSITIONS}",
         f"📥 Confirmed BUYs: {len(buys)}", f"📤 Confirmed SELLs: {len(sells)}", closed_summary,
         f"💰 Realized P/L total: {realized_total:+.2f} SDA",
-        f"📈 Unrealized P/L: {_pnl_text(unrealized)}", f"💹 Combined P/L: {_pnl_text(combined)}",
+        (f"📈 Unrealized P/L: {_pnl_text(unrealized)}" if unrealized is not None
+         else f"📈 Unrealized P/L: {partial_unrealized:+.2f} SDA PARTIAL ({priced_positions}/{total_positions} priced)"),
+        f"💹 Combined P/L: {_pnl_text(realized_total + unrealized if unrealized is not None else None)",
         f"🏆 Avg win: {sum(wins)/len(wins):+.2f} SDA" if wins else "🏆 Avg win: N/A",
         f"🧯 Avg loss: {sum(losses)/len(losses):+.2f} SDA" if losses else "🧯 Avg loss: N/A",
         f"⚖️ Profit factor: {pf:.2f}" if pf is not None and pf != float("inf") else ("⚖️ Profit factor: ∞" if pf == float("inf") else "⚖️ Profit factor: N/A"),
