@@ -227,7 +227,7 @@ def statistics_report(dashboard):
         symbol = _token_label(token, pos)
         cost = _num(pos.get("amount_sda", pos.get("cost_sda")))
         open_cost += cost
-        value, pnl, error = _position_mark_to_market(token, pos)
+        value, pnl, error, prices = _position_mark_to_market(token, pos)
         if pnl is None:
             position_rows.append(f"• {symbol}: P/L N/A ({error})")
         else:
