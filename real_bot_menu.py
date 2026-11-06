@@ -88,64 +88,44 @@ def _token_label(token, pos):
 
 
 def _position_mark_to_market(token, pos):
-    """Mark the real wallet quantity against the latest token-specific PinetSwap price."""
-    from datetime import datetime, timezone
+    """Value the actual wallet balance using a fresh executable PinetSwap SELL quote.
+
+    A last observed trade price is not a reliable mark for the amount held:
+    it can be stale and ignores price impact. Missing token-specific fee data,
+    balance data, or a current router quote therefore produces N/A, never a
+    fabricated fallback price.
+    """
     token = str(token).lower()
-    wallet = _wallet_address()
-    decimals = 18
-    try:
-        with open("token_metadata.json", "r", encoding="utf-8") as handle:
-            metadata = json.load(handle)
-        item = metadata.get(token, {}) if isinstance(metadata, dict) else {}
-        if isinstance(item, dict) and item.get("decimals") is not None:
-            decimals = int(item["decimals"])
-    except Exception:
-        pass
     try:
         import real_trader
-        amount_raw = int(real_trader.token_balance(token, wallet))
+        amount_raw = int(real_trader.token_balance(token, _wallet_address()))
+        decimals = int(real_trader.token_decimals(token))
     except Exception as exc:
-        return None, None, f"wallet balance unavailable: {str(exc)[:55]}", None
+        return None, None, f"wallet balance/decimals unavailable: {str(exc)[:70]}", None
     if amount_raw <= 0:
-        cost = _num(pos.get("amount_sda", pos.get("cost_sda")))
-        return 0.0, -cost, "wallet balance is zero", 0.0
-    try:
-        import requests
-        url = "https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/token_transactions"
-        headers = {"apikey": "sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z", "accept-profile": "public"}
-        response = requests.get(url, params={"select": "price_in_sda,tx_timestamp,block_number", "token_address": f"eq.{token}", "price_in_sda": "gt.0", "order": "block_number.desc", "limit": "1"}, headers=headers, timeout=8)
-        response.raise_for_status()
-        rows = response.json()
-        if not isinstance(rows, list) or not rows:
-            return None, None, "no PinetSwap price in transaction feed", None
-        row = rows[0]
-        current_price = _num(row.get("price_in_sda"))
-        if current_price <= 0:
-            return None, None, "invalid PinetSwap price", None
-        stamp = str(row.get("tx_timestamp") or "")
-        age_seconds = None
-        if stamp:
-            try:
-                parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-                age_seconds = max(0, int((datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()))
-            except Exception:
-                pass
-        token_amount = amount_raw / (10 ** decimals)
-        value_sda = token_amount * current_price
-        cost_sda = _num(pos.get("amount_sda", pos.get("cost_sda")))
-        bought_raw = int(pos.get("token_amount_raw") or pos.get("quoted_out_raw") or 0)
-        bought_amount = bought_raw / (10 ** decimals) if bought_raw > 0 else token_amount
-        entry_price = cost_sda / bought_amount if bought_amount > 0 else 0.0
-        if age_seconds is None:
-            marker = "PinetSwap last trade • age unknown"
-        elif age_seconds > 600:
-            marker = f"PinetSwap last trade • {age_seconds // 60}m old ⚠️"
-        else:
-            marker = f"PinetSwap • {age_seconds}s old"
-        return value_sda, value_sda - cost_sda, marker, (entry_price, current_price)
-    except Exception as exc:
-        return None, None, f"PinetSwap price unavailable: {str(exc)[:60]}", None
+        return None, None, "wallet token balance is zero; position needs reconciliation", None
 
+    cost_sda = _num(pos.get("amount_sda", pos.get("cost_sda")))
+    bought_raw = int(pos.get("token_amount_raw") or 0)
+    if cost_sda <= 0 or bought_raw <= 0:
+        return None, None, "confirmed BUY cost basis or received token amount missing", None
+
+    try:
+        # prepare_sell performs a fresh eth_call against the live PinetSwap
+        # router for the entire token quantity currently held by this wallet.
+        quote = real_trader.prepare_sell(token, _token_label(token, pos), amount_raw)
+        proceeds_raw = int(quote.get("quoted_wsda_raw") or 0)
+        if proceeds_raw <= 0:
+            return None, None, "PinetSwap returned an empty SELL quote", None
+        value_sda = proceeds_raw / 10**18
+        token_amount = amount_raw / (10**decimals)
+        bought_amount = bought_raw / (10**decimals)
+        entry_price = cost_sda / bought_amount
+        current_price = value_sda / token_amount
+        pnl_sda = value_sda - cost_sda
+        return value_sda, pnl_sda, "LIVE PinetSwap SELL quote • price impact included", (entry_price, current_price)
+    except Exception as exc:
+        return None, None, f"live PinetSwap SELL quote unavailable: {str(exc)[:75]}", None
 
 def _pnl_text(value):
     return f"{value:+.2f} SDA" if value is not None else "N/A"
