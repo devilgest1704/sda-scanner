@@ -182,8 +182,14 @@ def bot_report(dashboard):
                     entry_price, current_price = prices
                     lines.append(f"  Buy {entry_price:.10f} → Now {current_price:.10f} SDA")
                 lines.append(f"  Value {value:.2f} / cost {cost:.2f} SDA")
-        unrealized = sum(marks) if valid_count == len([p for p in positions.values() if isinstance(p, dict)]) else None
-        lines += ["────────────────────────", f"📈 Unrealized P/L: {_pnl_text(unrealized)}",
+        total_positions = len([p for p in positions.values() if isinstance(p, dict)])
+        partial_unrealized = sum(marks)
+        unrealized_text = (
+            f"{partial_unrealized:+.2f} SDA ({valid_count}/{total_positions} priced)"
+            if valid_count == total_positions
+            else f"{partial_unrealized:+.2f} SDA PARTIAL ({valid_count}/{total_positions} priced); rest N/A"
+        )
+        lines += ["────────────────────────", f"📈 Unrealized P/L: {unrealized_text}",
                   f"💼 Open cost: {open_cost:.2f} SDA", f"💹 Realized today: {daily:+.2f} SDA"]
     lines += ["", "P/L is quote-based estimate; excludes gas and may change before execution.",
               "Bot wallet is separate from the existing manual REAL wallet."]
