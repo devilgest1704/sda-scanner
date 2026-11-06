@@ -189,7 +189,7 @@ def bot_report(dashboard):
                 valid_count += 1
                 marks.append(pnl)
                 pct = pnl / cost * 100 if cost else 0.0
-                marker = " ⚠️ snapshot" if error == "snapshot" else ""
+                marker = " ⚠️ snapshot" if str(error or "").startswith("snapshot") else (" ⚠️ ledger amount" if error == "ledger amount" else "")
                 lines.append(f"• {symbol} • {pnl:+.2f} SDA ({pct:+.2f}%){marker}")
                 lines.append(f"  Value {value:.2f} / cost {cost:.2f} SDA")
         unrealized = sum(marks) if valid_count == len([p for p in positions.values() if isinstance(p, dict)]) else None
