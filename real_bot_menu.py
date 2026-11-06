@@ -88,31 +88,61 @@ def _token_label(token, pos):
 
 
 def _position_mark_to_market(token, pos):
-    """Prefer a live router quote; fall back to scanner quote snapshot."""
-    amount_raw = int(pos.get("token_amount_raw") or 0)
+    """Value the wallet's actual token balance; never use another token's fallback quote."""
+    token = str(token).lower()
+    wallet = _wallet_address()
+    recorded_raw = int(pos.get("token_amount_raw") or 0)
+    amount_raw = recorded_raw
+    balance_source = "ledger"
+    decimals = 18
+    try:
+        with open("token_metadata.json", "r", encoding="utf-8") as handle:
+            metadata = json.load(handle)
+        item = metadata.get(token, {}) if isinstance(metadata, dict) else {}
+        if isinstance(item, dict) and item.get("decimals") is not None:
+            decimals = int(item["decimals"])
+    except Exception:
+        pass
+    try:
+        import real_trader
+        actual_raw = int(real_trader.token_balance(token, wallet))
+        if actual_raw >= 0:
+            amount_raw = actual_raw
+            balance_source = "wallet"
+    except Exception:
+        # If RPC balance lookup fails, retain the recorded acquired amount but
+        # explicitly identify it as ledger-based below.
+        pass
     if amount_raw <= 0:
-        return None, None, "token amount unavailable"
+        return 0.0, -_num(pos.get("amount_sda", pos.get("cost_sda"))), "wallet balance is zero"
     cost_sda = _num(pos.get("amount_sda", pos.get("cost_sda")))
     try:
         import real_trader
         plan = real_trader.prepare_sell(token, str(pos.get("symbol") or token[:10]), amount_raw)
         value_sda = int(plan["quoted_wsda_raw"]) / 10**18
-        return value_sda, value_sda - cost_sda, None
+        return value_sda, value_sda - cost_sda, None if balance_source == "wallet" else "ledger amount"
     except Exception as live_error:
         try:
             with open("liquidity_data.json", "r", encoding="utf-8") as handle:
                 liquidity = json.load(handle)
             quotes = liquidity.get("quotes_50_sda", {})
-            quote = quotes.get(str(token).lower(), {}) if isinstance(quotes, dict) else {}
+            quote = quotes.get(token, {}) if isinstance(quotes, dict) else {}
+            source = str(quote.get("source") or "").lower()
+            quote_status = str(quote.get("quote_status") or "").upper()
+            # "fallback_fee" copies a generic token's output to unrelated
+            # addresses; it is not a token-specific price and must never be used.
+            if source == "fallback_fee":
+                return None, None, "no token-specific quote (fallback_fee rejected)"
             token_out = _num(quote.get("amount_out_token_18dec"))
             quote_size = _num(quote.get("amount_in_sda")) or 50.0
-            if token_out > 0:
-                token_amount = amount_raw / 10**18
+            if token_out > 0 and quote_status == "VALIDATED_READ_ONLY" and source in {"historical_token", "historical_buy"}:
+                token_amount = amount_raw / (10 ** decimals)
                 value_sda = token_amount * quote_size / token_out
-                return value_sda, value_sda - cost_sda, "snapshot"
+                marker = "snapshot" if balance_source == "wallet" else "snapshot + ledger amount"
+                return value_sda, value_sda - cost_sda, marker
         except Exception:
             pass
-        return None, None, str(live_error)[:100]
+        return None, None, f"live quote failed; {str(live_error)[:70]}"
 
 
 def _pnl_text(value):
