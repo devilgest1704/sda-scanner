@@ -88,12 +88,10 @@ def _token_label(token, pos):
 
 
 def _position_mark_to_market(token, pos):
-    """Value the wallet's actual token balance; never use another token's fallback quote."""
+    """Use newest PinetSwap trade price for this exact token and chain balance."""
+    from datetime import datetime, timezone
     token = str(token).lower()
     wallet = _wallet_address()
-    recorded_raw = int(pos.get("token_amount_raw") or 0)
-    amount_raw = recorded_raw
-    balance_source = "ledger"
     decimals = 18
     try:
         with open("token_metadata.json", "r", encoding="utf-8") as handle:
@@ -105,44 +103,42 @@ def _position_mark_to_market(token, pos):
         pass
     try:
         import real_trader
-        actual_raw = int(real_trader.token_balance(token, wallet))
-        if actual_raw >= 0:
-            amount_raw = actual_raw
-            balance_source = "wallet"
-    except Exception:
-        # If RPC balance lookup fails, retain the recorded acquired amount but
-        # explicitly identify it as ledger-based below.
-        pass
+        amount_raw = int(real_trader.token_balance(token, wallet))
+    except Exception as exc:
+        return None, None, f"wallet balance unavailable: {str(exc)[:55]}"
     if amount_raw <= 0:
-        return 0.0, -_num(pos.get("amount_sda", pos.get("cost_sda"))), "wallet balance is zero"
-    cost_sda = _num(pos.get("amount_sda", pos.get("cost_sda")))
+        cost = _num(pos.get("amount_sda", pos.get("cost_sda")))
+        return 0.0, -cost, "wallet balance is zero"
     try:
-        import real_trader
-        plan = real_trader.prepare_sell(token, str(pos.get("symbol") or token[:10]), amount_raw)
-        value_sda = int(plan["quoted_wsda_raw"]) / 10**18
-        return value_sda, value_sda - cost_sda, None if balance_source == "wallet" else "ledger amount"
-    except Exception as live_error:
-        try:
-            with open("liquidity_data.json", "r", encoding="utf-8") as handle:
-                liquidity = json.load(handle)
-            quotes = liquidity.get("quotes_50_sda", {})
-            quote = quotes.get(token, {}) if isinstance(quotes, dict) else {}
-            source = str(quote.get("source") or "").lower()
-            quote_status = str(quote.get("quote_status") or "").upper()
-            # "fallback_fee" copies a generic token's output to unrelated
-            # addresses; it is not a token-specific price and must never be used.
-            if source == "fallback_fee":
-                return None, None, "no token-specific quote (fallback_fee rejected)"
-            token_out = _num(quote.get("amount_out_token_18dec"))
-            quote_size = _num(quote.get("amount_in_sda")) or 50.0
-            if token_out > 0 and quote_status == "VALIDATED_READ_ONLY" and source in {"historical_token", "historical_buy"}:
-                token_amount = amount_raw / (10 ** decimals)
-                value_sda = token_amount * quote_size / token_out
-                marker = "snapshot" if balance_source == "wallet" else "snapshot + ledger amount"
-                return value_sda, value_sda - cost_sda, marker
-        except Exception:
-            pass
-        return None, None, f"live quote failed; {str(live_error)[:70]}"
+        import requests
+        url = "https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/token_transactions"
+        headers = {"apikey": "sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z", "accept-profile": "public"}
+        response = requests.get(url, params={"select": "price_in_sda,tx_timestamp,block_number", "token_address": f"eq.{token}", "price_in_sda": "gt.0", "order": "block_number.desc", "limit": "1"}, headers=headers, timeout=8)
+        response.raise_for_status()
+        rows = response.json()
+        if not isinstance(rows, list) or not rows:
+            return None, None, "no recent PinetSwap trade price"
+        row = rows[0]
+        price = _num(row.get("price_in_sda"))
+        if price <= 0:
+            return None, None, "invalid PinetSwap price"
+        stamp = str(row.get("tx_timestamp") or "")
+        age_seconds = None
+        if stamp:
+            try:
+                parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+                age_seconds = max(0, int((datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()))
+            except Exception:
+                pass
+        if age_seconds is not None and age_seconds > 600:
+            return None, None, f"last PinetSwap trade is {age_seconds // 60}m old"
+        token_amount = amount_raw / (10 ** decimals)
+        value_sda = token_amount * price
+        cost_sda = _num(pos.get("amount_sda", pos.get("cost_sda")))
+        age_text = f"{age_seconds}s" if age_seconds is not None else "fresh"
+        return value_sda, value_sda - cost_sda, f"live PinetSwap • {age_text}"
+    except Exception as exc:
+        return None, None, f"PinetSwap price unavailable: {str(exc)[:60]}"
 
 
 def _pnl_text(value):
@@ -293,7 +289,7 @@ def patch_dashboard(dashboard):
     def handle_update(update, state=None):
         cb = update.get("callback_query") or {}
         data = cb.get("data")
-        if data not in ("REAL_BOT", "REAL_BOT_STATS"):
+        if data not in ("REAL_BOT", "REAL_BOT_STATS", "REAL_BOT_REFRESH", "REAL_BOT_STATS_REFRESH"):
             return original_handle(update, state)
         state = state if state is not None else {"offset": 0}
         state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
@@ -305,14 +301,16 @@ def patch_dashboard(dashboard):
             dashboard.answer_callback(cb.get("id"), "Unauthorized")
             return state
         dashboard.answer_callback(cb.get("id"))
-        if data == "REAL_BOT":
+        if data in ("REAL_BOT", "REAL_BOT_REFRESH"):
             keyboard = {"inline_keyboard": [
+                [{"text": "🔄 Refresh live P/L", "callback_data": "REAL_BOT_REFRESH"}],
                 [{"text": "📈 Statistics", "callback_data": "REAL_BOT_STATS"}],
                 [{"text": "⬅️ Main dashboard", "callback_data": "MAIN"}],
             ]}
             dashboard.edit(chat_id, message_id, bot_report(dashboard), keyboard)
         else:
             keyboard = {"inline_keyboard": [
+                [{"text": "🔄 Refresh statistics", "callback_data": "REAL_BOT_STATS_REFRESH"}],
                 [{"text": "⬅️ Real Trading Bot", "callback_data": "REAL_BOT"}],
                 [{"text": "⬅️ Main dashboard", "callback_data": "MAIN"}],
             ]}
