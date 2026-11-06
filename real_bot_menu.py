@@ -245,7 +245,7 @@ def statistics_report(dashboard):
         f"💰 Realized P/L total: {realized_total:+.2f} SDA",
         (f"📈 Unrealized P/L: {_pnl_text(unrealized)}" if unrealized is not None
          else f"📈 Unrealized P/L: {partial_unrealized:+.2f} SDA PARTIAL ({priced_positions}/{total_positions} priced)"),
-        f"💹 Combined P/L: {_pnl_text(realized_total + unrealized if unrealized is not None else None)",
+        f"💹 Combined P/L: {_pnl_text(realized_total + unrealized if unrealized is not None else None)}",
         f"🏆 Avg win: {sum(wins)/len(wins):+.2f} SDA" if wins else "🏆 Avg win: N/A",
         f"🧯 Avg loss: {sum(losses)/len(losses):+.2f} SDA" if losses else "🧯 Avg loss: N/A",
         f"⚖️ Profit factor: {pf:.2f}" if pf is not None and pf != float("inf") else ("⚖️ Profit factor: ∞" if pf == float("inf") else "⚖️ Profit factor: N/A"),
