@@ -208,6 +208,43 @@ def quote_exact_input_single(token_in, token_out, fee, recipient, amount_in, val
     )
     return int(result, 16), calldata, deadline
 
+def quote_best_live_fee(token_in, token_out, token, recipient, amount_in, value_wei=0):
+    """Get a current router quote using a token-specific fee tier.
+
+    Prefer the token's validated historical fee tier. If it is missing or the
+    live quote fails, probe the supported V3 fee tiers with the actual trade
+    amount and choose the best successful output. No fee copied from another
+    token is ever trusted.
+    """
+    preferred = None
+    try:
+        preferred = fee_tier_for(token)
+    except RuntimeError:
+        pass
+
+    fees = ([preferred] if preferred is not None else []) + [
+        fee for fee in (100, 500, 3000, 10000) if fee != preferred
+    ]
+    successful = []
+    errors = []
+    for fee in fees:
+        try:
+            quoted, calldata, deadline = quote_exact_input_single(
+                token_in, token_out, fee, recipient, amount_in, value_wei=value_wei
+            )
+            if quoted > 0:
+                if fee == preferred:
+                    return fee, quoted, calldata, deadline
+                successful.append((quoted, fee, calldata, deadline))
+        except Exception as exc:
+            errors.append(f"{fee}:{str(exc)[:80]}")
+
+    if successful:
+        quoted, fee, calldata, deadline = max(successful, key=lambda item: item[0])
+        return fee, quoted, calldata, deadline
+    detail = "; ".join(errors[:4])
+    raise RuntimeError(f"No live PinetSwap quote for {token} across fee tiers: {detail}")
+
 
 def gas_price():
     return int(rpc("eth_gasPrice", []), 16)
@@ -374,10 +411,9 @@ def prepare_buy(token, symbol, position_sda=None):
     if not owner:
         raise RuntimeError("Set REAL_TRADING_WALLET_ADDRESS for dry-run or REAL_TRADING_PRIVATE_KEY for execution")
     token = addr(token)
-    fee = fee_tier_for(token)
     amount_in = int(Decimal(str(position_sda)) * Decimal(10 ** 18))
-    quoted, calldata, deadline = quote_exact_input_single(
-        cfg.WSDA_ADDRESS, token, fee, owner, amount_in, value_wei=amount_in
+    fee, quoted, calldata, deadline = quote_best_live_fee(
+        cfg.WSDA_ADDRESS, token, token, owner, amount_in, value_wei=amount_in
     )
     output_min = min_out(quoted)
     calldata = build_exact_input_single(cfg.WSDA_ADDRESS, token, fee, owner, deadline, amount_in, output_min)
@@ -500,12 +536,11 @@ def prepare_sell(token, symbol, token_amount_raw):
     if not owner:
         raise RuntimeError("Set REAL_TRADING_WALLET_ADDRESS for dry-run or REAL_TRADING_PRIVATE_KEY for execution")
     token = addr(token)
-    fee = fee_tier_for(token)
     token_amount_raw = int(token_amount_raw)
     if token_amount_raw <= 0:
         raise ValueError("token_amount_raw must be positive")
-    quoted, calldata, deadline = quote_exact_input_single(
-        token, cfg.WSDA_ADDRESS, fee, owner, token_amount_raw, value_wei=0
+    fee, quoted, calldata, deadline = quote_best_live_fee(
+        token, cfg.WSDA_ADDRESS, token, owner, token_amount_raw, value_wei=0
     )
     output_min = min_out(quoted)
     calldata = build_exact_input_single(token, cfg.WSDA_ADDRESS, fee, owner, deadline, token_amount_raw, output_min)
