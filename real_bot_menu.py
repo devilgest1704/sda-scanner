@@ -88,7 +88,6 @@ def _token_label(token, pos):
 
 
 def _position_mark_to_market(token, pos):
-    from datetime import datetime, timezone
     """Value the actual wallet balance using a fresh executable PinetSwap SELL quote.
 
     A last observed trade price is not a reliable mark for the amount held:
@@ -96,6 +95,7 @@ def _position_mark_to_market(token, pos):
     balance data, or a current router quote therefore produces N/A, never a
     fabricated fallback price.
     """
+    from datetime import datetime, timezone
     token = str(token).lower()
     try:
         import real_trader
@@ -128,6 +128,7 @@ def _position_mark_to_market(token, pos):
         return value_sda, pnl_sda, f"LIVE PinetSwap SELL quote • {quoted_at} • price impact included", (entry_price, current_price)
     except Exception as exc:
         return None, None, f"live PinetSwap SELL quote unavailable: {str(exc)[:75]}", None
+
 
 def _pnl_text(value):
     return f"{value:+.2f} SDA" if value is not None else "N/A"
