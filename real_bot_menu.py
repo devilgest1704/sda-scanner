@@ -88,7 +88,7 @@ def _token_label(token, pos):
 
 
 def _position_mark_to_market(token, pos):
-    """Use newest PinetSwap trade price for this exact token and chain balance."""
+    """Mark the real wallet quantity against the latest token-specific PinetSwap price."""
     from datetime import datetime, timezone
     token = str(token).lower()
     wallet = _wallet_address()
@@ -105,10 +105,10 @@ def _position_mark_to_market(token, pos):
         import real_trader
         amount_raw = int(real_trader.token_balance(token, wallet))
     except Exception as exc:
-        return None, None, f"wallet balance unavailable: {str(exc)[:55]}"
+        return None, None, f"wallet balance unavailable: {str(exc)[:55]}", None
     if amount_raw <= 0:
         cost = _num(pos.get("amount_sda", pos.get("cost_sda")))
-        return 0.0, -cost, "wallet balance is zero"
+        return 0.0, -cost, "wallet balance is zero", 0.0
     try:
         import requests
         url = "https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/token_transactions"
@@ -117,11 +117,11 @@ def _position_mark_to_market(token, pos):
         response.raise_for_status()
         rows = response.json()
         if not isinstance(rows, list) or not rows:
-            return None, None, "no recent PinetSwap trade price"
+            return None, None, "no PinetSwap price in transaction feed", None
         row = rows[0]
-        price = _num(row.get("price_in_sda"))
-        if price <= 0:
-            return None, None, "invalid PinetSwap price"
+        current_price = _num(row.get("price_in_sda"))
+        if current_price <= 0:
+            return None, None, "invalid PinetSwap price", None
         stamp = str(row.get("tx_timestamp") or "")
         age_seconds = None
         if stamp:
@@ -130,15 +130,21 @@ def _position_mark_to_market(token, pos):
                 age_seconds = max(0, int((datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()))
             except Exception:
                 pass
-        if age_seconds is not None and age_seconds > 600:
-            return None, None, f"last PinetSwap trade is {age_seconds // 60}m old"
         token_amount = amount_raw / (10 ** decimals)
-        value_sda = token_amount * price
+        value_sda = token_amount * current_price
         cost_sda = _num(pos.get("amount_sda", pos.get("cost_sda")))
-        age_text = f"{age_seconds}s" if age_seconds is not None else "fresh"
-        return value_sda, value_sda - cost_sda, f"live PinetSwap • {age_text}"
+        bought_raw = int(pos.get("token_amount_raw") or pos.get("quoted_out_raw") or 0)
+        bought_amount = bought_raw / (10 ** decimals) if bought_raw > 0 else token_amount
+        entry_price = cost_sda / bought_amount if bought_amount > 0 else 0.0
+        if age_seconds is None:
+            marker = "PinetSwap last trade • age unknown"
+        elif age_seconds > 600:
+            marker = f"PinetSwap last trade • {age_seconds // 60}m old ⚠️"
+        else:
+            marker = f"PinetSwap • {age_seconds}s old"
+        return value_sda, value_sda - cost_sda, marker, (entry_price, current_price)
     except Exception as exc:
-        return None, None, f"PinetSwap price unavailable: {str(exc)[:60]}"
+        return None, None, f"PinetSwap price unavailable: {str(exc)[:60]}", None
 
 
 def _pnl_text(value):
@@ -177,7 +183,7 @@ def bot_report(dashboard):
             symbol = _token_label(token, pos)
             cost = _num(pos.get("amount_sda", pos.get("cost_sda")))
             open_cost += cost
-            value, pnl, error = _position_mark_to_market(token, pos)
+            value, pnl, error, prices = _position_mark_to_market(token, pos)
             if pnl is None:
                 lines.append(f"• {symbol} • cost {cost:.2f} SDA • P/L N/A")
                 lines.append(f"  Quote unavailable: {error}")
@@ -187,6 +193,9 @@ def bot_report(dashboard):
                 pct = pnl / cost * 100 if cost else 0.0
                 marker = f" • {error}" if str(error or "").startswith("live PinetSwap") else (" ⚠️ snapshot" if str(error or "").startswith("snapshot") else (" ⚠️ ledger amount" if error == "ledger amount" else ""))
                 lines.append(f"• {symbol} • {pnl:+.2f} SDA ({pct:+.2f}%){marker}")
+                if prices:
+                    entry_price, current_price = prices
+                    lines.append(f"  Buy {entry_price:.10f} → Now {current_price:.10f} SDA")
                 lines.append(f"  Value {value:.2f} / cost {cost:.2f} SDA")
         unrealized = sum(marks) if valid_count == len([p for p in positions.values() if isinstance(p, dict)]) else None
         lines += ["────────────────────────", f"📈 Unrealized P/L: {_pnl_text(unrealized)}",
@@ -225,7 +234,11 @@ def statistics_report(dashboard):
             marks.append(pnl)
             pct = pnl / cost * 100 if cost else 0.0
             marker = f" • {error}" if str(error or "").startswith("live PinetSwap") else (" ⚠️ snapshot" if str(error or "").startswith("snapshot") else "")
-            position_rows.append(f"• {symbol}: {pnl:+.2f} SDA ({pct:+.2f}%){marker}")
+            if prices:
+                entry_price, current_price = prices
+                position_rows.append(f"• {symbol}: {pnl:+.2f} SDA ({pct:+.2f}%) | buy {entry_price:.10f} → now {current_price:.10f} SDA{marker}")
+            else:
+                position_rows.append(f"• {symbol}: {pnl:+.2f} SDA ({pct:+.2f}%){marker}")
     valid_positions = len(position_rows)
     unrealized = sum(marks) if len(marks) == valid_positions else None
     combined = realized_total + unrealized if unrealized is not None else None
