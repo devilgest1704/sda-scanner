@@ -88,6 +88,7 @@ def _token_label(token, pos):
 
 
 def _position_mark_to_market(token, pos):
+    from datetime import datetime, timezone
     """Value the actual wallet balance using a fresh executable PinetSwap SELL quote.
 
     A last observed trade price is not a reliable mark for the amount held:
@@ -123,7 +124,8 @@ def _position_mark_to_market(token, pos):
         entry_price = cost_sda / bought_amount
         current_price = value_sda / token_amount
         pnl_sda = value_sda - cost_sda
-        return value_sda, pnl_sda, "LIVE PinetSwap SELL quote • price impact included", (entry_price, current_price)
+        quoted_at = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+        return value_sda, pnl_sda, f"LIVE PinetSwap SELL quote • {quoted_at} • price impact included", (entry_price, current_price)
     except Exception as exc:
         return None, None, f"live PinetSwap SELL quote unavailable: {str(exc)[:75]}", None
 
@@ -139,6 +141,7 @@ def bot_report(dashboard):
     wallet = _wallet_address()
     balance, balance_error = _wallet_balance_sda()
     daily = _num(state.get("daily_realized_pnl_sda"))
+    state_updated = str(state.get("updated_at") or "—")[:19].replace("T", " ")
     balance_text = f"{balance:.3f} SDA" if balance is not None else f"RPC ERROR: {balance_error}"
     lines = [
         "🤖 REAL TRADING BOT", "", f"Status: {_status()}",
@@ -147,6 +150,7 @@ def bot_report(dashboard):
         f"📦 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.0f} SDA",
         f"📊 Open positions: {len(positions)}/{cfg.MAX_OPEN_POSITIONS}",
         f"📉 Daily realized P/L: {daily:+.2f} SDA",
+        f"🕒 Position ledger updated: {state_updated} UTC",
     ]
     if not positions:
         lines += ["📈 Unrealized P/L: +0.00 SDA", "💼 Open cost: 0.00 SDA",
