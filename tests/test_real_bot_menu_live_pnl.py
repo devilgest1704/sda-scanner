@@ -81,3 +81,29 @@ def test_fee_tier_accepts_token_specific_historical_fee(monkeypatch):
         },
     )
     assert real_trader.fee_tier_for("0x" + "a" * 40) == 3000
+
+
+def test_live_quote_probes_fee_tiers_when_token_has_no_trusted_fee(monkeypatch):
+    seen = []
+
+    def no_trusted_fee(token):
+        raise RuntimeError("Untrusted fee tier source")
+
+    def fake_quote(token_in, token_out, fee, recipient, amount_in, value_wei=0):
+        seen.append(fee)
+        if fee in (3000, 10000):
+            return (300 if fee == 3000 else 250), f"calldata-{fee}", 123
+        raise RuntimeError("pool unavailable")
+
+    monkeypatch.setattr(real_trader, "fee_tier_for", no_trusted_fee)
+    monkeypatch.setattr(real_trader, "quote_exact_input_single", fake_quote)
+
+    fee, amount_out, calldata, deadline = real_trader.quote_best_live_fee(
+        "token-in", "token-out", "token", "wallet", 10**18
+    )
+
+    assert seen == [100, 500, 3000, 10000]
+    assert fee == 3000
+    assert amount_out == 300
+    assert calldata == "calldata-3000"
+    assert deadline == 123
