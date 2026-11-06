@@ -1,13 +1,13 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-11-06T23:46:58.198772+00:00",
+  "checked_at": "2026-11-06T23:52:56.509684+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-11-06T23:46:28.716273+00:00",
+    "market_at": "2026-11-06T23:52:28.812803+00:00",
     "tokens": 168,
-    "quotes_last_5m": 0,
-    "quotes_last_15m": 1,
-    "quotes_last_60m": 25,
+    "quotes_last_5m": 1,
+    "quotes_last_15m": 3,
+    "quotes_last_60m": 23,
     "fresh_with_8_trades_1h": 0,
     "fresh_with_12_trades_1h": 0,
     "fresh_m15_ge_1_5pct": 0,
@@ -32,11 +32,11 @@
   "last_paper_close_at": "2026-11-06T18:21:17.885702+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-11-06T23:46:54.337171+00:00",
+    "at": "2026-11-06T23:52:52.635179+00:00",
     "age_minutes": 0.1,
     "aligned_to_market": true,
     "tokens_scored": 168,
-    "fresh_tokens": 1,
+    "fresh_tokens": 3,
     "champion_ready": 0,
     "shadow_ready": 0,
     "sampled_rows": 40,
@@ -47,22 +47,23 @@
     "sampled_rejections": {
       "v31_activity": 40,
       "temporal_recovery": 40,
-      "v31_age": 40,
-      "quote_continuity": 40,
+      "quote_continuity": 39,
+      "v31_age": 39,
       "late_spike": 1
     },
     "fresh_rejections": {
-      "quote_continuity": 1,
-      "temporal_recovery": 1,
-      "v31_activity": 1,
-      "v31_age": 1
+      "temporal_recovery": 3,
+      "v31_activity": 3,
+      "quote_continuity": 2,
+      "v31_age": 2
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "stale_or_invalid_current_quote": 1
+        "single_quote_swing_filters_insufficient": 1,
+        "stale_or_invalid_current_quote": 2
       },
       "confirmed_continuation": {
-        "missing_reason": 1
+        "missing_reason": 3
       }
     },
     "temporal_lane_ready": {
@@ -73,13 +74,43 @@
     "would_buy_if_only_loss_circuit_cleared": false,
     "top_near_ready": [
       {
-        "address": "0xf4a4f13821ba28cba5bc30a3965582a5339244ee",
-        "symbol": "BZST",
-        "score": 9.2,
-        "quality": 9.2,
+        "address": "0x62bb34f84330075f0747623390f2c69a1b99749c",
+        "symbol": "TAMBN",
+        "score": 6.5,
+        "quality": 6.5,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 486.2,
+        "data_age_sec": 275.5,
+        "gates": [
+          "temporal_recovery",
+          "v31_activity"
+        ],
+        "reason": "NO / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
+      },
+      {
+        "address": "0xaaadd5d2bb88fbdaa426ffdb95b917b861fe94bb",
+        "symbol": "AITT",
+        "score": 31.1,
+        "quality": 31.1,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 489.5,
+        "gates": [
+          "temporal_recovery",
+          "v31_age",
+          "v31_activity",
+          "quote_continuity"
+        ],
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
+      },
+      {
+        "address": "0xf4a4f13821ba28cba5bc30a3965582a5339244ee",
+        "symbol": "BZST",
+        "score": 8.0,
+        "quality": 8.0,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 844.5,
         "gates": [
           "temporal_recovery",
           "v31_age",
@@ -90,7 +121,7 @@
       }
     ]
   },
-  "assessment": "NO_FRESH_MARKET_QUOTE",
+  "assessment": "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED",
   "paper_buy_rules_modified": false,
   "real_trading": false
 }
