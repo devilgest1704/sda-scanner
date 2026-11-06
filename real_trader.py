@@ -163,12 +163,26 @@ def allowance(token, owner, spender):
 
 
 def fee_tier_for(token):
+    """Return only a token-specific, historically observed fee tier.
+
+    Entries copied from another token by the old fallback-fee heuristic are
+    explicitly rejected: they can produce plausible-looking but false P/L
+    quotes and unsafe SELL calldata.
+    """
     liquidity = load_json("liquidity_data.json", {})
     quotes = liquidity.get("quotes_50_sda", {}) if isinstance(liquidity, dict) else {}
     item = quotes.get(addr(token)) if isinstance(quotes, dict) else None
-    if isinstance(item, dict) and item.get("fee") is not None and item.get("quote_status") == "VALIDATED_READ_ONLY":
-        return int(item["fee"])
-    raise RuntimeError(f"No validated fee tier for {token} in liquidity_data.json")
+    if not isinstance(item, dict):
+        raise RuntimeError(f"No token-specific fee tier for {token}")
+    source = str(item.get("source") or "").strip().lower()
+    if source not in {"historical_token", "historical_buy", "live_pool_probe"}:
+        raise RuntimeError(f"Untrusted fee tier source for {token}: {source or 'missing'}")
+    if item.get("fee") is None or item.get("quote_status") != "VALIDATED_READ_ONLY":
+        raise RuntimeError(f"No validated token-specific fee tier for {token}")
+    fee = int(item["fee"])
+    if fee not in {100, 500, 3000, 10000}:
+        raise RuntimeError(f"Unsupported fee tier {fee} for {token}")
+    return fee
 
 
 def build_exact_input_single(token_in, token_out, fee, recipient, deadline, amount_in, amount_out_min):
