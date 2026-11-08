@@ -86,18 +86,25 @@ def test_unavailable_token_price_does_not_break_dashboard(monkeypatch):
     assert "Total PnL  unavailable" in report
 
 
-def test_realized_pnl_is_lifetime_ledger_value_not_daily_field():
+def test_daily_and_partial_trade_history_are_not_mislabeled_as_wallet_realized_pnl():
     state = {
         "daily_realized_pnl_sda": -0.10,
         "trades": [
             {"action": "SELL", "realized_pnl_sda": 4.5},
             {"action": "SELL", "pnl_sda": 2.0},
-            {"action": "SELL", "source": "manual_user_confirmed",
-             "amount_sda": 38.0, "cost_sda": 20.0},
         ],
     }
     result = real_bot_menu._fast_ledger_realized_summary(state)
-    assert result["verified_pnl_sda"] == 24.5
+    assert result["verified_pnl_sda"] is None
+
+
+def test_explicit_cumulative_wallet_realized_field_is_used():
+    result = real_bot_menu._fast_ledger_realized_summary({
+        "daily_realized_pnl_sda": -0.10,
+        "wallet_realized_pnl_sda": 90.0727,
+        "trades": [{"action": "SELL", "realized_pnl_sda": 4.5}],
+    })
+    assert result["verified_pnl_sda"] == 90.0727
 
 
 def test_wallet_snapshot_does_not_request_executable_sell_quotes(monkeypatch):
