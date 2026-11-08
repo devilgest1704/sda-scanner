@@ -761,9 +761,16 @@ def _build_bot_report(dashboard):
         "wallet_address": _wallet_address(), "native_sda": None, "holdings": [],
         "token_balances_loaded": False, "market_complete": False, "errors": []}
     marks, snapshot = _position_marks(dashboard, positions, snapshot) if source != "unavailable" else ([], snapshot)
-    realized = _fast_ledger_realized_summary(state) if source == "authoritative" else {"verified_pnl_sda": None}
+    ledger_fresh = source == "authoritative" and not _ledger_freshness_warning(state, worker_state)
+    if not ledger_fresh:
+        # Keep wallet market values visible, but never apply stale cost basis/PnL.
+        for _symbol, mark in marks:
+            mark["cost_sda"] = None
+            mark["market_pnl_sda"] = None
+            mark["market_pnl_pct"] = None
+    realized = _fast_ledger_realized_summary(state) if ledger_fresh else {"verified_pnl_sda": None}
     open_pnl_values = [m["market_pnl_sda"] for _, m in marks if m.get("market_pnl_sda") is not None]
-    open_complete = len(open_pnl_values) == len(marks)
+    open_complete = ledger_fresh and len(open_pnl_values) == len(marks)
     open_pnl = sum(open_pnl_values) if open_complete else None
     realized_pnl = realized.get("verified_pnl_sda")
     total_pnl = (open_pnl + realized_pnl) if open_pnl is not None and realized_pnl is not None else None
