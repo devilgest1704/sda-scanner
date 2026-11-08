@@ -114,6 +114,8 @@ def test_j_disabled_worker_displays_disabled():
     assert real_bot_menu._status(_worker_state(False, False)) == "🔴 REAL TRADING DISABLED"
 
 
-def test_k_unknown_worker_state_never_guesses_live_or_dry_run():
+def test_k_unknown_or_stale_worker_state_never_guesses_live_or_dry_run():
     assert real_bot_menu._status(None) == "⚪ STATUS UNKNOWN"
     assert real_bot_menu._status({"enabled": None, "dry_run": None}) == "⚪ STATUS UNKNOWN"
+    stale = (datetime.now(timezone.utc) - timedelta(seconds=901)).isoformat()
+    assert real_bot_menu._status(_worker_state(True, False, stale)) == "⚪ STATUS UNKNOWN"

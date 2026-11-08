@@ -78,7 +78,7 @@ checkpoint_state() {
   git config user.email 'scanner@github.local'
 
   # Publish actual worker mode and checkpoint heartbeat for the Telegram REAL dashboard.
-  python - <<'PY'
+  if ! python - <<'PY'
 import json
 import os
 from datetime import datetime, timezone
@@ -105,6 +105,9 @@ Path("real_worker_status.json").write_text(
     json.dumps(status, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
 )
 PY
+  then
+    echo "::warning::REAL worker status checkpoint unavailable; scanner continues." >&2
+  fi
 
   # Produce a small observed-state NO-BUY audit at each durable scanner
   # checkpoint (not per token). Never relax PAPER entry risk or interrupt

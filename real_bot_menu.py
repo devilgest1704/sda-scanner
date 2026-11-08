@@ -92,6 +92,12 @@ def _status(worker_state=None):
     enabled, dry_run = worker_state.get("enabled"), worker_state.get("dry_run")
     if not isinstance(enabled, bool) or not isinstance(dry_run, bool):
         return "⚪ STATUS UNKNOWN"
+    heartbeat = _parse_timestamp(worker_state.get("updated_at"))
+    if heartbeat is None:
+        return "⚪ STATUS UNKNOWN"
+    heartbeat_age = (datetime.now(timezone.utc) - heartbeat).total_seconds()
+    if heartbeat_age < 0 or heartbeat_age > REAL_LEDGER_FRESHNESS_SECONDS:
+        return "⚪ STATUS UNKNOWN"
     if not enabled:
         return "🔴 REAL TRADING DISABLED"
     return "🟡 DRY RUN" if dry_run else "🟢 LIVE"
