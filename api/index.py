@@ -248,6 +248,32 @@ async def watchdog(request: Request):
     ok, message = _dispatch_scanner("Watchdog")
     return PlainTextResponse(message, status_code=200 if ok else 502)
 
+@app.get("/api/telegram/health")
+async def telegram_health():
+    """Read-only, token-safe Telegram webhook diagnostics for production checks."""
+    result = dashboard.api("getWebhookInfo", {})
+    if not isinstance(result, dict) or not result.get("ok"):
+        return {
+            "telegram_api": "error",
+            "error_code": (result or {}).get("error_code") if isinstance(result, dict) else None,
+            "description": str((result or {}).get("description") or "getWebhookInfo failed")[:200]
+                           if isinstance(result, dict) else "getWebhookInfo failed",
+        }
+    info = result.get("result") if isinstance(result.get("result"), dict) else {}
+    webhook_url = str(info.get("url") or "").rstrip("/")
+    expected_url = "https://sda-scanner.vercel.app/api/telegram"
+    return {
+        "telegram_api": "ok",
+        "webhook_configured": bool(webhook_url),
+        "webhook_url_matches_production": webhook_url == expected_url,
+        "pending_update_count": info.get("pending_update_count"),
+        "last_error_date": info.get("last_error_date"),
+        "last_error_message": str(info.get("last_error_message") or "")[:200] or None,
+        "allowed_updates": info.get("allowed_updates"),
+        "max_connections": info.get("max_connections"),
+    }
+
+
 @app.post("/api/telegram", response_class=PlainTextResponse)
 async def telegram(request: Request):
     """Handle Telegram webhook updates without blocking on remote menu-state I/O."""
