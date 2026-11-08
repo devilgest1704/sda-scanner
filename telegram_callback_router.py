@@ -86,25 +86,10 @@ def patch_dashboard(dashboard):
             return False, f"{type(exc).__name__}: {exc}"
 
     def _real_bot_report(data):
-        try:
-            import real_bot_menu
-            refresh = data == "REAL_BOT_REFRESH"
-            return (real_bot_menu.bot_report(dashboard, refresh=True) if refresh else real_bot_menu.bot_report(dashboard)), {
-                "inline_keyboard": [
-                    [{"text": "🔄 Refresh", "callback_data": "REAL_BOT_REFRESH"}],
-                    [{"text": "⬅️ Back", "callback_data": "MAIN"}],
-                ],
-            }
-        except Exception as exc:
-            print(f"REAL Trading menu data error: {type(exc).__name__}")
-            return ("🤖 REAL TRADING ⚪\\n\\n💰 Portfolio unavailable\\n📈 Total PnL unavailable"
-                    "\\nOpen PnL unavailable\\nRealized unavailable\\nPositions unavailable"
-                    "\\n\\n📊 OPEN POSITIONS\\n⚪ Valuation unavailable"), {
-                "inline_keyboard": [
-                    [{"text": "🔄 Refresh", "callback_data": "REAL_BOT_REFRESH"}],
-                    [{"text": "⬅️ Back", "callback_data": "MAIN"}],
-                ],
-            }
+        import real_bot_views
+        return real_bot_views.render_view(
+            dashboard, "main", refresh=(data == "REAL_BOT_REFRESH")
+        )
 
     def handle_update(update, state=None):
         update = update or {}
@@ -113,7 +98,10 @@ def patch_dashboard(dashboard):
         handled = (
             "MAIN", "REAL", "REAL_STATS", "REFRESH", "DEBUG",
             "OPTIMIZER", "OPTIMIZER_STRATEGIES", "OPTIMIZER_V30",
-            "REAL_BOT", "REAL_BOT_REFRESH", "REAL_BOT_STATS", "REAL_BOT_STATS_REFRESH",
+            "REAL_BOT", "REAL_BOT_REFRESH", "REAL_BOT_BACK",
+            "REAL_BOT_PORTFOLIO", "REAL_BOT_PORTFOLIO_REFRESH",
+            "REAL_BOT_BUY", "REAL_BOT_SELL",
+            "REAL_BOT_STATS", "REAL_BOT_STATS_REFRESH",
         )
         if data not in handled:
             return original_handle(update, state)
@@ -130,16 +118,29 @@ def patch_dashboard(dashboard):
         # Acknowledge exactly once and before any GitHub, RPC, valuation or quote work.
         dashboard.answer_callback(cb.get("id"))
 
-        if data in ("REAL_BOT", "REAL_BOT_REFRESH"):
-            keyboard = {
-                "inline_keyboard": [
+        real_bot_views = {
+            "REAL_BOT": "main", "REAL_BOT_REFRESH": "main", "REAL_BOT_BACK": "main",
+            "REAL_BOT_PORTFOLIO": "portfolio", "REAL_BOT_PORTFOLIO_REFRESH": "portfolio",
+            "REAL_BOT_BUY": "buy", "REAL_BOT_SELL": "sell",
+            "REAL_BOT_STATS": "stats", "REAL_BOT_STATS_REFRESH": "stats",
+        }
+        if data in real_bot_views:
+            view = real_bot_views[data]
+            refresh = data in {"REAL_BOT_REFRESH", "REAL_BOT_PORTFOLIO_REFRESH", "REAL_BOT_STATS_REFRESH"}
+            cache_only = data in {"REAL_BOT_BACK", "REAL_BOT_PORTFOLIO", "REAL_BOT_BUY", "REAL_BOT_SELL", "REAL_BOT_STATS"}
+            try:
+                import real_bot_views as real_views
+                if refresh or data == "REAL_BOT":
+                    loading_keyboard = real_views._main_keyboard() if view == "main" else real_views._submenu_keyboard(view)
+                    _safe_edit(chat_id, message_id, "🤖 REAL TRADING\n\n⏳ Updating verified portfolio data…", loading_keyboard)
+                text, keyboard = real_views.render_view(dashboard, view, refresh=refresh, cache_only=cache_only)
+            except Exception as exc:
+                print(f"REAL Trading view error: {type(exc).__name__}: {exc}")
+                text = "🤖 REAL TRADING\n\n⚠️ Data temporarily unavailable. Tap Refresh to retry."
+                keyboard = {"inline_keyboard": [
                     [{"text": "🔄 Refresh", "callback_data": "REAL_BOT_REFRESH"}],
-                    [{"text": "⬅️ Back", "callback_data": "MAIN"}],
-                ],
-            }
-            # Show a responsive screen immediately after acknowledging the tap.
-            _safe_edit(chat_id, message_id, "🤖 REAL TRADING\\n\\n⏳ Updating portfolio…", keyboard)
-            text, keyboard = _real_bot_report(data)
+                    [{"text": "⬅️ REAL Menu", "callback_data": "REAL_BOT_BACK"}],
+                ]}
             _safe_edit(chat_id, message_id, text, keyboard)
             return state
 

@@ -323,8 +323,8 @@ def _human_token_amount(raw, decimals):
     return Decimal(raw_integer) / (Decimal(10) ** decimals)
 
 
-def _fetch_wallet_snapshot():
-    """Read-only wallet mark-to-market. Never requests executable SELL quotes."""
+def _fetch_wallet_snapshot(include_prices=True):
+    """Read-only wallet snapshot; price lookups may be skipped for live-quote-first callers."""
     wallet = _wallet_address().strip().lower()
     snapshot = {"wallet_address": wallet, "native_sda": None, "holdings": [],
                 "token_balances_loaded": False, "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -362,6 +362,14 @@ def _fetch_wallet_snapshot():
             snapshot["errors"].append(f"token balances unavailable: {type(exc).__name__}")
             return snapshot
 
+    try:
+        with open("token_metadata.json", "r", encoding="utf-8") as handle:
+            token_catalog = json.load(handle)
+        if not isinstance(token_catalog, dict):
+            token_catalog = {}
+    except Exception:
+        token_catalog = {}
+
     holdings = []
     for item in items:
         if not isinstance(item, dict):
@@ -369,8 +377,14 @@ def _fetch_wallet_snapshot():
         token_data = item.get("token") if isinstance(item.get("token"), dict) else item
         address = _address_from(token_data) or _address_from(item)
         raw = _raw_integer(item.get("value", item.get("balance", item.get("token_balance"))))
+        decimals_value = token_data.get("decimals")
+        if decimals_value is None:
+            decimals_value = item.get("decimals")
+        if decimals_value is None:
+            metadata = token_catalog.get(address, {}) if address else {}
+            decimals_value = metadata.get("decimals") if isinstance(metadata, dict) else None
         try:
-            decimals = int(token_data.get("decimals", item.get("decimals")))
+            decimals = int(decimals_value)
         except (TypeError, ValueError, OverflowError):
             decimals = -1
         if not address or raw is None or raw <= 0 or not 0 <= decimals <= 36:
@@ -389,7 +403,7 @@ def _fetch_wallet_snapshot():
                          "market_error": None if is_wsda else "price unavailable"})
 
     priced = [h for h in holdings if h["price_sda"] is None]
-    if priced:
+    if include_prices and priced:
         with ThreadPoolExecutor(max_workers=min(8, len(priced))) as pool:
             prices = list(pool.map(lambda h: _newest_supabase_price(h["address"]), priced))
         for holding, price in zip(priced, prices):
@@ -768,16 +782,24 @@ def _build_bot_report(dashboard):
     realized_pnl = realized.get("verified_pnl_sda")
     total_pnl = (open_pnl + realized_pnl) if open_pnl is not None and realized_pnl is not None else None
     holdings = snapshot.get("holdings", [])
+    market_count = sum(h.get("market_value_sda") is not None for h in holdings)
+    token_count = len(holdings)
     token_total = sum((float(h["market_value_sda"]) for h in holdings
                        if h.get("market_value_sda") is not None), 0.0)
     native = snapshot.get("native_sda")
+    market_complete = (snapshot.get("token_balances_loaded", False)
+                       and market_count == token_count)
     portfolio_complete = (source == "authoritative" and native is not None
-                          and snapshot.get("market_complete", False))
-    portfolio = native + token_total if portfolio_complete else None
+                           and market_complete)
+    portfolio = native + token_total if native is not None else None
     lines = ["🤖 REAL TRADING " + ("🟢" if _status(worker_state) == "🟢 LIVE" else
                                   "🟡" if _status(worker_state) == "🟡 DRY RUN" else
                                   "🔴" if "DISABLED" in _status(worker_state) else "⚪")]
-    lines += ["", f"💰 Portfolio  {portfolio:.2f} SDA" if portfolio is not None else "💰 Portfolio  unavailable",
+    portfolio_line = (
+        f"💰 Portfolio  {portfolio:.2f} SDA" if portfolio_complete else
+        f"💰 Portfolio  ≥{portfolio:.2f} SDA ({market_count}/{token_count})"
+    ) if portfolio is not None else "💰 Portfolio  unavailable"
+    lines += ["", portfolio_line,
               f"📈 Total PnL  {total_pnl:+.2f} SDA" if total_pnl is not None else "📈 Total PnL  unavailable",
               f"Open PnL  {open_pnl:+.2f} SDA" if open_pnl is not None else "Open PnL  unavailable",
               f"Realized  {realized_pnl:+.2f} SDA" if realized_pnl is not None else "Realized  unavailable",
@@ -905,7 +927,7 @@ def patch_dashboard(dashboard):
         rows = keyboard.get("inline_keyboard", [])
         if not any(row and row[0].get("callback_data") == "REAL_BOT" for row in rows):
             real_index = next((i for i, row in enumerate(rows) if row and row[0].get("callback_data") == "REAL"), None)
-            bot_row = [{"text": "🤖 Real Trading Bot", "callback_data": "REAL_BOT"}]
+            bot_row = [{"text": "🤖 REAL Trading", "callback_data": "REAL_BOT"}]
             if real_index is None:
                 rows.insert(2, bot_row)
             else:

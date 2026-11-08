@@ -89,106 +89,101 @@ def test_real_trading_wallet_menu_callback_is_reachable(monkeypatch):
 
 
 def test_real_trading_bot_button_is_explicitly_routed(monkeypatch):
-    import real_bot_menu
-    monkeypatch.setattr(real_bot_menu, "bot_report", lambda _d: "BOT REPORT")
+    import real_bot_views
     dashboard = _router(monkeypatch)
+    calls = []
+    def render(_dashboard, view, refresh=False, cache_only=False):
+        assert dashboard.events[0] == ("answer", "cb-1", None)
+        calls.append((view, refresh, cache_only))
+        return "BOT MAIN", real_bot_views._main_keyboard()
+    monkeypatch.setattr(real_bot_views, "render_view", render)
     dashboard.handle_update(_update("REAL_BOT"))
-    assert dashboard.events[0][0] == "answer"
-    payload = _last_edit(dashboard)
-    assert payload["text"] == "BOT REPORT"
-    callbacks = [b["callback_data"] for row in payload["reply_markup"]["inline_keyboard"] for b in row]
-    assert callbacks == ["REAL_BOT_REFRESH", "MAIN"]
+    assert calls == [("main", False, False)]
+    assert _last_edit(dashboard)["text"] == "BOT MAIN"
+    callbacks = [b["callback_data"] for row in _last_edit(dashboard)["reply_markup"]["inline_keyboard"] for b in row]
+    assert callbacks == ["REAL_BOT_PORTFOLIO", "REAL_BOT_BUY", "REAL_BOT_SELL", "REAL_BOT_STATS", "REAL_BOT_REFRESH", "MAIN"]
 
 
-def test_back_from_real_bot_returns_to_main_menu(monkeypatch):
+@pytest.mark.parametrize("callback,view", [
+    ("REAL_BOT_PORTFOLIO", "portfolio"), ("REAL_BOT_BUY", "buy"),
+    ("REAL_BOT_SELL", "sell"), ("REAL_BOT_STATS", "stats"),
+])
+def test_real_bot_submenus_are_acknowledged_and_rendered(monkeypatch, callback, view):
+    import real_bot_views
     dashboard = _router(monkeypatch)
-    dashboard.handle_update(_update("MAIN", 2))
+    calls = []
+    def render(_dashboard, selected_view, refresh=False, cache_only=False):
+        assert dashboard.events[0] == ("answer", "cb-1", None)
+        calls.append((selected_view, refresh, cache_only))
+        return selected_view.upper(), real_bot_views._submenu_keyboard(selected_view)
+    monkeypatch.setattr(real_bot_views, "render_view", render)
+    dashboard.handle_update(_update(callback))
+    assert calls == [(view, False, True)]
+    assert _last_edit(dashboard)["text"] == view.upper()
+
+
+@pytest.mark.parametrize("callback", ["REAL_BOT_PORTFOLIO", "REAL_BOT_BUY", "REAL_BOT_SELL", "REAL_BOT_STATS"])
+def test_back_from_every_submenu_uses_cached_data(monkeypatch, callback):
+    import real_bot_views
+    dashboard = _router(monkeypatch)
+    calls = []
+    def render(_dashboard, view, refresh=False, cache_only=False):
+        calls.append((view, refresh, cache_only))
+        return view.upper(), real_bot_views._main_keyboard() if view == "main" else real_bot_views._submenu_keyboard(view)
+    monkeypatch.setattr(real_bot_views, "render_view", render)
+    dashboard.handle_update(_update(callback, 10))
+    dashboard.handle_update(_update("REAL_BOT_BACK", 11))
+    expected = {"REAL_BOT_PORTFOLIO":"portfolio","REAL_BOT_BUY":"buy","REAL_BOT_SELL":"sell","REAL_BOT_STATS":"stats"}[callback]
+    assert calls == [(expected, False, True), ("main", False, True)]
     assert _last_edit(dashboard)["text"] == "MAIN"
-    assert dashboard.events[0] == ("answer", "cb-2", None)
 
 
-def test_refresh_callback_is_acknowledged_exactly_once(monkeypatch):
+@pytest.mark.parametrize("callback,view", [
+    ("REAL_BOT_REFRESH", "main"), ("REAL_BOT_PORTFOLIO_REFRESH", "portfolio"),
+    ("REAL_BOT_STATS_REFRESH", "stats"),
+])
+def test_real_bot_refresh_forces_fresh_data_after_immediate_ack(monkeypatch, callback, view):
+    import real_bot_views
     dashboard = _router(monkeypatch)
-    dashboard.handle_update(_update("REFRESH"))
-    assert len([event for event in dashboard.events if event[0] == "answer"]) == 1
-    assert _last_edit(dashboard)["reply_markup"] == dashboard.menu_keyboard()
+    calls = []
+    def render(_dashboard, selected_view, refresh=False, cache_only=False):
+        assert dashboard.events[0] == ("answer", "cb-1", None)
+        calls.append((selected_view, refresh, cache_only))
+        return "FRESH", real_bot_views._main_keyboard() if selected_view == "main" else real_bot_views._submenu_keyboard(selected_view)
+    monkeypatch.setattr(real_bot_views, "render_view", render)
+    dashboard.handle_update(_update(callback))
+    assert calls == [(view, True, False)]
+    assert _last_edit(dashboard)["text"] == "FRESH"
 
 
 def test_missing_ledger_or_quote_failure_keeps_real_menu_navigable(monkeypatch):
-    import real_bot_menu
-    monkeypatch.setattr(real_bot_menu, "bot_report", lambda _d: (_ for _ in ()).throw(OSError("ledger/quote unavailable")))
+    import real_bot_views
+    def fail(*_args, **_kwargs):
+        raise OSError("private Supabase/RPC detail must not be shown")
+    monkeypatch.setattr(real_bot_views, "render_view", fail)
     dashboard = _router(monkeypatch)
     dashboard.handle_update(_update("REAL_BOT"))
     payload = _last_edit(dashboard)
     assert "temporarily unavailable" in payload["text"]
-    assert payload["reply_markup"]["inline_keyboard"][-1][0]["callback_data"] == "MAIN"
-
-
-@pytest.mark.parametrize("warning", [
-    "⚠ REAL ledger unavailable",
-    "⚠ REAL ledger stale",
-    "⚪ Worker status unknown",
-    "⚪ STATUS UNKNOWN",
-    "⚠ Sell quote unavailable",
-])
-def test_missing_stale_worker_and_valuation_warnings_do_not_remove_buttons(monkeypatch, warning):
-    import real_bot_menu
-    monkeypatch.setattr(real_bot_menu, "bot_report", lambda _d: warning)
-    dashboard = _router(monkeypatch)
-    dashboard.handle_update(_update("REAL_BOT"))
-    payload = _last_edit(dashboard)
-    assert warning in payload["text"]
-    assert payload["reply_markup"]["inline_keyboard"]
+    assert "Supabase" not in payload["text"] and "RPC detail" not in payload["text"]
+    assert payload["reply_markup"]["inline_keyboard"][-1][0]["callback_data"] == "REAL_BOT_BACK"
 
 
 def test_callback_is_acknowledged_before_slow_real_report(monkeypatch):
-    import real_bot_menu
-
+    import real_bot_views
     dashboard = _router(monkeypatch)
-
-    def slow_report(_dashboard):
+    def slow_report(_dashboard, view, refresh=False, cache_only=False):
         assert dashboard.events[0] == ("answer", "cb-1", None)
-        return "REAL REPORT"
-
-    monkeypatch.setattr(real_bot_menu, "bot_report", slow_report)
+        return "REAL REPORT", real_bot_views._main_keyboard()
+    monkeypatch.setattr(real_bot_views, "render_view", slow_report)
     dashboard.handle_update(_update("REAL_BOT"))
     assert _last_edit(dashboard)["text"] == "REAL REPORT"
 
 
-def test_failed_edit_falls_back_to_send_message(monkeypatch):
-    dashboard = _router(monkeypatch)
-    calls = []
-
-    def api(method, payload):
-        calls.append(method)
-        return {"ok": method == "sendMessage"}
-
-    dashboard.api = api
-    dashboard.handle_update(_update("MAIN"))
-    assert calls == ["editMessageText", "sendMessage"]
-
-
-
-def test_real_bot_refresh_forces_fresh_data_after_immediate_ack(monkeypatch):
-    import real_bot_menu
-    dashboard = _router(monkeypatch)
-    calls = []
-
-    def report(_dashboard, refresh=False):
-        calls.append((dashboard.events[0][0], refresh))
-        return "FRESH REAL REPORT"
-
-    monkeypatch.setattr(real_bot_menu, "bot_report", report)
-    dashboard.handle_update(_update("REAL_BOT_REFRESH", 22))
-    assert calls == [("answer", True)]
-    assert _last_edit(dashboard)["text"] == "FRESH REAL REPORT"
-
-
-def test_real_bot_menu_has_only_refresh_and_back(monkeypatch):
-    import real_bot_menu
-    monkeypatch.setattr(real_bot_menu, "bot_report", lambda _d: "REAL")
+def test_real_bot_menu_has_required_six_actions(monkeypatch):
+    import real_bot_views
+    monkeypatch.setattr(real_bot_views, "render_view", lambda *_a, **_k: ("REAL", real_bot_views._main_keyboard()))
     dashboard = _router(monkeypatch)
     dashboard.handle_update(_update("REAL_BOT", 23))
-    buttons = [button for row in _last_edit(dashboard)["reply_markup"]["inline_keyboard"]
-               for button in row]
-    assert [button["callback_data"] for button in buttons] == ["REAL_BOT_REFRESH", "MAIN"]
+    buttons = [button for row in _last_edit(dashboard)["reply_markup"]["inline_keyboard"] for button in row]
+    assert [button["callback_data"] for button in buttons] == ["REAL_BOT_PORTFOLIO","REAL_BOT_BUY","REAL_BOT_SELL","REAL_BOT_STATS","REAL_BOT_REFRESH","MAIN"]

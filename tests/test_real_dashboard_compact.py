@@ -83,7 +83,7 @@ def test_unavailable_token_price_does_not_break_dashboard(monkeypatch):
     assert "AAA 22.00 SDA +2.00" in report
     assert "BBB value unavailable" in report
     assert "rpc error" not in report
-    assert "Portfolio  unavailable" in report
+    assert "Portfolio  ≥122.00 SDA (1/2)" in report
     assert "Total PnL  unavailable" in report
 
 
