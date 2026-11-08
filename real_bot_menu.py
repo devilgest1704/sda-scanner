@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -24,6 +25,8 @@ SUPABASE_HEADERS = {
     "accept-profile": "public",
 }
 MARKET_PRICE_STALE_SECONDS = 900
+_DASHBOARD_CACHE = {"at": 0.0, "value": None}
+_DASHBOARD_CACHE_TTL = 20.0
 EXTERNAL_REFERENCE_ENV = "REAL_WALLET_REFERENCE_TOTAL_SDA"
 
 
@@ -48,7 +51,7 @@ REAL_WORKER_STATUS_FILE = "real_worker_status.json"
 def _remote_json(dashboard, path):
     base = getattr(dashboard, "REMOTE_BASE", "https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/")
     response = requests.get(base + path, params={"ts": int(datetime.now(timezone.utc).timestamp())},
-                            timeout=12, headers={"Cache-Control": "no-cache"})
+                            timeout=(1.5, 3.0), headers={"Cache-Control": "no-cache"})
     response.raise_for_status()
     value = response.json()
     if not isinstance(value, dict):
@@ -239,7 +242,7 @@ def _newest_supabase_price(token):
                 "limit": "100",
             },
             headers=SUPABASE_HEADERS,
-            timeout=15,
+            timeout=(1.5, 3.0),
         )
         response.raise_for_status()
         rows = response.json()
@@ -321,38 +324,43 @@ def _human_token_amount(raw, decimals):
 
 
 def _fetch_wallet_snapshot():
+    """Read-only wallet mark-to-market. Never requests executable SELL quotes."""
     wallet = _wallet_address().strip().lower()
-    snapshot = {
-        "wallet_address": wallet,
-        "native_sda": None,
-        "holdings": [],
-        "token_balances_loaded": False,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "errors": [],
-    }
+    snapshot = {"wallet_address": wallet, "native_sda": None, "holdings": [],
+                "token_balances_loaded": False, "updated_at": datetime.now(timezone.utc).isoformat(),
+                "errors": []}
     if wallet != BOT_WALLET_ADDRESS:
-        snapshot["errors"].append("Configured wallet address does not match the REAL bot wallet")
+        snapshot["errors"].append("wallet mismatch")
         return snapshot
 
-    try:
-        response = requests.get(f"{EXPLORER_API}/addresses/{wallet}", timeout=15)
+    def get_address():
+        response = requests.get(f"{EXPLORER_API}/addresses/{wallet}", timeout=(1.5, 3.0))
         response.raise_for_status()
-        address_data = response.json()
-        native_raw = _raw_integer(address_data.get("coin_balance", address_data.get("balance")))
-        if native_raw is None:
-            raise ValueError("Blockscout address response has no native balance")
-        snapshot["native_sda"] = float(Decimal(native_raw) / Decimal(10**18))
-    except Exception as exc:
-        snapshot["errors"].append(f"Native balance unavailable: {type(exc).__name__}")
+        return response.json()
 
-    try:
-        response = requests.get(f"{EXPLORER_API}/addresses/{wallet}/token-balances", timeout=20)
+    def get_tokens():
+        response = requests.get(f"{EXPLORER_API}/addresses/{wallet}/token-balances", timeout=(1.5, 3.5))
         response.raise_for_status()
-        items = _unwrap_items(response.json())
-        snapshot["token_balances_loaded"] = True
-    except Exception as exc:
-        snapshot["errors"].append(f"Token balances unavailable: {type(exc).__name__}")
-        return snapshot
+        return _unwrap_items(response.json())
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        native_future = pool.submit(get_address)
+        tokens_future = pool.submit(get_tokens)
+        try:
+            address_data = native_future.result(timeout=4.0)
+            raw = _raw_integer(address_data.get("coin_balance", address_data.get("balance")))
+            if raw is not None:
+                snapshot["native_sda"] = float(Decimal(raw) / Decimal(10**18))
+            else:
+                snapshot["errors"].append("native balance unavailable")
+        except Exception as exc:
+            snapshot["errors"].append(f"native balance unavailable: {type(exc).__name__}")
+        try:
+            items = tokens_future.result(timeout=4.5)
+            snapshot["token_balances_loaded"] = True
+        except Exception as exc:
+            snapshot["errors"].append(f"token balances unavailable: {type(exc).__name__}")
+            return snapshot
 
     holdings = []
     for item in items:
@@ -370,24 +378,21 @@ def _fetch_wallet_snapshot():
         quantity = _human_token_amount(raw, decimals)
         if quantity is None:
             continue
-        holdings.append({
-            "address": address,
-            "symbol": str(token_data.get("symbol") or address[:10]).strip(),
-            "amount_raw": raw,
-            "decimals": decimals,
-            "amount": quantity,
-            "price_sda": None,
-            "price_timestamp": None,
-            "price_age_seconds": None,
-            "price_stale": False,
-            "market_value_sda": None,
-            "market_error": "price unavailable",
-        })
+        symbol = str(token_data.get("symbol") or address[:10]).strip()
+        is_wsda = address == str(cfg.WSDA_ADDRESS).lower()
+        holdings.append({"address": address, "symbol": symbol, "amount_raw": raw,
+                         "decimals": decimals, "amount": quantity,
+                         "price_sda": Decimal(1) if is_wsda else None,
+                         "price_timestamp": snapshot["updated_at"] if is_wsda else None,
+                         "price_age_seconds": 0 if is_wsda else None,
+                         "price_stale": False, "market_value_sda": quantity if is_wsda else None,
+                         "market_error": None if is_wsda else "price unavailable"})
 
-    if holdings:
-        with ThreadPoolExecutor(max_workers=min(8, len(holdings))) as pool:
-            prices = list(pool.map(lambda holding: _newest_supabase_price(holding["address"]), holdings))
-        for holding, price in zip(holdings, prices):
+    priced = [h for h in holdings if h["price_sda"] is None]
+    if priced:
+        with ThreadPoolExecutor(max_workers=min(8, len(priced))) as pool:
+            prices = list(pool.map(lambda h: _newest_supabase_price(h["address"]), priced))
+        for holding, price in zip(priced, prices):
             holding["price_sda"] = price.get("price_sda")
             holding["price_timestamp"] = price.get("timestamp")
             holding["price_age_seconds"] = price.get("age_seconds")
@@ -395,33 +400,10 @@ def _fetch_wallet_snapshot():
             holding["market_error"] = price.get("error")
             if price.get("price_sda") is not None:
                 holding["market_value_sda"] = holding["amount"] * Decimal(str(price["price_sda"]))
-        def quote_holding(holding):
-            started = datetime.now(timezone.utc)
-            try:
-                import real_trader
-                quote = real_trader.prepare_sell(holding["address"], holding["symbol"], holding["amount_raw"])
-                proceeds_raw = _raw_integer(quote.get("quoted_wsda_raw"))
-                if proceeds_raw is None or proceeds_raw <= 0:
-                    return {"sell_value_sda": None, "sell_error": "empty quote"}
-                return {
-                    "sell_value_sda": Decimal(proceeds_raw) / (Decimal(10) ** 18),
-                    "sell_error": None,
-                    "sell_quote_timestamp": datetime.now(timezone.utc).isoformat(),
-                    "sell_quote_age_seconds": (datetime.now(timezone.utc) - started).total_seconds(),
-                }
-            except Exception as exc:
-                return {"sell_value_sda": None, "sell_error": _short_sell_quote_error(exc)}
-
-        with ThreadPoolExecutor(max_workers=min(8, len(holdings))) as pool:
-            sell_quotes = list(pool.map(quote_holding, holdings))
-        for holding, quote in zip(holdings, sell_quotes):
-            holding.update(quote)
-            holding["sellable"] = holding.get("sell_value_sda") is not None
     snapshot["holdings"] = holdings
-    snapshot["market_valued_count"] = sum(h["market_value_sda"] is not None for h in holdings)
-    snapshot["sell_quoted_count"] = sum(h.get("sell_value_sda") is not None for h in holdings)
+    snapshot["market_valued_count"] = sum(h.get("market_value_sda") is not None for h in holdings)
+    snapshot["market_complete"] = snapshot["market_valued_count"] == len(holdings)
     return snapshot
-
 
 def _market_price(dashboard, token):
     price = _newest_supabase_price(token)
@@ -505,21 +487,25 @@ def _position_mark_to_market(dashboard, token, pos, holding=None):
     return mark
 
 
-def _position_marks(dashboard, positions):
-    snapshot = _fetch_wallet_snapshot()
+def _position_marks(dashboard, positions, snapshot=None):
+    snapshot = snapshot if isinstance(snapshot, dict) else _fetch_wallet_snapshot()
     holdings = {item["address"]: item for item in snapshot.get("holdings", [])}
     marks = []
-    for token, pos in positions.items():
-        if isinstance(pos, dict):
-            address = str(token).lower()
-            holding = holdings.get(address)
-            if holding is None and snapshot.get("token_balances_loaded"):
-                holding = {"address": address, "amount_raw": 0, "amount": Decimal(0),
-                           "sell_error": "zero wallet balance", "market_error": "zero wallet balance"}
-            marks.append((_token_label(token, pos),
-                          _position_mark_to_market(dashboard, address, pos, holding)))
+    for token, pos in (positions or {}).items():
+        if not isinstance(pos, dict):
+            continue
+        address = str(token).lower()
+        holding = holdings.get(address)
+        # A ledger entry with no current wallet balance is not an open position.
+        if snapshot.get("token_balances_loaded") and holding is None:
+            continue
+        if holding is None:
+            mark = {"amount": None, "cost_sda": _finite_number(pos.get("amount_sda", pos.get("cost_sda"))),
+                    "market_value_sda": None, "market_pnl_sda": None, "market_pnl_pct": None}
+        else:
+            mark = _position_mark_to_market(dashboard, address, pos, holding)
+        marks.append((_token_label(token, pos), mark))
     return marks, snapshot
-
 
 def _nested_address(value):
     return _address_from(value)
@@ -617,51 +603,32 @@ def _verify_trade(trade, wallet):
     return result
 
 
-def _realized_summary(state, wallet):
+def _realized_summary(state, wallet=None):
+    """Fast ledger-derived lifetime realized PnL; no per-trade explorer calls."""
     trades = state.get("trades", []) if isinstance(state, dict) else []
-    verified = []
-    unverified = []
-    verified_buys = []
+    realized = 0.0
+    count = 0
     records = []
     for trade in trades:
-        if not isinstance(trade, dict) or str(trade.get("action", "")).upper() not in {"BUY", "SELL"}:
+        if not isinstance(trade, dict) or str(trade.get("action") or "").upper() != "SELL":
             continue
-        result = _verify_trade(trade, wallet)
-        record = {"trade": trade, **result}
-        records.append(record)
-        if str(trade.get("action", "")).upper() == "BUY":
-            (verified_buys if result["verified"] else unverified).append(record)
-            continue
-        if result["verified"]:
-            cost = _finite_number(trade.get("cost_sda", trade.get("amount_sda")))
-            if cost is None:
-                record.update({"verified": False, "status": "UNVERIFIED",
-                               "reason": "verified transfer but missing cost basis"})
-                unverified.append(record)
-            else:
-                record["realized_pnl_sda"] = result["proceeds_sda"] - cost
-                verified.append(record)
-        else:
-            saved_pnl = _finite_number(trade.get("realized_pnl_sda")
-                                       if trade.get("realized_pnl_sda") is not None
-                                       else trade.get("pnl_sda"))
-            record["realized_pnl_sda"] = saved_pnl
-            unverified.append(record)
-    verified_total = sum(record["realized_pnl_sda"] for record in verified)
-    manual_values = [record.get("realized_pnl_sda") for record in unverified
-                     if record.get("realized_pnl_sda") is not None]
-    return {
-        "verified_pnl_sda": verified_total,
-        "unverified_pnl_sda": sum(manual_values),
-        "verified_trades": verified,
-        "unverified_trades": unverified,
-        "verified_count": len(verified),
-        "unverified_count": sum(1 for item in unverified
-                                 if str(item["trade"].get("action", "")).upper() == "SELL"),
-        "verified_buys": verified_buys,
-        "records": records,
-    }
-
+        value = _finite_number(trade.get("realized_pnl_sda"))
+        if value is None:
+            value = _finite_number(trade.get("pnl_sda"))
+        if value is None and str(trade.get("source") or "").lower() == "manual_user_confirmed":
+            proceeds = _finite_number(trade.get("amount_sda"))
+            cost = _finite_number(trade.get("cost_sda"))
+            if proceeds is not None and cost is not None:
+                value = proceeds - cost
+        if value is not None:
+            realized += value
+            count += 1
+            records.append({"trade": trade, "verified": False, "realized_pnl_sda": value,
+                            "status": "LEDGER RECORDED"})
+    return {"verified_pnl_sda": realized, "unverified_pnl_sda": 0.0,
+            "verified_trades": [], "unverified_trades": [], "verified_count": 0,
+            "unverified_count": 0, "ledger_realized_count": count,
+            "records": records, "verified_buys": []}
 
 def _portfolio_summary_lines(snapshot, marks, realized):
     holdings = snapshot.get("holdings", [])
@@ -723,91 +690,74 @@ def _portfolio_summary_lines(snapshot, marks, realized):
 
 
 def _position_lines(symbol, mark):
-    amount = f"{mark['amount']:.8f}" if mark.get("amount") is not None else "UNAVAILABLE"
-    cost = f"{mark['cost_sda']:.4f} SDA" if mark["cost_sda"] is not None else "UNKNOWN"
-    market_value = (f"{float(mark['market_value_sda']):.4f} SDA"
-                    if mark.get("market_value_sda") is not None else "UNPRICED")
-    market_pnl = (f"{mark['market_pnl_sda']:+.4f} SDA ({mark['market_pnl_pct']:+.2f}%)"
-                  if mark.get("market_pnl_sda") is not None else "N/A")
-    sell_value = f"{float(mark['sell_value_sda']):.4f} SDA" if mark.get("sell_value_sda") is not None else "UNAVAILABLE"
-    sell_pnl = (f"{mark['sell_pnl_sda']:+.4f} SDA ({mark['sell_pnl_pct']:+.2f}%)"
-                if mark.get("sell_pnl_sda") is not None else "N/A")
-    if mark["price_sda"] is not None:
-        age_seconds = mark.get("price_age_seconds")
-        age = _quote_age(mark.get("price_timestamp"))
-        stale = " ⚠ STALE PRICE" if mark.get("price_stale") else ""
-        price_line = f"Market price: {mark['price_sda']:.10g} SDA at {mark['price_timestamp']} ({age}){stale}"
-    else:
-        price_line = f"Market price: unavailable ({mark.get('market_error') or 'no valid price'})"
-    sell_line = ("Sell: ✅ executable quote" if mark["sellable"]
-                 else f"Sell: ⚠ quote unavailable ({mark['sell_error'] or 'unknown'})")
-    lines = [f"• {symbol}", f"  Quantity: {amount}", f"  Original invested: {cost}",
-             f"  Market value: {market_value}", f"  Market unrealized P/L: {market_pnl}",
-             f"  {price_line}", f"  Estimated sell value: {sell_value}",
-             f"  Executable P/L: {sell_pnl}", f"  {sell_line}"]
-    if mark.get("sell_quote_timestamp"):
-        lines.append(f"  Sell quote: {mark['sell_quote_timestamp']} (age {mark['sell_quote_age_seconds']:.2f}s)")
-    if mark.get("sell_quote_vs_market_pct") is not None:
-        lines.append(f"  Sell quote vs market mark: {mark['sell_quote_vs_market_pct']:+.2f}% (not a standalone price-impact estimate)")
-    return lines
+    value = mark.get("market_value_sda")
+    pnl = mark.get("market_pnl_sda")
+    if value is None:
+        return [f"⚪ {symbol} value unavailable"]
+    if pnl is None:
+        return [f"⚪ {symbol} {float(value):.2f} SDA PnL unavailable"]
+    icon = "🟢" if pnl >= 0 else "🔴"
+    return [f"{icon} {symbol} {float(value):.2f} SDA {float(pnl):+.2f}"]
 
-
-def bot_report(dashboard):
-    state, source, _load_error = _load_real_state(dashboard)
+def _build_bot_report(dashboard):
+    state, source, _error = _load_real_state(dashboard)
     worker_state = _load_worker_status(dashboard)
     state = state if isinstance(state, dict) else {}
     positions = state.get("positions", {})
     if not isinstance(positions, dict):
         positions = {}
-    wallet = _wallet_address()
-    state_updated = str(state.get("updated_at") or "—")[:19].replace("T", " ")
-    if source == "unavailable":
-        marks, snapshot = [], {"holdings": [], "native_sda": None}
-        realized = {"verified_pnl_sda": 0.0, "verified_count": 0, "unverified_pnl_sda": 0.0,
-                    "unverified_count": 0, "unverified_trades": []}
-    else:
-        marks, snapshot = _position_marks(dashboard, positions)
-        realized = _realized_summary(state, BOT_WALLET_ADDRESS)
-    lines = ["🤖 REAL TRADING BOT", "", f"Status: {_status(worker_state)}"]
-    lines += _ledger_source_warning(source, state)
-    freshness_warning = _ledger_freshness_warning(state, worker_state)
-    if freshness_warning:
-        lines.append(freshness_warning)
-    lines += [
-        f"👛 Bot wallet: {_wallet_short(wallet)}",
-        f"🎯 Position size: {cfg.POSITION_MIN_SDA:.0f}–{cfg.POSITION_MAX_SDA:.0f} SDA",
-        f"📦 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.0f} SDA",
-        (f"📊 {'Last-known ' if source == 'last_known' else ''}Open positions: {len(positions)}/{cfg.MAX_OPEN_POSITIONS}"
-         if source != "unavailable" else "📊 Open positions: N/A (ledger unavailable)"),
-        f"🕒 Position ledger updated: {state_updated} UTC",
-    ]
-    if source != "unavailable":
-        lines += _portfolio_summary_lines(snapshot, marks, realized)
-    else:
-        lines += ["💵 Open cost basis: N/A (ledger unavailable)", "💹 Realized P/L: N/A (ledger unavailable)"]
+    snapshot = _fetch_wallet_snapshot() if source != "unavailable" else {
+        "wallet_address": _wallet_address(), "native_sda": None, "holdings": [],
+        "token_balances_loaded": False, "market_complete": False, "errors": []}
+    marks, snapshot = _position_marks(dashboard, positions, snapshot) if source != "unavailable" else ([], snapshot)
+    realized = _realized_summary(state) if source != "unavailable" else {"verified_pnl_sda": None}
+    open_pnl_values = [m["market_pnl_sda"] for _, m in marks if m.get("market_pnl_sda") is not None]
+    open_complete = len(open_pnl_values) == len(marks)
+    open_pnl = sum(open_pnl_values) if open_complete else None
+    realized_pnl = realized.get("verified_pnl_sda")
+    total_pnl = (open_pnl + realized_pnl) if open_pnl is not None and realized_pnl is not None else None
+    holdings = snapshot.get("holdings", [])
+    token_total = sum((float(h["market_value_sda"]) for h in holdings
+                       if h.get("market_value_sda") is not None), 0.0)
+    native = snapshot.get("native_sda")
+    portfolio_complete = (source == "authoritative" and native is not None
+                          and snapshot.get("market_complete", False))
+    portfolio = native + token_total if portfolio_complete else None
+    lines = ["🤖 REAL TRADING " + ("🟢" if _status(worker_state) == "🟢 LIVE" else
+                                  "🟡" if _status(worker_state) == "🟡 DRY RUN" else
+                                  "🔴" if "DISABLED" in _status(worker_state) else "⚪")]
+    lines += ["", f"💰 Portfolio  {portfolio:.2f} SDA" if portfolio is not None else "💰 Portfolio  unavailable",
+              f"📈 Total PnL  {total_pnl:+.2f} SDA" if total_pnl is not None else "📈 Total PnL  unavailable",
+              f"Open PnL  {open_pnl:+.2f} SDA" if open_pnl is not None else "Open PnL  unavailable",
+              f"Realized  {realized_pnl:+.2f} SDA" if realized_pnl is not None else "Realized  unavailable",
+              f"Positions  {len(marks)}"]
+    if source != "authoritative":
+        lines += ["", "⚠ Current REAL ledger unavailable" if source == "unavailable"
+                  else "⚠ Showing last-known ledger; not current"]
+    if snapshot.get("errors"):
+        lines += ["", "⚠ Some wallet data unavailable"]
+    lines += ["", "📊 OPEN POSITIONS"]
     if not marks:
-        lines += ["────────────────────────",
-                  "⚠ Open positions unavailable" if source == "unavailable" else
-                  "⚪ No open bot positions" if source == "authoritative" else
-                  "⚠ No last-known open positions"]
+        lines.append("⚪ No verified open positions" if source == "authoritative" else "⚪ Positions unavailable")
     else:
-        heading = "⚠ LAST-KNOWN OPEN BOT POSITIONS — STALE" if source == "last_known" else "🪙 OPEN BOT POSITIONS"
-        lines += [heading, "────────────────────────"]
         for symbol, mark in marks:
             lines.extend(_position_lines(symbol, mark))
-    if realized["unverified_trades"]:
-        lines += ["", "📎 UNVERIFIED REALIZED LEDGER ENTRIES"]
-        for record in realized["unverified_trades"]:
-            trade = record["trade"]
-            symbol = trade.get("symbol") or str(trade.get("token") or "UNKNOWN")[:10]
-            pnl = record.get("realized_pnl_sda")
-            pnl_text = f" • recorded P/L {pnl:+.4f} SDA" if pnl is not None else " • P/L unavailable"
-            label = ("UNVERIFIED MANUAL" if record["status"] == "UNVERIFIED MANUAL"
-                     else f"UNVERIFIED {str(trade.get('action') or 'TRADE').upper()}")
-            lines.append(f"{label} • {symbol}{pnl_text} • {record['reason']}")
-    lines += ["", "Market value is based on the newest valid Supabase transaction price; estimated sell value is a separate read-only PinetSwap quote."]
     return "\n".join(lines)
 
+
+def bot_report(dashboard, refresh=False):
+    """Render cached dashboard-only data; refresh=True bypasses cache."""
+    now = time.monotonic()
+    cached = _DASHBOARD_CACHE.get("value")
+    if not refresh and cached is not None and now - _DASHBOARD_CACHE.get("at", 0) < _DASHBOARD_CACHE_TTL:
+        return cached
+    try:
+        value = _build_bot_report(dashboard)
+    except Exception as exc:
+        print(f"REAL dashboard render isolated error: {type(exc).__name__}")
+        value = "🤖 REAL TRADING ⚪\n\n💰 Portfolio unavailable\n📈 Total PnL unavailable\nOpen PnL unavailable\nRealized unavailable\nPositions unavailable\n\n📊 OPEN POSITIONS\n⚪ Valuation unavailable"
+    _DASHBOARD_CACHE.update({"at": time.monotonic(), "value": value})
+    return value
 
 def statistics_report(dashboard):
     state, source, _load_error = _load_real_state(dashboard)
