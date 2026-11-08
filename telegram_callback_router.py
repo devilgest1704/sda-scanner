@@ -89,7 +89,7 @@ def patch_dashboard(dashboard):
         try:
             import real_bot_menu
             refresh = data == "REAL_BOT_REFRESH"
-            return real_bot_menu.bot_report(dashboard, refresh=refresh), {
+            return (real_bot_menu.bot_report(dashboard, refresh=True) if refresh else real_bot_menu.bot_report(dashboard)), {
                 "inline_keyboard": [
                     [{"text": "🔄 Refresh", "callback_data": "REAL_BOT_REFRESH"}],
                     [{"text": "⬅️ Back", "callback_data": "MAIN"}],
