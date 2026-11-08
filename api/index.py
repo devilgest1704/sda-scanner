@@ -250,7 +250,29 @@ async def watchdog(request: Request):
 
 @app.post("/api/telegram", response_class=PlainTextResponse)
 async def telegram(request: Request):
+    """Handle Telegram webhook updates without blocking on remote menu-state I/O."""
     update = await request.json()
-    state = dashboard.load("telegram_menu_state.json", {"offset": 0})
-    dashboard.handle_update(update, state)
+    # Webhooks are stateless per invocation. Loading this file through
+    # SDA_REMOTE_STATE used to add a GitHub network round-trip before callback
+    # acknowledgement, so use a local ephemeral cursor instead.
+    state = {"offset": 0}
+    try:
+        dashboard.handle_update(update, state)
+    except Exception as exc:
+        callback = update.get("callback_query") if isinstance(update, dict) else None
+        message = (callback or {}).get("message") or {}
+        chat_id = (message.get("chat") or {}).get("id")
+        print(f"Telegram update handler error: {type(exc).__name__}: {exc}")
+        # Keep a navigation path visible even if a dashboard/report function
+        # raises unexpectedly. Do not re-answer callbacks here: the router
+        # acknowledges them before starting any report/data work.
+        if chat_id:
+            try:
+                dashboard.send(
+                    "⚠ Telegram dashboard data is temporarily unavailable. Please use the menu again.",
+                    dashboard.menu_keyboard(),
+                    chat_id=chat_id,
+                )
+            except Exception as send_exc:
+                print(f"Telegram error fallback failed: {type(send_exc).__name__}")
     return PlainTextResponse("ok")
