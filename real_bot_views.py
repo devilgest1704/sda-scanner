@@ -45,27 +45,29 @@ def _price_holding(holding,wallet):
             "price_timestamp":datetime.now(timezone.utc).isoformat(),"price_age_seconds":0,
             "price_stale":False,"price_source":"WSDA 1:1","market_error":None})
         return holding
+    fallback={}
+    try:
+        fallback=rb._newest_supabase_price(address) or {}
+    except Exception as fallback_exc:
+        _log(f"Supabase price lookup failed symbol={symbol} reason={type(fallback_exc).__name__}: {fallback_exc}")
+    fresh_price=rb._finite_number(fallback.get("price_sda"))
+    stale=bool(fallback.get("stale"))
+    # Prefer a recent observed swap price over a 1 SDA router quote: the latter
+    # includes trade-size price impact and is not a spot mark for the whole balance.
+    if fresh_price is not None and fresh_price>0 and not stale:
+        holding.update({"price_sda":Decimal(str(fresh_price)),
+            "market_value_sda":amount*Decimal(str(fresh_price)),
+            "price_timestamp":fallback.get("timestamp"),"price_age_seconds":fallback.get("age_seconds"),
+            "price_stale":False,"price_source":"Supabase fresh observed swap price","market_error":None})
+        return holding
     try:
         price=_read_only_buy_price(address,holding.get("decimals",18),wallet)
         holding.update({"price_sda":price,"market_value_sda":amount*price,
             "price_timestamp":datetime.now(timezone.utc).isoformat(),"price_age_seconds":0,
-            "price_stale":False,"price_source":"PinetSwap read-only BUY eth_call (1 SDA)",
+            "price_stale":False,"price_source":"PinetSwap read-only BUY quote (1 SDA; price impact included)",
             "market_error":None})
         return holding
     except Exception as exc:
-        fallback={}
-        try:
-            fallback=rb._newest_supabase_price(address) or {}
-        except Exception as fallback_exc:
-            _log(f"Supabase fallback failed symbol={symbol} reason={type(fallback_exc).__name__}: {fallback_exc}")
-        fresh_price=rb._finite_number(fallback.get("price_sda"))
-        stale=bool(fallback.get("stale"))
-        if fresh_price is not None and fresh_price>0 and not stale:
-            holding.update({"price_sda":Decimal(str(fresh_price)),
-                "market_value_sda":amount*Decimal(str(fresh_price)),
-                "price_timestamp":fallback.get("timestamp"),"price_age_seconds":fallback.get("age_seconds"),
-                "price_stale":False,"price_source":"Supabase fresh transaction price","market_error":None})
-            return holding
         holding["market_value_sda"]=None
         reason=fallback.get("error") or ("stale Supabase price" if stale else "no valid Supabase price row")
         holding["market_error"]=f"{type(exc).__name__}: {str(exc)[:180]}; Supabase: {reason}"
@@ -217,14 +219,17 @@ def _build_dashboard_data(dashboard):
     realized_partial=bool(unverified_sells or unverified_buys or len(pnl_records)!=len(verified_sells))
     total_pnl=open_pnl+realized if open_pnl is not None and realized is not None else None
     total_partial=(total_pnl is not None and (realized_partial or not open_complete or source!="authoritative"))
-    holdings_rows=snapshot.get("holdings",[])
+    # The REAL Telegram portfolio mirrors the bot's active REAL positions,
+    # not every ERC-20 dust/airdrop balance returned by the explorer. Wallet
+    # tokens outside the active position ledger (including spam) are excluded.
     native=rb._finite_number(snapshot.get("native_sda"))
-    known_token_value=sum(float(h["market_value_sda"]) for h in holdings_rows if h.get("market_value_sda") is not None)
-    unavailable=[{"symbol":str(h.get("symbol") or str(h.get("address") or "")[:10]),
-        "address":h.get("address"),"reason":h.get("market_error") or "no reliable price"}
-        for h in holdings_rows if h.get("market_value_sda") is None]
-    portfolio_value=known_token_value+(native or 0.0)
-    portfolio_complete=native is not None and not unavailable and snapshot.get("token_balances_loaded")
+    portfolio_position_values=[p["value_sda"] for p in open_positions if p.get("value_sda") is not None]
+    portfolio_valued_count=len(portfolio_position_values)
+    portfolio_total_count=len(open_positions)
+    known_open_value=sum(portfolio_position_values)
+    portfolio_value=(native+known_open_value) if native is not None else None
+    portfolio_complete=(native is not None and snapshot.get("token_balances_loaded")
+        and portfolio_valued_count==portfolio_total_count)
     return {"source":source,"load_error":load_error,"worker":worker,"worker_status":rb._status(worker),
         "state":state,"snapshot":snapshot,"positions":open_positions,"buy_records":buy_records,
         "sell_records":sell_records,"buy_count":len(verified_buys),"sell_count":len(verified_sells),
@@ -235,9 +240,9 @@ def _build_dashboard_data(dashboard):
         "open_value":open_value,"open_cost":open_cost,"open_pnl":open_pnl,"open_complete":open_complete,
         "realized_pnl":realized,"realized_partial":realized_partial,"total_pnl":total_pnl,
         "total_partial":total_partial,"portfolio_value":portfolio_value,"portfolio_complete":portfolio_complete,
-        "portfolio_valued_count":snapshot.get("market_valued_count",0),
-        "portfolio_total_count":snapshot.get("market_total_count",len(holdings_rows)),
-        "unavailable_assets":unavailable,"native_sda":native,"holdings":holdings_rows}
+        "portfolio_valued_count":portfolio_valued_count,
+        "portfolio_total_count":portfolio_total_count,
+        "native_sda":native,"holdings":snapshot.get("holdings",[])}
 
 def _get_data(dashboard,refresh=False,cache_only=False):
     now=time.monotonic()
