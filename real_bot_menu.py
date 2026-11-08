@@ -398,8 +398,10 @@ def _fetch_wallet_snapshot():
             holding["price_age_seconds"] = price.get("age_seconds")
             holding["price_stale"] = bool(price.get("stale"))
             holding["market_error"] = price.get("error")
-            if price.get("price_sda") is not None:
+            if price.get("price_sda") is not None and not price.get("stale"):
                 holding["market_value_sda"] = holding["amount"] * Decimal(str(price["price_sda"]))
+            elif price.get("stale"):
+                holding["market_error"] = "stale market price"
     snapshot["holdings"] = holdings
     snapshot["market_valued_count"] = sum(h.get("market_value_sda") is not None for h in holdings)
     snapshot["market_complete"] = snapshot["market_valued_count"] == len(holdings)
