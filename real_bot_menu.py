@@ -115,9 +115,13 @@ def _parse_timestamp(value):
 
 def _ledger_freshness_warning(state, worker_state, now=None):
     now = now or datetime.now(timezone.utc)
-    stamp = _parse_timestamp((worker_state or {}).get("updated_at")) or _parse_timestamp((state or {}).get("updated_at"))
+    # The worker heartbeat proves the process is alive; it does not prove the
+    # position ledger itself was checkpointed recently. Check ledger time
+    # independently so a fresh heartbeat cannot mask stale positions/P&L.
+    stamp = (_parse_timestamp((state or {}).get("updated_at"))
+             or _parse_timestamp((worker_state or {}).get("ledger_updated_at")))
     if stamp is None:
-        return "⚠ REAL ledger freshness unavailable (no valid timestamp)"
+        return "⚠ REAL ledger freshness unavailable (no valid ledger timestamp)"
     age = (now - stamp).total_seconds()
     if age < 0:
         return f"⚠ REAL ledger timestamp is in the future: {stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
