@@ -652,25 +652,16 @@ def _realized_summary(state, wallet):
 
 
 def _fast_ledger_realized_summary(state):
-    """Fast ledger-derived lifetime realized PnL; no per-trade explorer calls."""
-    trades = state.get("trades", []) if isinstance(state, dict) else []
-    realized = 0.0
-    count = 0
-    for trade in trades:
-        if not isinstance(trade, dict) or str(trade.get("action") or "").upper() != "SELL":
-            continue
-        value = _finite_number(trade.get("realized_pnl_sda"))
-        if value is None:
-            value = _finite_number(trade.get("pnl_sda"))
-        if value is None and str(trade.get("source") or "").lower() == "manual_user_confirmed":
-            proceeds = _finite_number(trade.get("amount_sda"))
-            cost = _finite_number(trade.get("cost_sda"))
-            if proceeds is not None and cost is not None:
-                value = proceeds - cost
+    """Use only an explicit cumulative wallet/lifetime field; never substitute daily PnL."""
+    if not isinstance(state, dict):
+        return {"verified_pnl_sda": None, "ledger_realized_count": 0}
+    for key in ("wallet_realized_pnl_sda", "realized_total_pnl_sda", "lifetime_realized_pnl_sda"):
+        value = _finite_number(state.get(key))
         if value is not None:
-            realized += value
-            count += 1
-    return {"verified_pnl_sda": realized, "ledger_realized_count": count}
+            return {"verified_pnl_sda": value, "ledger_realized_count": None}
+    # Individual bot SELL records are not the complete wallet history. Their
+    # sum can be useful in diagnostics, but cannot be presented as wallet PnL.
+    return {"verified_pnl_sda": None, "ledger_realized_count": 0}
 
 
 def _portfolio_summary_lines(snapshot, marks, realized):
