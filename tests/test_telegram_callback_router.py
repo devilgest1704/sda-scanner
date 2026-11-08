@@ -166,3 +166,29 @@ def test_failed_edit_falls_back_to_send_message(monkeypatch):
     dashboard.api = api
     dashboard.handle_update(_update("MAIN"))
     assert calls == ["editMessageText", "sendMessage"]
+
+
+
+def test_real_bot_refresh_forces_fresh_data_after_immediate_ack(monkeypatch):
+    import real_bot_menu
+    dashboard = _router(monkeypatch)
+    calls = []
+
+    def report(_dashboard, refresh=False):
+        calls.append((dashboard.events[0][0], refresh))
+        return "FRESH REAL REPORT"
+
+    monkeypatch.setattr(real_bot_menu, "bot_report", report)
+    dashboard.handle_update(_update("REAL_BOT_REFRESH", 22))
+    assert calls == [("answer", True)]
+    assert _last_edit(dashboard)["text"] == "FRESH REAL REPORT"
+
+
+def test_real_bot_menu_has_only_refresh_and_back(monkeypatch):
+    import real_bot_menu
+    monkeypatch.setattr(real_bot_menu, "bot_report", lambda _d: "REAL")
+    dashboard = _router(monkeypatch)
+    dashboard.handle_update(_update("REAL_BOT", 23))
+    buttons = [button for row in _last_edit(dashboard)["reply_markup"]["inline_keyboard"]
+               for button in row]
+    assert [button["callback_data"] for button in buttons] == ["REAL_BOT_REFRESH", "MAIN"]
