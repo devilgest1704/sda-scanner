@@ -121,12 +121,15 @@ def test_statistics_contains_all_required_metrics(built_data):
         "Avg loss -1.00 SDA","Best +5.00 SDA","Worst -1.00 SDA"]:
         assert expected in text
 
-def test_one_unavailable_residual_asset_does_not_break_portfolio(built_data):
+def test_wallet_airdrops_and_non_position_tokens_are_excluded_from_real_portfolio(built_data):
     assert len(built_data["positions"])==2
-    assert built_data["portfolio_value"]==pytest.approx(51.0)
-    assert built_data["portfolio_complete"] is False
-    assert built_data["portfolio_valued_count"]==3 and built_data["portfolio_total_count"]==4
-    assert "≥51.00 SDA (3/4)" in views._main_text(built_data)
+    # Native 10 + open REAL positions XEN 22 and HAQ 18.
+    # WSDA and JOINIT are wallet residuals, not active REAL positions.
+    assert built_data["portfolio_value"]==pytest.approx(50.0)
+    assert built_data["portfolio_complete"] is True
+    assert built_data["portfolio_valued_count"]==2 and built_data["portfolio_total_count"]==2
+    assert "Portfolio 50.00 SDA" in views._main_text(built_data)
+    assert "≥" not in views._main_text(built_data)
 
 def test_raw_technical_errors_never_appear_in_normal_views(built_data):
     for text in (views._main_text(built_data),views._portfolio_text(built_data),views._buy_text(built_data),views._sell_text(built_data),views._stats_text(built_data)):
