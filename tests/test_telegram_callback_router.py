@@ -97,7 +97,7 @@ def test_real_trading_bot_button_is_explicitly_routed(monkeypatch):
     payload = _last_edit(dashboard)
     assert payload["text"] == "BOT REPORT"
     callbacks = [b["callback_data"] for row in payload["reply_markup"]["inline_keyboard"] for b in row]
-    assert callbacks == ["REAL_BOT_REFRESH", "REAL_BOT_STATS", "MAIN"]
+    assert callbacks == ["REAL_BOT_REFRESH", "MAIN"]
 
 
 def test_back_from_real_bot_returns_to_main_menu(monkeypatch):
