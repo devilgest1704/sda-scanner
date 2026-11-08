@@ -603,12 +603,57 @@ def _verify_trade(trade, wallet):
     return result
 
 
-def _realized_summary(state, wallet=None):
+def _realized_summary(state, wallet):
+    trades = state.get("trades", []) if isinstance(state, dict) else []
+    verified = []
+    unverified = []
+    verified_buys = []
+    records = []
+    for trade in trades:
+        if not isinstance(trade, dict) or str(trade.get("action", "")).upper() not in {"BUY", "SELL"}:
+            continue
+        result = _verify_trade(trade, wallet)
+        record = {"trade": trade, **result}
+        records.append(record)
+        if str(trade.get("action", "")).upper() == "BUY":
+            (verified_buys if result["verified"] else unverified).append(record)
+            continue
+        if result["verified"]:
+            cost = _finite_number(trade.get("cost_sda", trade.get("amount_sda")))
+            if cost is None:
+                record.update({"verified": False, "status": "UNVERIFIED",
+                               "reason": "verified transfer but missing cost basis"})
+                unverified.append(record)
+            else:
+                record["realized_pnl_sda"] = result["proceeds_sda"] - cost
+                verified.append(record)
+        else:
+            saved_pnl = _finite_number(trade.get("realized_pnl_sda")
+                                       if trade.get("realized_pnl_sda") is not None
+                                       else trade.get("pnl_sda"))
+            record["realized_pnl_sda"] = saved_pnl
+            unverified.append(record)
+    verified_total = sum(record["realized_pnl_sda"] for record in verified)
+    manual_values = [record.get("realized_pnl_sda") for record in unverified
+                     if record.get("realized_pnl_sda") is not None]
+    return {
+        "verified_pnl_sda": verified_total,
+        "unverified_pnl_sda": sum(manual_values),
+        "verified_trades": verified,
+        "unverified_trades": unverified,
+        "verified_count": len(verified),
+        "unverified_count": sum(1 for item in unverified
+                                 if str(item["trade"].get("action", "")).upper() == "SELL"),
+        "verified_buys": verified_buys,
+        "records": records,
+    }
+
+
+def _fast_ledger_realized_summary(state):
     """Fast ledger-derived lifetime realized PnL; no per-trade explorer calls."""
     trades = state.get("trades", []) if isinstance(state, dict) else []
     realized = 0.0
     count = 0
-    records = []
     for trade in trades:
         if not isinstance(trade, dict) or str(trade.get("action") or "").upper() != "SELL":
             continue
@@ -623,12 +668,8 @@ def _realized_summary(state, wallet=None):
         if value is not None:
             realized += value
             count += 1
-            records.append({"trade": trade, "verified": False, "realized_pnl_sda": value,
-                            "status": "LEDGER RECORDED"})
-    return {"verified_pnl_sda": realized, "unverified_pnl_sda": 0.0,
-            "verified_trades": [], "unverified_trades": [], "verified_count": 0,
-            "unverified_count": 0, "ledger_realized_count": count,
-            "records": records, "verified_buys": []}
+    return {"verified_pnl_sda": realized, "ledger_realized_count": count}
+
 
 def _portfolio_summary_lines(snapshot, marks, realized):
     holdings = snapshot.get("holdings", [])
@@ -710,7 +751,7 @@ def _build_bot_report(dashboard):
         "wallet_address": _wallet_address(), "native_sda": None, "holdings": [],
         "token_balances_loaded": False, "market_complete": False, "errors": []}
     marks, snapshot = _position_marks(dashboard, positions, snapshot) if source != "unavailable" else ([], snapshot)
-    realized = _realized_summary(state) if source != "unavailable" else {"verified_pnl_sda": None}
+    realized = _fast_ledger_realized_summary(state) if source == "authoritative" else {"verified_pnl_sda": None}
     open_pnl_values = [m["market_pnl_sda"] for _, m in marks if m.get("market_pnl_sda") is not None]
     open_complete = len(open_pnl_values) == len(marks)
     open_pnl = sum(open_pnl_values) if open_complete else None
