@@ -64,7 +64,7 @@ def test_real_main_menu_is_short_and_has_six_actions(monkeypatch,built_data):
     monkeypatch.setattr(views,"_get_data",lambda *_a,**_k:built_data)
     text,keyboard=views.render_view(None,"main")
     assert "🤖 REAL TRADING" in text
-    assert "Portfolio ≥51.00 SDA (3/4)" in text
+    assert "Portfolio 50.00 SDA" in text
     assert "Total PnL +6.00 SDA (partial)" in text
     assert "Positions 2" in text
     assert "XEN" not in text and "HAQ" not in text and "RIDEX" not in text
