@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import real_bot_menu
@@ -35,7 +36,7 @@ def _fixture(monkeypatch, positions=None, holdings=None, native=100.0, realized=
     state = {
         "positions": positions,
         "trades": [{"action": "SELL", "realized_pnl_sda": realized}],
-        "updated_at": "2026-11-08T16:30:00+00:00",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     snapshot = {
         "wallet_address": real_bot_menu.BOT_WALLET_ADDRESS,
@@ -44,7 +45,7 @@ def _fixture(monkeypatch, positions=None, holdings=None, native=100.0, realized=
     }
     monkeypatch.setattr(real_bot_menu, "_load_real_state", lambda _d: (state, "authoritative", None))
     monkeypatch.setattr(real_bot_menu, "_load_worker_status", lambda _d: {
-        "enabled": True, "dry_run": False, "updated_at": "2026-11-08T16:30:00+00:00"
+        "enabled": True, "dry_run": False, "updated_at": datetime.now(timezone.utc).isoformat()
     })
     monkeypatch.setattr(real_bot_menu, "_fetch_wallet_snapshot", lambda: snapshot)
     real_bot_menu._DASHBOARD_CACHE.update({"at": 0, "value": None})
@@ -140,3 +141,16 @@ def test_dashboard_cache_is_bypassed_by_refresh(monkeypatch):
     assert real_bot_menu.bot_report(Dashboard()) == "cached"
     assert real_bot_menu.bot_report(Dashboard(), refresh=True) == "fresh"
     assert len(calls) == 1
+
+
+
+def test_stale_ledger_does_not_produce_current_open_or_realized_pnl(monkeypatch):
+    state, _snapshot = _fixture(monkeypatch)
+    state["updated_at"] = "2026-11-08T03:33:39+00:00"
+    monkeypatch.setattr(real_bot_menu, "_load_real_state",
+                        lambda _d: (state, "authoritative", None))
+    report = real_bot_menu.bot_report(Dashboard(), refresh=True)
+    assert "Open PnL  unavailable" in report
+    assert "Realized  unavailable" in report
+    assert "Total PnL  unavailable" in report
+    assert "AAA 22.00 SDA PnL unavailable" in report
