@@ -41,17 +41,93 @@ def _wallet_address():
     return BOT_WALLET_FALLBACK
 
 
+REAL_LEDGER_FRESHNESS_SECONDS = 900
+REAL_WORKER_STATUS_FILE = "real_worker_status.json"
+
+
+def _remote_json(dashboard, path):
+    base = getattr(dashboard, "REMOTE_BASE", "https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/")
+    response = requests.get(base + path, params={"ts": int(datetime.now(timezone.utc).timestamp())},
+                            timeout=12, headers={"Cache-Control": "no-cache"})
+    response.raise_for_status()
+    value = response.json()
+    if not isinstance(value, dict):
+        raise ValueError(f"GitHub {path} did not contain a JSON object")
+    return value
+
+
+def _load_real_state(dashboard):
+    """GitHub main is authoritative; local deployment state is last-known only."""
+    try:
+        return _remote_json(dashboard, cfg.STATE_FILE), "authoritative", None
+    except Exception as exc:
+        try:
+            with open(cfg.STATE_FILE, encoding="utf-8") as handle:
+                local = json.load(handle)
+            if isinstance(local, dict):
+                return local, "last_known", str(exc)
+        except Exception:
+            pass
+        return None, "unavailable", str(exc)
+
+
+def _load_worker_status(dashboard):
+    try:
+        value = _remote_json(dashboard, REAL_WORKER_STATUS_FILE)
+        if not isinstance(value.get("enabled"), bool) or not isinstance(value.get("dry_run"), bool):
+            return None
+        return value
+    except Exception:
+        return None
+
+
 def _state(dashboard):
-    value = dashboard.load(cfg.STATE_FILE, {})
+    value, _source, _error = _load_real_state(dashboard)
     return value if isinstance(value, dict) else {}
 
 
-def _status():
-    if cfg.REAL_TRADING_ENABLED and not cfg.REAL_TRADING_DRY_RUN:
-        return "🟢 LIVE"
-    if cfg.REAL_TRADING_DRY_RUN:
-        return "🟡 DRY RUN"
-    return "🔴 OFF"
+def _status(worker_state=None):
+    if not isinstance(worker_state, dict):
+        return "⚪ STATUS UNKNOWN"
+    enabled, dry_run = worker_state.get("enabled"), worker_state.get("dry_run")
+    if not isinstance(enabled, bool) or not isinstance(dry_run, bool):
+        return "⚪ STATUS UNKNOWN"
+    if not enabled:
+        return "🔴 REAL TRADING DISABLED"
+    return "🟡 DRY RUN" if dry_run else "🟢 LIVE"
+
+
+def _parse_timestamp(value):
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        return stamp.astimezone(timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _ledger_freshness_warning(state, worker_state, now=None):
+    now = now or datetime.now(timezone.utc)
+    stamp = _parse_timestamp((worker_state or {}).get("updated_at")) or _parse_timestamp((state or {}).get("updated_at"))
+    if stamp is None:
+        return "⚠ REAL ledger freshness unavailable (no valid timestamp)"
+    age = (now - stamp).total_seconds()
+    if age < 0:
+        return f"⚠ REAL ledger timestamp is in the future: {stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    if age > REAL_LEDGER_FRESHNESS_SECONDS:
+        return f"⚠ REAL ledger stale — last checkpoint: {stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    return None
+
+
+def _ledger_source_warning(source, state):
+    if source == "last_known":
+        stamp = str((state or {}).get("updated_at") or "timestamp unavailable")
+        return ["⚠ REAL ledger unavailable — showing LAST-KNOWN snapshot only",
+                f"⚠ LAST-KNOWN data is NOT current • ledger timestamp: {stamp}"]
+    if source == "unavailable":
+        return ["⚠ REAL ledger unavailable — current positions/P&L cannot be verified"]
+    return []
 
 
 def _wallet_balance_sda():
@@ -667,28 +743,46 @@ def _position_lines(symbol, mark):
 
 
 def bot_report(dashboard):
-    state = _state(dashboard)
+    state, source, _load_error = _load_real_state(dashboard)
+    worker_state = _load_worker_status(dashboard)
+    state = state if isinstance(state, dict) else {}
     positions = state.get("positions", {})
     if not isinstance(positions, dict):
         positions = {}
     wallet = _wallet_address()
     state_updated = str(state.get("updated_at") or "—")[:19].replace("T", " ")
-    marks, snapshot = _position_marks(dashboard, positions)
-    realized = _realized_summary(state, BOT_WALLET_ADDRESS)
-    lines = [
-        "🤖 REAL TRADING BOT", "", f"Status: {_status()}",
+    if source == "unavailable":
+        marks, snapshot = [], {"holdings": [], "native_sda": None}
+        realized = {"verified_pnl_sda": 0.0, "verified_count": 0, "unverified_pnl_sda": 0.0,
+                    "unverified_count": 0, "unverified_trades": []}
+    else:
+        marks, snapshot = _position_marks(dashboard, positions)
+        realized = _realized_summary(state, BOT_WALLET_ADDRESS)
+    lines = ["🤖 REAL TRADING BOT", "", f"Status: {_status(worker_state)}"]
+    lines += _ledger_source_warning(source, state)
+    freshness_warning = _ledger_freshness_warning(state, worker_state)
+    if freshness_warning:
+        lines.append(freshness_warning)
+    lines += [
         f"👛 Bot wallet: {_wallet_short(wallet)}",
         f"🎯 Position size: {cfg.POSITION_MIN_SDA:.0f}–{cfg.POSITION_MAX_SDA:.0f} SDA",
         f"📦 Capital cap: {cfg.TRADING_WALLET_CAPITAL_SDA:.0f} SDA",
-        f"📊 Open positions: {len(positions)}/{cfg.MAX_OPEN_POSITIONS}",
+        (f"📊 {'Last-known ' if source == 'last_known' else ''}Open positions: {len(positions)}/{cfg.MAX_OPEN_POSITIONS}"
+         if source != "unavailable" else "📊 Open positions: N/A (ledger unavailable)"),
         f"🕒 Position ledger updated: {state_updated} UTC",
     ]
-    lines += _portfolio_summary_lines(snapshot, marks, realized)
+    if source != "unavailable":
+        lines += _portfolio_summary_lines(snapshot, marks, realized)
+    else:
+        lines += ["💵 Open cost basis: N/A (ledger unavailable)", "💹 Realized P/L: N/A (ledger unavailable)"]
     if not marks:
         lines += ["────────────────────────",
-                  "⚪ No open bot positions"]
+                  "⚠ Open positions unavailable" if source == "unavailable" else
+                  "⚪ No open bot positions" if source == "authoritative" else
+                  "⚠ No last-known open positions"]
     else:
-        lines += ["🪙 OPEN BOT POSITIONS", "────────────────────────"]
+        heading = "⚠ LAST-KNOWN OPEN BOT POSITIONS — STALE" if source == "last_known" else "🪙 OPEN BOT POSITIONS"
+        lines += [heading, "────────────────────────"]
         for symbol, mark in marks:
             lines.extend(_position_lines(symbol, mark))
     if realized["unverified_trades"]:
@@ -706,7 +800,9 @@ def bot_report(dashboard):
 
 
 def statistics_report(dashboard):
-    state = _state(dashboard)
+    state, source, _load_error = _load_real_state(dashboard)
+    worker_state = _load_worker_status(dashboard)
+    state = state if isinstance(state, dict) else {}
     positions = state.get("positions", {})
     trades = state.get("trades", [])
     positions = positions if isinstance(positions, dict) else {}
@@ -714,13 +810,20 @@ def statistics_report(dashboard):
     buys = [x for x in trades if str(x.get("action", "")).upper() == "BUY"]
     sells = [x for x in trades if str(x.get("action", "")).upper() == "SELL"]
     wallet = _wallet_address()
-    realized = _realized_summary(state, BOT_WALLET_ADDRESS)
+    if source == "unavailable":
+        realized = {"verified_trades": [], "verified_buys": [], "records": [],
+                    "verified_count": 0, "unverified_count": 0,
+                    "verified_pnl_sda": 0.0, "unverified_pnl_sda": 0.0,
+                    "unverified_trades": []}
+        marks, snapshot = [], {"holdings": [], "native_sda": None}
+    else:
+        realized = _realized_summary(state, BOT_WALLET_ADDRESS)
+        marks, snapshot = _position_marks(dashboard, positions)
     verified_values = [item["realized_pnl_sda"] for item in realized["verified_trades"]]
     wins = [value for value in verified_values if value > 0]
     losses = [value for value in verified_values if value < 0]
     wallet = _wallet_address()
     updated = str(state.get("updated_at") or "—")[:16].replace("T", " ")
-    marks, snapshot = _position_marks(dashboard, positions)
     gross_wins, gross_losses = sum(wins), abs(sum(losses))
     pf = gross_wins / gross_losses if gross_losses else (float("inf") if gross_wins else None)
     win_rate = len(wins) / len(verified_values) * 100 if verified_values else None
@@ -729,11 +832,14 @@ def statistics_report(dashboard):
                       f"📊 SELL trades: {len(sells)} • Verified: {realized['verified_count']} • Unverified: {realized['unverified_count']} • Verified win rate: N/A")
     lines = [
         "📈 REAL TRADING BOT • STATISTICS", "",
-        f"🟢 Open positions: {len(positions)} / {cfg.MAX_OPEN_POSITIONS}",
-        f"📥 BUY entries: {len(buys)} • Verified: {len(realized['verified_buys'])}",
-        closed_summary,
-        f"💹 Verified realized P/L: {realized['verified_pnl_sda']:+.4f} SDA (gas excluded)",
-        f"📝 Unverified/manual realized P/L: {realized['unverified_pnl_sda']:+.4f} SDA",
+        f"Status: {_status(worker_state)}",
+        *_ledger_source_warning(source, state),
+        *([_ledger_freshness_warning(state, worker_state)] if _ledger_freshness_warning(state, worker_state) else []),
+        (f"🟢 Open positions: {len(positions)} / {cfg.MAX_OPEN_POSITIONS}" if source != "unavailable" else "⚠ Open positions: N/A (ledger unavailable)"),
+        (f"📥 BUY entries: {len(buys)} • Verified: {len(realized['verified_buys'])}" if source != "unavailable" else "📥 BUY entries: N/A (ledger unavailable)"),
+        (closed_summary if source != "unavailable" else "📊 SELL trades: N/A (ledger unavailable)"),
+        (f"💹 Verified realized P/L: {realized['verified_pnl_sda']:+.4f} SDA (gas excluded)" if source != "unavailable" else "💹 Verified realized P/L: N/A (ledger unavailable)"),
+        (f"📝 Unverified/manual realized P/L: {realized['unverified_pnl_sda']:+.4f} SDA" if source != "unavailable" else "📝 Unverified/manual realized P/L: N/A (ledger unavailable)"),
         f"🏆 Avg win: {sum(wins)/len(wins):+.2f} SDA" if wins else "🏆 Avg win: N/A",
         f"🧯 Avg loss: {sum(losses)/len(losses):+.2f} SDA" if losses else "🧯 Avg loss: N/A",
         f"⚖️ Profit factor: {pf:.2f}" if pf is not None and pf != float("inf") else ("⚖️ Profit factor: ∞" if pf == float("inf") else "⚖️ Profit factor: N/A"),
@@ -741,14 +847,17 @@ def statistics_report(dashboard):
         f"🎯 Position range: {cfg.POSITION_MIN_SDA:.0f}–{cfg.POSITION_MAX_SDA:.0f} SDA",
         f"🕒 State updated: {updated}",
     ]
-    lines += _portfolio_summary_lines(snapshot, marks, realized)
+    if source != "unavailable":
+        lines += _portfolio_summary_lines(snapshot, marks, realized)
+    else:
+        lines += ["💵 Open cost basis: N/A (ledger unavailable)", "💹 Realized P/L: N/A (ledger unavailable)"]
     lines += [
-        "", "🪙 OPEN POSITION P/L", "────────────────────────",
+        "", ("🪙 OPEN POSITION P/L" if source == "authoritative" else "⚠ LAST-KNOWN OPEN POSITION P/L" if source == "last_known" else "⚠ OPEN POSITION P/L UNAVAILABLE"), "────────────────────────",
     ]
     for symbol, mark in marks:
         lines.extend(_position_lines(symbol, mark))
     if not marks:
-        lines.append("⚪ No open positions")
+        lines.append("⚪ No open positions" if source == "authoritative" else "⚠ Positions unavailable" if source == "unavailable" else "⚠ No last-known open positions")
     lines += ["", "📜 RECENT BOT TRADES", "────────────────────────"]
     if not trades:
         lines.append("⚪ No bot trades yet")

@@ -31,7 +31,7 @@ if ! [[ "$OPTIMIZER_INTERVAL" =~ ^[0-9]+$ ]] || [ "$OPTIMIZER_INTERVAL" -lt 900 
   exit 1
 fi
 
-STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json v30_no_buy_diagnostic.json strategy_lab/candidate_outcomes.json strategy_lab/missed_pump_learning.json strategy_lab/forward_shadow_state.json strategy_lab/execution_quote_audit.json strategy_lab/evolution_state.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json real_paper_bridge_state.json real_paper_bridge_events.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json strategy_lab/temporal_paper_trial.json strategy_lab/temporal_paper_trial_report.json"
+STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json v30_no_buy_diagnostic.json strategy_lab/candidate_outcomes.json strategy_lab/missed_pump_learning.json strategy_lab/forward_shadow_state.json strategy_lab/execution_quote_audit.json strategy_lab/evolution_state.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json real_worker_status.json real_paper_bridge_state.json real_paper_bridge_events.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json strategy_lab/temporal_paper_trial.json strategy_lab/temporal_paper_trial_report.json"
 
 ensure_json_state() {
   python - <<'PY'
@@ -76,6 +76,35 @@ checkpoint_state() {
 
   git config user.name 'sda-scanner-bot'
   git config user.email 'scanner@github.local'
+
+  # Publish actual worker mode and checkpoint heartbeat for the Telegram REAL dashboard.
+  python - <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+def flag(name):
+    value = os.environ.get(name)
+    if value is None or value.strip().lower() not in ("true", "false"):
+        return None
+    return value.strip().lower() == "true"
+
+status = {
+    "source": "github-actions-real-worker",
+    "enabled": flag("REAL_TRADING_ENABLED"),
+    "dry_run": flag("REAL_TRADING_DRY_RUN"),
+    "updated_at": datetime.now(timezone.utc).isoformat(),
+}
+try:
+    ledger = json.loads(Path("real_trade_state.json").read_text(encoding="utf-8"))
+    status["ledger_updated_at"] = ledger.get("updated_at") if isinstance(ledger, dict) else None
+except Exception:
+    status["ledger_updated_at"] = None
+Path("real_worker_status.json").write_text(
+    json.dumps(status, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+)
+PY
 
   # Produce a small observed-state NO-BUY audit at each durable scanner
   # checkpoint (not per token). Never relax PAPER entry risk or interrupt
