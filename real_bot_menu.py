@@ -741,8 +741,18 @@ def _position_lines(symbol, mark):
     return [f"{icon} {symbol} {float(value):.2f} SDA {float(pnl):+.2f}"]
 
 def _build_bot_report(dashboard):
-    state, source, _error = _load_real_state(dashboard)
-    worker_state = _load_worker_status(dashboard)
+    # Independent remote reads are fetched once each and concurrently.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        ledger_future = pool.submit(_load_real_state, dashboard)
+        worker_future = pool.submit(_load_worker_status, dashboard)
+        try:
+            state, source, _error = ledger_future.result(timeout=5.0)
+        except Exception:
+            state, source, _error = None, "unavailable", "ledger timeout"
+        try:
+            worker_state = worker_future.result(timeout=4.0)
+        except Exception:
+            worker_state = None
     state = state if isinstance(state, dict) else {}
     positions = state.get("positions", {})
     if not isinstance(positions, dict):
