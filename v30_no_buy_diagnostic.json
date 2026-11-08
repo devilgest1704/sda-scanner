@@ -1,18 +1,18 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-11-08T02:22:35.216911+00:00",
+  "checked_at": "2026-11-08T02:28:35.203921+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-11-08T02:22:00.504796+00:00",
+    "market_at": "2026-11-08T02:28:00.989619+00:00",
     "tokens": 170,
-    "quotes_last_5m": 2,
-    "quotes_last_15m": 10,
-    "quotes_last_60m": 26,
-    "fresh_with_8_trades_1h": 1,
-    "fresh_with_12_trades_1h": 1,
-    "fresh_m15_ge_1_5pct": 0,
-    "fresh_m15_ge_1_5pct_and_8_trades": 0,
-    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 0
+    "quotes_last_5m": 4,
+    "quotes_last_15m": 9,
+    "quotes_last_60m": 22,
+    "fresh_with_8_trades_1h": 2,
+    "fresh_with_12_trades_1h": 2,
+    "fresh_m15_ge_1_5pct": 3,
+    "fresh_m15_ge_1_5pct_and_8_trades": 1,
+    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 1
   },
   "paper_loss_circuit": {
     "paper_only": true,
@@ -32,71 +32,84 @@
   "last_paper_close_at": "2026-11-07T23:43:24.365417+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-11-08T02:22:31.571637+00:00",
+    "at": "2026-11-08T02:28:30.958588+00:00",
     "age_minutes": 0.1,
     "aligned_to_market": true,
     "tokens_scored": 170,
     "fresh_tokens": 9,
-    "champion_ready": 0,
+    "champion_ready": 2,
     "shadow_ready": 0,
     "sampled_rows": 40,
     "sampled_phases": {
       "IGNITION": 1,
-      "WATCH": 1,
-      "NO": 38
+      "WATCH": 3,
+      "NO": 36
     },
     "sampled_rejections": {
-      "temporal_recovery": 40,
-      "quote_continuity": 40,
-      "v31_age": 40,
-      "v31_activity": 37,
+      "temporal_recovery": 38,
+      "v31_age": 36,
+      "quote_continuity": 36,
+      "v31_activity": 34,
       "late_spike": 1
     },
     "fresh_rejections": {
-      "quote_continuity": 9,
-      "temporal_recovery": 9,
-      "v31_age": 9,
-      "v31_activity": 6,
+      "temporal_recovery": 7,
+      "quote_continuity": 5,
+      "v31_age": 5,
+      "v31_activity": 4,
       "late_spike": 1
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "stale_or_invalid_current_quote": 9
+        "stale_or_invalid_current_quote": 5,
+        "single_quote_swing_filters_insufficient": 2
       },
       "confirmed_continuation": {
-        "missing_reason": 9
+        "missing_reason": 7
       }
     },
     "temporal_lane_ready": {
-      "temporal_recovery": 0,
-      "confirmed_continuation": 0
+      "temporal_recovery": 1,
+      "confirmed_continuation": 1
     },
     "risk_only_rejected_rows": 0,
     "would_buy_if_only_loss_circuit_cleared": false,
     "top_near_ready": [
       {
-        "address": "0x62bb34f84330075f0747623390f2c69a1b99749c",
-        "symbol": "TAMBN",
-        "score": 89.4,
-        "quality": 69.4,
-        "impulse": 20.0,
-        "phase": "IGNITION",
-        "data_age_sec": 410.5,
+        "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
+        "symbol": "JSFT",
+        "score": 13.3,
+        "quality": 13.3,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 166.9,
+        "gates": [
+          "temporal_recovery"
+        ],
+        "reason": "NO / temporal_recovery: single_quote_swing_filters_insufficient / "
+      },
+      {
+        "address": "0xb8d7fb85c4bf32f418715dcb9ebf88107ee73cb7",
+        "symbol": "IFC",
+        "score": 34.3,
+        "quality": 34.3,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 251.9,
         "gates": [
           "temporal_recovery",
-          "v31_age",
-          "quote_continuity"
+          "v31_activity"
         ],
-        "reason": "quote_continuity: stale_or_invalid_current_quote"
+        "reason": "NO / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
       },
       {
         "address": "0x4765561e63914e72168bbd2a7e2ce72f9057ca04",
         "symbol": "GMAI",
-        "score": 19.6,
-        "quality": 19.6,
+        "score": 20.6,
+        "quality": 20.6,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 318.5,
+        "data_age_sec": 677.9,
         "gates": [
           "temporal_recovery",
           "v31_age",
@@ -107,11 +120,11 @@
       {
         "address": "0xe9d82898c3cc398209eeba10e806e94c480d22ba",
         "symbol": "AFRA",
-        "score": 78.8,
-        "quality": 78.6,
-        "impulse": 0.2,
+        "score": 71.2,
+        "quality": 71.2,
+        "impulse": 0.0,
         "phase": "WATCH",
-        "data_age_sec": 336.5,
+        "data_age_sec": 695.9,
         "gates": [
           "temporal_recovery",
           "v31_age",
@@ -123,27 +136,11 @@
       {
         "address": "0xf4a4f13821ba28cba5bc30a3965582a5339244ee",
         "symbol": "BZST",
-        "score": 27.7,
-        "quality": 27.7,
+        "score": 24.8,
+        "quality": 24.8,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 468.5,
-        "gates": [
-          "temporal_recovery",
-          "v31_age",
-          "v31_activity",
-          "quote_continuity"
-        ],
-        "reason": "quote_continuity: stale_or_invalid_current_quote"
-      },
-      {
-        "address": "0xbe7360fe473e65a4afee06c776440ec2e807182f",
-        "symbol": "BINV",
-        "score": 27.0,
-        "quality": 27.0,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 809.4,
+        "data_age_sec": 827.9,
         "gates": [
           "temporal_recovery",
           "v31_age",
@@ -154,7 +151,7 @@
       }
     ]
   },
-  "assessment": "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED",
+  "assessment": "CHAMPION_BUY_READY_CHECK_EXECUTION_CAPACITY",
   "paper_buy_rules_modified": false,
   "real_trading": false
 }
