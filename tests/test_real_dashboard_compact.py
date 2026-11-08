@@ -35,7 +35,8 @@ def _fixture(monkeypatch, positions=None, holdings=None, native=100.0, realized=
     ]
     state = {
         "positions": positions,
-        "wallet_realized_pnl_sda": realized,\n        "trades": [{"action": "SELL", "realized_pnl_sda": realized}],
+        "wallet_realized_pnl_sda": realized,
+        "trades": [{"action": "SELL", "realized_pnl_sda": realized}],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     snapshot = {
