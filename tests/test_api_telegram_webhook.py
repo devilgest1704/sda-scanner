@@ -56,3 +56,30 @@ def test_webhook_returns_ok_and_sends_navigation_on_handler_exception(monkeypatc
     assert sent["chat_id"] == 12345
     assert "temporarily unavailable" in sent["text"]
     assert sent["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == "MAIN"
+
+def test_webhook_health_reports_only_safe_telegram_status(monkeypatch):
+    monkeypatch.setattr(
+        telegram_api.dashboard,
+        "api",
+        lambda method, payload: {
+            "ok": True,
+            "result": {
+                "url": "https://sda-scanner.vercel.app/api/telegram",
+                "pending_update_count": 0,
+                "last_error_date": None,
+                "last_error_message": None,
+                "allowed_updates": ["message", "callback_query"],
+                "max_connections": 40,
+            },
+        },
+    )
+
+    response = TestClient(telegram_api.app).get("/api/telegram/health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["telegram_api"] == "ok"
+    assert data["webhook_configured"] is True
+    assert data["webhook_url_matches_production"] is True
+    assert data["pending_update_count"] == 0
+    assert "url" not in data
