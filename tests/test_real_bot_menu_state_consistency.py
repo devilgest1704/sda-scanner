@@ -95,11 +95,18 @@ def test_f_local_fallback_is_explicitly_marked_last_known(monkeypatch, tmp_path)
     assert "LAST-KNOWN snapshot only" in report and "LAST-KNOWN OPEN BOT POSITIONS" in report
 
 
-def test_g_ledger_older_than_900_seconds_is_marked_stale():
+def test_g_ledger_older_than_900_seconds_is_marked_stale_even_with_fresh_worker():
     old = (datetime.now(timezone.utc) - timedelta(seconds=901)).isoformat()
+    fresh = datetime.now(timezone.utc).isoformat()
     warning = real_bot_menu._ledger_freshness_warning(
-        {"updated_at": datetime.now(timezone.utc).isoformat()}, {"updated_at": old})
+        {"updated_at": old}, {"updated_at": fresh, "ledger_updated_at": old})
     assert warning and "REAL ledger stale" in warning
+
+
+def test_g2_missing_ledger_timestamp_is_reported_as_unknown():
+    warning = real_bot_menu._ledger_freshness_warning(
+        {}, {"updated_at": datetime.now(timezone.utc).isoformat()})
+    assert warning and "freshness unavailable" in warning
 
 
 def test_h_live_worker_configuration_displays_live():
