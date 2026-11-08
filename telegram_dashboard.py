@@ -40,30 +40,69 @@ def _snapshot_time(md,ws=None):
     return "unknown"
 
 def api(method,payload):
+    """Call Telegram without leaking the bot token or discarding API error details."""
     token=os.environ.get("TELEGRAM_TOKEN")
-    if not token:return None
+    if not token:
+        print(f"Telegram {method} skipped: TELEGRAM_TOKEN is not configured")
+        return {"ok":False,"description":"TELEGRAM_TOKEN is not configured"}
     try:
-        r=requests.post(f"https://api.telegram.org/bot{token}/{method}",json=payload,timeout=30);r.raise_for_status();return r.json()
-    except Exception as exc:print(f"Telegram {method} error: {exc}");return None
+        response=requests.post(
+            f"https://api.telegram.org/bot{token}/{method}",
+            json=payload,
+            timeout=(2,8),
+        )
+        try:
+            result=response.json()
+        except Exception:
+            result={"description":(response.text or "")[:240]}
+        if not isinstance(result,dict):
+            result={"description":"Telegram returned a non-object response"}
+        if not response.ok or not result.get("ok",response.ok):
+            description=str(result.get("description") or "Telegram API request failed")[:240]
+            code=result.get("error_code",response.status_code)
+            print(f"Telegram {method} failed: HTTP {response.status_code}, code {code}: {description}")
+            result.setdefault("ok",False)
+            result.setdefault("error_code",response.status_code)
+        return result
+    except requests.RequestException as exc:
+        # Exception strings contain the request URL, including the bot token.
+        print(f"Telegram {method} transport error: {type(exc).__name__}")
+        return {"ok":False,"description":f"Telegram transport error: {type(exc).__name__}"}
+    except Exception as exc:
+        print(f"Telegram {method} unexpected error: {type(exc).__name__}")
+        return {"ok":False,"description":f"Telegram error: {type(exc).__name__}"}
 
 def send(text,reply_markup=None,chat_id=None):
     cid=chat_id or os.environ.get("CHAT_ID")
     if cid:
         payload={"chat_id":cid,"text":text}
         if reply_markup:payload["reply_markup"]=reply_markup
-        api("sendMessage",payload)
+        return api("sendMessage",payload)
+    return {"ok":False,"description":"CHAT_ID is not configured"}
 
 def edit(chat_id,message_id,text,reply_markup=None):
-    if chat_id and message_id:
-        payload={"chat_id":chat_id,"message_id":message_id,"text":text}
-        if reply_markup:payload["reply_markup"]=reply_markup
-        api("editMessageText",payload)
+    if not chat_id or not message_id:return {"ok":False,"description":"Missing chat or message id"}
+    payload={"chat_id":chat_id,"message_id":message_id,"text":text}
+    if reply_markup:payload["reply_markup"]=reply_markup
+    result=api("editMessageText",payload)
+    description=str(result.get("description") or "").lower() if isinstance(result,dict) else ""
+    if isinstance(result,dict) and result.get("ok"):
+        return result
+    if "message is not modified" in description:
+        return {"ok":True,"description":"Message unchanged"}
+    # Editing an old/inaccessible message must not strand the user without a menu.
+    fallback={"chat_id":chat_id,"text":text}
+    if reply_markup:fallback["reply_markup"]=reply_markup
+    sent=api("sendMessage",fallback)
+    if isinstance(sent,dict) and not sent.get("ok") and reply_markup:
+        api("sendMessage",{"chat_id":chat_id,"text":text})
+    return result
 
 def answer_callback(callback_id,text=None):
-    if callback_id:
-        payload={"callback_query_id":callback_id}
-        if text:payload["text"]=text
-        api("answerCallbackQuery",payload)
+    if not callback_id:return {"ok":False,"description":"Missing callback query id"}
+    payload={"callback_query_id":callback_id}
+    if text:payload["text"]=text
+    return api("answerCallbackQuery",payload)
 
 def menu_keyboard():return {"inline_keyboard":[[{"text":"🔄 Refresh","callback_data":"REFRESH"}],[{"text":"📐 Technical Analysis","callback_data":"TECH"}],[{"text":"🤖 Paper Trading","callback_data":"PAPER"}],[{"text":"🧠 AI Optimizer","callback_data":"OPTIMIZER"}],[{"text":"👛 Real Wallet & Positions","callback_data":"REAL"}],[{"text":"📊 Market Momentum","callback_data":"MOMENTUM"}],[{"text":"🐞 Market Debug","callback_data":"DEBUG"}]]}
 def paper_menu_keyboard():return {"inline_keyboard":[[{"text":"📊 Statistics","callback_data":"PAPER_STATS"}],[{"text":"⬅️ Main dashboard","callback_data":"MAIN"}]]}
