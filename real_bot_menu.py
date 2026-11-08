@@ -330,7 +330,7 @@ def _fetch_wallet_snapshot():
                 "token_balances_loaded": False, "updated_at": datetime.now(timezone.utc).isoformat(),
                 "errors": []}
     if wallet != BOT_WALLET_ADDRESS:
-        snapshot["errors"].append("wallet mismatch")
+        snapshot["errors"].append("Configured wallet address does not match the REAL bot wallet")
         return snapshot
 
     def get_address():
