@@ -296,16 +296,7 @@ def _resolve_existing(token, intent):
             intent.pop("tx_hash", None)
             intent["swap_tx"] = tx_hash
             intent["stage"] = "SWAP_CONFIRMED"
-            try:
-                owner = trader.wallet_address()
-                token_after = trader.token_balance(token, owner)
-                wsda_after = trader.token_balance(cfg.WSDA_ADDRESS, owner)
-            except Exception:
-                intent["status"] = "UNKNOWN"
-                _update_intent(token, intent)
-                return {"action": "SELL", "status": "UNKNOWN", "token": token, "tx": tx_hash}
-            intent["confirmed_token_balance_after"] = token_after
-            intent["confirmed_wsda_balance_after"] = wsda_after
+            owner = trader.wallet_address()
             sold_raw, proceeds_raw = _confirmed_transfer_deltas(receipt, token, owner)
             intent["confirmed_sold_quantity_raw"] = sold_raw
             intent["confirmed_proceeds_raw"] = proceeds_raw
@@ -322,20 +313,6 @@ def _resolve_existing(token, intent):
     if intent.get("stage") == "SWAP_CONFIRMED":
         sold = int(intent.get("confirmed_sold_quantity_raw") or 0)
         proceeds = int(intent.get("confirmed_proceeds_raw") or 0)
-        if sold <= 0 or proceeds <= 0:
-            try:
-                owner = trader.wallet_address()
-                token_after = trader.token_balance(token, owner)
-                wsda_after = trader.token_balance(cfg.WSDA_ADDRESS, owner)
-                sold = max(0, int(intent["token_balance_before"]) - int(token_after))
-                proceeds = max(0, int(wsda_after) - int(intent["wsda_balance_before"]))
-                intent["confirmed_token_balance_after"] = token_after
-                intent["confirmed_wsda_balance_after"] = wsda_after
-                intent["confirmed_sold_quantity_raw"] = sold
-                intent["confirmed_proceeds_raw"] = proceeds
-                _update_intent(token, intent)
-            except Exception:
-                return {"action": "SELL", "status": "ACCOUNTING_UNVERIFIED", "token": token}
         if sold <= 0 or proceeds <= 0:
             return {"action": "SELL", "status": "ACCOUNTING_UNVERIFIED", "token": token}
         # Unwrap the exact confirmed WSDA received, not the quote/minimum.
@@ -465,15 +442,6 @@ def _submit_swap(token, intent):
     intent["stage"] = "SWAP_CONFIRMED"
     intent.pop("tx_hash", None)
     intent["swap_tx"] = tx
-    try:
-        token_after = trader.token_balance(token, owner)
-        wsda_after = trader.token_balance(cfg.WSDA_ADDRESS, owner)
-    except Exception:
-        intent["status"] = "UNKNOWN"
-        _update_intent(token, intent)
-        return {"action": "SELL", "status": "ACCOUNTING_UNVERIFIED", "token": token}
-    intent["confirmed_token_balance_after"] = token_after
-    intent["confirmed_wsda_balance_after"] = wsda_after
     sold_raw, proceeds_raw = _confirmed_transfer_deltas(receipt, token, owner)
     intent["confirmed_sold_quantity_raw"] = sold_raw
     intent["confirmed_proceeds_raw"] = proceeds_raw
