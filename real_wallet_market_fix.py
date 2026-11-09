@@ -1,7 +1,7 @@
-"""Final Real Wallet market-data resolver.
+"""Compatibility adapters for legacy REAL Telegram entry points.
 
-The real wallet is read from wallet_data.json holdings. P/L uses the same
-FIFO rebuild and live-wallet reconciliation as the dashboard.
+All BOT positions and PnL are delegated to real_bot_views, whose only trading
+accounting source is the blockchain-derived real_accounting_state.json.
 """
 import sys
 from copy import deepcopy
@@ -166,8 +166,7 @@ def patch_dashboard(dashboard):
     dashboard.real_trading_report = lambda: real_trading_report(dashboard)
     dashboard.real_wallet_position_action = lambda: position_action_section(dashboard)
     dashboard.market_debug_report = lambda snapshot=None: v26._market_debug(dashboard, snapshot)
-    # Do not replace position_action_v20._real_statistics_report here.
-    # Its implementation contains the closed-position history, and this
-    # module is loaded after position_action_v20 in the dashboard bootstrap.
+    # position_action_v20 owns the legacy statistics callback, but it now
+    # delegates to the same real_accounting_state.json-backed renderer.
     dashboard._real_wallet_market_fix_patched = True
     return dashboard
