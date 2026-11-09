@@ -113,136 +113,87 @@ def _verify_trades(state,wallet):
         return list(pool.map(verify,rows))
 
 def _build_dashboard_data(dashboard):
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        state_future=pool.submit(rb._load_real_state,dashboard)
-        worker_future=pool.submit(rb._load_worker_status,dashboard)
-        try:
-            state,source,load_error=state_future.result(timeout=7.0)
-        except Exception as exc:
-            state,source,load_error={},"unavailable",f"{type(exc).__name__}: {exc}"
-        try:
-            worker=worker_future.result(timeout=5.0)
-        except Exception:
-            worker=None
-    state=state if isinstance(state,dict) else {}
-    positions=state.get("positions") if isinstance(state.get("positions"),dict) else {}
-    wallet=str(rb._wallet_address()).lower()
-    if source!="unavailable":
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            snapshot_future=pool.submit(_fetch_wallet_snapshot)
-            verified_future=pool.submit(_verify_trades,state,wallet)
-            try:
-                snapshot=snapshot_future.result(timeout=45.0)
-            except Exception as exc:
-                _log(f"wallet snapshot failed: {type(exc).__name__}: {exc}")
-                snapshot={"wallet_address":wallet,"native_sda":None,"holdings":[],
-                    "token_balances_loaded":False,"market_complete":False,
-                    "market_valued_count":0,"market_total_count":0,"errors":[]}
-            try:
-                verified=verified_future.result(timeout=45.0)
-            except Exception as exc:
-                _log(f"REAL receipt verification failed: {type(exc).__name__}: {exc}")
-                verified=[]
+    """All REAL Telegram screens consume one blockchain-derived accounting state."""
+    try:
+        accounting=dashboard.load("real_accounting_state.json",{})
+    except Exception as exc:
+        accounting={}
+        load_error=f"{type(exc).__name__}: {str(exc)[:180]}"
     else:
-        snapshot={"wallet_address":wallet,"native_sda":None,"holdings":[],
-            "token_balances_loaded":False,"market_complete":False,
-            "market_valued_count":0,"market_total_count":0,"errors":[]}
-        verified=[]
-    wallet=str(snapshot.get("wallet_address") or wallet).lower()
-    verified_buys=[r for r in verified if r["action"]=="BUY" and r.get("verified")]
-    verified_sells=[r for r in verified if r["action"]=="SELL" and r.get("verified")]
-    unverified_buys=[r for r in verified if r["action"]=="BUY" and not r.get("verified")]
-    unverified_sells=[r for r in verified if r["action"]=="SELL" and not r.get("verified")]
-    verified_buy_by_tx={str(r["trade"].get("tx") or r["trade"].get("tx_hash") or "").lower():r
-                        for r in verified_buys if r.get("token_amount") is not None}
-    holdings={str(h.get("address") or "").lower():h for h in snapshot.get("holdings",[]) if isinstance(h,dict)}
-    open_positions=[]
-    for token,position in positions.items():
-        if not isinstance(position,dict):
-            continue
-        address=str(token).lower()
-        holding=holdings.get(address)
-        if not holding or Decimal(str(holding.get("amount") or 0))<=0:
-            continue
-        label=_symbol(address,position.get("symbol"))
-        buy_hash=str(position.get("buy_tx") or "").lower()
-        buy_record=verified_buy_by_tx.get(buy_hash)
-        buy_verified=buy_record is not None
-        actual_amount=Decimal(str(holding.get("amount") or 0))
-        verified_buy_amount=Decimal(str(buy_record.get("token_amount"))) if buy_record is not None else Decimal(0)
-        balance_matches=(buy_verified and verified_buy_amount>0 and
-            abs(actual_amount-verified_buy_amount)<=max(Decimal("1e-18"),verified_buy_amount*Decimal("1e-5")))
-        cost=rb._finite_number(position.get("amount_sda",position.get("cost_sda")))
-        value=rb._finite_number(holding.get("market_value_sda"))
-        complete_basis=bool(balance_matches and buy_verified and cost is not None and cost>0)
-        pnl=value-cost if value is not None and complete_basis else None
-        pct=pnl/cost*100 if pnl is not None and cost else None
-        open_positions.append({"token":address,"symbol":label,"amount":holding.get("amount"),
-            "value_sda":value,"cost_sda":cost if complete_basis else None,"pnl_sda":pnl,
-            "pnl_pct":pct,"valued":value is not None,"balance_matches":balance_matches,
-            "buy_verified":buy_verified})
-    open_value_rows=[p["value_sda"] for p in open_positions if p["value_sda"] is not None]
-    open_cost_rows=[p["cost_sda"] for p in open_positions if p["cost_sda"] is not None]
-    open_pnl_rows=[p["pnl_sda"] for p in open_positions if p["pnl_sda"] is not None]
-    open_complete=(len(open_positions)>0 and len(open_value_rows)==len(open_positions)
-        and len(open_cost_rows)==len(open_positions) and len(open_pnl_rows)==len(open_positions))
-    open_value=sum(open_value_rows) if open_value_rows else None
-    open_cost=sum(open_cost_rows) if open_cost_rows else None
-    open_pnl=sum(open_pnl_rows) if open_pnl_rows else None
-    sell_records=[]
-    for record in verified_sells:
-        trade=record["trade"]
-        sell_records.append({"symbol":_symbol(str(trade.get("token") or "").lower(),trade.get("symbol")),
-            "at":trade.get("at") or trade.get("timestamp"),"proceeds_sda":record.get("proceeds_sda"),
-            "cost_sda":record.get("cost_sda"),"pnl_sda":record.get("realized_pnl_sda"),"verified":True})
-    buy_records=[]
-    for record in verified_buys:
-        trade=record["trade"]
-        buy_records.append({"symbol":_symbol(str(trade.get("token") or "").lower(),trade.get("symbol")),
-            "at":trade.get("at") or trade.get("timestamp"),
-            "invested_sda":rb._finite_number(record.get("sda_transfer")),"verified":True})
-    def sort_time(row):
-        return rb._parse_utc(row.get("at")) or datetime.min.replace(tzinfo=timezone.utc)
-    buy_records.sort(key=sort_time,reverse=True)
-    sell_records.sort(key=sort_time,reverse=True)
-    pnl_records=[r for r in sell_records if r["pnl_sda"] is not None]
-    pnl_values=[r["pnl_sda"] for r in pnl_records]
-    wins=sum(value>0 for value in pnl_values)
-    losses=sum(value<0 for value in pnl_values)
-    closed_count=len(verified_sells)
-    win_rate=wins/(wins+losses)*100 if wins+losses else None
-    average_win=sum(value for value in pnl_values if value>0)/wins if wins else None
-    average_loss=sum(value for value in pnl_values if value<0)/losses if losses else None
-    realized=sum(pnl_values) if pnl_values else (None if verified_sells else 0.0)
-    invested_values=[r["invested_sda"] for r in buy_records]
-    total_invested=sum(invested_values) if invested_values and all(v is not None for v in invested_values) else None
-    realized_partial=bool(unverified_sells or unverified_buys or len(pnl_records)!=len(verified_sells))
-    total_pnl=open_pnl+realized if open_pnl is not None and realized is not None else None
-    total_partial=(total_pnl is not None and (realized_partial or not open_complete or source!="authoritative"))
-    # The REAL Telegram portfolio mirrors the bot's active REAL positions,
-    # not every ERC-20 dust/airdrop balance returned by the explorer. Wallet
-    # tokens outside the active position ledger (including spam) are excluded.
-    native=rb._finite_number(snapshot.get("native_sda"))
-    portfolio_position_values=[p["value_sda"] for p in open_positions if p.get("value_sda") is not None]
-    portfolio_valued_count=len(portfolio_position_values)
-    portfolio_total_count=len(open_positions)
-    known_open_value=sum(portfolio_position_values)
-    portfolio_value=(native+known_open_value) if native is not None else None
-    portfolio_complete=(native is not None and snapshot.get("token_balances_loaded")
-        and portfolio_valued_count==portfolio_total_count)
-    return {"source":source,"load_error":load_error,"worker":worker,"worker_status":rb._status(worker),
-        "state":state,"snapshot":snapshot,"positions":open_positions,"buy_records":buy_records,
-        "sell_records":sell_records,"buy_count":len(verified_buys),"sell_count":len(verified_sells),
-        "unverified_buy_count":len(unverified_buys),"unverified_sell_count":len(unverified_sells),
-        "closed_count":closed_count,"wins":wins,"losses":losses,"win_rate":win_rate,
-        "average_win":average_win,"average_loss":average_loss,"best_trade":max(pnl_values) if pnl_values else None,
-        "worst_trade":min(pnl_values) if pnl_values else None,"total_invested":total_invested,
-        "open_value":open_value,"open_cost":open_cost,"open_pnl":open_pnl,"open_complete":open_complete,
-        "realized_pnl":realized,"realized_partial":realized_partial,"total_pnl":total_pnl,
-        "total_partial":total_partial,"portfolio_value":portfolio_value,"portfolio_complete":portfolio_complete,
-        "portfolio_valued_count":portfolio_valued_count,
-        "portfolio_total_count":portfolio_total_count,
-        "native_sda":native,"holdings":snapshot.get("holdings",[])}
+        load_error=None
+    if not isinstance(accounting,dict) or accounting.get("schema_version")!=1:
+        return {"source":"unavailable","load_error":load_error or "real_accounting_state.json missing or unsupported",
+            "worker":None,"worker_status":"⚪ UNKNOWN","state":{},"snapshot":{},
+            "positions":[],"buy_records":[],"sell_records":[],"buy_count":0,"sell_count":0,
+            "unverified_buy_count":0,"unverified_sell_count":0,"closed_count":0,"wins":0,"losses":0,
+            "win_rate":None,"average_win":None,"average_loss":None,"average_trade":None,
+            "best_trade":None,"worst_trade":None,"best_trade_label":None,"worst_trade_label":None,
+            "total_invested":None,"open_value":None,"open_cost":None,"open_pnl":None,
+            "open_complete":False,"realized_pnl":None,"realized_partial":True,"total_pnl":None,
+            "total_partial":True,"portfolio_value":None,"portfolio_complete":False,
+            "portfolio_valued_count":0,"portfolio_total_count":0,"native_sda":None,"holdings":[],
+            "bot_reconciliation_status":"INCOMPLETE","bot_unresolved_transactions":[]}
+    try:
+        worker=rb._load_worker_status(dashboard)
+    except Exception:
+        worker=None
+    stats=accounting.get("statistics") if isinstance(accounting.get("statistics"),dict) else {}
+    complete=str(accounting.get("bot_reconciliation_status") or "INCOMPLETE").upper()=="COMPLETE"
+    positions=[]
+    for p in accounting.get("open_positions") or []:
+        if not isinstance(p,dict): continue
+        positions.append({"token":p.get("token"),"symbol":p.get("symbol") or "UNKNOWN",
+            "amount":p.get("quantity"),"value_sda":rb._finite_number(p.get("value_sda")),
+            "cost_sda":rb._finite_number(p.get("cost_basis_sda")),
+            "pnl_sda":rb._finite_number(p.get("open_pnl_sda")),
+            "pnl_pct":rb._finite_number(p.get("pnl_pct")),"valued":p.get("value_sda") is not None,
+            "balance_matches":True,"buy_verified":True})
+    buy_records=[{"symbol":x.get("symbol") or "UNKNOWN","at":x.get("at"),
+        "invested_sda":rb._finite_number(x.get("invested_sda")),"tx":x.get("tx")}
+        for x in (accounting.get("buy_transactions") or []) if isinstance(x,dict)]
+    buy_records.sort(key=lambda x:str(x.get("at") or ""),reverse=True)
+    sell_records=[{"symbol":x.get("symbol") or "UNKNOWN","at":x.get("at"),
+        "proceeds_sda":rb._finite_number(x.get("proceeds_sda")),
+        "cost_sda":rb._finite_number(x.get("cost_basis_sda")),
+        "pnl_sda":rb._finite_number(x.get("net_pnl_sda")),"tx":x.get("tx"),"verified":True}
+        for x in (accounting.get("sell_transactions") or []) if isinstance(x,dict)]
+    unresolved=accounting.get("bot_unresolved_transactions") or []
+    wallet_meta=accounting.get("wallet_valuation") if isinstance(accounting.get("wallet_valuation"),dict) else {}
+    buy_values=[x["invested_sda"] for x in buy_records]
+    open_values=[x["value_sda"] for x in positions if x["value_sda"] is not None]
+    open_costs=[x["cost_sda"] for x in positions if x["cost_sda"] is not None]
+    best=stats.get("best_trade") if isinstance(stats.get("best_trade"),dict) else {}
+    worst=stats.get("worst_trade") if isinstance(stats.get("worst_trade"),dict) else {}
+    return {"source":"blockchain_fifo","load_error":None,"worker":worker,
+        "worker_status":rb._status(worker),"state":accounting,"snapshot":{},
+        "positions":positions,"buy_records":buy_records,"sell_records":sell_records,
+        "buy_count":int(stats.get("confirmed_buys_count") or len(buy_records)),
+        "sell_count":int(stats.get("matched_sells_count") or len(sell_records)),
+        "unverified_buy_count":0,"unverified_sell_count":len(unresolved),
+        "closed_count":int(stats.get("matched_sells_count") or len(sell_records)),
+        "wins":int(stats.get("wins") or 0),"losses":int(stats.get("losses") or 0),
+        "win_rate":rb._finite_number(stats.get("win_rate_pct")),
+        "average_win":rb._finite_number(stats.get("average_win_sda")),
+        "average_loss":rb._finite_number(stats.get("average_loss_sda")),
+        "average_trade":rb._finite_number(stats.get("average_trade_sda")),
+        "best_trade":rb._finite_number(best.get("net_pnl_sda")),
+        "worst_trade":rb._finite_number(worst.get("net_pnl_sda")),
+        "best_trade_label":best.get("symbol"),"worst_trade_label":worst.get("symbol"),
+        "total_invested":sum(buy_values) if buy_values and all(x is not None for x in buy_values) else None,
+        "open_value":sum(open_values) if open_values else 0.0,
+        "open_cost":sum(open_costs) if open_costs else 0.0,
+        "open_pnl":rb._finite_number(accounting.get("open_pnl_sda")),
+        "open_complete":complete and all(p["value_sda"] is not None and p["pnl_sda"] is not None for p in positions),
+        "realized_pnl":rb._finite_number(accounting.get("realized_pnl_sda")),
+        "realized_partial":not complete,
+        "total_pnl":rb._finite_number(accounting.get("total_pnl_sda")),
+        "total_partial":not complete,"portfolio_value":rb._finite_number(accounting.get("wallet_value_sda")),
+        "portfolio_complete":bool(accounting.get("wallet_value_complete")),
+        "portfolio_valued_count":int(wallet_meta.get("valued_assets_count") or 0),
+        "portfolio_total_count":int(wallet_meta.get("total_assets_count") or 0),
+        "native_sda":rb._finite_number(accounting.get("native_balance_sda")),"holdings":[],
+        "bot_reconciliation_status":accounting.get("bot_reconciliation_status"),
+        "bot_unresolved_transactions":unresolved}
 
 def _get_data(dashboard,refresh=False,cache_only=False):
     now=time.monotonic()
