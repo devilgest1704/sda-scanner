@@ -263,7 +263,7 @@ def main():
             if 0 <= (udt-sell_dt).total_seconds() <= 120:
                 ug=u["fee"]; unwrap_hash=u["hash"]; u["used"]=True; break
         gas=buygas+r["gas"]+ag+ug
-        closed.append({"contract":c,"token":r["symbol"],"quantity_sold":str(r["quantity"]),
+        closed.append({"contract":c,"token":r["symbol"],"timestamp":r["timestamp"],"quantity_sold":str(r["quantity"]),
             "buy_cost_sda":str(basis),"sell_proceeds_sda":str(r["proceeds"]),
             "gross_pnl_sda":str(r["proceeds"]-basis),"gas_sda":str(gas),
             "net_pnl_sda":str(r["proceeds"]-basis-gas),
