@@ -171,26 +171,24 @@ def patch_dashboard(dashboard):
 
         if data == "REAL":
             try:
-                report_fn = getattr(dashboard, "real_trading_report", None)
-                text = report_fn() if callable(report_fn) else "⚠️ Real Wallet report unavailable"
+                import real_bot_views
+                text,keyboard=real_bot_views.render_view(dashboard,"main",refresh=True)
             except Exception as exc:
                 print(f"Telegram REAL menu render error: {type(exc).__name__}: {exc}")
-                text = f"⚠️ REAL dashboard data unavailable ({type(exc).__name__})."
-            keyboard = {"inline_keyboard": [
-                [{"text": "📈 Real Statistics", "callback_data": "REAL_STATS"}],
-                [{"text": "⬅️ Main dashboard", "callback_data": "MAIN"}],
-            ]}
-            _safe_edit(chat_id, message_id, text, keyboard)
+                text="🤖 REAL TRADING\n\n⚠️ Blockchain accounting temporarily unavailable."
+                keyboard=dashboard.menu_keyboard()
+            _safe_edit(chat_id,message_id,text,keyboard)
             return state
 
         if data == "REAL_STATS":
             try:
-                report_fn = getattr(dashboard, "real_statistics_report", None)
-                text = report_fn() if callable(report_fn) else "⚠️ Real Statistics unavailable"
+                import real_bot_views
+                text,keyboard=real_bot_views.render_view(dashboard,"stats",refresh=True)
             except Exception as exc:
                 print(f"Telegram REAL statistics error: {type(exc).__name__}: {exc}")
-                text = "⚠️ REAL statistics unavailable. Use Back to return to the menu."
-            _safe_edit(chat_id, message_id, text, dashboard.back_keyboard())
+                text="📈 REAL STATISTICS\n\n⚠️ Blockchain accounting temporarily unavailable."
+                keyboard=dashboard.back_keyboard()
+            _safe_edit(chat_id,message_id,text,keyboard)
             return state
 
         if data == "DEBUG":
