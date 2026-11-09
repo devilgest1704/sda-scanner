@@ -320,6 +320,19 @@ def _resolve_existing(token, intent):
         sold = int(intent.get("confirmed_sold_quantity_raw") or 0)
         proceeds = int(intent.get("confirmed_proceeds_raw") or 0)
         if sold <= 0 or proceeds <= 0:
+            try:
+                swap_receipt = trader.rpc("eth_getTransactionReceipt", [intent.get("swap_tx")])
+                if not swap_receipt or int(swap_receipt.get("status", "0x0"), 16) != 1:
+                    return {"action": "SELL", "status": "ACCOUNTING_UNVERIFIED", "token": token}
+                sold, proceeds = _confirmed_transfer_deltas(
+                    swap_receipt, token, trader.wallet_address()
+                )
+                intent["confirmed_sold_quantity_raw"] = sold
+                intent["confirmed_proceeds_raw"] = proceeds
+                _update_intent(token, intent)
+            except Exception:
+                return {"action": "SELL", "status": "ACCOUNTING_UNVERIFIED", "token": token}
+        if sold <= 0 or proceeds <= 0:
             return {"action": "SELL", "status": "ACCOUNTING_UNVERIFIED", "token": token}
         # Unwrap the exact confirmed WSDA received, not the quote/minimum.
         account = trader.private_account()
@@ -402,13 +415,25 @@ def _submit_swap(token, intent):
     intent["wsda_balance_before"] = int(trader.token_balance(cfg.WSDA_ADDRESS, owner))
     _update_intent(token, intent)
     # Fresh executable quote is intentionally obtained only AFTER approval.
-    fee, quoted, _, deadline = trader.quote_best_live_fee(
-        token, cfg.WSDA_ADDRESS, token, owner, actual, value_wei=0
-    )
-    minimum = trader.min_out(quoted)
-    calldata = trader.build_exact_input_single(
-        token, cfg.WSDA_ADDRESS, fee, owner, deadline, actual, minimum
-    )
+    try:
+        fee, quoted, _, deadline = trader.quote_best_live_fee(
+            token, cfg.WSDA_ADDRESS, token, owner, actual, value_wei=0
+        )
+        minimum = trader.min_out(quoted)
+        if int(quoted) <= 0 or int(minimum) <= 0:
+            raise RuntimeError("SELL quote/minOut is zero")
+        calldata = trader.build_exact_input_single(
+            token, cfg.WSDA_ADDRESS, fee, owner, deadline, actual, minimum
+        )
+    except Exception as exc:
+        intent["stage"] = "FAILED"
+        intent["status"] = "FAILED"
+        intent["failure_reason"] = f"SELL quote/preflight failed: {type(exc).__name__}: {str(exc)[:180]}"
+        _update_intent(token, intent)
+        state = trader.load_state()
+        state.setdefault("pending_sells", {}).pop(token, None)
+        trader.save_state(state)
+        return {"action": "SELL", "status": "QUOTE_FAILED", "token": token}
     intent.update({
         "requested_quantity_raw": actual, "fee_tier": fee,
         "quoted_wsda_raw": int(quoted), "minimum_wsda_raw": int(minimum),
