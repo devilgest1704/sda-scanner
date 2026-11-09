@@ -5,6 +5,8 @@ import pytest
 
 import real_bot_menu as rb
 import real_bot_views as views
+import real_wallet_market_fix
+import position_action_v20
 
 
 POSITION_ROWS = [
@@ -199,3 +201,30 @@ def test_all_views_share_the_same_cached_accounting_snapshot(monkeypatch, built_
     views.render_view(dashboard, "stats", cache_only=True)
     assert calls == ["load"]
     views.clear_cache()
+
+
+def test_legacy_real_wallet_and_statistics_reports_use_the_same_state(monkeypatch):
+    state = _accounting_state()
+    dashboard = SimpleNamespace(load=lambda _path, _default: state)
+    monkeypatch.setattr(rb, "_load_worker_status", lambda _d: {"enabled": True, "dry_run": False})
+    monkeypatch.setattr(rb, "_status", lambda _w: "🟢 LIVE")
+    views.clear_cache()
+    expected_main, _ = views.render_view(dashboard, "main", refresh=True)
+    expected_stats, _ = views.render_view(dashboard, "stats", refresh=True)
+    assert real_wallet_market_fix.real_trading_report(dashboard) == expected_main
+    assert real_wallet_market_fix.real_statistics_report(dashboard) == expected_stats
+    assert position_action_v20._real_statistics_report(dashboard) == expected_stats
+
+
+def test_legacy_position_action_panel_shows_only_verified_bot_positions(monkeypatch):
+    state = _accounting_state()
+    dashboard = SimpleNamespace(load=lambda _path, _default: state)
+    monkeypatch.setattr(rb, "_load_worker_status", lambda _d: {"enabled": True, "dry_run": False})
+    monkeypatch.setattr(rb, "_status", lambda _w: "🟢 LIVE")
+    lines = real_wallet_market_fix.position_action_section(dashboard)
+    text = "\n".join(lines)
+    assert "POSITION ACTION • REAL BOT" in text
+    assert len([line for line in lines if " • Value " in line]) == 9
+    assert "PINE" not in text and "HAQ" not in text
+    for symbol, _value, _pnl in POSITION_ROWS:
+        assert symbol in text
