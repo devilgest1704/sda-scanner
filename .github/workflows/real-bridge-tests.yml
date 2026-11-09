@@ -74,6 +74,25 @@ jobs:
         run: python -m pytest -q tests/test_swing_sell_v2.py
       - name: Run read-only Swing SELL V2 decision report tests
         run: python -m pytest -q tests/test_real_swing_sell_report.py
+      - name: Capture current read-only REAL SELL V2 decisions
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import real_bot_menu
+          import real_swing_sell_report
+
+          state=json.loads(Path("real_trade_state.json").read_text(encoding="utf-8"))
+          analysis=json.loads(Path("market_analysis.json").read_text(encoding="utf-8"))
+          metadata=json.loads(Path("token_metadata.json").read_text(encoding="utf-8"))
+          rows=real_swing_sell_report.build_decision_rows(
+              state, analysis, metadata,
+              supabase_lookup=real_bot_menu._newest_supabase_price,
+          )
+          print("READ-ONLY SELL V2 SNAPSHOT")
+          for row in rows:
+              print(json.dumps(row, ensure_ascii=False, sort_keys=True))
+          PY
       - name: Run Swing SELL V2 live-executor mock integration tests
         run: python -m pytest -q tests/test_real_swing_sell_executor.py
       - name: Run PAPER-to-REAL bridge regression tests
