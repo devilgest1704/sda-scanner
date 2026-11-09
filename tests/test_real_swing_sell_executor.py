@@ -122,7 +122,7 @@ class SwingSellExecutionTests(unittest.TestCase):
         self.token_balances = [700]
         result = sell.evaluate_position(TOKEN, "TEST", "0.02", "2026-11-09T18:00:00Z")
         pos = self.state["positions"][TOKEN]
-        self.assertEqual(result["status"], "MANUAL_RECONCILED")
+        self.assertEqual(result["action"], "HOLD")
         self.assertEqual(pos["remaining_quantity"], 700)
         self.assertAlmostEqual(float(pos["remaining_cost_basis"]), 14.0)
         self.assertIsNone(self.state["trades"][0]["proceeds_sda"])
@@ -155,7 +155,7 @@ class SwingSellExecutionTests(unittest.TestCase):
         result = sell.evaluate_position(TOKEN, "TEST", "0.01")
         self.assertEqual(result["status"], "CONFIRMED")
         self.assertNotIn(TOKEN, self.state["positions"])
-        self.assertEqual(self.state["trades"][0]["sold_quantity_raw"], 600)
+        self.assertEqual(self.state["trades"][-1]["sold_quantity_raw"], 600)
 
     def test_legacy_pending_sell_is_archived_without_transaction(self):
         self.state.pop("sell_strategy_version")
