@@ -257,6 +257,8 @@ def _resolve_existing(token, intent):
         try:
             receipt = trader.rpc("eth_getTransactionReceipt", [tx_hash])
         except Exception:
+            intent["status"] = "UNKNOWN"
+            _update_intent(token, intent)
             return {"action": "SELL", "status": "UNKNOWN", "token": token, "tx": tx_hash}
         if not receipt:
             return {"action": "SELL", "status": "PENDING_CONFIRMATION", "token": token, "tx": tx_hash}
@@ -266,6 +268,9 @@ def _resolve_existing(token, intent):
                 intent["stage"] = "FAILED"
                 intent["status"] = "FAILED"
                 _update_intent(token, intent)
+                state = trader.load_state()
+                state.setdefault("pending_sells", {}).pop(token, None)
+                trader.save_state(state)
                 return {"action": "SELL", "status": "APPROVAL_FAILED", "token": token, "tx": tx_hash}
             if stage == "SWAP_SUBMITTED":
                 intent["stage"] = "FAILED"
@@ -340,6 +345,8 @@ def _resolve_existing(token, intent):
         try:
             receipt = trader.rpc("eth_getTransactionReceipt", [tx])
         except Exception:
+            intent["status"] = "UNKNOWN"
+            _update_intent(token, intent)
             return {"action": "SELL", "status": "UNKNOWN", "token": token, "tx": tx}
         if not receipt:
             return {"action": "SELL", "status": "PENDING_CONFIRMATION", "token": token, "tx": tx}
