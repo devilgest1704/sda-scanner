@@ -80,12 +80,28 @@ def test_main_menu_callback_is_acknowledged_and_rendered(monkeypatch):
     assert _last_edit(dashboard)["text"] == "MAIN"
 
 
-def test_real_trading_wallet_menu_callback_is_reachable(monkeypatch):
+def test_real_trading_wallet_menu_callback_uses_unified_blockchain_menu(monkeypatch):
+    import real_bot_views
     dashboard = _router(monkeypatch)
+    calls = []
+    monkeypatch.setattr(real_bot_views, "render_view", lambda _d, view, refresh=False, cache_only=False:
+                        calls.append((view, refresh, cache_only)) or ("UNIFIED REAL MAIN", real_bot_views._main_keyboard()))
     dashboard.handle_update(_update("REAL"))
     assert dashboard.events[0][0] == "answer"
-    assert ("render_real",) in dashboard.events
-    assert _last_edit(dashboard)["text"] == "REAL"
+    assert calls == [("main", True, False)]
+    assert _last_edit(dashboard)["text"] == "UNIFIED REAL MAIN"
+
+
+def test_legacy_real_statistics_callback_uses_unified_statistics(monkeypatch):
+    import real_bot_views
+    dashboard = _router(monkeypatch)
+    calls = []
+    monkeypatch.setattr(real_bot_views, "render_view", lambda _d, view, refresh=False, cache_only=False:
+                        calls.append((view, refresh, cache_only)) or ("UNIFIED REAL STATS", real_bot_views._submenu_keyboard("stats")))
+    dashboard.handle_update(_update("REAL_STATS"))
+    assert dashboard.events[0][0] == "answer"
+    assert calls == [("stats", True, False)]
+    assert _last_edit(dashboard)["text"] == "UNIFIED REAL STATS"
 
 
 def test_real_trading_bot_button_is_explicitly_routed(monkeypatch):
