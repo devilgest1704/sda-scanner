@@ -112,8 +112,45 @@ def _verify_trades(state,wallet):
     with ThreadPoolExecutor(max_workers=min(12,len(rows))) as pool:
         return list(pool.map(verify,rows))
 
+def _tracked_wallet_snapshot(accounting):
+    """Value native SDA and only tokens backed by verified open BOT FIFO lots."""
+    expected = {
+        str(item.get("token") or "").lower()
+        for item in (accounting.get("open_positions") or [])
+        if isinstance(item, dict) and item.get("token")
+    }
+    try:
+        snapshot = _ORIGINAL_FETCH_WALLET_SNAPSHOT(include_prices=False)
+    except Exception as exc:
+        return {"native_sda": None, "holdings": [], "token_balances_loaded": False,
+                "tracked_expected_count": len(expected), "tracked_missing_contracts": sorted(expected),
+                "market_complete": False, "errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+    all_holdings = snapshot.get("holdings")
+    if not isinstance(all_holdings, list):
+        all_holdings = []
+    tracked = [item for item in all_holdings if isinstance(item, dict)
+               and str(item.get("address") or "").lower() in expected]
+    wallet = str(snapshot.get("wallet_address") or rb._wallet_address()).lower()
+    if tracked:
+        with ThreadPoolExecutor(max_workers=min(12, len(tracked))) as pool:
+            tracked = list(pool.map(lambda item: _price_holding(item, wallet), tracked))
+    present = {str(item.get("address") or "").lower() for item in tracked}
+    missing = sorted(expected - present)
+    valued = sum(item.get("market_value_sda") is not None for item in tracked)
+    snapshot["holdings"] = tracked
+    snapshot["tracked_expected_count"] = len(expected)
+    snapshot["tracked_missing_contracts"] = missing
+    snapshot["market_valued_count"] = valued
+    snapshot["market_complete"] = valued == len(expected) and not missing
+    snapshot["token_balances_loaded"] = bool(snapshot.get("token_balances_loaded"))
+    return snapshot
+
+
 def _build_dashboard_data(dashboard):
-    # Canonical source: real_accounting_state.json, generated from complete blockchain FIFO evidence.
+    # Accounting is blockchain/FIFO-derived; wallet valuation is refreshed
+    # live and excludes unverified external receipts, airdrops and unmatched sells.
     """All REAL Telegram screens consume one blockchain-derived accounting state."""
     try:
         accounting=dashboard.load("real_accounting_state.json",{})
@@ -149,6 +186,19 @@ def _build_dashboard_data(dashboard):
             "pnl_sda":rb._finite_number(p.get("open_pnl_sda")),
             "pnl_pct":rb._finite_number(p.get("pnl_pct")),"valued":p.get("value_sda") is not None,
             "balance_matches":True,"buy_verified":True})
+    snapshot=_tracked_wallet_snapshot(accounting)
+    holdings=snapshot.get("holdings") if isinstance(snapshot.get("holdings"),list) else []
+    market_count=sum(item.get("market_value_sda") is not None for item in holdings)
+    token_total=sum((float(item["market_value_sda"]) for item in holdings
+                     if item.get("market_value_sda") is not None),0.0)
+    native=rb._finite_number(snapshot.get("native_sda"))
+    portfolio=native+token_total if native is not None else None
+    expected_count=int(snapshot.get("tracked_expected_count") or 0)
+    portfolio_total_count=1+expected_count
+    portfolio_valued_count=(1 if native is not None else 0)+market_count
+    portfolio_complete=(native is not None and bool(snapshot.get("token_balances_loaded"))
+                        and bool(snapshot.get("market_complete"))
+                        and not snapshot.get("tracked_missing_contracts"))
     buy_records=[{"symbol":x.get("symbol") or "UNKNOWN","at":x.get("at"),
         "invested_sda":rb._finite_number(x.get("invested_sda")),"tx":x.get("tx")}
         for x in (accounting.get("buy_transactions") or []) if isinstance(x,dict)]
@@ -159,14 +209,13 @@ def _build_dashboard_data(dashboard):
         "pnl_sda":rb._finite_number(x.get("net_pnl_sda")),"tx":x.get("tx"),"verified":True}
         for x in (accounting.get("sell_transactions") or []) if isinstance(x,dict)]
     unresolved=accounting.get("bot_unresolved_transactions") or []
-    wallet_meta=accounting.get("wallet_valuation") if isinstance(accounting.get("wallet_valuation"),dict) else {}
     buy_values=[x["invested_sda"] for x in buy_records]
     open_values=[x["value_sda"] for x in positions if x["value_sda"] is not None]
     open_costs=[x["cost_sda"] for x in positions if x["cost_sda"] is not None]
     best=stats.get("best_trade") if isinstance(stats.get("best_trade"),dict) else {}
     worst=stats.get("worst_trade") if isinstance(stats.get("worst_trade"),dict) else {}
     return {"source":"blockchain_fifo","load_error":None,"worker":worker,
-        "worker_status":rb._status(worker),"state":accounting,"snapshot":{},
+        "worker_status":rb._status(worker),"state":accounting,"snapshot":snapshot,
         "positions":positions,"buy_records":buy_records,"sell_records":sell_records,
         "buy_count":int(stats.get("confirmed_buys_count") or len(buy_records)),
         "sell_count":int(stats.get("matched_sells_count") or len(sell_records)),
@@ -188,11 +237,13 @@ def _build_dashboard_data(dashboard):
         "realized_pnl":rb._finite_number(accounting.get("realized_pnl_sda")),
         "realized_partial":not complete,
         "total_pnl":rb._finite_number(accounting.get("total_pnl_sda")),
-        "total_partial":not complete,"portfolio_value":rb._finite_number(accounting.get("wallet_value_sda")),
-        "portfolio_complete":bool(accounting.get("wallet_value_complete")),
-        "portfolio_valued_count":int(wallet_meta.get("valued_assets_count") or 0),
-        "portfolio_total_count":int(wallet_meta.get("total_assets_count") or 0),
-        "native_sda":rb._finite_number(accounting.get("native_balance_sda")),"holdings":[],
+        "total_partial":not complete,"portfolio_value":portfolio,
+        "portfolio_complete":portfolio_complete,
+        "portfolio_valued_count":portfolio_valued_count,
+        "portfolio_total_count":portfolio_total_count,
+        "portfolio_token_value":token_total,
+        "portfolio_missing_contracts":snapshot.get("tracked_missing_contracts") or [],
+        "native_sda":native,"holdings":holdings,
         "bot_reconciliation_status":accounting.get("bot_reconciliation_status"),
         "bot_unresolved_transactions":unresolved}
 
@@ -246,6 +297,12 @@ def _main_text(data):
 
 def _portfolio_text(data):
     lines=["📊 PORTFOLIO"]
+    total=data.get("portfolio_value")
+    if total is None: lines.append("💰 Tracked wallet total unavailable")
+    else: lines.append(f"💰 Tracked wallet total {total:.4f} SDA" + ("" if data.get("portfolio_complete") else " (partial)"))
+    native=data.get("native_sda")
+    lines.append(f"💵 Native SDA {native:.4f} SDA" if native is not None else "💵 Native SDA unavailable")
+    lines += ["","Verified open BOT positions"]
     for p in data.get("positions") or []:
         value,pnl=p.get("value_sda"),p.get("pnl_sda")
         if value is None:lines.append(f"⚪ {p['symbol']} unavailable");continue
@@ -309,7 +366,7 @@ def _stats_text(data):
         f"Worst {data.get('worst_trade_label') or 'trade'} {_fmt(data.get('worst_trade'),signed=True)} SDA"]
     if data.get("bot_unresolved_transactions"):
         lines += ["","⚠ Unreconciled BOT transactions",*data["bot_unresolved_transactions"]]
-    if not data.get("portfolio_complete"):lines += ["",f"⚠ Wallet valuation partial: {data.get('portfolio_valued_count',0)}/{data.get('portfolio_total_count',0)} assets"]
+    if not data.get("portfolio_complete"):lines += ["",f"⚠ Tracked wallet valuation partial: {data.get('portfolio_valued_count',0)}/{data.get('portfolio_total_count',0)} assets"]
     return "\n".join(lines)
 
 def render_view(dashboard,view="main",refresh=False,cache_only=False):
