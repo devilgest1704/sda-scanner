@@ -99,8 +99,8 @@ def reconcile_position_wallet(token):
             state["positions"][token] = adjusted
         state["updated_at"] = trader.now()
         trader.save_state(state)
-        return {"status": "MANUAL_RECONCILED", "wallet_quantity": wallet_qty,
-                "previous_quantity": recorded}
+        return {"status": "CLOSED_MANUAL_RECONCILED" if wallet_qty == 0 else "MANUAL_RECONCILED",
+                "wallet_quantity": wallet_qty, "previous_quantity": recorded}
     # External deposits are not silently added to the bot's costed position.
     position["wallet_available_quantity"] = wallet_qty
     trader.save_state(state)
@@ -275,6 +275,20 @@ def _resolve_existing(token, intent):
         sold = int(intent.get("confirmed_sold_quantity_raw") or 0)
         proceeds = int(intent.get("confirmed_proceeds_raw") or 0)
         if sold <= 0 or proceeds <= 0:
+            try:
+                owner = trader.wallet_address()
+                token_after = trader.token_balance(token, owner)
+                wsda_after = trader.token_balance(cfg.WSDA_ADDRESS, owner)
+                sold = max(0, int(intent["token_balance_before"]) - int(token_after))
+                proceeds = max(0, int(wsda_after) - int(intent["wsda_balance_before"]))
+                intent["confirmed_token_balance_after"] = token_after
+                intent["confirmed_wsda_balance_after"] = wsda_after
+                intent["confirmed_sold_quantity_raw"] = sold
+                intent["confirmed_proceeds_raw"] = proceeds
+                _update_intent(token, intent)
+            except Exception:
+                return {"action": "SELL", "status": "ACCOUNTING_UNVERIFIED", "token": token}
+        if sold <= 0 or proceeds <= 0:
             return {"action": "SELL", "status": "ACCOUNTING_UNVERIFIED", "token": token}
         # Unwrap the exact confirmed WSDA received, not the quote/minimum.
         account = trader.private_account()
@@ -317,6 +331,15 @@ def _resolve_existing(token, intent):
                               int(intent.get("confirmed_proceeds_raw") or 0))
     if intent.get("stage") == "SELL_READY":
         return _submit_swap(token, intent)
+    if intent.get("stage") == "DECIDED":
+        # No signed hash was persisted, so the transaction was not broadcast.
+        intent["stage"] = "FAILED"
+        intent["status"] = "FAILED"
+        _update_intent(token, intent)
+        state = trader.load_state()
+        state.setdefault("pending_sells", {}).pop(token, None)
+        trader.save_state(state)
+        return {"action": "SELL", "status": "PRE_BROADCAST_ABORTED", "token": token}
     return {"action": "SELL", "status": intent.get("status", "UNKNOWN"), "token": token}
 
 
@@ -328,6 +351,10 @@ def _submit_swap(token, intent):
     actual = min(requested, wallet_qty)
     if actual <= 0:
         return {"action": "SELL", "status": "NO_WALLET_BALANCE", "token": token}
+    # Refresh both baselines immediately before the swap.
+    intent["token_balance_before"] = wallet_qty
+    intent["wsda_balance_before"] = int(trader.token_balance(cfg.WSDA_ADDRESS, owner))
+    _update_intent(token, intent)
     # Fresh executable quote is intentionally obtained only AFTER approval.
     fee, quoted, _, deadline = trader.quote_best_live_fee(
         token, cfg.WSDA_ADDRESS, token, owner, actual, value_wei=0
