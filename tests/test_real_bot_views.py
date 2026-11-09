@@ -110,13 +110,26 @@ def built_data(monkeypatch):
     dashboard = SimpleNamespace(load=lambda path, default: state if path == "real_accounting_state.json" else default)
     monkeypatch.setattr(rb, "_load_worker_status", lambda _d: {"enabled": True, "dry_run": False})
     monkeypatch.setattr(rb, "_status", lambda _w: "🟢 LIVE")
+    tracked_snapshot = {
+        "native_sda": 120.499217823303884285,
+        "wallet_address": rb.BOT_WALLET_ADDRESS,
+        "token_balances_loaded": True,
+        "holdings": [
+            {"address": p["token"], "symbol": p["symbol"], "market_value_sda": p["value_sda"]}
+            for p in state["open_positions"]
+        ],
+        "tracked_expected_count": len(state["open_positions"]),
+        "tracked_missing_contracts": [],
+        "market_complete": True,
+    }
+    monkeypatch.setattr(views, "_tracked_wallet_snapshot", lambda _accounting: tracked_snapshot)
     return views._build_dashboard_data(dashboard)
 
 
 def test_main_menu_uses_bot_pnl_and_wallet_total_separately(built_data):
     text = views._main_text(built_data)
     assert "🤖 REAL TRADING 🟢" in text
-    assert "Portfolio ≥351.31 SDA (31/32)" in text
+    assert "Portfolio 296.63 SDA" in text
     assert "Bot PnL +28.35 SDA" in text
     assert "Open PnL -4.21 SDA" in text
     assert "Realized +32.56 SDA" in text
@@ -128,6 +141,8 @@ def test_portfolio_contains_only_nine_blockchain_fifo_positions(built_data):
     text = views._portfolio_text(built_data)
     for symbol, _value, _pnl in POSITION_ROWS:
         assert symbol in text
+    assert "Tracked wallet total 296.6285 SDA" in text
+    assert "Native SDA 120.4992 SDA" in text
     assert "HAQ" not in text and "PINE" not in text and "JOINIT" not in text
     assert len(built_data["positions"]) == 9
     assert "XEN 18.86 SDA -1.23" in text
@@ -172,9 +187,9 @@ def test_external_pine_and_unpriced_assets_do_not_make_bot_pnl_partial(built_dat
     assert built_data["realized_partial"] is False
     assert built_data["total_partial"] is False
     assert built_data["open_complete"] is True
-    assert built_data["portfolio_complete"] is False
+    assert built_data["portfolio_complete"] is True
     assert "(partial)" not in views._main_text(built_data)
-    assert "Wallet valuation partial: 31/32 assets" in views._stats_text(built_data)
+    assert "Wallet valuation partial" not in views._stats_text(built_data)
 
 
 def test_unreconciled_bot_transaction_keeps_partial_and_reports_exact_hash(monkeypatch):
