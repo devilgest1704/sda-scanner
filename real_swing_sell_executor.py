@@ -126,8 +126,10 @@ def reconcile_position_wallet(token):
         else:
             adjusted["wallet_available_quantity"] = wallet_qty
             state["positions"][token] = adjusted
+        state["accounting_refresh_pending"] = True
         state["updated_at"] = trader.now()
         trader.save_state(state)
+        _request_accounting_refresh(state)
         return {"status": "CLOSED_MANUAL_RECONCILED" if wallet_qty == 0 else "MANUAL_RECONCILED",
                 "wallet_quantity": wallet_qty, "previous_quantity": recorded}
     # External deposits are not silently added to the bot's costed position.
@@ -189,6 +191,55 @@ def _cancel_intent(token, intent, status):
     trader.save_state(state)
 
 
+def _request_accounting_refresh(state):
+    """Dispatch the existing read-only FIFO accounting rebuild after real disposals."""
+    if not state.get("accounting_refresh_pending"):
+        return "NOT_PENDING"
+    now = trader.now()
+    previous = state.get("accounting_refresh_last_attempt_at")
+    if previous:
+        try:
+            age = (datetime.fromisoformat(now) -
+                   datetime.fromisoformat(str(previous).replace("Z", "+00:00"))).total_seconds()
+            if 0 <= age < 60:
+                return "THROTTLED"
+        except Exception:
+            pass
+    token = os.getenv("GH_TOKEN", "").strip()
+    repository = os.getenv("GITHUB_REPOSITORY", "").strip()
+    if not token or not repository:
+        state["accounting_refresh_last_error"] = "GH_TOKEN or GITHUB_REPOSITORY unavailable"
+        trader.save_state(state)
+        return "NOT_CONFIGURED"
+    state["accounting_refresh_last_attempt_at"] = now
+    try:
+        response = trader.requests.post(
+            f"https://api.github.com/repos/{repository}/actions/workflows/real-accounting-readonly.yml/dispatches",
+            json={"ref": "main"},
+            headers={"Authorization": f"Bearer {token}",
+                     "Accept": "application/vnd.github+json",
+                     "X-GitHub-Api-Version": "2022-11-28"},
+            timeout=(3, 10),
+        )
+        if int(response.status_code) not in (200, 201, 204):
+            raise RuntimeError(f"workflow dispatch HTTP {response.status_code}")
+        state["accounting_refresh_pending"] = False
+        state["accounting_refresh_last_dispatched_at"] = now
+        state.pop("accounting_refresh_last_error", None)
+        for item in state.get("sell_intents", {}).values():
+            if isinstance(item, dict) and item.get("stage") == "RECONCILED":
+                item["accounting_refresh_status"] = "DISPATCHED"
+        for item in state.get("manual_disposals", []):
+            if isinstance(item, dict):
+                item["accounting_refresh_status"] = "DISPATCHED"
+        trader.save_state(state)
+        return "DISPATCHED"
+    except Exception as exc:
+        state["accounting_refresh_last_error"] = f"{type(exc).__name__}: {str(exc)[:180]}"
+        trader.save_state(state)
+        return "FAILED"
+
+
 def _finish_intent(token, intent, sold_raw, proceeds_raw):
     state = trader.load_state()
     position = state.get("positions", {}).get(token)
@@ -236,8 +287,10 @@ def _finish_intent(token, intent, sold_raw, proceeds_raw):
         "amount_sda": float(allocated_cost), "proceeds_sda": float(proceeds_sda),
         "realized_pnl_sda": float(realized_increment), "at": trader.now(),
     })
+    state["accounting_refresh_pending"] = True
     state["updated_at"] = trader.now()
     trader.save_state(state)
+    _request_accounting_refresh(state)
     return {"action": "SELL", "status": "CONFIRMED", "token": token,
             "tx": intent.get("swap_tx"), "unwrap_tx": intent.get("unwrap_tx"),
             "sold_quantity_raw": int(sold_raw), "proceeds_sda": float(proceeds_sda),
@@ -656,6 +709,7 @@ def startup_recovery():
     """Inspect all current v2 intents; no historical intent is ever replayed."""
     migrate_if_needed()
     state = trader.load_state()
+    _request_accounting_refresh(state)
     results = []
     for token, intent in list(state.get("pending_sells", {}).items()):
         if isinstance(intent, dict):
