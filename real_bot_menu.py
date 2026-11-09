@@ -15,7 +15,6 @@ from decimal import Decimal, InvalidOperation
 
 import requests
 import real_trading_config as cfg
-import swing_sell_v2 as sell_v2_policy
 
 BOT_WALLET_ADDRESS = "0x9e3643f2ac15c91ee83aa2814015f15b18d573f2"
 BOT_WALLET_FALLBACK = BOT_WALLET_ADDRESS
@@ -274,219 +273,6 @@ def _newest_supabase_price(token):
             "error": None,
         }
     return {"price_sda": None, "timestamp": None, "error": "no valid Supabase price row"}
-
-
-
-def load_market_snapshot(dashboard=None):
-    """Load the scanner's latest persisted analysis snapshot (read-only)."""
-    try:
-        if dashboard is not None and callable(getattr(dashboard, "load", None)):
-            value = dashboard.load("market_analysis.json", {"tokens": {}})
-        else:
-            with open("market_analysis.json", "r", encoding="utf-8") as handle:
-                value = json.load(handle)
-        return value if isinstance(value, dict) else {}
-    except Exception:
-        return {}
-
-
-def _scanner_snapshot_price(token, snapshot, now=None, max_age_seconds=300):
-    """Accept scanner prices only when both snapshot and underlying trade are fresh."""
-    token = str(token).strip().lower()
-    if not isinstance(snapshot, dict):
-        return None
-    now = now or datetime.now(timezone.utc)
-    snapshot_stamp = _parse_utc(snapshot.get("updated_at"))
-    if snapshot_stamp is None:
-        return None
-    snapshot_age = (now - snapshot_stamp).total_seconds()
-    if snapshot_age < 0 or snapshot_age > max_age_seconds:
-        return None
-    tokens = snapshot.get("tokens")
-    row = tokens.get(token) if isinstance(tokens, dict) else None
-    if not isinstance(row, dict):
-        return None
-    price = _finite_number(row.get("price_in_sda"))
-    stamp = _parse_utc(row.get("last_transaction"))
-    if price is None or price <= 0 or stamp is None or stamp > now:
-        return None
-    age = max(0.0, (now - stamp).total_seconds())
-    if age > max_age_seconds:
-        return None
-    return {"price_sda": price, "timestamp": stamp.isoformat(),
-            "age_seconds": age, "stale": False,
-            "source": "scanner market_analysis.json"}
-
-
-def _newest_market_price(token, market_snapshot=None, dashboard=None,
-                         max_age_seconds=300):
-    """Prefer fresh scanner snapshot; fall back to fresh Supabase transaction price."""
-    snapshot = market_snapshot if isinstance(market_snapshot, dict) else load_market_snapshot(dashboard)
-    price = _scanner_snapshot_price(token, snapshot, max_age_seconds=max_age_seconds)
-    if price is not None:
-        return price
-    # If a fresh scanner snapshot already contains this token, its last trade
-    # timestamp is authoritative. Do not issue a redundant per-token Supabase
-    # request when that trade is stale; the same transaction feed cannot make
-    # the cached observation newer.
-    snapshot_stamp = _parse_utc(snapshot.get("updated_at")) if isinstance(snapshot, dict) else None
-    row_map = snapshot.get("tokens") if isinstance(snapshot, dict) else None
-    if (snapshot_stamp is not None and
-            0 <= (datetime.now(timezone.utc) - snapshot_stamp).total_seconds() <= max_age_seconds and
-            isinstance(row_map, dict) and token in row_map):
-        return {"price_sda": None, "timestamp": None, "age_seconds": None,
-                "stale": True, "source": "scanner market_analysis.json"}
-    try:
-        candidate = _newest_supabase_price(token)
-        age = candidate.get("age_seconds") if isinstance(candidate, dict) else None
-        value = _finite_number(candidate.get("price_sda")) if isinstance(candidate, dict) else None
-        stamp = _parse_utc(candidate.get("timestamp")) if isinstance(candidate, dict) else None
-        now = datetime.now(timezone.utc)
-        if (value is not None and value > 0 and stamp is not None and stamp <= now
-                and age is not None and 0 <= float(age) <= max_age_seconds):
-            return {**candidate, "price_sda": value, "stale": False}
-    except Exception:
-        pass
-    return {"price_sda": None, "timestamp": None, "age_seconds": None,
-            "stale": True, "source": None}
-
-
-def _sell_v2_preview(position, current_price, decimals=18, pending_intent=None):
-    """Pure, read-only Swing V2 decision projection. Never creates or executes intents."""
-    position = position if isinstance(position, dict) else {}
-    try:
-        decimals = int(decimals)
-        if not 0 <= decimals <= 36:
-            raise ValueError
-        initial_qty = int(position.get("initial_quantity",
-                                       position.get("token_amount_raw",
-                                                    position.get("remaining_quantity", 0))) or 0)
-        initial_cost = Decimal(str(position.get("initial_cost_basis",
-                                               position.get("amount_sda",
-                                                            position.get("cost_sda", 0))) or 0))
-        if initial_qty <= 0 or initial_cost <= 0:
-            raise ValueError
-        entry = initial_cost / (Decimal(initial_qty) / (Decimal(10) ** decimals))
-    except Exception:
-        return {"entry_price": None, "decision_price": None, "pnl_pct": None,
-                "profit_partial_done": bool(position.get("profit_partial_done")),
-                "trailing_armed": bool(position.get("trailing_armed")),
-                "peak_price": None, "trailing_price": None,
-                "swing_state": "INVALID_POSITION_BASIS",
-                "action": "SELL_QUARANTINED"}
-
-    remaining = int(position.get("remaining_quantity",
-                                 position.get("token_amount_raw", initial_qty)) or 0)
-    wallet_qty = position.get("wallet_available_quantity")
-    explicit_quarantine = bool(
-        position.get("sell_quarantined")
-        or position.get("wallet_reconciliation_required")
-        or position.get("manual_reconciliation_required")
-        or (wallet_qty is not None and int(wallet_qty) < remaining)
-    )
-    if isinstance(pending_intent, dict) and pending_intent.get("stage") not in {
-        "RECONCILED", "FAILED", "FAILED_FINAL", "CANCELLED"
-    }:
-        explicit_quarantine = True
-
-    partial_done = bool(position.get("profit_partial_done"))
-    trailing_armed = bool(position.get("trailing_armed"))
-    state = ("WALLET_RECONCILIATION_REQUIRED" if explicit_quarantine else
-             "TRAILING_ACTIVE" if trailing_armed else "WAITING_PARTIAL")
-    result = {
-        "entry_price": float(entry), "decision_price": None, "pnl_pct": None,
-        "profit_partial_done": partial_done, "trailing_armed": trailing_armed,
-        "peak_price": None, "trailing_price": None, "swing_state": state,
-        "action": "SELL_QUARANTINED" if explicit_quarantine else "PRICE_UNAVAILABLE",
-    }
-    if explicit_quarantine:
-        return result
-    price_number = _finite_number(current_price)
-    if price_number is None or price_number <= 0:
-        return result
-
-    price = Decimal(str(price_number))
-    pnl_fraction = price / entry - Decimal(1)
-    result.update({"decision_price": float(price), "pnl_pct": float(pnl_fraction * 100)})
-    decision_position = dict(position)
-    if trailing_armed:
-        old_peak = _finite_number(position.get("highest_price_since_trailing_activation"))
-        peak = max(Decimal(str(old_peak or price)), price)
-        trail = peak * Decimal("0.85")
-        decision_position["highest_price_since_trailing_activation"] = str(peak)
-        result.update({"peak_price": float(peak), "trailing_price": float(trail)})
-    decision = sell_v2_policy.decide(decision_position, pnl_fraction, price)
-    reason = decision.get("reason")
-    if reason == "LOSS_LIMIT":
-        action = "FULL_SELL_EMERGENCY"
-    elif reason == "HARD_TP":
-        action = "FULL_SELL_TP"
-    elif reason == "TRAILING_STOP":
-        action = "FULL_SELL_TRAILING"
-    elif reason == "FIRST_PROFIT_PARTIAL":
-        action = "PARTIAL_SELL_20"
-    elif reason == "TRAILING_ACTIVE":
-        action = "TRAILING_HOLD"
-    else:
-        action = "HOLD"
-    result["action"] = action
-    return result
-
-
-def sell_v2_report(dashboard):
-    """Compact read-only decision table for every authoritative REAL open position."""
-    state, source, _error = _load_real_state(dashboard)
-    if source == "unavailable" or not isinstance(state, dict):
-        return "🎯 SELL V2 • READ ONLY\n\n⚪ REAL position ledger unavailable"
-    positions = state.get("positions") if isinstance(state.get("positions"), dict) else {}
-    pending = state.get("pending_sells") if isinstance(state.get("pending_sells"), dict) else {}
-    market = load_market_snapshot(dashboard)
-    metadata = dashboard.load("token_metadata.json", {}) if callable(getattr(dashboard, "load", None)) else {}
-    metadata = metadata if isinstance(metadata, dict) else {}
-    lines = ["🎯 SELL V2 • READ ONLY", ""]
-    for token, position in positions.items():
-        if not isinstance(position, dict):
-            continue
-        token = str(token).lower()
-        meta = metadata.get(token, {}) if isinstance(metadata.get(token), dict) else {}
-        symbol = str(meta.get("symbol") or position.get("symbol") or token[:8])
-        if symbol.lower().startswith("0x") and len(symbol) > 8:
-            symbol = symbol[:8]
-        decimals = meta.get("decimals", position.get("decimals", 18))
-        price_data = _newest_market_price(token, market_snapshot=market, max_age_seconds=300)
-        stamp = _parse_utc(price_data.get("timestamp"))
-        migration = _parse_utc(state.get("sell_migration_observation_started_at"))
-        if stamp is not None and migration is not None and stamp <= migration:
-            price_data = {"price_sda": None}
-        preview = _sell_v2_preview(position, price_data.get("price_sda"), decimals,
-                                   pending_intent=pending.get(token))
-        action = preview["action"]
-        icon = {
-            "HOLD": "🟡", "PARTIAL_SELL_20": "🟢", "TRAILING_HOLD": "🔵",
-            "FULL_SELL_EMERGENCY": "🔴", "FULL_SELL_TRAILING": "🔴",
-            "FULL_SELL_TP": "🔴", "PRICE_UNAVAILABLE": "⚪",
-            "SELL_QUARANTINED": "⚠️",
-        }.get(action, "⚪")
-        entry = preview["entry_price"]
-        now_price = preview["decision_price"]
-        pnl = preview["pnl_pct"]
-        entry_text = f"{entry:.7g}" if entry is not None else "N/A"
-        now_text = f"{now_price:.7g}" if now_price is not None else "N/A"
-        pnl_text = f"{pnl:+.1f}%" if pnl is not None else "N/A"
-        partial_text = "Y" if preview["profit_partial_done"] else "N"
-        trailing_text = "Y" if preview["trailing_armed"] else "N"
-        lines.append(f"{symbol:<6} Entry {entry_text} → Now {now_text}  {pnl_text}  {icon} {action}")
-        lines.append(f"P:{partial_text}  T:{trailing_text}  State: {preview['swing_state']}")
-        if preview["trailing_armed"] and preview["peak_price"] is not None:
-            peak = preview["peak_price"]
-            trail = preview["trailing_price"]
-            peak_pct = (peak / entry - 1) * 100 if entry else 0
-            trail_pct = (trail / entry - 1) * 100 if entry else 0
-            lines.append(f"Peak {peak:.7g} ({peak_pct:+.1f}%) | Exit {trail:.7g} ({trail_pct:+.1f}%)")
-    if not positions:
-        lines.append("⚪ No open REAL positions")
-    lines += ["", "Read-only • no SELL intents or transactions are created"]
-    return "\n".join(lines)
 
 
 def _unwrap_items(data):
@@ -1151,8 +937,7 @@ def patch_dashboard(dashboard):
     def handle_update(update, state=None):
         cb = update.get("callback_query") or {}
         data = cb.get("data")
-        if data not in ("REAL_BOT", "REAL_BOT_STATS", "REAL_BOT_REFRESH", "REAL_BOT_STATS_REFRESH",
-                        "REAL_BOT_SELL_V2", "REAL_BOT_SELL_V2_REFRESH"):
+        if data not in ("REAL_BOT", "REAL_BOT_STATS", "REAL_BOT_REFRESH", "REAL_BOT_STATS_REFRESH"):
             return original_handle(update, state)
         state = state if state is not None else {"offset": 0}
         state["offset"] = max(int(state.get("offset", 0)), int(update.get("update_id", 0)) + 1)
@@ -1168,17 +953,9 @@ def patch_dashboard(dashboard):
             keyboard = {"inline_keyboard": [
                 [{"text": "🔄 Refresh live P/L", "callback_data": "REAL_BOT_REFRESH"}],
                 [{"text": "📈 Statistics", "callback_data": "REAL_BOT_STATS"}],
-                [{"text": "🎯 SELL V2", "callback_data": "REAL_BOT_SELL_V2"}],
                 [{"text": "⬅️ Main dashboard", "callback_data": "MAIN"}],
             ]}
             dashboard.edit(chat_id, message_id, bot_report(dashboard), keyboard)
-        elif data in ("REAL_BOT_SELL_V2", "REAL_BOT_SELL_V2_REFRESH"):
-            keyboard = {"inline_keyboard": [
-                [{"text": "🔄 Refresh SELL V2", "callback_data": "REAL_BOT_SELL_V2_REFRESH"}],
-                [{"text": "⬅️ Real Trading Bot", "callback_data": "REAL_BOT"}],
-                [{"text": "⬅️ Main dashboard", "callback_data": "MAIN"}],
-            ]}
-            dashboard.edit(chat_id, message_id, sell_v2_report(dashboard), keyboard)
         else:
             keyboard = {"inline_keyboard": [
                 [{"text": "🔄 Refresh statistics", "callback_data": "REAL_BOT_STATS_REFRESH"}],
