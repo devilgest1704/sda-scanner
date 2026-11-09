@@ -355,12 +355,22 @@ def _resolve_existing(token, intent):
 def _submit_swap(token, intent):
     account = trader.private_account()
     owner = account.address
-    requested = int(intent["requested_quantity_raw"])
-    wallet_qty = int(trader.token_balance(token, owner))
+    reconciliation = reconcile_position_wallet(token)
+    if reconciliation.get("status") == "CLOSED_MANUAL_RECONCILED":
+        return {"action": "SELL", "status": "MANUAL_CLOSED", "token": token}
+    state = trader.load_state()
+    position = state.get("positions", {}).get(token)
+    if not isinstance(position, dict):
+        return {"action": "SELL", "status": "NO_POSITION", "token": token}
+    wallet_qty = int(reconciliation.get("wallet_quantity") or 0)
+    tracked_qty = int(position.get("remaining_quantity", position.get("token_amount_raw", 0)) or 0)
+    fraction = Decimal("0.20") if intent.get("sell_reason") == "PROFIT_PARTIAL_25" else Decimal("1")
+    requested = int((Decimal(tracked_qty) * fraction).to_integral_value(rounding=ROUND_DOWN))
     actual = min(requested, wallet_qty)
     if actual <= 0:
         return {"action": "SELL", "status": "NO_WALLET_BALANCE", "token": token}
-    # Refresh both baselines immediately before the swap.
+    # Refresh both baselines immediately before the swap. A manual disposal
+    # during approval has already been cost-allocated by wallet reconciliation.
     intent["token_balance_before"] = wallet_qty
     intent["wsda_balance_before"] = int(trader.token_balance(cfg.WSDA_ADDRESS, owner))
     _update_intent(token, intent)
