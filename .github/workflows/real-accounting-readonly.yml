@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: real-wallet-accounting-readonly
@@ -44,10 +44,23 @@ jobs:
           PY
       - name: Collect complete wallet history and build conservative report
         run: python scripts/rebuild_real_accounting.py
+      - name: Commit refreshed blockchain-derived REAL accounting state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add real_accounting_state.json
+          if git diff --cached --quiet; then
+            echo "REAL accounting state unchanged"
+          else
+            git commit -m "Update blockchain-derived REAL accounting state"
+            git push origin HEAD:main
+          fi
       - name: Upload immutable raw evidence and report
         uses: actions/upload-artifact@v4
         with:
           name: real-wallet-accounting-${{ github.run_id }}-${{ github.run_attempt }}
-          path: accounting_evidence/
+          path: |
+            accounting_evidence/
+            real_accounting_state.json
           if-no-files-found: error
           retention-days: 90
