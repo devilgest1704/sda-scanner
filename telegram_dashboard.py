@@ -166,8 +166,14 @@ def handle_update(update,state=None):
     if data in ("REFRESH","MAIN"):edit(chat_id,message_id,main_dashboard(),menu_keyboard())
     elif data=="PAPER":edit(chat_id,message_id,"🤖 PAPER TRADING\n\nVyber zobrazení:",paper_menu_keyboard())
     elif data=="PAPER_STATS":edit(chat_id,message_id,paper_statistics_report(),back_keyboard())
-    elif data=="REAL":edit(chat_id,message_id,_real_statistics_report(),real_menu_keyboard())
-    elif data=="REAL_STATS":edit(chat_id,message_id,_real_statistics_report(),back_keyboard())
+    elif data=="REAL":
+        import real_bot_views
+        text,keyboard=real_bot_views.render_view(sys.modules[__name__],"main",refresh=True)
+        edit(chat_id,message_id,text,keyboard)
+    elif data=="REAL_STATS":
+        import real_bot_views
+        text,keyboard=real_bot_views.render_view(sys.modules[__name__],"stats",refresh=True)
+        edit(chat_id,message_id,text,keyboard)
     elif data=="TECH":edit(chat_id,message_id,technical_report(),back_keyboard())
     elif data=="MOMENTUM":edit(chat_id,message_id,market_momentum_report(),back_keyboard())
     elif data=="DEBUG":
