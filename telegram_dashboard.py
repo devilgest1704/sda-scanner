@@ -108,7 +108,9 @@ def menu_keyboard():return {"inline_keyboard":[[{"text":"🔄 Refresh","callback
 def paper_menu_keyboard():return {"inline_keyboard":[[{"text":"📊 Statistics","callback_data":"PAPER_STATS"}],[{"text":"⬅️ Main dashboard","callback_data":"MAIN"}]]}
 def optimizer_menu_keyboard():return {"inline_keyboard":[[{"text":"📊 Stav & Champion","callback_data":"OPTIMIZER"}],[{"text":"🧪 Testované strategie","callback_data":"OPTIMIZER_STRATEGIES"}],[{"text":"📈 V30 Research","callback_data":"OPTIMIZER_V30"}],[{"text":"⬅️ Main dashboard","callback_data":"MAIN"}]]}
 
-def real_menu_keyboard():return {"inline_keyboard":[[{"text":"📈 Real Statistics","callback_data":"REAL_STATS"}],[{"text":"⬅️ Main dashboard","callback_data":"MAIN"}]]}
+def real_menu_keyboard():
+    import real_bot_views
+    return real_bot_views._main_keyboard()
 def back_keyboard():return {"inline_keyboard":[[{"text":"⬅️ Main dashboard","callback_data":"MAIN"}]]}
 
 def _analysis(td):
