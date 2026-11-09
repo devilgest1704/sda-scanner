@@ -109,7 +109,7 @@ def main():
     transfers,xp=paged(f"/addresses/{WALLET}/token-transfers")
     internal,ip=paged(f"/addresses/{WALLET}/internal-transactions")
     holdings,hp=paged(f"/addresses/{WALLET}/tokens",{"type":"ERC-20"})
-    hashes=sorted({str(x.get("hash") or "").lower() for x in txs if x.get("hash")})
+    hashes=sorted({str(x.get("hash") or "").lower() for x in txs if x.get("hash")} | {str(x.get("transaction_hash") or "").lower() for x in transfers if x.get("transaction_hash")} | {str(x.get("transaction_hash") or "").lower() for x in internal if x.get("transaction_hash")})
     details={}; errors={}
     for i,h in enumerate(hashes,1):
         try: details[h]=get(f"/transactions/{h}")
@@ -317,11 +317,13 @@ def main():
     with ThreadPoolExecutor(max_workers=4) as pool:
         priced=list(pool.map(price_one,holding_rows))
     holdmap={h["contract"]:h for h in priced}
-    open_positions=[]; open_value=Decimal(0); open_cost=Decimal(0); open_complete=True
+    open_positions=[]; residual_dust=[]; open_value=Decimal(0); open_cost=Decimal(0); open_complete=True
     for lot in open_lots:
         c=lot["contract"]; h=holdmap.get(c)
         qty=Decimal(lot["quantity"]); cost=Decimal(lot["total_cost_basis_sda"])
-        if qty<=Decimal("0.000001"): continue
+        if qty<=Decimal("0.001"):
+            residual_dust.append(lot)
+            continue
         if not h or Decimal(h["quantity"]) < qty-Decimal("0.00000001"):
             open_complete=False; current=None; err="wallet balance does not cover FIFO open lot"
         else:
@@ -368,20 +370,58 @@ def main():
         u="https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/real_trade_state.json"
         rr=requests.get(u,timeout=(10,30)); rr.raise_for_status(); ledger=rr.json()
     except Exception as e: ledger_error=str(e)
+    ledger_trades=(ledger or {}).get("trades",[]) if isinstance(ledger,dict) else []
+    ledger_positions=(ledger or {}).get("positions",{}) if isinstance(ledger,dict) else {}
+    ledger_times=[str(x.get("at") or "") for x in ledger_trades if x.get("at")]
+    ledger_start=min(ledger_times) if ledger_times else ""
+    def after_ledger_start(r):
+        return not ledger_start or str(r.get("timestamp") or "")>=ledger_start
     chain_buys={r["hash"] for r in records if r["action"]=="BUY"}
     chain_sells={r["hash"] for r in records if r["action"]=="SELL"}
-    ledger_trades=(ledger or {}).get("trades",[]) if isinstance(ledger,dict) else []
+    chain_buys_current={r["hash"] for r in records if r["action"]=="BUY" and after_ledger_start(r)}
+    chain_sells_current={r["hash"] for r in records if r["action"]=="SELL" and after_ledger_start(r)}
     ledger_buys={str(x.get("tx") or "").lower() for x in ledger_trades if str(x.get("action","")).upper()=="BUY" and x.get("tx")}
     ledger_sells={str(x.get("tx") or "").lower() for x in ledger_trades if str(x.get("action","")).upper()=="SELL" and x.get("tx")}
-    ledger_positions=(ledger or {}).get("positions",{}) if isinstance(ledger,dict) else {}
+    ledger_buys_current={str(x.get("tx") or "").lower() for x in ledger_trades if str(x.get("action","")).upper()=="BUY" and x.get("tx") and (not ledger_start or str(x.get("at") or "")>=ledger_start)}
+    ledger_sells_current={str(x.get("tx") or "").lower() for x in ledger_trades if str(x.get("action","")).upper()=="SELL" and x.get("tx") and (not ledger_start or str(x.get("at") or "")>=ledger_start)}
+    manual_rows=[x for x in ledger_trades if str(x.get("action","")).upper()=="SELL" and not x.get("tx")]
+    manual_matches=[]; manual_unmatched=[]
+    for m in manual_rows:
+        candidates=[]
+        for r in records:
+            if r["action"]!="SELL" or r["contract"]!=str(m.get("token") or "").lower(): continue
+            if not after_ledger_start(r): continue
+            try:
+                delta=abs((datetime.fromisoformat(str(r["timestamp"]).replace("Z","+00:00"))-
+                    datetime.fromisoformat(str(m.get("at")).replace("Z","+00:00"))).total_seconds())
+            except Exception: delta=999999
+            amount_delta=abs(Decimal(str(m.get("amount_sda") or "0"))-r["proceeds"])
+            if delta<=600 and amount_delta<=Decimal("0.001"):
+                candidates.append((delta,amount_delta,r))
+        if len(candidates)==1:
+            delta,amount_delta,r=candidates[0]
+            manual_matches.append({"ledger_at":m.get("at"),"token":m.get("symbol"),
+                "matched_sell_tx":r["hash"],"time_delta_seconds":delta,
+                "proceeds_delta_sda":str(amount_delta),"ledger_pnl_sda":m.get("pnl_sda"),
+                "blockchain_gross_pnl_sda":next((x["gross_pnl_sda"] for x in closed if x["sell_tx"]==r["hash"]),None)})
+        else: manual_unmatched.append(m)
+    matched_manual_hashes={x["matched_sell_tx"] for x in manual_matches}
+    active_open_contracts={x["contract"] for x in open_lots if Decimal(x["quantity"])>Decimal("0.001")}
+    ledger_contracts={str(k).lower() for k in ledger_positions}
+    historical_buys=sorted(r["hash"] for r in records if r["action"]=="BUY" and ledger_start and str(r["timestamp"])<ledger_start)
+    historical_sells=sorted(r["hash"] for r in records if r["action"]=="SELL" and ledger_start and str(r["timestamp"])<ledger_start)
     discrepancies={
-        "ledger_missing_buy_tx":sorted(chain_buys-ledger_buys),
-        "ledger_buy_not_onchain":sorted(ledger_buys-chain_buys),
-        "ledger_missing_sell_tx":sorted(chain_sells-ledger_sells),
-        "ledger_sell_not_onchain":sorted(ledger_sells-chain_sells),
-        "manual_sells_without_tx":[x for x in ledger_trades if str(x.get("action","")).upper()=="SELL" and not x.get("tx")],
-        "ledger_positions_without_meaningful_open_lot":sorted(set(k.lower() for k in ledger_positions)-{x["contract"] for x in open_positions}),
-        "blockchain_open_lots_missing_from_ledger":sorted({x["contract"] for x in open_positions}-set(k.lower() for k in ledger_positions)),
+        "ledger_missing_buy_tx":sorted(chain_buys_current-ledger_buys_current),
+        "ledger_buy_not_onchain":sorted(ledger_buys_current-chain_buys_current),
+        "ledger_missing_sell_tx":sorted(chain_sells_current-ledger_sells_current-matched_manual_hashes),
+        "ledger_sell_not_onchain":sorted(ledger_sells_current-chain_sells_current),
+        "manual_sell_matches":manual_matches,
+        "manual_sells_without_tx_unmatched":manual_unmatched,
+        "historical_onchain_buys_before_ledger_start":historical_buys,
+        "historical_onchain_sells_before_ledger_start":historical_sells,
+        "ledger_positions_without_meaningful_open_lot":sorted(ledger_contracts-active_open_contracts),
+        "blockchain_open_lots_missing_from_ledger":sorted(active_open_contracts-ledger_contracts),
+        "ledger_start_timestamp":ledger_start or None,
         "ledger_fetch_error":ledger_error
     }
     # Current token balances include external/airdrop holdings. Their basis is
@@ -390,8 +430,8 @@ def main():
     external_assets=[h for h in priced if h["contract"] not in known_contracts and h["contract"]!=WSDA]
     tx_by_hash={str(x.get("hash") or "").lower():x for x in txs}
     def block_of(h): return tx_by_hash.get(h,{}).get("block_number")
-    dates=[x.get("timestamp") for x in txs if x.get("timestamp")]
-    blocks=[x.get("block_number") for x in txs if x.get("block_number") is not None]
+    dates=[x.get("timestamp") for x in details.values() if x.get("timestamp")] or [x.get("timestamp") for x in txs if x.get("timestamp")]
+    blocks=[x.get("block_number") for x in details.values() if x.get("block_number") is not None] or [x.get("block_number") for x in txs if x.get("block_number") is not None]
     failed=[x for x in classifications if not x["success"]]
     blockers=[]
     if unmatched: blockers.extend([x["sell_tx"] for x in unmatched])
@@ -420,7 +460,7 @@ def main():
             "unwraps":sum(x["classification"]=="UNWRAP" for x in classifications)},
         "classifications":classifications,"closed_trades":closed,"unmatched_sells":unmatched,
         "realized_pnl_gross_sda":str(realized_gross),"realized_pnl_net_sda":str(realized_net),
-        "open_positions":open_positions,"open_cost_basis_sda":str(open_cost),
+        "open_positions":open_positions,"residual_dust":residual_dust,"open_cost_basis_sda":str(open_cost),
         "open_market_value_sda":str(open_value) if open_complete else None,
         "open_pnl_sda":str(open_pnl) if open_pnl is not None else None,
         "total_pnl_sda":str(total_pnl) if total_pnl is not None else None,"statistics":stats,
