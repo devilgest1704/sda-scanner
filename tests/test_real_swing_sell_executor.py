@@ -38,6 +38,7 @@ class SwingSellExecutionTests(unittest.TestCase):
         self.token_balances = []
         self.wsda_balances = []
         self.send_calls = []
+        self.events = []
         self.send = Mock(side_effect=self.fake_send)
         self.receipt = Mock(return_value={"status": "0x1", "logs": self.transfer_logs(200, 5 * 10**18)})
         self.rpc = Mock(side_effect=self.rpc_result)
@@ -98,7 +99,15 @@ class SwingSellExecutionTests(unittest.TestCase):
         return self.token_balances.pop(0) if self.token_balances else 800
 
     def fake_send(self, account, to, data, value=0, gas_limit=None, before_broadcast=None):
-        tx = "0xswap" if len(self.send_calls) == 0 else "0xunwrap"
+        if str(data).startswith("0x095ea7b3"):
+            tx = "0xapproval"
+            self.events.append("approval")
+        elif data == "0x1234":
+            tx = "0xswap"
+            self.events.append("swap")
+        else:
+            tx = "0xunwrap"
+            self.events.append("unwrap")
         self.send_calls.append(tx)
         if before_broadcast:
             before_broadcast({"tx_hash": tx, "nonce": len(self.send_calls),
@@ -117,6 +126,10 @@ class SwingSellExecutionTests(unittest.TestCase):
         self.assertTrue(pos["trailing_armed"])
         self.assertEqual(len(self.state["trades"]), 1)
         self.assertEqual(self.state["trades"][0]["sell_reason"], "PROFIT_PARTIAL_25")
+        open_value = Decimal(pos["remaining_quantity"]) * Decimal("0.025")
+        open_pnl = open_value - Decimal(pos["remaining_cost_basis"])
+        self.assertEqual(open_pnl, Decimal("4.0"))
+        self.assertEqual(open_pnl + Decimal(str(result["realized_pnl_sda"])), Decimal("5.0"))
 
     def test_restart_after_partial_does_not_repeat_partial(self):
         sell.evaluate_position(TOKEN, "TEST", "0.025", "2026-11-09T18:00:00Z")
@@ -183,6 +196,23 @@ class SwingSellExecutionTests(unittest.TestCase):
         self.assertEqual(self.state["legacy_pending_sells"][0]["record"]["tx_hash"], "0xlegacy")
         self.assertEqual(self.state["sell_migration_historical_transactions"], 0)
         self.send.assert_not_called()
+
+    def test_approval_is_confirmed_before_fresh_sell_quote(self):
+        events = []
+        def quote(*args, **kwargs):
+            events.append("quote")
+            return (3000, 10**19, "0x", 9999999999)
+        with patch.object(sell.trader, "allowance", side_effect=[0, 10**30]):
+            with patch.object(sell.trader, "quote_best_live_fee", side_effect=quote):
+                result = sell.evaluate_position(TOKEN, "TEST", "0.025")
+        self.assertEqual(result["status"], "CONFIRMED")
+        self.assertEqual(self.events[:3], ["approval", "swap", "unwrap"])
+        self.assertLess(self.events.index("approval"), events.index("quote"))
+        self.assertLess(events.index("quote"), self.events.index("swap"))
+
+    def test_legacy_full_position_executor_is_disabled(self):
+        with self.assertRaisesRegex(RuntimeError, "Legacy full-position SELL executor is disabled"):
+            sell.trader.execute_sell(TOKEN, "TEST", 1000)
 
     def test_two_concurrent_evaluations_create_only_one_partial(self):
         results = []
