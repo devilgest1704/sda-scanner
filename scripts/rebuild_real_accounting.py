@@ -611,7 +611,7 @@ def main():
     dump("real_accounting_report.json",report)
     dump("closed_trades.json",closed)
     dump("ledger_comparison.json",{"discrepancies":discrepancies,"ledger_updated_at":(ledger or {}).get("updated_at") if ledger else None})
-    Path("real_accounting_state.json").write_text(json.dumps(bot_state,indent=2,sort_keys=True,default=str)+"\\n",encoding="utf-8")
+    Path("real_accounting_state.json").write_text(json.dumps(bot_state,indent=2,sort_keys=True,default=str)+"\n",encoding="utf-8")
     print(json.dumps({"run_wallet":WALLET,"pages":evidence["meta"]["pagination"],"counts":report["counts"],
         "range":report["blockchain_range"],"realized_gross_sda":str(realized_gross),
         "realized_net_sda":str(realized_net),"open_cost_basis_sda":str(open_cost),
