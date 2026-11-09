@@ -238,7 +238,7 @@ def _main_text(data):
     open_pnl=f"{_fmt(data.get('open_pnl'),signed=True)} SDA"
     if data.get("open_pnl") is not None and not data.get("open_complete"):open_pnl+=" (partial)"
     return "\n".join([f"🤖 REAL TRADING {status_icon}","",f"💰 Portfolio {portfolio}",
-        f"📈 Total PnL {total}" if data.get("total_pnl") is not None else "📈 Total PnL N/A",
+        f"📈 Bot PnL {total}" if data.get("total_pnl") is not None else "📈 Bot PnL N/A",
         f"📊 Open PnL {open_pnl}",
         f"💵 Realized {realized}" if data.get("realized_pnl") is not None else "💵 Realized N/A",
         f"📦 Positions {len(data.get('positions') or [])}"])
@@ -263,23 +263,23 @@ def _date_short(value):
     return stamp.strftime("%d.%m") if stamp else ""
 
 def _buy_text(data):
-    lines=["🟢 BUY HISTORY"]
+    lines=["🟢 CONFIRMED BOT BUY HISTORY"]
     for item in (data.get("buy_records") or [])[:18]:
         date=_date_short(item.get("at"));prefix=f"{date} " if date else ""
         lines.append(f"{prefix}{item['symbol']} {_fmt(item.get('invested_sda'))} SDA")
-    lines += ["",f"BUY transactions: {data.get('buy_count',0)}",
+    lines += ["",f"Confirmed bot BUY transactions: {data.get('buy_count',0)},
         f"Total invested: {_fmt(data.get('total_invested'))} SDA"]
     if data.get("unverified_buy_count"):lines.append(f"⚠ {data['unverified_buy_count']} unverified BUY excluded")
     return "\n".join(lines)
 
 def _sell_text(data):
-    lines=["🔴 SELL HISTORY"]
+    lines=["🔴 MATCHED BOT SELL HISTORY"]
     for item in (data.get("sell_records") or [])[:18]:
         date=_date_short(item.get("at"));prefix=f"{date} " if date else ""
         pnl=item.get("pnl_sda")
         icon="✅" if pnl is not None and pnl>0 else ("❌" if pnl is not None and pnl<0 else "⚪")
         lines.append(f"{icon} {prefix}{item['symbol']} {_fmt(pnl,signed=True)} SDA")
-    lines += ["",f"SELL transactions: {data.get('sell_count',0)}",
+    lines += ["",f"Confirmed matched bot SELL transactions: {data.get('sell_count',0)},
         f"Wins: {data.get('wins',0)}  Losses: {data.get('losses',0)}",
         f"Realized PnL: {_fmt(data.get('realized_pnl'),signed=True)} SDA"]
     if data.get("unverified_sell_count"):lines.append(f"⚠ {data['unverified_sell_count']} unverified SELL excluded")
@@ -290,19 +290,22 @@ def _stats_text(data):
     if data.get("open_value") is not None and not data.get("open_complete"):open_value+=" (partial)"
     open_pnl=f"{_fmt(data.get('open_pnl'),signed=True)} SDA"
     if data.get("open_pnl") is not None and not data.get("open_complete"):open_pnl+=" (partial)"
-    lines=["📈 REAL STATISTICS","","Trades",f"BUY {data.get('buy_count',0)}",
-        f"SELL {data.get('sell_count',0)}",f"Open {len(data.get('positions') or [])}",
-        f"Closed {data.get('closed_count',0)}","","Results",f"Wins {data.get('wins',0)}",
+    lines=["📈 REAL STATISTICS","","Trades",
+        f"Open positions {len(data.get('positions') or [])}",
+        f"Confirmed bot BUY {data.get('buy_count',0)}",
+        f"Confirmed matched bot SELL {data.get('sell_count',0)}",
+        f"Closed trades {data.get('closed_count',0)}","","Results",f"Wins {data.get('wins',0)}",
         f"Losses {data.get('losses',0)}",
         f"Win rate {data['win_rate']:.1f}%" if data.get("win_rate") is not None else "Win rate N/A",
         "","PnL",f"Total invested {_fmt(data.get('total_invested'))} SDA",
         f"Current open value {open_value}",f"Open {open_pnl}",
         f"Realized {_fmt(data.get('realized_pnl'),signed=True)} SDA"+(" (partial)" if data.get("realized_partial") else ""),
         f"Total {_fmt(data.get('total_pnl'),signed=True)} SDA"+(" (partial)" if data.get("total_partial") else ""),
-        "","Closed trades",f"Avg win {_fmt(data.get('average_win'),signed=True)} SDA",
+        "","Closed trades",f"Average trade {_fmt(data.get('average_trade'),signed=True)} SDA",
+        f"Avg win {_fmt(data.get('average_win'),signed=True)} SDA",
         f"Avg loss {_fmt(data.get('average_loss'),signed=True)} SDA",
-        f"Best {_fmt(data.get('best_trade'),signed=True)} SDA",
-        f"Worst {_fmt(data.get('worst_trade'),signed=True)} SDA"]
+        f"Best {data.get('best_trade_label') or 'trade'} {_fmt(data.get('best_trade'),signed=True)} SDA",
+        f"Worst {data.get('worst_trade_label') or 'trade'} {_fmt(data.get('worst_trade'),signed=True)} SDA"]
     if data.get("unverified_sell_count"):lines += ["",f"⚠ {data['unverified_sell_count']} unverified SELL excluded; PnL is partial"]
     if not data.get("portfolio_complete"):lines += ["",f"⚠ Wallet valuation partial: {data.get('portfolio_valued_count',0)}/{data.get('portfolio_total_count',0)} assets"]
     return "\n".join(lines)
