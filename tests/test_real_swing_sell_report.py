@@ -16,6 +16,13 @@ class ReadOnlySellReportTests(unittest.TestCase):
  def test_stale_scanner_price_unavailable(self):
   row=report.build_decision_rows(STATE,analysis(.30,"2026-11-09T18:50:00Z"),META,now=NOW)[0]
   self.assertEqual(row["action"],"PRICE_UNAVAILABLE"); self.assertIsNone(row["decision_price"])
+  self.assertEqual(row["swing_state"],"WAITING_PARTIAL")
+ def test_fresh_supabase_fallback_is_used_when_scanner_price_is_stale(self):
+  lookup=lambda _token: {"price_sda":.205,"timestamp":"2026-11-09T19:08:00Z"}
+  row=report.build_decision_rows(STATE,analysis(.30,"2026-11-09T18:50:00Z"),META,now=NOW,supabase_lookup=lookup)[0]
+  self.assertEqual(row["action"],"HOLD")
+  self.assertEqual(row["price_source"],"supabase_transaction")
+  self.assertAlmostEqual(row["pnl_pct"],2.5)
  def test_partial_trigger(self):
   row=report.build_decision_rows(STATE,analysis(.25,"2026-11-09T19:08:00Z"),META,now=NOW)[0]
   self.assertEqual(row["action"],"PARTIAL_SELL_20")
