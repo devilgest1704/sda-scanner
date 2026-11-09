@@ -132,6 +132,19 @@ class SwingSellExecutionTests(unittest.TestCase):
         self.assertEqual(open_pnl, Decimal("4.0"))
         self.assertEqual(open_pnl + Decimal(str(result["realized_pnl_sda"])), Decimal("5.0"))
 
+    def test_confirmed_sell_dispatches_readonly_telegram_accounting_refresh(self):
+        response = SimpleNamespace(status_code=204)
+        with patch.dict("os.environ", {
+            "GH_TOKEN": "test-token",
+            "GITHUB_REPOSITORY": "devilgest1704/sda-scanner",
+        }):
+            with patch.object(sell.trader.requests, "post", return_value=response) as dispatch:
+                result = sell.evaluate_position(TOKEN, "TEST", "0.025")
+        self.assertEqual(result["status"], "CONFIRMED")
+        dispatch.assert_called_once()
+        self.assertIn("real-accounting-readonly.yml/dispatches", dispatch.call_args.args[0])
+        self.assertFalse(self.state["accounting_refresh_pending"])
+
     def test_restart_after_partial_does_not_repeat_partial(self):
         sell.evaluate_position(TOKEN, "TEST", "0.025", "2026-11-09T18:00:00Z")
         self.token_balances = [800]
