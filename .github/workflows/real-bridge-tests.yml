@@ -46,3 +46,32 @@ jobs:
         continue-on-error: true
       - name: Run REAL Telegram accounting and callback regression tests
         run: python -m pytest -q tests/test_real_bot_views.py tests/test_telegram_callback_router.py
+      - name: Render and reconcile all REAL menus from generated blockchain state
+        if: hashFiles('real_accounting_state.json') != ''
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from types import SimpleNamespace
+          import real_bot_menu as rb
+          import real_bot_views as views
+
+          state=json.loads(Path("real_accounting_state.json").read_text(encoding="utf-8"))
+          rb._load_worker_status=lambda _dashboard: {"enabled": True, "dry_run": False}
+          rb._status=lambda _worker: "🟢 LIVE"
+          dashboard=SimpleNamespace(load=lambda path, default: state if path=="real_accounting_state.json" else default)
+          views.clear_cache()
+          data=views._build_dashboard_data(dashboard)
+          assert len(data["positions"]) == state["statistics"]["open_positions_count"]
+          assert len(data["buy_records"]) == state["statistics"]["confirmed_buys_count"]
+          assert len(data["sell_records"]) == state["statistics"]["matched_sells_count"]
+          assert abs(sum(float(x["pnl_sda"]) for x in data["sell_records"])-float(state["realized_pnl_sda"])) < 1e-8
+          assert abs(sum(float(x["pnl_sda"]) for x in data["positions"])-float(state["open_pnl_sda"])) < 1e-8
+          assert abs(float(state["total_pnl_sda"])-float(state["realized_pnl_sda"])-float(state["open_pnl_sda"])) < 1e-8
+          assert all(x["symbol"]!="PINE" for x in data["buy_records"]+data["sell_records"]+data["positions"])
+          assert all(x["symbol"]!="HAQ" for x in data["positions"])
+          for view in ("main","portfolio","buy","sell","stats"):
+              text,_=views.render_view(dashboard,view,refresh=True)
+              print(f"===== REAL {view.upper()} =====")
+              print(text)
+          PY
