@@ -1,9 +1,8 @@
-"""Position Action UI compatibility layer.
+"""Compatibility layer for legacy REAL Telegram callbacks.
 
-V26 is the single paper/decision policy. This module only wires the existing
-Telegram Real Wallet menu to the V26 read-only reports.
+Every REAL PnL/statistics view delegates to the canonical blockchain FIFO
+accounting state through real_bot_views; this module performs no PnL math.
 """
-from copy import deepcopy
 import v26_dashboard_patch
 import real_wallet_market_fix
 
