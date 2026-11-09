@@ -325,6 +325,17 @@ def _newest_market_price(token, market_snapshot=None, dashboard=None,
     price = _scanner_snapshot_price(token, snapshot, max_age_seconds=max_age_seconds)
     if price is not None:
         return price
+    # If a fresh scanner snapshot already contains this token, its last trade
+    # timestamp is authoritative. Do not issue a redundant per-token Supabase
+    # request when that trade is stale; the same transaction feed cannot make
+    # the cached observation newer.
+    snapshot_stamp = _parse_utc(snapshot.get("updated_at")) if isinstance(snapshot, dict) else None
+    row_map = snapshot.get("tokens") if isinstance(snapshot, dict) else None
+    if (snapshot_stamp is not None and
+            0 <= (datetime.now(timezone.utc) - snapshot_stamp).total_seconds() <= max_age_seconds and
+            isinstance(row_map, dict) and token in row_map):
+        return {"price_sda": None, "timestamp": None, "age_seconds": None,
+                "stale": True, "source": "scanner market_analysis.json"}
     try:
         candidate = _newest_supabase_price(token)
         age = candidate.get("age_seconds") if isinstance(candidate, dict) else None
