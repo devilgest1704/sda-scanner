@@ -113,6 +113,7 @@ def _verify_trades(state,wallet):
         return list(pool.map(verify,rows))
 
 def _build_dashboard_data(dashboard):
+    # Canonical source: real_accounting_state.json, generated from complete blockchain FIFO evidence.
     """All REAL Telegram screens consume one blockchain-derived accounting state."""
     try:
         accounting=dashboard.load("real_accounting_state.json",{})
