@@ -17,6 +17,21 @@ class ReadOnlySellReportTests(unittest.TestCase):
   row=report.build_decision_rows(STATE,analysis(.30,"2026-11-09T18:50:00Z"),META,now=NOW)[0]
   self.assertEqual(row["action"],"PRICE_UNAVAILABLE"); self.assertIsNone(row["decision_price"])
   self.assertEqual(row["swing_state"],"WAITING_PARTIAL")
+ def test_stale_scanner_snapshot_is_rejected_even_with_recent_trade(self):
+  snapshot=analysis(.205,"2026-11-09T19:08:00Z")
+  snapshot["updated_at"]="2026-11-09T18:50:00Z"
+  row=report.build_decision_rows(STATE,snapshot,META,now=NOW)[0]
+  self.assertEqual(row["action"],"PRICE_UNAVAILABLE")
+  self.assertIsNone(row["decision_price"])
+
+ def test_wallet_excess_does_not_quarantine_position(self):
+  state={"sell_migration_observation_started_at":"2026-11-09T18:09:10Z","positions":{TOKEN:{
+   "amount_sda":20,"remaining_cost_basis":"20","remaining_quantity":100*10**18,
+   "token_amount_raw":100*10**18,"wallet_available_quantity":100*10**18+12345,
+   "profit_partial_done":False,"trailing_armed":False}}}
+  row=report.build_decision_rows(state,analysis(.205,"2026-11-09T19:08:00Z"),META,now=NOW)[0]
+  self.assertEqual(row["action"],"HOLD")
+  self.assertIsNone(row["quarantine_reason"])
  def test_fresh_supabase_fallback_is_used_when_scanner_price_is_stale(self):
   lookup=lambda _token: {"price_sda":.205,"timestamp":"2026-11-09T19:08:00Z"}
   row=report.build_decision_rows(STATE,analysis(.30,"2026-11-09T18:50:00Z"),META,now=NOW,supabase_lookup=lookup)[0]
