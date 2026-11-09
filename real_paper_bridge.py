@@ -146,6 +146,10 @@ def reconcile():
                                         "token": token, "symbol": symbol,
                                         "status": "CLOSED", "at": _now()})
                         continue
+                    if wallet_reconciliation.get("status") == "MANUAL_RECONCILED":
+                        actions.append({"action": "MANUAL_SELL_RECONCILIATION",
+                                        "token": token, "symbol": symbol,
+                                        "status": "PARTIAL", "at": _now()})
                     market = real_bot_menu._newest_supabase_price(token)
                     price = market.get("price_sda") if isinstance(market, dict) else None
                     age = market.get("age_seconds") if isinstance(market, dict) else None
