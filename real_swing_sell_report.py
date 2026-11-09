@@ -2,6 +2,7 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from concurrent.futures import ThreadPoolExecutor
 import swing_sell_v2 as policy
 
 MAX_PRICE_AGE_SECONDS = 300
@@ -68,6 +69,14 @@ def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None):
     metadata=metadata if isinstance(metadata,dict) else {}
     migration=_stamp((state or {}).get("sell_migration_observation_started_at") or (state or {}).get("sell_strategy_migrated_at"))
     rows=[]
+    tokens=[str(token).lower() for token,position in positions.items() if isinstance(position,dict)]
+    scanner_prices={token:scanner_market_price(token,analysis,now) for token in tokens}
+    fallback_tokens=[token for token in tokens if scanner_prices.get(token) is None]
+    fallback_prices={}
+    if callable(supabase_lookup) and fallback_tokens:
+        with ThreadPoolExecutor(max_workers=min(8,len(fallback_tokens))) as pool:
+            values=list(pool.map(lambda token:_supabase_market_price(token,supabase_lookup,now,MAX_PRICE_AGE_SECONDS),fallback_tokens))
+        fallback_prices=dict(zip(fallback_tokens,values))
     for token,position in positions.items():
         if not isinstance(position,dict): continue
         token=str(token).lower()
@@ -84,7 +93,7 @@ def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None):
         partial=bool(position.get("profit_partial_done")); trailing=bool(position.get("trailing_armed"))
         peak=_decimal(position.get("highest_price_since_trailing_activation"))
         trail=peak*Decimal("0.85") if trailing and peak and peak>0 else None
-        market=resolve_decision_price(token,analysis,now,supabase_lookup)
+        market=scanner_prices.get(token) or fallback_prices.get(token)
         if market and migration:
             observed=_stamp(market.get("timestamp"))
             if observed is None or observed<=migration: market=None
