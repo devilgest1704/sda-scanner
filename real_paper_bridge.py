@@ -134,7 +134,12 @@ def reconcile():
     if not migrated:
         try:
             import real_bot_menu
-            market_snapshot = real_bot_menu.load_market_snapshot()
+            import real_swing_sell_report
+            try:
+                with open("market_analysis.json", "r", encoding="utf-8") as handle:
+                    market_snapshot = json.load(handle)
+            except Exception:
+                market_snapshot = {}
             real_state = real_trader.load_state()
             for token, real_pos in list(real_state.get("positions", {}).items()):
                 if not isinstance(real_pos, dict):
@@ -151,8 +156,10 @@ def reconcile():
                         actions.append({"action": "MANUAL_SELL_RECONCILIATION",
                                         "token": token, "symbol": symbol,
                                         "status": "PARTIAL", "at": _now()})
-                    market = real_bot_menu._newest_market_price(
-                        token, market_snapshot=market_snapshot, max_age_seconds=300
+                    market = real_swing_sell_report.resolve_decision_price(
+                        token, market_snapshot,
+                        supabase_lookup=real_bot_menu._newest_supabase_price,
+                        max_age=300,
                     )
                     price = market.get("price_sda") if isinstance(market, dict) else None
                     age = market.get("age_seconds") if isinstance(market, dict) else None
