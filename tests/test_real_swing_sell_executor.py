@@ -39,8 +39,8 @@ class SwingSellExecutionTests(unittest.TestCase):
         self.wsda_balances = []
         self.send_calls = []
         self.send = Mock(side_effect=self.fake_send)
-        self.receipt = Mock(return_value={"status": "0x1"})
-        self.rpc = Mock(side_effect=lambda method, params: self.receipt(method, params))
+        self.receipt = Mock(return_value={"status": "0x1", "logs": self.transfer_logs(200, 5 * 10**18)})
+        self.rpc = Mock(side_effect=self.rpc_result)
         self.patches = [
             patch.object(sell.trader, "load_state", self.load),
             patch.object(sell.trader, "save_state", self.save),
@@ -75,6 +75,22 @@ class SwingSellExecutionTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def transfer_logs(self, sold, proceeds):
+        topic = sell.TRANSFER_TOPIC
+        wallet_topic = "0x" + WALLET[2:].rjust(64, "0")
+        router_topic = "0x" + ROUTER[2:].rjust(64, "0")
+        return [
+            {"address": TOKEN, "topics": [topic, wallet_topic, router_topic],
+             "data": hex(int(sold))},
+            {"address": WSDA, "topics": [topic, router_topic, wallet_topic],
+             "data": hex(int(proceeds))},
+        ]
+
+    def rpc_result(self, method, params):
+        if params[0] == "0xunwrap":
+            return {"status": "0x1", "logs": []}
+        return self.receipt(method, params)
 
     def balance(self, token, owner):
         if token == WSDA:
@@ -152,6 +168,7 @@ class SwingSellExecutionTests(unittest.TestCase):
     def test_wallet_quantity_caps_full_sell(self):
         self.token_balances = [600, 600, 600, 0]
         self.wsda_balances = [0, 0, 12 * 10**18]
+        self.receipt.return_value = {"status": "0x1", "logs": self.transfer_logs(600, 12 * 10**18)}
         result = sell.evaluate_position(TOKEN, "TEST", "0.01")
         self.assertEqual(result["status"], "CONFIRMED")
         self.assertNotIn(TOKEN, self.state["positions"])
