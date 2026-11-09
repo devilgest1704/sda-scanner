@@ -84,8 +84,14 @@ def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None):
         symbol=str(meta.get("symbol") or position.get("symbol") or token[:10])
         try:
             decimals=int(meta.get("decimals"))
-            quantity=int(position.get("remaining_quantity",position.get("token_amount_raw")))
-            cost=_decimal(position.get("remaining_cost_basis",position.get("amount_sda",position.get("cost_sda"))))
+            quantity_value=position.get("remaining_quantity")
+            if quantity_value is None:
+                quantity_value=position.get("token_amount_raw")
+            cost_value=position.get("remaining_cost_basis")
+            if cost_value is None:
+                cost_value=position.get("amount_sda",position.get("cost_sda"))
+            quantity=int(quantity_value)
+            cost=_decimal(cost_value)
         except (TypeError,ValueError,OverflowError):
             decimals,quantity,cost=-1,0,None
         valid=0<=decimals<=36 and quantity>0 and cost is not None and cost>0
@@ -104,10 +110,16 @@ def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None):
         if wallet_qty is not None:
             try: mismatch=int(wallet_qty)!=quantity
             except (TypeError,ValueError,OverflowError): mismatch=True
+        quarantine_reason=None
         if _active_intent(intent):
             swing_state,action="SELL_INTENT_PENDING","SELL_QUARANTINED"
-        elif mismatch or not valid:
+            quarantine_reason="SELL_INTENT_PENDING"
+        elif mismatch:
             swing_state,action="WALLET_RECONCILIATION_REQUIRED","SELL_QUARANTINED"
+            quarantine_reason="WALLET_QUANTITY_MISMATCH"
+        elif not valid:
+            swing_state,action="WALLET_RECONCILIATION_REQUIRED","SELL_QUARANTINED"
+            quarantine_reason="INVALID_POSITION_BASIS"
         elif price is not None and entry is not None:
             fraction=price/entry-Decimal(1); pnl=float(fraction*100)
             preview=dict(position)
@@ -124,5 +136,5 @@ def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None):
             "price_age_seconds":market.get("age_seconds") if market else None,"price_source":market.get("source") if market else None,
             "pnl_pct":pnl,"profit_partial_done":partial,"trailing_armed":trailing,
             "current_peak":float(peak) if peak is not None else None,"trailing_price":float(trail) if trail is not None else None,
-            "swing_state":swing_state,"action":action})
+            "swing_state":swing_state,"action":action,"quarantine_reason":quarantine_reason})
     return rows
