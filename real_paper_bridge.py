@@ -140,6 +140,12 @@ def reconcile():
                     continue
                 symbol = str(real_pos.get("symbol") or token[:8])
                 try:
+                    wallet_reconciliation = swing_executor.reconcile_position_wallet(token)
+                    if wallet_reconciliation.get("status") == "CLOSED_MANUAL_RECONCILED":
+                        actions.append({"action": "MANUAL_SELL_RECONCILIATION",
+                                        "token": token, "symbol": symbol,
+                                        "status": "CLOSED", "at": _now()})
+                        continue
                     market = real_bot_menu._newest_supabase_price(token)
                     price = market.get("price_sda") if isinstance(market, dict) else None
                     age = market.get("age_seconds") if isinstance(market, dict) else None
@@ -149,7 +155,8 @@ def reconcile():
                                         "at": _now()})
                         continue
                     result = swing_executor.evaluate_position(
-                        token, symbol, price, market.get("timestamp")
+                        token, symbol, price, market.get("timestamp"),
+                        wallet_reconciled=True
                     )
                     actions.append({"action": "SELL_DECISION", "token": token,
                                     "symbol": symbol, **result, "at": _now()})
