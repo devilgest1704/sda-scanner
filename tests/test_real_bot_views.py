@@ -16,7 +16,7 @@ POSITION_ROWS = [
     ("FREEt", 20.026326148366508, 0.026160769614920364),
     ("SGWA", 20.453709912231375, 0.453380354731375),
     ("VLCP", 17.215845328477638, -2.784667449172362),
-    ("BZST", 19.603389179236153, -0.463184820764779036),
+    ("BZST", 19.915700680587005, -0.150873319413927036),
 ]
 SELL_ROWS = [
     ("SDS", -1.389311804706278277),
@@ -72,13 +72,13 @@ def _accounting_state():
         "schema_version": 1,
         "bot_reconciliation_status": "COMPLETE",
         "bot_unresolved_transactions": [],
-        "wallet_value_sda": "350.9958932906058869876318570",
+        "wallet_value_sda": "351.3082603369996777960878570",
         "wallet_value_complete": False,
         "native_balance_sda": "120.499217823303884285",
         "wallet_valuation": {"valued_assets_count": 31, "total_assets_count": 32},
         "realized_pnl_sda": "32.56109105665811362536319366",
-        "open_pnl_sda": "-4.526729887011644369",
-        "total_pnl_sda": "28.03436116964646925636319366",
+        "open_pnl_sda": "-4.214418385660792369",
+        "total_pnl_sda": "28.34667267099732125636319366",
         "open_positions": positions,
         "buy_transactions": buys,
         "sell_transactions": sells,
@@ -114,9 +114,9 @@ def built_data(monkeypatch):
 def test_main_menu_uses_bot_pnl_and_wallet_total_separately(built_data):
     text = views._main_text(built_data)
     assert "🤖 REAL TRADING 🟢" in text
-    assert "Portfolio ≥351.00 SDA (31/32)" in text
-    assert "Bot PnL +28.03 SDA" in text
-    assert "Open PnL -4.53 SDA" in text
+    assert "Portfolio ≥351.31 SDA (31/32)" in text
+    assert "Bot PnL +28.35 SDA" in text
+    assert "Open PnL -4.21 SDA" in text
     assert "Realized +32.56 SDA" in text
     assert "Positions 9" in text
     assert "(partial)" not in text
@@ -161,7 +161,7 @@ def test_statistics_reconcile_exactly_with_main_portfolio_and_history(built_data
         "Open positions 9", "Confirmed bot BUY 21", "Confirmed matched bot SELL 14",
         "Wins 6", "Losses 8", "Win rate 42.9%", "Average trade +2.33 SDA",
         "Best JSFT +18.02 SDA", "Worst SDS -1.39 SDA",
-        "Realized +32.56 SDA", "Open -4.53 SDA", "Total +28.03 SDA",
+        "Realized +32.56 SDA", "Open -4.21 SDA", "Total +28.35 SDA",
     ]:
         assert expected in text
 
