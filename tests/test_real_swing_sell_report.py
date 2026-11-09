@@ -29,6 +29,13 @@ class ReadOnlySellReportTests(unittest.TestCase):
  def test_emergency_exit(self):
   row=report.build_decision_rows(STATE,analysis(.10,"2026-11-09T19:08:00Z"),META,now=NOW)[0]
   self.assertEqual(row["action"],"FULL_SELL_EMERGENCY")
+ def test_null_partial_fields_fall_back_to_original_position_basis(self):
+  state={"sell_migration_observation_started_at":"2026-11-09T18:09:10Z","positions":{TOKEN:{
+   "remaining_quantity":None,"remaining_cost_basis":None,"token_amount_raw":100*10**18,
+   "amount_sda":20,"wallet_available_quantity":100*10**18}}}
+  row=report.build_decision_rows(state,analysis(.205,"2026-11-09T19:08:00Z"),META,now=NOW)[0]
+  self.assertEqual(row["action"],"HOLD")
+  self.assertIsNone(row["quarantine_reason"])
  def test_unresolved_intent_quarantines(self):
   state=dict(STATE); state["pending_sells"]={TOKEN:{"stage":"SWAP_SUBMITTED","status":"SUBMITTED"}}
   row=report.build_decision_rows(state,analysis(.25,"2026-11-09T19:08:00Z"),META,now=NOW)[0]
