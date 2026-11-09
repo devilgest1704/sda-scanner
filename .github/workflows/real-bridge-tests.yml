@@ -62,12 +62,14 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install requests eth-account pytest fastapi httpx
       - name: Static Python syntax validation
-        run: python -m compileall -q real_trader.py real_paper_bridge.py real_swing_sell_executor.py swing_sell_v2.py
+        run: python -m compileall -q real_trader.py real_paper_bridge.py real_swing_sell_executor.py real_swing_sell_report.py swing_sell_v2.py
       - name: Run repository unittest suite
         run: python -m unittest discover -s tests -v
         continue-on-error: true
       - name: Run Swing SELL V2 policy regression tests
         run: python -m pytest -q tests/test_swing_sell_v2.py
+      - name: Run read-only Swing SELL V2 decision report tests
+        run: python -m pytest -q tests/test_real_swing_sell_report.py
       - name: Run Swing SELL V2 live-executor mock integration tests
         run: python -m pytest -q tests/test_real_swing_sell_executor.py
       - name: Run PAPER-to-REAL bridge regression tests
