@@ -9,12 +9,12 @@ from swing_sell_v2 import (
 
 class SwingSellV2PolicyTests(unittest.TestCase):
     def test_loss_boundaries(self):
-        for pnl in ("-0.10", "-0.25", "-0.40", "-0.499"):
+        for pnl in ("-0.10", "-0.25", "-0.40", "-0.49", "-0.499"):
             self.assertEqual(decide({}, pnl, "1")["action"], "HOLD")
         self.assertEqual(decide({}, "-0.50", "1")["action"], "FULL_SELL")
 
     def test_profit_boundaries_and_one_time_partial(self):
-        for pnl in ("0.10", "0.249"):
+        for pnl in ("0.10", "0.24", "0.249"):
             self.assertEqual(decide({}, pnl, "1")["action"], "HOLD")
         self.assertEqual(decide({}, "0.25", "1")["action"], "PARTIAL_SELL")
         already_partial = {"profit_partial_done": True, "trailing_armed": True,
