@@ -391,7 +391,7 @@ def _sell_v2_text(dashboard):
     state=load(cfg.STATE_FILE)
     analysis=load("market_analysis.json")
     metadata=load("token_metadata.json")
-    rows=report.build_decision_rows(state, analysis, metadata)
+    rows=report.build_decision_rows(state, analysis, metadata, supabase_lookup=rb._newest_supabase_price)
     lines=["🎯 SELL V2 • READ ONLY",""]
     if not rows:
         lines.append("⚪ No open REAL positions")
