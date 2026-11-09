@@ -198,17 +198,14 @@ class SwingSellExecutionTests(unittest.TestCase):
         self.send.assert_not_called()
 
     def test_approval_is_confirmed_before_fresh_sell_quote(self):
-        events = []
         def quote(*args, **kwargs):
-            events.append("quote")
+            self.events.append("quote")
             return (3000, 10**19, "0x", 9999999999)
         with patch.object(sell.trader, "allowance", side_effect=[0, 10**30]):
             with patch.object(sell.trader, "quote_best_live_fee", side_effect=quote):
                 result = sell.evaluate_position(TOKEN, "TEST", "0.025")
         self.assertEqual(result["status"], "CONFIRMED")
-        self.assertEqual(self.events[:3], ["approval", "swap", "unwrap"])
-        self.assertLess(self.events.index("approval"), events.index("quote"))
-        self.assertLess(events.index("quote"), self.events.index("swap"))
+        self.assertEqual(self.events[:4], ["approval", "quote", "swap", "unwrap"])
 
     def test_legacy_full_position_executor_is_disabled(self):
         with self.assertRaisesRegex(RuntimeError, "Legacy full-position SELL executor is disabled"):
