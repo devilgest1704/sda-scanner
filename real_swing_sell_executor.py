@@ -23,6 +23,34 @@ ACTIVE_STAGES = {
     "SWAP_SUBMITTED", "SWAP_CONFIRMED", "UNWRAP_SUBMITTED",
 }
 
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+
+def _confirmed_transfer_deltas(receipt, token, wallet):
+    """Extract exact wallet token outflow and WSDA inflow from this tx receipt."""
+    sold = 0
+    proceeds = 0
+    wallet = trader.addr(wallet)
+    token = trader.addr(token)
+    for log in (receipt or {}).get("logs", []):
+        try:
+            if str(log.get("topics", [""])[0]).lower() != TRANSFER_TOPIC:
+                continue
+            topics = log.get("topics") or []
+            if len(topics) < 3:
+                continue
+            sender = "0x" + str(topics[1])[-40:].lower()
+            recipient = "0x" + str(topics[2])[-40:].lower()
+            amount = int(str(log.get("data") or "0x0"), 16)
+            contract = trader.addr(log.get("address"))
+            if contract == token and sender == wallet:
+                sold += amount
+            if contract == trader.addr(cfg.WSDA_ADDRESS) and recipient == wallet:
+                proceeds += amount
+        except (TypeError, ValueError, IndexError):
+            continue
+    return sold, proceeds
+
 
 @contextmanager
 def _token_lock(token):
@@ -278,12 +306,13 @@ def _resolve_existing(token, intent):
                 return {"action": "SELL", "status": "UNKNOWN", "token": token, "tx": tx_hash}
             intent["confirmed_token_balance_after"] = token_after
             intent["confirmed_wsda_balance_after"] = wsda_after
-            intent["confirmed_sold_quantity_raw"] = max(
-                0, int(intent["token_balance_before"]) - int(token_after)
-            )
-            intent["confirmed_proceeds_raw"] = max(
-                0, int(wsda_after) - int(intent["wsda_balance_before"])
-            )
+            sold_raw, proceeds_raw = _confirmed_transfer_deltas(receipt, token, owner)
+            intent["confirmed_sold_quantity_raw"] = sold_raw
+            intent["confirmed_proceeds_raw"] = proceeds_raw
+            if sold_raw <= 0 or proceeds_raw <= 0 or sold_raw > int(intent["token_balance_before"]):
+                intent["status"] = "UNKNOWN"
+                _update_intent(token, intent)
+                return {"action": "SELL", "status": "ACCOUNTING_UNVERIFIED", "token": token}
             _update_intent(token, intent)
         elif stage == "UNWRAP_SUBMITTED":
             intent.pop("tx_hash", None)
@@ -445,12 +474,13 @@ def _submit_swap(token, intent):
         return {"action": "SELL", "status": "ACCOUNTING_UNVERIFIED", "token": token}
     intent["confirmed_token_balance_after"] = token_after
     intent["confirmed_wsda_balance_after"] = wsda_after
-    intent["confirmed_sold_quantity_raw"] = max(
-        0, int(intent["token_balance_before"]) - int(token_after)
-    )
-    intent["confirmed_proceeds_raw"] = max(
-        0, int(wsda_after) - int(intent["wsda_balance_before"])
-    )
+    sold_raw, proceeds_raw = _confirmed_transfer_deltas(receipt, token, owner)
+    intent["confirmed_sold_quantity_raw"] = sold_raw
+    intent["confirmed_proceeds_raw"] = proceeds_raw
+    if sold_raw <= 0 or proceeds_raw <= 0 or sold_raw > int(intent["token_balance_before"]):
+        intent["status"] = "UNKNOWN"
+        _update_intent(token, intent)
+        return {"action": "SELL", "status": "ACCOUNTING_UNVERIFIED", "token": token}
     _update_intent(token, intent)
     return _resolve_existing(token, intent)
 
