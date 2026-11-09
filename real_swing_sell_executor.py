@@ -302,6 +302,7 @@ def _resolve_existing(token, intent):
             intent.pop("tx_hash", None)
             intent["swap_tx"] = tx_hash
             intent["stage"] = "SWAP_CONFIRMED"
+            intent["status"] = "CONFIRMED"
             owner = trader.wallet_address()
             sold_raw, proceeds_raw = _confirmed_transfer_deltas(receipt, token, owner)
             intent["confirmed_sold_quantity_raw"] = sold_raw
@@ -315,6 +316,7 @@ def _resolve_existing(token, intent):
             intent.pop("tx_hash", None)
             intent["unwrap_tx"] = tx_hash
             intent["stage"] = "RECONCILED_READY"
+            intent["status"] = "CONFIRMED"
             _update_intent(token, intent)
     if intent.get("stage") == "SWAP_CONFIRMED":
         sold = int(intent.get("confirmed_sold_quantity_raw") or 0)
@@ -473,6 +475,7 @@ def _submit_swap(token, intent):
         trader.save_state(state)
         return {"action": "SELL", "status": "SWAP_FAILED", "token": token, "tx": tx}
     intent["stage"] = "SWAP_CONFIRMED"
+    intent["status"] = "CONFIRMED"
     intent.pop("tx_hash", None)
     intent["swap_tx"] = tx
     sold_raw, proceeds_raw = _confirmed_transfer_deltas(receipt, token, owner)
