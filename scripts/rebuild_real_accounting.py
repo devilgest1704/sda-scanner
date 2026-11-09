@@ -519,9 +519,99 @@ def main():
             "cash_reconciliation_zero":abs(cash_delta)<=Decimal("0.00000001"),
             "open_positions_valued":open_complete,"wallet_value_complete":wallet_value_complete,
             "unmatched_sell_count":len(unmatched),"ledger_loaded":ledger is not None}}
+    # BOT accounting is narrower than wallet accounting: only successful,
+    # wallet-funded router BUYs and FIFO-matched SELLs have verified bot basis.
+    bot_buy_records=[]
+    for tx in classifications:
+        if tx.get("classification")!="BUY" or not tx.get("success"): continue
+        received=next((d for d in tx.get("token_deltas",[]) if d.get("direction")=="IN"
+                       and str(d.get("symbol") or "").upper()!="PINE"
+                       and str(d.get("contract") or "").lower()!=WSDA),None)
+        if not received: continue
+        bot_buy_records.append({"tx":tx["hash"],"at":tx.get("timestamp"),
+            "symbol":received.get("symbol") or "UNKNOWN","contract":str(received.get("contract") or "").lower(),
+            "quantity":str(received.get("quantity") or "0"),"invested_sda":str(tx.get("native_value_sda") or "0")})
+    bot_buy_contracts={x["contract"] for x in bot_buy_records}
+    bot_closed_trades=[x for x in closed if str(x.get("contract") or "").lower() in bot_buy_contracts
+                       and str(x.get("token") or "").upper()!="PINE"]
+    bot_open_positions=[]
+    for p in open_positions:
+        contract=str(p.get("contract") or "").lower()
+        quantity=Decimal(str(p.get("quantity") or "0"))
+        if contract not in bot_buy_contracts or str(p.get("token") or "").upper()=="PINE" or quantity<=Decimal("0.001"):
+            continue
+        pnl=Decimal(str(p.get("open_pnl_sda") or "0"))
+        value=Decimal(str(p.get("current_value_sda"))) if p.get("current_value_sda") is not None else None
+        cost=Decimal(str(p.get("total_cost_basis_sda") or "0"))
+        bot_open_positions.append({"token":contract,"symbol":p.get("token") or "UNKNOWN","quantity":str(quantity),
+            "value_sda":str(value) if value is not None else None,"cost_basis_sda":str(cost),
+            "open_pnl_sda":str(pnl),"pnl_pct":str(pnl/cost*100) if cost>0 else None,
+            "buy_tx":p.get("buy_tx"),"at":p.get("timestamp")})
+    bot_open_positions.sort(key=lambda x:x["symbol"])
+    bot_closed_trades.sort(key=lambda x:(str(x.get("timestamp") or ""),str(x.get("sell_tx") or "")),reverse=True)
+    bot_net_values=[Decimal(x["net_pnl_sda"]) for x in bot_closed_trades]
+    bot_wins=[x for x in bot_net_values if x>0]
+    bot_losses=[x for x in bot_net_values if x<0]
+    bot_realized=sum(bot_net_values,Decimal(0))
+    bot_open_pnl=sum((Decimal(x["open_pnl_sda"]) for x in bot_open_positions),Decimal(0))
+    bot_total=bot_realized+bot_open_pnl
+    bot_open_complete=all(x["value_sda"] is not None for x in bot_open_positions)
+    bot_unmatched=[x for x in unmatched if str(x.get("contract") or "").lower() in bot_buy_contracts
+                   and str(x.get("token") or "").upper()!="PINE"]
+    bot_blockers=[]
+    if errors: bot_blockers.extend(sorted(errors))
+    if abs(cash_delta)>Decimal("0.00000001"): bot_blockers.append("NATIVE_CASH_RECONCILIATION_DELTA")
+    bot_blockers.extend(x["sell_tx"] for x in bot_unmatched)
+    if not bot_open_complete:
+        bot_blockers.extend(x["buy_tx"] for x in bot_open_positions if x["value_sda"] is None)
+    bot_blockers=sorted(set(bot_blockers))
+    best=max(bot_closed_trades,key=lambda x:Decimal(x["net_pnl_sda"])) if bot_closed_trades else None
+    worst=min(bot_closed_trades,key=lambda x:Decimal(x["net_pnl_sda"])) if bot_closed_trades else None
+    bot_stats={"open_positions_count":len(bot_open_positions),"confirmed_buys_count":len(bot_buy_records),
+        "matched_sells_count":len(bot_closed_trades),"wins":len(bot_wins),"losses":len(bot_losses),
+        "win_rate_pct":str(Decimal(len(bot_wins))*100/Decimal(len(bot_net_values))) if bot_net_values else None,
+        "average_trade_sda":str(sum(bot_net_values,Decimal(0))/len(bot_net_values)) if bot_net_values else None,
+        "average_win_sda":str(sum(bot_wins,Decimal(0))/len(bot_wins)) if bot_wins else None,
+        "average_loss_sda":str(sum(bot_losses,Decimal(0))/len(bot_losses)) if bot_losses else None,
+        "best_trade":({"symbol":best.get("token"),"net_pnl_sda":best.get("net_pnl_sda"),
+                       "sell_tx":best.get("sell_tx"),"timestamp":best.get("timestamp")} if best else None),
+        "worst_trade":({"symbol":worst.get("token"),"net_pnl_sda":worst.get("net_pnl_sda"),
+                        "sell_tx":worst.get("sell_tx"),"timestamp":worst.get("timestamp")} if worst else None)}
+    excluded_external_sells=[x for x in unmatched if x not in bot_unmatched]
+    bot_state={"schema_version":1,"generated_at":evidence["meta"]["retrieved_at"],
+        "wallet":WALLET,"chain_id":CHAIN,"source":"blockchain_raw.json / confirmed router transactions / FIFO",
+        "raw_evidence_sha256":raw_sha,"blockchain_range":report["blockchain_range"],
+        "pagination":evidence["meta"]["pagination"],"pagination_exhausted":True,
+        "bot_reconciliation_status":"COMPLETE" if not bot_blockers else "INCOMPLETE",
+        "bot_unresolved_transactions":bot_blockers,
+        "realized_pnl_sda":str(bot_realized),"open_pnl_sda":str(bot_open_pnl),"total_pnl_sda":str(bot_total),
+        "open_positions":bot_open_positions,"buy_transactions":bot_buy_records,
+        "sell_transactions":[{"tx":x.get("sell_tx"),"at":x.get("timestamp"),"symbol":x.get("token"),
+            "contract":x.get("contract"),"quantity":x.get("quantity_sold"),"proceeds_sda":x.get("sell_proceeds_sda"),
+            "cost_basis_sda":x.get("buy_cost_sda"),"gross_pnl_sda":x.get("gross_pnl_sda"),
+            "gas_sda":x.get("gas_sda"),"net_pnl_sda":x.get("net_pnl_sda"),"buy_tx":x.get("buy_tx")}
+            for x in bot_closed_trades],"statistics":bot_stats,
+        "wallet_value_sda":str(wallet_value_partial),"wallet_value_complete":wallet_value_complete,
+        "native_balance_sda":str(native_sda),
+        "wallet_valuation":{"valued_assets_count":max(0,len(priced)-len(unpriced)),
+            "total_assets_count":len(priced),"unpriced_assets":unpriced},
+        "excluded_external_activity":{"unmatched_sells":excluded_external_sells,
+            "unknown_basis_assets":[{"symbol":x.get("symbol"),"contract":x.get("contract")} for x in external_assets]},
+        "method":{"lot_matching":"FIFO","bot_buy_rule":"successful wallet-funded router BUY with received token delta",
+            "bot_sell_rule":"successful SELL fully matched to confirmed bot BUY FIFO basis",
+            "dust_threshold_token_quantity":"0.001",
+            "external_receipts":"excluded from BOT performance without verified router BUY cost basis",
+            "wallet_value":"all priced wallet assets, including external receipts/airdrops"}}
+    report["bot_reconciliation_status"]=bot_state["bot_reconciliation_status"]
+    report["bot_unresolved_transactions"]=bot_blockers
+    report["bot_realized_pnl_net_sda"]=bot_state["realized_pnl_sda"]
+    report["bot_open_pnl_sda"]=bot_state["open_pnl_sda"]
+    report["bot_total_pnl_sda"]=bot_state["total_pnl_sda"]
+    report["bot_open_positions_count"]=bot_stats["open_positions_count"]
     dump("real_accounting_report.json",report)
     dump("closed_trades.json",closed)
     dump("ledger_comparison.json",{"discrepancies":discrepancies,"ledger_updated_at":(ledger or {}).get("updated_at") if ledger else None})
+    Path("real_accounting_state.json").write_text(json.dumps(bot_state,indent=2,sort_keys=True,default=str)+"\\n",encoding="utf-8")
     print(json.dumps({"run_wallet":WALLET,"pages":evidence["meta"]["pagination"],"counts":report["counts"],
         "range":report["blockchain_range"],"realized_gross_sda":str(realized_gross),
         "realized_net_sda":str(realized_net),"open_cost_basis_sda":str(open_cost),
