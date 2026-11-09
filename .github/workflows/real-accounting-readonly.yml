@@ -1,0 +1,53 @@
+name: REAL Wallet Blockchain Accounting (Read Only)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/rebuild_real_accounting.py"
+      - ".github/workflows/real-accounting-readonly.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-wallet-accounting-readonly
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      REAL_ACCOUNTING_WALLET: "0x9e3643f2ac15c91ee83aa2814015f15b18d573f2"
+      SIDRA_EXPLORER_API: "https://ledger.sidrachain.com/api/v2"
+      SIDRA_WSDA_ADDRESS: "0xE4095a910209D7BE03B55D02F40d4554B1666182"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install read-only collector dependency
+        run: python -m pip install requests
+      - name: Verify chain identity (read only)
+        run: |
+          python - <<'PY'
+          import requests
+          rpc = "https://node.sidrachain.com"
+          r = requests.post(rpc, json={"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}, timeout=20)
+          r.raise_for_status()
+          chain = int(r.json()["result"], 16)
+          print(f"RPC chain id: {chain}")
+          if chain != 97453:
+              raise SystemExit("Refusing accounting run on unexpected chain")
+          PY
+      - name: Collect complete wallet history and build conservative report
+        run: python scripts/rebuild_real_accounting.py
+      - name: Upload immutable raw evidence and report
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-wallet-accounting-${{ github.run_id }}-${{ github.run_attempt }}
+          path: accounting_evidence/
+          if-no-files-found: error
+          retention-days: 90
