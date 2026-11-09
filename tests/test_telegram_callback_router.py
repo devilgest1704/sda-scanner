@@ -123,6 +123,7 @@ def test_real_trading_bot_button_is_explicitly_routed(monkeypatch):
 @pytest.mark.parametrize("callback,view", [
     ("REAL_BOT_PORTFOLIO", "portfolio"), ("REAL_BOT_BUY", "buy"),
     ("REAL_BOT_SELL", "sell"), ("REAL_BOT_STATS", "stats"),
+    ("REAL_BOT_SELL_V2", "sell_v2"),
 ])
 def test_real_bot_submenus_are_acknowledged_and_rendered(monkeypatch, callback, view):
     import real_bot_views
@@ -138,7 +139,7 @@ def test_real_bot_submenus_are_acknowledged_and_rendered(monkeypatch, callback, 
     assert _last_edit(dashboard)["text"] == view.upper()
 
 
-@pytest.mark.parametrize("callback", ["REAL_BOT_PORTFOLIO", "REAL_BOT_BUY", "REAL_BOT_SELL", "REAL_BOT_STATS"])
+@pytest.mark.parametrize("callback", ["REAL_BOT_PORTFOLIO", "REAL_BOT_BUY", "REAL_BOT_SELL", "REAL_BOT_STATS", "REAL_BOT_SELL_V2"])
 def test_back_from_every_submenu_uses_cached_data(monkeypatch, callback):
     import real_bot_views
     dashboard = _router(monkeypatch)
@@ -149,14 +150,14 @@ def test_back_from_every_submenu_uses_cached_data(monkeypatch, callback):
     monkeypatch.setattr(real_bot_views, "render_view", render)
     dashboard.handle_update(_update(callback, 10))
     dashboard.handle_update(_update("REAL_BOT_BACK", 11))
-    expected = {"REAL_BOT_PORTFOLIO":"portfolio","REAL_BOT_BUY":"buy","REAL_BOT_SELL":"sell","REAL_BOT_STATS":"stats"}[callback]
+    expected = {"REAL_BOT_PORTFOLIO":"portfolio","REAL_BOT_BUY":"buy","REAL_BOT_SELL":"sell","REAL_BOT_STATS":"stats","REAL_BOT_SELL_V2":"sell_v2"}[callback]
     assert calls == [(expected, False, True), ("main", False, True)]
     assert _last_edit(dashboard)["text"] == "MAIN"
 
 
 @pytest.mark.parametrize("callback,view", [
     ("REAL_BOT_REFRESH", "main"), ("REAL_BOT_PORTFOLIO_REFRESH", "portfolio"),
-    ("REAL_BOT_STATS_REFRESH", "stats"),
+    ("REAL_BOT_STATS_REFRESH", "stats"), ("REAL_BOT_SELL_V2_REFRESH", "sell_v2"),
 ])
 def test_real_bot_refresh_forces_fresh_data_after_immediate_ack(monkeypatch, callback, view):
     import real_bot_views
@@ -196,10 +197,10 @@ def test_callback_is_acknowledged_before_slow_real_report(monkeypatch):
     assert _last_edit(dashboard)["text"] == "REAL REPORT"
 
 
-def test_real_bot_menu_has_required_six_actions(monkeypatch):
+def test_real_bot_menu_has_required_seven_actions(monkeypatch):
     import real_bot_views
     monkeypatch.setattr(real_bot_views, "render_view", lambda *_a, **_k: ("REAL", real_bot_views._main_keyboard()))
     dashboard = _router(monkeypatch)
     dashboard.handle_update(_update("REAL_BOT", 23))
     buttons = [button for row in _last_edit(dashboard)["reply_markup"]["inline_keyboard"] for button in row]
-    assert [button["callback_data"] for button in buttons] == ["REAL_BOT_PORTFOLIO","REAL_BOT_BUY","REAL_BOT_SELL","REAL_BOT_STATS","REAL_BOT_REFRESH","MAIN"]
+    assert [button["callback_data"] for button in buttons] == ["REAL_BOT_PORTFOLIO","REAL_BOT_BUY","REAL_BOT_SELL","REAL_BOT_SELL_V2","REAL_BOT_STATS","REAL_BOT_REFRESH","MAIN"]
