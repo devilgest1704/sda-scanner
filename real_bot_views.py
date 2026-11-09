@@ -389,6 +389,8 @@ def _sell_v2_text(dashboard):
             except Exception:
                 return {}
     state=load(cfg.STATE_FILE)
+    if not isinstance(state,dict) or not isinstance(state.get("positions"),dict):
+        return "🎯 SELL V2 • READ ONLY\\n\\n⚪ Data temporarily unavailable"
     analysis=load("market_analysis.json")
     metadata=load("token_metadata.json")
     rows=report.build_decision_rows(state, analysis, metadata, supabase_lookup=rb._newest_supabase_price)
