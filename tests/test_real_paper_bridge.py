@@ -46,9 +46,15 @@ class BridgeTests(unittest.TestCase):
                 TOKEN: {"symbol": "TEST", "token_amount_raw": 123}
             }}),
         )
+        self.swing = SimpleNamespace(
+            migrate_if_needed=unittest.mock.Mock(return_value=True),
+            startup_recovery=unittest.mock.Mock(return_value=[]),
+            evaluate_position=unittest.mock.Mock(return_value={"action": "HOLD", "status": "NO_THRESHOLD"}),
+        )
         self.modules = patch.dict("sys.modules", {
             "real_trading_config": self.cfg,
             "real_trader": self.trader,
+            "real_swing_sell_executor": self.swing,
         })
         self.modules.start()
         self.addCleanup(self.modules.stop)
@@ -111,8 +117,8 @@ class BridgeTests(unittest.TestCase):
         }
         result = bridge.reconcile()
         self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 20.0)
-        self.trader.execute_sell.assert_called_once_with(TOKEN, "TEST", 123)
-        self.assertEqual([a["action"] for a in result["actions"]], ["BUY", "SELL"])
+        self.trader.execute_sell.assert_not_called()
+        self.assertEqual([a["action"] for a in result["actions"]], ["BUY"])
 
     def test_pending_buy_is_reconciled_and_closed_if_paper_exits_first(self):
         self.state.write_text(json.dumps({
@@ -128,17 +134,29 @@ class BridgeTests(unittest.TestCase):
         }
         result = bridge.reconcile()
         self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 20.0)
-        self.trader.execute_sell.assert_called_once_with(TOKEN, "TEST", 123)
-        self.assertEqual([a["action"] for a in result["actions"]], ["BUY", "SELL"])
+        self.trader.execute_sell.assert_not_called()
+        self.assertEqual([a["action"] for a in result["actions"]], ["BUY"])
 
-    def test_paper_close_mirrors_sell_of_recorded_real_amount(self):
+    def test_paper_close_does_not_trigger_real_sell(self):
         self.write_paper({TOKEN: {"symbol": "TEST"}})
         bridge.reconcile()  # baseline includes token
         self.write_paper({})
         result = bridge.reconcile()
-        self.trader.execute_sell.assert_called_once_with(TOKEN, "TEST", 123)
+        self.trader.execute_sell.assert_not_called()
         self.assertEqual(result["closed"], 1)
-        self.assertEqual(result["actions"][0]["status"], "CONFIRMED")
+        self.assertEqual(result["actions"], [])
+
+    def test_legacy_bridge_pending_sell_is_archived_not_executed(self):
+        self.state.write_text(json.dumps({
+            "initialized": True, "paper_positions": [], "pending_buy": [],
+            "pending_sell": [TOKEN],
+        }), encoding="utf-8")
+        result = bridge.reconcile()
+        self.trader.execute_sell.assert_not_called()
+        saved = json.loads(self.state.read_text(encoding="utf-8"))
+        self.assertEqual(saved["pending_sell"], [])
+        self.assertEqual(saved["legacy_pending_sell"][0]["token"], TOKEN)
+        self.assertEqual(result["status"], "reconciled")
 
 
 if __name__ == "__main__":
