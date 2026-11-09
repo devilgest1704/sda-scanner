@@ -135,7 +135,7 @@ def test_real_bot_submenus_are_acknowledged_and_rendered(monkeypatch, callback, 
         return selected_view.upper(), real_bot_views._submenu_keyboard(selected_view)
     monkeypatch.setattr(real_bot_views, "render_view", render)
     dashboard.handle_update(_update(callback))
-    assert calls == [(view, False, True)]
+    assert calls == [(view, False, view != "sell_v2")]
     assert _last_edit(dashboard)["text"] == view.upper()
 
 
@@ -151,7 +151,7 @@ def test_back_from_every_submenu_uses_cached_data(monkeypatch, callback):
     dashboard.handle_update(_update(callback, 10))
     dashboard.handle_update(_update("REAL_BOT_BACK", 11))
     expected = {"REAL_BOT_PORTFOLIO":"portfolio","REAL_BOT_BUY":"buy","REAL_BOT_SELL":"sell","REAL_BOT_STATS":"stats","REAL_BOT_SELL_V2":"sell_v2"}[callback]
-    assert calls == [(expected, False, True), ("main", False, True)]
+    assert calls == [(expected, False, callback != "REAL_BOT_SELL_V2"), ("main", False, True)]
     assert _last_edit(dashboard)["text"] == "MAIN"
 
 
