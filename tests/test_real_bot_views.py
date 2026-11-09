@@ -114,7 +114,7 @@ def built_data(monkeypatch):
 def test_main_menu_uses_bot_pnl_and_wallet_total_separately(built_data):
     text = views._main_text(built_data)
     assert "🤖 REAL TRADING 🟢" in text
-    assert "Portfolio ≥350.99 SDA (31/32)" in text
+    assert "Portfolio ≥351.00 SDA (31/32)" in text
     assert "Bot PnL +28.03 SDA" in text
     assert "Open PnL -4.53 SDA" in text
     assert "Realized +32.56 SDA" in text
