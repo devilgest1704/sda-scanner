@@ -267,7 +267,7 @@ def _buy_text(data):
     for item in (data.get("buy_records") or [])[:18]:
         date=_date_short(item.get("at"));prefix=f"{date} " if date else ""
         lines.append(f"{prefix}{item['symbol']} {_fmt(item.get('invested_sda'))} SDA")
-    lines += ["",f"Confirmed bot BUY transactions: {data.get('buy_count',0)},
+    lines += ["",f"Confirmed bot BUY transactions: {data.get('buy_count',0)}",
         f"Total invested: {_fmt(data.get('total_invested'))} SDA"]
     if data.get("unverified_buy_count"):lines.append(f"⚠ {data['unverified_buy_count']} unverified BUY excluded")
     return "\n".join(lines)
@@ -279,7 +279,7 @@ def _sell_text(data):
         pnl=item.get("pnl_sda")
         icon="✅" if pnl is not None and pnl>0 else ("❌" if pnl is not None and pnl<0 else "⚪")
         lines.append(f"{icon} {prefix}{item['symbol']} {_fmt(pnl,signed=True)} SDA")
-    lines += ["",f"Confirmed matched bot SELL transactions: {data.get('sell_count',0)},
+    lines += ["",f"Confirmed matched bot SELL transactions: {data.get('sell_count',0)}",
         f"Wins: {data.get('wins',0)}  Losses: {data.get('losses',0)}",
         f"Realized PnL: {_fmt(data.get('realized_pnl'),signed=True)} SDA"]
     if data.get("unverified_sell_count"):lines.append(f"⚠ {data['unverified_sell_count']} unverified SELL excluded")
@@ -306,7 +306,8 @@ def _stats_text(data):
         f"Avg loss {_fmt(data.get('average_loss'),signed=True)} SDA",
         f"Best {data.get('best_trade_label') or 'trade'} {_fmt(data.get('best_trade'),signed=True)} SDA",
         f"Worst {data.get('worst_trade_label') or 'trade'} {_fmt(data.get('worst_trade'),signed=True)} SDA"]
-    if data.get("unverified_sell_count"):lines += ["",f"⚠ {data['unverified_sell_count']} unverified SELL excluded; PnL is partial"]
+    if data.get("bot_unresolved_transactions"):
+        lines += ["","⚠ Unreconciled BOT transactions",*data["bot_unresolved_transactions"]]
     if not data.get("portfolio_complete"):lines += ["",f"⚠ Wallet valuation partial: {data.get('portfolio_valued_count',0)}/{data.get('portfolio_total_count',0)} assets"]
     return "\n".join(lines)
 
