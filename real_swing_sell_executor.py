@@ -150,6 +150,16 @@ def _update_intent(token, intent):
     trader.save_state(state)
 
 
+def _cancel_intent(token, intent, status):
+    intent["stage"] = "CANCELLED"
+    intent["status"] = status
+    state = trader.load_state()
+    state.setdefault("sell_intents", {})[intent["sell_intent_id"]] = dict(intent)
+    state.setdefault("pending_sells", {}).pop(token, None)
+    state["updated_at"] = trader.now()
+    trader.save_state(state)
+
+
 def _finish_intent(token, intent, sold_raw, proceeds_raw):
     state = trader.load_state()
     position = state.get("positions", {}).get(token)
@@ -357,10 +367,12 @@ def _submit_swap(token, intent):
     owner = account.address
     reconciliation = reconcile_position_wallet(token)
     if reconciliation.get("status") == "CLOSED_MANUAL_RECONCILED":
+        _cancel_intent(token, intent, "CANCELLED_MANUAL_WALLET_EMPTY")
         return {"action": "SELL", "status": "MANUAL_CLOSED", "token": token}
     state = trader.load_state()
     position = state.get("positions", {}).get(token)
     if not isinstance(position, dict):
+        _cancel_intent(token, intent, "CANCELLED_POSITION_CLOSED")
         return {"action": "SELL", "status": "NO_POSITION", "token": token}
     wallet_qty = int(reconciliation.get("wallet_quantity") or 0)
     tracked_qty = int(position.get("remaining_quantity", position.get("token_amount_raw", 0)) or 0)
@@ -368,6 +380,7 @@ def _submit_swap(token, intent):
     requested = int((Decimal(tracked_qty) * fraction).to_integral_value(rounding=ROUND_DOWN))
     actual = min(requested, wallet_qty)
     if actual <= 0:
+        _cancel_intent(token, intent, "CANCELLED_NO_WALLET_BALANCE")
         return {"action": "SELL", "status": "NO_WALLET_BALANCE", "token": token}
     # Refresh both baselines immediately before the swap. A manual disposal
     # during approval has already been cost-allocated by wallet reconciliation.
@@ -544,6 +557,7 @@ def evaluate_position(token, symbol, market_price, price_timestamp=None):
         wallet_qty = int(trader.token_balance(token, account.address))
         actual_qty = min(int(intent["requested_quantity_raw"]), wallet_qty)
         if actual_qty <= 0:
+            _cancel_intent(token, intent, "CANCELLED_NO_WALLET_BALANCE")
             return {"action": "SELL", "status": "NO_WALLET_BALANCE", "token": token}
         intent["requested_quantity_raw"] = actual_qty
         intent["token_balance_before"] = wallet_qty
