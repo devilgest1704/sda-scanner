@@ -374,8 +374,9 @@ def main():
     ledger_positions=(ledger or {}).get("positions",{}) if isinstance(ledger,dict) else {}
     ledger_times=[str(x.get("at") or "") for x in ledger_trades if x.get("at")]
     ledger_start=min(ledger_times) if ledger_times else ""
+    ledger_start_day=ledger_start[:10] if ledger_start else ""
     def after_ledger_start(r):
-        return not ledger_start or str(r.get("timestamp") or "")>=ledger_start
+        return not ledger_start_day or str(r.get("timestamp") or "")[:10]>=ledger_start_day
     chain_buys={r["hash"] for r in records if r["action"]=="BUY"}
     chain_sells={r["hash"] for r in records if r["action"]=="SELL"}
     chain_buys_current={r["hash"] for r in records if r["action"]=="BUY" and after_ledger_start(r)}
@@ -428,6 +429,37 @@ def main():
     # intentionally not invented; they are disclosed separately.
     known_contracts={x["contract"] for x in open_lots}
     external_assets=[h for h in priced if h["contract"] not in known_contracts and h["contract"]!=WSDA]
+    for asset in external_assets:
+        asset["transfer_in_txs"]=[{"hash":tr.get("transaction_hash"),"timestamp":tr.get("timestamp"),
+            "from":addr(tr.get("from")),"quantity":str(dec(rawval(tr.get("total",tr.get("value"))),
+                (tr.get("total") or {}).get("decimals") or (tr.get("token") or {}).get("decimals") or 0))}
+            for tr in transfers if addr(tr.get("to"))==WALLET and addr(tr.get("token"))==asset["contract"]]
+    # Flag plausible but non-atomic native-payment/token-transfer pairs; do not
+    # silently treat them as confirmed swaps or assign their basis to FIFO.
+    candidate_external_pairs=[]
+    for h,d in details.items():
+        if addr(d.get("from"))!=WALLET or addr(d.get("to")) in {ROUTER,WALLET}: continue
+        paid=dec(d.get("value","0"),18)
+        if paid<=0: continue
+        try: pay_dt=datetime.fromisoformat(str(d.get("timestamp")).replace("Z","+00:00"))
+        except Exception: continue
+        recipient=addr(d.get("to"))
+        for tr in transfers:
+            if addr(tr.get("from"))!=recipient or addr(tr.get("to"))!=WALLET: continue
+            token=tr.get("token") or {}
+            if addr(token)==WSDA: continue
+            try: recv_dt=datetime.fromisoformat(str(tr.get("timestamp")).replace("Z","+00:00"))
+            except Exception: continue
+            delta=(recv_dt-pay_dt).total_seconds()
+            if 0<=delta<=120:
+                candidate_external_pairs.append({"payment_tx":h,"payment_sda":str(paid),
+                    "counterparty":recipient,"token_transfer_tx":tr.get("transaction_hash"),
+                    "token":token.get("symbol"),"token_contract":addr(token),
+                    "token_quantity":str(dec(rawval(tr.get("total",tr.get("value"))),
+                        (tr.get("total") or {}).get("decimals") or token.get("decimals") or 0)),
+                    "seconds_between":delta,"classification":"POSSIBLE OTC/EXTERNAL ACQUISITION — NOT A CONFIRMED SWAP"})
+    external_unknown_basis_hashes=sorted({str(tr.get("transaction_hash") or "").lower()
+        for tr in transfers if addr(tr.get("to"))==WALLET and addr(tr.get("token")) in {x["contract"] for x in external_assets}})
     tx_by_hash={str(x.get("hash") or "").lower():x for x in txs}
     def block_of(h): return tx_by_hash.get(h,{}).get("block_number")
     dates=[x.get("timestamp") for x in details.values() if x.get("timestamp")] or [x.get("timestamp") for x in txs if x.get("timestamp")]
@@ -435,6 +467,7 @@ def main():
     failed=[x for x in classifications if not x["success"]]
     blockers=[]
     if unmatched: blockers.extend([x["sell_tx"] for x in unmatched])
+    blockers.extend(external_unknown_basis_hashes)
     if errors: blockers.extend(errors.keys())
     if not open_complete: blockers.extend(x["buy_tx"] for x in open_positions if x["current_value_sda"] is None)
     if unpriced: blockers.extend(x["contract"] for x in unpriced)
@@ -470,7 +503,10 @@ def main():
             "native_balance_sda":str(native_sda),"cash_reconciliation_delta_sda":str(cash_delta)},
         "residual_wsda_sda":str(residual_wsda),"current_wallet_value_sda":str(wallet_value_partial),
         "current_wallet_value_complete":wallet_value_complete,"unpriced_assets":unpriced,
-        "external_or_unknown_basis_assets":external_assets,"ledger_discrepancies":discrepancies,
+        "external_or_unknown_basis_assets":external_assets,"candidate_external_purchase_pairs":candidate_external_pairs,
+        "external_unknown_basis_transfer_hashes":external_unknown_basis_hashes,
+        "partial_confirmed_trading_pnl_sda":str(realized_net+open_pnl) if open_pnl is not None else None,
+        "ledger_discrepancies":discrepancies,
         "reconciliation_status":"COMPLETE" if not blockers else "INCOMPLETE",
         "unresolved_hashes_or_items":blockers,
         "method":{"lot_matching":"FIFO","buy_cost":"confirmed native SDA value in successful router swap",
