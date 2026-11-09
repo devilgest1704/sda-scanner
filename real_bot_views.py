@@ -264,7 +264,7 @@ def _date_short(value):
 
 def _buy_text(data):
     lines=["🟢 CONFIRMED BOT BUY HISTORY"]
-    for item in (data.get("buy_records") or [])[:18]:
+    for item in (data.get("buy_records") or []):
         date=_date_short(item.get("at"));prefix=f"{date} " if date else ""
         lines.append(f"{prefix}{item['symbol']} {_fmt(item.get('invested_sda'))} SDA")
     lines += ["",f"Confirmed bot BUY transactions: {data.get('buy_count',0)}",
@@ -274,7 +274,7 @@ def _buy_text(data):
 
 def _sell_text(data):
     lines=["🔴 MATCHED BOT SELL HISTORY"]
-    for item in (data.get("sell_records") or [])[:18]:
+    for item in (data.get("sell_records") or []):
         date=_date_short(item.get("at"));prefix=f"{date} " if date else ""
         pnl=item.get("pnl_sda")
         icon="✅" if pnl is not None and pnl>0 else ("❌" if pnl is not None and pnl<0 else "⚪")
