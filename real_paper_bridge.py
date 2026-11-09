@@ -139,19 +139,24 @@ def reconcile():
                 if not isinstance(real_pos, dict):
                     continue
                 symbol = str(real_pos.get("symbol") or token[:8])
-                market = real_bot_menu._newest_supabase_price(token)
-                price = market.get("price_sda") if isinstance(market, dict) else None
-                age = market.get("age_seconds") if isinstance(market, dict) else None
-                if price is None or market.get("stale") or age is None or float(age) > 300:
+                try:
+                    market = real_bot_menu._newest_supabase_price(token)
+                    price = market.get("price_sda") if isinstance(market, dict) else None
+                    age = market.get("age_seconds") if isinstance(market, dict) else None
+                    if price is None or market.get("stale") or age is None or float(age) > 300:
+                        actions.append({"action": "SELL_DECISION", "token": token,
+                                        "symbol": symbol, "status": "PRICE_UNAVAILABLE",
+                                        "at": _now()})
+                        continue
+                    result = swing_executor.evaluate_position(
+                        token, symbol, price, market.get("timestamp")
+                    )
                     actions.append({"action": "SELL_DECISION", "token": token,
-                                    "symbol": symbol, "status": "PRICE_UNAVAILABLE",
-                                    "at": _now()})
-                    continue
-                result = swing_executor.evaluate_position(
-                    token, symbol, price, market.get("timestamp")
-                )
-                actions.append({"action": "SELL_DECISION", "token": token,
-                                "symbol": symbol, **result, "at": _now()})
+                                    "symbol": symbol, **result, "at": _now()})
+                except Exception as exc:
+                    actions.append({"action": "SELL_DECISION", "token": token,
+                                    "symbol": symbol, "status": "ERROR",
+                                    "error": str(exc)[:500], "at": _now()})
         except Exception as exc:
             actions.append({"action": "SELL_DECISION", "status": "ERROR",
                             "error": str(exc)[:500], "at": _now()})
