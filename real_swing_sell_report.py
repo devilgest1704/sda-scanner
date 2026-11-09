@@ -23,6 +23,13 @@ def _decimal(value):
 
 def scanner_market_price(token,analysis,now=None,max_age=MAX_PRICE_AGE_SECONDS):
     now=now or datetime.now(timezone.utc)
+    if isinstance(analysis,dict) and analysis.get("updated_at"):
+        snapshot_stamp=_stamp(analysis.get("updated_at"))
+        if snapshot_stamp is None:
+            return None
+        snapshot_age=(now.astimezone(timezone.utc)-snapshot_stamp).total_seconds()
+        if snapshot_age<0 or snapshot_age>max_age:
+            return None
     tokens=analysis.get("tokens") if isinstance(analysis,dict) else {}
     item=tokens.get(str(token).lower()) if isinstance(tokens,dict) else None
     if not isinstance(item,dict): return None
@@ -108,7 +115,9 @@ def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None):
         intent=pending.get(token); wallet_qty=position.get("wallet_available_quantity")
         mismatch=False
         if wallet_qty is not None:
-            try: mismatch=int(wallet_qty)!=quantity
+            # External excess deposits are ignored by the live executor; only
+            # a wallet shortfall makes the tracked SELL quantity unsafe.
+            try: mismatch=int(wallet_qty)<quantity
             except (TypeError,ValueError,OverflowError): mismatch=True
         quarantine_reason=None
         if _active_intent(intent):
