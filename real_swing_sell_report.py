@@ -118,7 +118,7 @@ def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None):
             result=policy.decide(preview,fraction,price)
             action=_action(result,trailing)
             swing_state="TRAILING_ACTIVE" if trailing else ("PARTIAL_DONE" if partial else "WAITING_PARTIAL")
-        else: swing_state="PRICE_UNAVAILABLE"
+        else: swing_state="TRAILING_ACTIVE" if trailing else ("PARTIAL_DONE" if partial else "WAITING_PARTIAL")
         rows.append({"token":symbol,"token_address":token,"entry_price":float(entry) if entry is not None else None,
             "decision_price":float(price) if price is not None else None,"price_timestamp":market.get("timestamp") if market else None,
             "price_age_seconds":market.get("age_seconds") if market else None,"price_source":market.get("source") if market else None,
