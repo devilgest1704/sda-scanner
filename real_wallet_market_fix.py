@@ -133,40 +133,34 @@ def _qty(amount):
 
 
 def position_action_section(dashboard):
-    rows = _wallet_rows(dashboard); lines = ["", "🧭 POSITION ACTION • REAL WALLET", "────────────────────────"]
-    if not rows: lines.append("⚪ No live wallet holdings"); return lines
-    for r in rows:
-        if not isinstance(r, dict): continue
-        pnl = "UNKNOWN" if r.get("pnl_sda") is None else f"{_n(r.get('pnl_sda')):+.2f} SDA"; score = "N/A" if r.get("score") is None else f"{_n(r.get('score')):.0f}/100"; action = str(r.get("action") or "HOLD / MONITOR"); amount = _amount_for(dashboard, r)
-        icon = "🔴" if action.startswith("EMERGENCY") or action.startswith("SELL") else ("🟢" if action == "HOLD / PUMP" else "🟡")
-        qty = f" • {_qty(amount)}" if amount is not None else ""
-        lines.append(f"{icon} {r.get('symbol')}{qty} • {action} • P/L {pnl} • score {score}")
+    """Compatibility panel backed by the canonical BOT accounting state."""
+    import real_bot_views
+    data=real_bot_views._build_dashboard_data(dashboard)
+    rows=data.get("positions") or []
+    lines=["","🧭 POSITION ACTION • REAL BOT","────────────────────────"]
+    if not rows:
+        lines.append("⚪ No open BOT positions")
+        return lines
+    for row in rows:
+        pnl=row.get("pnl_sda")
+        value=row.get("value_sda")
+        icon="🟢" if pnl is not None and pnl>0 else ("🔴" if pnl is not None and pnl<0 else "⚪")
+        pnl_text="UNKNOWN" if pnl is None else f"{pnl:+.2f} SDA"
+        value_text="UNKNOWN" if value is None else f"{value:.2f} SDA"
+        lines.append(f"{icon} {row.get('symbol')} • Value {value_text} • Open P/L {pnl_text}")
     return lines
 
-
 def real_trading_report(dashboard):
-    wallet = dashboard.load("wallet_data.json", {}); portfolio_raw = dashboard.load("portfolio_data.json", {"current": {}}); meta = dashboard.load("token_metadata.json", {})
-    portfolio = _fifo_portfolio(dashboard, portfolio_raw, meta, wallet)
-    rows = _wallet_rows(dashboard)
-    sda_balance = _n(wallet.get("native_sda"), _n(wallet.get("sda_balance_sda"), _n(wallet.get("sda_balance"))))
-    known_value = sum(_n(r.get("value_sda")) for r in rows if isinstance(r, dict)) or _n(wallet.get("total_token_value_sda")); total_wallet = _n(wallet.get("total_value_sda"), sda_balance + known_value)
-    open_pnl = _n(portfolio.get("open_pnl_sda"), _n(portfolio.get("open_unrealized_pnl_sda")))
-    open_cost = _n(portfolio.get("open_cost_sda")); realized = _n(portfolio.get("realized_pnl_sda")); total = realized + open_pnl
-    lines = ["👛 REAL WALLET & POSITIONS", "────────────────────────"]
-    for r in rows:
-        if not isinstance(r, dict): continue
-        pnl = "UNKNOWN" if r.get("pnl_sda") is None else f"{_n(r.get('pnl_sda')):+.2f} SDA"; amount = _amount_for(dashboard, r); qty = f" • {_qty(amount)}" if amount is not None else ""; icon = "🟢" if r.get("pnl_sda") is not None and _n(r.get("pnl_sda")) > 0 else "🔴" if r.get("pnl_sda") is not None and _n(r.get("pnl_sda")) < 0 else "⚪"
-        lines.append(f"{icon} {r.get('symbol')}{qty} • {r.get('action')} • P/L {pnl}"); lines.append(f"   Value: {_n(r.get('value_sda')):.2f} SDA")
-    if not rows: lines.append("⚪ No live wallet holdings")
-    open_pct = open_pnl / open_cost * 100 if open_cost > 0 else None
-    lines += ["", "────────────────────────", f"📊 Known token value: {known_value:.2f} SDA", f"💼 TOTAL WALLET VALUE: {total_wallet:.2f} SDA", "", "💹 P/L SUMMARY", f"{'🟢' if open_pnl > 0 else '🔴' if open_pnl < 0 else '⚪'} Current open P/L {open_pnl:+.2f} SDA" + (f" ({open_pct:+.2f}%)" if open_pct is not None else ""), f"{'🟢' if realized > 0 else '🔴' if realized < 0 else '⚪'} Historical realized P/L {realized:+.2f} SDA", f"{'🟢' if total > 0 else '🔴' if total < 0 else '⚪'} Total P/L {total:+.2f} SDA", "", "👁 READ-ONLY • No real order is executed"]
-    return "\n".join(lines)
-
+    """Legacy REAL entry point delegates to the unified blockchain-backed menu."""
+    import real_bot_views
+    text,_keyboard=real_bot_views.render_view(dashboard,"main",refresh=True)
+    return text
 
 def real_statistics_report(dashboard):
-    """Compatibility report only; Position Action owns the statistics/history UI."""
-    return real_trading_report(dashboard)
-
+    """Legacy REAL statistics entry point delegates to the unified state."""
+    import real_bot_views
+    text,_keyboard=real_bot_views.render_view(dashboard,"stats",refresh=True)
+    return text
 
 def patch_dashboard(dashboard):
     dashboard.real_trading_report = lambda: real_trading_report(dashboard)
