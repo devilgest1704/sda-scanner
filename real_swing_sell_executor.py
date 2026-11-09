@@ -583,7 +583,7 @@ def _new_intent(token, symbol, position, decision, market_price, price_timestamp
     return intent, None
 
 
-def evaluate_position(token, symbol, market_price, price_timestamp=None):
+def evaluate_position(token, symbol, market_price, price_timestamp=None, wallet_reconciled=False):
     token = trader.addr(token)
     with _token_lock(token):
         migrated = migrate_if_needed()
@@ -592,7 +592,8 @@ def evaluate_position(token, symbol, market_price, price_timestamp=None):
         if isinstance(existing, dict):
             return _resolve_existing(token, existing)
 
-        reconciled = reconcile_position_wallet(token)
+        reconciled = ({"status": "UNCHANGED"} if wallet_reconciled
+                      else reconcile_position_wallet(token))
         if reconciled["status"] == "CLOSED_MANUAL_RECONCILED":
             return {"action": "SELL", "status": "MANUAL_CLOSED", "token": token}
         state = trader.load_state()
