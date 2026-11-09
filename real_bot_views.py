@@ -267,8 +267,8 @@ def _get_data(dashboard,refresh=False,cache_only=False):
 def _main_keyboard():
     return {"inline_keyboard":[
         [{"text":"📊 Portfolio","callback_data":"REAL_BOT_PORTFOLIO"},{"text":"🟢 BUY","callback_data":"REAL_BOT_BUY"}],
-        [{"text":"🔴 SELL","callback_data":"REAL_BOT_SELL"},{"text":"📈 Statistics","callback_data":"REAL_BOT_STATS"}],
-        [{"text":"🔄 Refresh","callback_data":"REAL_BOT_REFRESH"}],
+        [{"text":"🔴 SELL","callback_data":"REAL_BOT_SELL"},{"text":"🎯 SELL V2","callback_data":"REAL_BOT_SELL_V2"}],
+        [{"text":"📈 Statistics","callback_data":"REAL_BOT_STATS"},{"text":"🔄 Refresh","callback_data":"REAL_BOT_REFRESH"}],
         [{"text":"⬅️ Back","callback_data":"MAIN"}],
     ]}
 
@@ -276,6 +276,8 @@ def _submenu_keyboard(view):
     rows=[]
     if view=="portfolio":
         rows.append([{"text":"🔄 Refresh","callback_data":"REAL_BOT_PORTFOLIO_REFRESH"}])
+    elif view=="sell_v2":
+        rows.append([{"text":"🔄 Refresh","callback_data":"REAL_BOT_SELL_V2_REFRESH"}])
     rows.append([{"text":"⬅️ REAL Menu","callback_data":"REAL_BOT_BACK"}])
     return {"inline_keyboard":rows}
 
@@ -375,7 +377,47 @@ def _stats_text(data):
     if not data.get("portfolio_complete"):lines += ["",f"⚠ Tracked wallet valuation partial: {data.get('portfolio_valued_count',0)}/{data.get('portfolio_total_count',0)} assets"]
     return "\n".join(lines)
 
+def _sell_v2_text(dashboard):
+    """Read-only Swing SELL V2 preview; never calls the live executor."""
+    import real_swing_sell_report as report
+    def load(path):
+        try:
+            return rb._remote_json(dashboard, path)
+        except Exception:
+            try:
+                return dashboard.load(path, {})
+            except Exception:
+                return {}
+    state=load(cfg.STATE_FILE)
+    analysis=load("market_analysis.json")
+    metadata=load("token_metadata.json")
+    rows=report.build_decision_rows(state, analysis, metadata)
+    lines=["🎯 SELL V2 • READ ONLY",""]
+    if not rows:
+        lines.append("⚪ No open REAL positions")
+        return "\n".join(lines)
+    for row in rows:
+        symbol=row["token"]
+        entry="N/A" if row["entry_price"] is None else f'{row["entry_price"]:.6g}'
+        current="N/A" if row["decision_price"] is None else f'{row["decision_price"]:.6g}'
+        pnl="N/A" if row["pnl_pct"] is None else f'{row["pnl_pct"]:+.1f}%'
+        icon={
+            "HOLD":"🟡","PARTIAL_SELL_20":"🟢","TRAILING_HOLD":"🔵",
+            "FULL_SELL_EMERGENCY":"🔴","FULL_SELL_TRAILING":"🔴",
+            "FULL_SELL_TP":"🔴","PRICE_UNAVAILABLE":"⚪","SELL_QUARANTINED":"⚠️",
+        }[row["action"]]
+        lines.append(f'{symbol}  Entry {entry} → Now {current}  {pnl}  {icon} {row["action"]}')
+        lines.append(f'P:{ "Y" if row["profit_partial_done"] else "N"}  T:{ "Y" if row["trailing_armed"] else "N"}  State: {row["swing_state"]}')
+        if row["trailing_armed"]:
+            peak="N/A" if row["current_peak"] is None else f'{row["current_peak"]:.6g}'
+            exit_price="N/A" if row["trailing_price"] is None else f'{row["trailing_price"]:.6g}'
+            lines.append(f'  Peak {peak} | Exit {exit_price}')
+    return "\n".join(lines)
+
+
 def render_view(dashboard,view="main",refresh=False,cache_only=False):
+    if view=="sell_v2":
+        return _sell_v2_text(dashboard),_submenu_keyboard(view)
     data=_get_data(dashboard,refresh=refresh,cache_only=cache_only)
     if data is None:return "REAL Trading data is not loaded yet. Open REAL Menu or tap Refresh.",_main_keyboard()
     renderer={"main":_main_text,"portfolio":_portfolio_text,"buy":_buy_text,

@@ -102,6 +102,7 @@ def patch_dashboard(dashboard):
             "REAL_BOT_PORTFOLIO", "REAL_BOT_PORTFOLIO_REFRESH",
             "REAL_BOT_BUY", "REAL_BOT_SELL",
             "REAL_BOT_STATS", "REAL_BOT_STATS_REFRESH",
+            "REAL_BOT_SELL_V2", "REAL_BOT_SELL_V2_REFRESH",
         )
         if data not in handled:
             return original_handle(update, state)
@@ -123,10 +124,11 @@ def patch_dashboard(dashboard):
             "REAL_BOT_PORTFOLIO": "portfolio", "REAL_BOT_PORTFOLIO_REFRESH": "portfolio",
             "REAL_BOT_BUY": "buy", "REAL_BOT_SELL": "sell",
             "REAL_BOT_STATS": "stats", "REAL_BOT_STATS_REFRESH": "stats",
+            "REAL_BOT_SELL_V2": "sell_v2", "REAL_BOT_SELL_V2_REFRESH": "sell_v2",
         }
         if data in real_bot_views:
             view = real_bot_views[data]
-            refresh = data in {"REAL_BOT_REFRESH", "REAL_BOT_PORTFOLIO_REFRESH", "REAL_BOT_STATS_REFRESH"}
+            refresh = data in {"REAL_BOT_REFRESH", "REAL_BOT_PORTFOLIO_REFRESH", "REAL_BOT_STATS_REFRESH", "REAL_BOT_SELL_V2_REFRESH"}
             cache_only = data in {"REAL_BOT_BACK", "REAL_BOT_PORTFOLIO", "REAL_BOT_BUY", "REAL_BOT_SELL", "REAL_BOT_STATS"}
             try:
                 import real_bot_views as real_views
