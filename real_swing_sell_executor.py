@@ -243,6 +243,15 @@ def _resolve_existing(token, intent):
         elif stage == "APPROVAL_SUBMITTED":
             intent.pop("tx_hash", None)
             intent["approval_tx"] = tx_hash
+            owner = trader.wallet_address()
+            if int(trader.allowance(token, owner, cfg.ROUTER_ADDRESS)) < int(intent["requested_quantity_raw"]):
+                intent["stage"] = "FAILED"
+                intent["status"] = "FAILED"
+                _update_intent(token, intent)
+                state = trader.load_state()
+                state.setdefault("pending_sells", {}).pop(token, None)
+                trader.save_state(state)
+                return {"action": "SELL", "status": "ALLOWANCE_NOT_CONFIRMED", "token": token}
             intent["stage"] = "SELL_READY"
             _update_intent(token, intent)
         elif stage == "SWAP_SUBMITTED":
