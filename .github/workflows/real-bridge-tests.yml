@@ -61,6 +61,8 @@ jobs:
           python-version: "3.11"
       - name: Install test dependencies
         run: python -m pip install requests eth-account pytest fastapi httpx
+      - name: Static Python syntax validation
+        run: python -m compileall -q real_trader.py real_paper_bridge.py real_swing_sell_executor.py swing_sell_v2.py
       - name: Run repository unittest suite
         run: python -m unittest discover -s tests -v
         continue-on-error: true
