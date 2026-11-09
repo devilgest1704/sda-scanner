@@ -10,6 +10,7 @@ import fcntl
 import hashlib
 import json
 import os
+from datetime import datetime
 from contextlib import contextmanager
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
@@ -515,6 +516,15 @@ def evaluate_position(token, symbol, market_price, price_timestamp=None):
         price = Decimal(str(market_price))
         if price <= 0:
             return {"action": "HOLD", "status": "PRICE_UNAVAILABLE", "token": token}
+        migration_stamp = state.get("sell_migration_observation_started_at")
+        if migration_stamp:
+            try:
+                observed = datetime.fromisoformat(str(price_timestamp).replace("Z", "+00:00"))
+                migrated_at = datetime.fromisoformat(str(migration_stamp).replace("Z", "+00:00"))
+                if observed.tzinfo is None or migrated_at.tzinfo is None or observed <= migrated_at:
+                    return {"action": "HOLD", "status": "PRE_MIGRATION_PRICE", "token": token}
+            except Exception:
+                return {"action": "HOLD", "status": "PRICE_TIMESTAMP_INVALID", "token": token}
         position = _position_defaults(position)
         decimals = trader.token_decimals(token)
         quantity_human = Decimal(int(position["remaining_quantity"])) / (Decimal(10) ** decimals)
