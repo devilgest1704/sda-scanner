@@ -188,6 +188,14 @@ class SwingSellExecutionTests(unittest.TestCase):
         self.assertNotIn(TOKEN, self.state["positions"])
         self.assertEqual(self.state["trades"][-1]["sold_quantity_raw"], 600)
 
+    def test_pre_migration_price_observation_cannot_trigger_sell(self):
+        self.state["sell_migration_observation_started_at"] = "2026-11-09T18:00:00+00:00"
+        self.token_balances = [1000]
+        result = sell.evaluate_position(TOKEN, "TEST", "0.025", "2026-11-09T17:59:59Z")
+        self.assertEqual(result["status"], "PRE_MIGRATION_PRICE")
+        self.send.assert_not_called()
+        self.assertEqual(self.state["trades"], [])
+
     def test_legacy_pending_sell_is_archived_without_transaction(self):
         self.state.pop("sell_strategy_version")
         self.state["pending_sells"] = {TOKEN: {"tx_hash": "0xlegacy"}}
