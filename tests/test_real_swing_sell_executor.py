@@ -3,6 +3,7 @@ import json
 import tempfile
 import threading
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
