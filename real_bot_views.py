@@ -130,8 +130,14 @@ def _tracked_wallet_snapshot(accounting):
     all_holdings = snapshot.get("holdings")
     if not isinstance(all_holdings, list):
         all_holdings = []
+    wsda_present = any(isinstance(item, dict)
+                       and str(item.get("address") or "").lower() == _WSDA
+                       for item in all_holdings)
+    tracked_addresses = set(expected)
+    if wsda_present:
+        tracked_addresses.add(_WSDA)
     tracked = [item for item in all_holdings if isinstance(item, dict)
-               and str(item.get("address") or "").lower() in expected]
+               and str(item.get("address") or "").lower() in tracked_addresses]
     wallet = str(snapshot.get("wallet_address") or rb._wallet_address()).lower()
     if tracked:
         with ThreadPoolExecutor(max_workers=min(12, len(tracked))) as pool:
@@ -140,10 +146,10 @@ def _tracked_wallet_snapshot(accounting):
     missing = sorted(expected - present)
     valued = sum(item.get("market_value_sda") is not None for item in tracked)
     snapshot["holdings"] = tracked
-    snapshot["tracked_expected_count"] = len(expected)
+    snapshot["tracked_expected_count"] = len(tracked_addresses)
     snapshot["tracked_missing_contracts"] = missing
     snapshot["market_valued_count"] = valued
-    snapshot["market_complete"] = valued == len(expected) and not missing
+    snapshot["market_complete"] = valued == len(tracked_addresses) and not missing
     snapshot["token_balances_loaded"] = bool(snapshot.get("token_balances_loaded"))
     return snapshot
 
