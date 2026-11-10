@@ -2,6 +2,7 @@
 import json
 import os
 import tempfile
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -59,44 +60,43 @@ def _run_case(price=None, unavailable=False):
             real_state.update(value)
 
         send_transaction = Mock(side_effect=AssertionError("transaction broadcast attempted"))
-        with (
-            patch.object(bridge, "PAPER_FILE", paper_file),
-            patch.object(bridge, "STATE_FILE", bridge_state_file),
-            patch.object(bridge, "EVENTS_FILE", events_file),
-            patch.object(market_prices, "load_market_snapshot", return_value=snapshot),
-            patch.object(market_prices, "load_token_metadata", return_value={}),
-            patch.object(market_prices, "newest_supabase_price", return_value=None),
-            patch.object(real_trader, "load_state", side_effect=load_state),
-            patch.object(real_trader, "save_state", side_effect=save_state),
-            patch.object(real_trader, "token_decimals", return_value=0),
-            patch.object(real_trader, "wallet_address", return_value=WALLET),
-            patch.object(real_trader, "send_transaction", send_transaction),
-            patch.object(real_trader, "token_balance",
-                         side_effect=AssertionError("unexpected wallet RPC")),
-            patch.object(executor, "reconcile_position_wallet",
-                         return_value={"status": "UNCHANGED"}),
-            patch.object(cfg, "REAL_TRADING_ENABLED", True),
-            # The bridge is entered in live mode, while the executor itself is
-            # explicitly dry-run guarded for every threshold integration case.
-            patch.object(cfg, "REAL_TRADING_DRY_RUN", True),
-            patch.object(cfg, "STATE_FILE", str(executor_state_file)),
-            patch.dict(os.environ, {
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(bridge, "PAPER_FILE", paper_file))
+            stack.enter_context(patch.object(bridge, "STATE_FILE", bridge_state_file))
+            stack.enter_context(patch.object(bridge, "EVENTS_FILE", events_file))
+            stack.enter_context(patch.object(market_prices, "load_market_snapshot", return_value=snapshot))
+            stack.enter_context(patch.object(market_prices, "load_token_metadata", return_value={}))
+            stack.enter_context(patch.object(market_prices, "newest_supabase_price", return_value=None))
+            stack.enter_context(patch.object(real_trader, "load_state", side_effect=load_state))
+            stack.enter_context(patch.object(real_trader, "save_state", side_effect=save_state))
+            stack.enter_context(patch.object(real_trader, "token_decimals", return_value=0))
+            stack.enter_context(patch.object(real_trader, "wallet_address", return_value=WALLET))
+            stack.enter_context(patch.object(real_trader, "send_transaction", send_transaction))
+            stack.enter_context(patch.object(real_trader, "token_balance",
+                                             side_effect=AssertionError("unexpected wallet RPC")))
+            stack.enter_context(patch.object(executor, "reconcile_position_wallet",
+                                             return_value={"status": "UNCHANGED"}))
+            stack.enter_context(patch.object(cfg, "REAL_TRADING_ENABLED", True))
+            # Bridge enters live mode; executor is separately forced into dry-run.
+            stack.enter_context(patch.object(cfg, "REAL_TRADING_DRY_RUN", True))
+            stack.enter_context(patch.object(cfg, "STATE_FILE", str(executor_state_file)))
+            stack.enter_context(patch.dict(os.environ, {
                 "REAL_TRADING_ENABLED": "true",
                 "REAL_TRADING_DRY_RUN": "false",
                 "SDA_PAPER_BUY_MODE": "temporal_recovery",
                 "SDA_PAPER_TP4": "1",
                 "GH_TOKEN": "",
-            }),
-            patch.object(market_prices, "resolve_market_price",
-                         wraps=market_prices.resolve_market_price) as resolver,
-            patch.object(executor, "evaluate_position",
-                         wraps=executor.evaluate_position) as evaluate,
-            patch.object(policy, "decide", wraps=policy.decide) as decide,
-        ):
+            }))
+            resolver = stack.enter_context(patch.object(
+                market_prices, "resolve_market_price", wraps=market_prices.resolve_market_price))
+            evaluate = stack.enter_context(patch.object(
+                executor, "evaluate_position", wraps=executor.evaluate_position))
+            decide = stack.enter_context(patch.object(
+                policy, "decide", wraps=policy.decide))
             result = bridge.reconcile()
 
-        # This is a post-migration state: migrate_if_needed() runs for real and
-        # returns False because the persisted strategy version is already V2.
+        # migrate_if_needed() is not mocked: persisted V2 state makes this a
+        # real post-migration reconciliation and allows the SELL loop to run.
         assert real_state["sell_strategy_version"] == policy.STRATEGY_VERSION
         sell_rows = [x for x in result["actions"] if x.get("action") == "SELL_DECISION"]
         assert len(sell_rows) == 1
