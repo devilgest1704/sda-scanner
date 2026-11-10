@@ -19,6 +19,9 @@ on:
       - "tests/test_real_paper_bridge_swing_v2_integration.py"
       - "tests/test_real_trader_calldata.py"
       - "real_trader.py"
+      - "real_pnl_stats.py"
+      - "tests/test_real_sell_p0_fixes.py"
+      - "tests/test_real_pnl_stats.py"
       - "swing_sell_v2.py"
       - "real_swing_sell_executor.py"
       - "real_swing_sell_report.py"
@@ -58,6 +61,9 @@ on:
       - "tests/test_real_swing_sell_executor.py"
       - "tests/test_real_paper_bridge.py"
       - "tests/test_real_trader_calldata.py"
+      - "real_pnl_stats.py"
+      - "tests/test_real_sell_p0_fixes.py"
+      - "tests/test_real_pnl_stats.py"
       - "run_scanner_v18.sh"
       - ".github/workflows/real-bridge-tests.yml"
 
@@ -201,6 +207,10 @@ jobs:
         run: python -m pytest -q tests/test_real_paper_bridge.py
       - name: Run production bridge to Swing SELL V2 integration tests
         run: python -m pytest -q tests/test_real_paper_bridge_swing_v2_integration.py
+      - name: Run P0 REAL SELL lifecycle and double-count regression tests
+        run: python -m pytest -q tests/test_real_sell_p0_fixes.py
+      - name: Run REAL PnL statistics tests
+        run: python -m pytest -q tests/test_real_pnl_stats.py
       - name: Run REAL Telegram accounting and callback regression tests
         run: python -m pytest -q tests/test_real_bot_views.py tests/test_telegram_callback_router.py
       - name: Render and reconcile all REAL menus from generated blockchain state

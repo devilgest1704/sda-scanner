@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from decimal import Decimal
 import real_bot_menu as rb
+import real_pnl_stats
 import real_trading_config as cfg
 
 _CACHE={"at":0.0,"data":None}
@@ -292,11 +293,6 @@ def _build_dashboard_data(dashboard):
         "invested_sda":rb._finite_number(x.get("invested_sda")),"tx":x.get("tx")}
         for x in (accounting.get("buy_transactions") or []) if isinstance(x,dict)]
     buy_records.sort(key=lambda x:str(x.get("at") or ""),reverse=True)
-    sell_records=[{"symbol":x.get("symbol") or "UNKNOWN","at":x.get("at"),
-        "proceeds_sda":rb._finite_number(x.get("proceeds_sda")),
-        "cost_sda":rb._finite_number(x.get("cost_basis_sda")),
-        "pnl_sda":rb._finite_number(x.get("net_pnl_sda")),"tx":x.get("tx"),"verified":True}
-        for x in (accounting.get("sell_transactions") or []) if isinstance(x,dict)]
     unresolved=accounting.get("bot_unresolved_transactions") or []
     buy_values=[x["invested_sda"] for x in buy_records]
     open_values=[x["value_sda"] for x in positions if x["value_sda"] is not None]
@@ -305,6 +301,15 @@ def _build_dashboard_data(dashboard):
     live_open_value=sum(open_values) if open_values else 0.0
     live_open_cost=sum(open_costs) if open_costs else 0.0
     live_open_complete=complete and len(positions)>0 and all(x["value_sda"] is not None and x["pnl_sda"] is not None for x in positions)
+    # One realized/open/total source for main, SELL history and PnL statistics.
+    pnl_model=real_pnl_stats.build_pnl_model(accounting,runtime_state if isinstance(runtime_state,dict) else {},
+        live_open_pnl,live_open_complete)
+    sell_records=[{"symbol":e["symbol"],"at":e["at"],
+        "proceeds_sda":float(e["proceeds"]) if e["proceeds"] is not None else None,
+        "cost_sda":float(e["cost"]) if e["cost"] is not None else None,
+        "pnl_sda":float(e["pnl"]),"tx":e["tx"],"verified":True}
+        for e in sorted(pnl_model["events"],key=lambda e:(e["at_utc"],str(e["tx"])),reverse=True)]
+    realized_pnl=float(pnl_model["realized"])
     best=stats.get("best_trade") if isinstance(stats.get("best_trade"),dict) else {}
     worst=stats.get("worst_trade") if isinstance(stats.get("worst_trade"),dict) else {}
     return {"source":"blockchain_fifo","load_error":None,"worker":worker,
@@ -327,10 +332,10 @@ def _build_dashboard_data(dashboard):
         "open_cost":live_open_cost,
         "open_pnl":live_open_pnl,
         "open_complete":live_open_complete,
-        "realized_pnl":rb._finite_number(accounting.get("realized_pnl_sda")),
-        "realized_partial":not complete,
-        "total_pnl":(rb._finite_number(accounting.get("realized_pnl_sda"))+live_open_pnl) if live_open_pnl is not None and rb._finite_number(accounting.get("realized_pnl_sda")) is not None else None,
-        "total_partial":not (complete and live_open_complete),"portfolio_value":portfolio,
+        "realized_pnl":realized_pnl,
+        "realized_partial":bool(pnl_model["realized_partial"]),
+        "total_pnl":(realized_pnl+live_open_pnl) if live_open_pnl is not None else None,
+        "total_partial":bool(pnl_model["realized_partial"]) or not live_open_complete,"portfolio_value":portfolio,
         "portfolio_complete":portfolio_complete,
         "portfolio_valued_count":portfolio_valued_count,
         "portfolio_total_count":portfolio_total_count,
@@ -338,7 +343,7 @@ def _build_dashboard_data(dashboard):
         "portfolio_missing_contracts":snapshot.get("tracked_missing_contracts") or [],
         "native_sda":native,"holdings":holdings,
         "bot_reconciliation_status":accounting.get("bot_reconciliation_status"),
-        "bot_unresolved_transactions":unresolved}
+        "bot_unresolved_transactions":unresolved,"pnl_model":pnl_model}
 
 def _get_data(dashboard,refresh=False,cache_only=False):
     now=time.monotonic()
@@ -356,10 +361,26 @@ def _main_keyboard():
         [{"text":"📊 Portfolio","callback_data":"REAL_BOT_PORTFOLIO"},{"text":"🟢 BUY","callback_data":"REAL_BOT_BUY"}],
         [{"text":"🔴 SELL","callback_data":"REAL_BOT_SELL"},{"text":"🎯 SELL V2","callback_data":"REAL_BOT_SELL_V2"}],
         [{"text":"📈 Statistics","callback_data":"REAL_BOT_STATS"},{"text":"🔄 Refresh","callback_data":"REAL_BOT_REFRESH"}],
+        [{"text":"📈 PnL statistika","callback_data":"REAL_BOT_PNL"}],
         [{"text":"⬅️ Back","callback_data":"MAIN"}],
     ]}
 
+PNL_VIEWS={"pnl","pnl_daily","pnl_weekly","pnl_monthly"}
+
+def _pnl_keyboard(view):
+    if view=="pnl":
+        return {"inline_keyboard":[
+            [{"text":"📅 Daily","callback_data":"REAL_BOT_PNL_DAILY"},
+             {"text":"📆 Weekly","callback_data":"REAL_BOT_PNL_WEEKLY"}],
+            [{"text":"🗓 Monthly","callback_data":"REAL_BOT_PNL_MONTHLY"}],
+            [{"text":"⬅️ REAL Menu","callback_data":"REAL_BOT_BACK"}]]}
+    return {"inline_keyboard":[
+        [{"text":"⬅️ PnL statistika","callback_data":"REAL_BOT_PNL"}],
+        [{"text":"⬅️ REAL Menu","callback_data":"REAL_BOT_BACK"}]]}
+
 def _submenu_keyboard(view):
+    if view in PNL_VIEWS:
+        return _pnl_keyboard(view)
     rows=[]
     if view=="portfolio":
         rows.append([{"text":"🔄 Refresh","callback_data":"REAL_BOT_PORTFOLIO_REFRESH"}])
@@ -520,12 +541,84 @@ def _sell_v2_text(dashboard):
     return "\n".join(lines)
 
 
+def _signed_sda(value):
+    return "N/A" if value is None else f"{float(value):+.2f} SDA"
+
+def _pnl_icon(value):
+    return "🟢" if value>0 else ("🔴" if value<0 else "⚪")
+
+def _partial(flag):
+    return " ⚠ partial" if flag else ""
+
+def _pnl_text(data):
+    m=data.get("pnl_model")
+    if not m:return "📈 REAL PNL\n\n⚪ Data temporarily unavailable"
+    open_partial=data.get("open_pnl") is not None and not data.get("open_complete")
+    return "\n".join(["📈 REAL PNL","",
+        f"Dnes          {_signed_sda(m['today']['pnl'])}{_partial(m['today']['partial'])}",
+        f"Tento týden   {_signed_sda(m['this_week']['pnl'])}{_partial(m['this_week']['partial'])}",
+        f"Tento měsíc   {_signed_sda(m['this_month']['pnl'])}{_partial(m['this_month']['partial'])}","",
+        f"Realized      {_signed_sda(data.get('realized_pnl'))}{_partial(data.get('realized_partial'))}",
+        f"Open          {_signed_sda(data.get('open_pnl'))}{_partial(open_partial)}",
+        f"Total         {_signed_sda(data.get('total_pnl'))}{_partial(data.get('total_pnl') is not None and data.get('total_partial'))}",
+        "","Periods = realized BOT SELLs • Europe/Prague"])
+
+def _pnl_daily_text(data):
+    m=data.get("pnl_model")
+    if not m:return "📅 DAILY PNL\n\n⚪ Data temporarily unavailable"
+    daily=m["daily"];lines=["📅 DAILY PNL",""]
+    for key in sorted(daily,reverse=True)[:14]:
+        row=daily[key];day=datetime.fromisoformat(key)
+        lines.append(f"{day:%d.%m}  {float(row['pnl']):+.2f} SDA  Σ {float(row['cumulative']):+.2f} {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
+    if not daily:lines.append("No realized BOT SELL yet")
+    window=[daily[k] for k in real_pnl_stats.recent_days(m,7) if k in daily]
+    values=[row["pnl"] for row in window]
+    lines += ["",f"7D PnL      {_signed_sda(sum(values,Decimal(0)))}{_partial(any(r['partial'] for r in window))}",
+        f"Best day    {_signed_sda(max(values)) if values else 'N/A'}",
+        f"Worst day   {_signed_sda(min(values)) if values else 'N/A'}",
+        f"Green days  {sum(v>0 for v in values)}",f"Red days    {sum(v<0 for v in values)}"]
+    return "\n".join(lines)
+
+def _pnl_weekly_text(data):
+    m=data.get("pnl_model")
+    if not m:return "📆 WEEKLY PNL\n\n⚪ Data temporarily unavailable"
+    weekly=m["weekly"];lines=["📆 WEEKLY PNL",""]
+    for key in sorted(weekly,reverse=True)[:8]:
+        row=weekly[key]
+        lines.append(f"{key}  {float(row['pnl']):+.2f} SDA {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
+    if not weekly:lines.append("No realized BOT SELL yet")
+    window=[weekly[k] for k in real_pnl_stats.recent_weeks(m,4) if k in weekly]
+    values=[row["pnl"] for row in weekly.values()]
+    sells=sum(r["sells"] for r in window);wins=sum(r["wins"] for r in window);losses=sum(r["losses"] for r in window)
+    lines += ["",f"4W PnL      {_signed_sda(sum((r['pnl'] for r in window),Decimal(0)))}{_partial(any(r['partial'] for r in window))}",
+        f"Best week   {_signed_sda(max(values)) if values else 'N/A'}",
+        f"Worst week  {_signed_sda(min(values)) if values else 'N/A'}",
+        f"SELLs {sells}  Wins {wins}  Losses {losses}",
+        f"Win rate    {wins/sells*100:.1f}%" if sells else "Win rate    N/A"]
+    return "\n".join(lines)
+
+def _pnl_monthly_text(data):
+    m=data.get("pnl_model")
+    if not m:return "🗓 MONTHLY PNL\n\n⚪ Data temporarily unavailable"
+    monthly=m["monthly"];lines=["🗓 MONTHLY PNL",""]
+    for key in sorted(monthly,reverse=True):
+        row=monthly[key];month=datetime.strptime(key,"%Y-%m")
+        lines.append(f"{month:%b %Y}  {float(row['pnl']):+.2f} SDA {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
+    if not monthly:lines.append("No realized BOT SELL yet")
+    values=[row["pnl"] for row in monthly.values()]
+    lines += ["",f"Best month   {_signed_sda(max(values)) if values else 'N/A'}",
+        f"Worst month  {_signed_sda(min(values)) if values else 'N/A'}",
+        f"Total realized BOT PnL {_signed_sda(data.get('realized_pnl'))}{_partial(data.get('realized_partial'))}"]
+    return "\n".join(lines)
+
+
 def render_view(dashboard,view="main",refresh=False,cache_only=False):
     if view=="sell_v2":
         return _sell_v2_text(dashboard),_submenu_keyboard(view)
     data=_get_data(dashboard,refresh=refresh,cache_only=cache_only)
     if data is None:return "REAL Trading data is not loaded yet. Open REAL Menu or tap Refresh.",_main_keyboard()
     renderer={"main":_main_text,"portfolio":_portfolio_text,"buy":_buy_text,
-        "sell":_sell_text,"stats":_stats_text}.get(view,_main_text)
+        "sell":_sell_text,"stats":_stats_text,"pnl":_pnl_text,"pnl_daily":_pnl_daily_text,
+        "pnl_weekly":_pnl_weekly_text,"pnl_monthly":_pnl_monthly_text}.get(view,_main_text)
     keyboard=_main_keyboard() if view=="main" else _submenu_keyboard(view)
     return renderer(data),keyboard

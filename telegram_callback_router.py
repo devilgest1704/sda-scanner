@@ -103,6 +103,7 @@ def patch_dashboard(dashboard):
             "REAL_BOT_BUY", "REAL_BOT_SELL",
             "REAL_BOT_STATS", "REAL_BOT_STATS_REFRESH",
             "REAL_BOT_SELL_V2", "REAL_BOT_SELL_V2_REFRESH",
+            "REAL_BOT_PNL", "REAL_BOT_PNL_DAILY", "REAL_BOT_PNL_WEEKLY", "REAL_BOT_PNL_MONTHLY",
         )
         if data not in handled:
             return original_handle(update, state)
@@ -125,6 +126,8 @@ def patch_dashboard(dashboard):
             "REAL_BOT_BUY": "buy", "REAL_BOT_SELL": "sell",
             "REAL_BOT_STATS": "stats", "REAL_BOT_STATS_REFRESH": "stats",
             "REAL_BOT_SELL_V2": "sell_v2", "REAL_BOT_SELL_V2_REFRESH": "sell_v2",
+            "REAL_BOT_PNL": "pnl", "REAL_BOT_PNL_DAILY": "pnl_daily",
+            "REAL_BOT_PNL_WEEKLY": "pnl_weekly", "REAL_BOT_PNL_MONTHLY": "pnl_monthly",
         }
         if data in real_bot_views:
             view = real_bot_views[data]

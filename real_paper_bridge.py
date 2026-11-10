@@ -7,12 +7,50 @@ position transitions. PAPER remains the sole signal/exit authority.
 """
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 STATE_FILE = Path("real_paper_bridge_state.json")
 EVENTS_FILE = Path("real_paper_bridge_events.json")
 PAPER_FILE = Path("positions.json")
+
+SELL_ACTIONS = {"SELL_DECISION", "SELL_RECOVERY", "MANUAL_SELL_RECONCILIATION", "ACCOUNTING_REPAIR"}
+SELL_ERROR_STATUSES = {
+    "ERROR", "FAILED", "DROPPED", "QUOTE_FAILED", "SWAP_REVERTED", "APPROVAL_REVERTED",
+    "BROADCAST_PREPARATION_FAILED", "PRE_BROADCAST_ABORTED", "ACCOUNTING_UNVERIFIED",
+    "UNWRAP_FAILED", "UNWRAP_DROPPED",
+}
+SELL_QUARANTINE_STATUSES = {"QUARANTINED", "SELL_QUARANTINED"}
+SELL_PENDING_STATUSES = {
+    "PENDING_CONFIRMATION", "UNKNOWN", "SELL_BACKOFF", "SELL_INTENT_PENDING",
+    "ALLOWANCE_NOT_CONFIRMED", "UNWRAP_DEFERRED", "INTENT_ALREADY_EXISTS", "DRY_RUN",
+}
+
+
+def sell_health(actions):
+    """Summarize SELL subsystem health; any SELL error is never reported as healthy."""
+    rows = [a for a in actions if isinstance(a, dict) and a.get("action") in SELL_ACTIONS]
+    statuses = [str(a.get("status") or "") for a in rows]
+    errors = [a for a in rows if str(a.get("status") or "") in SELL_ERROR_STATUSES]
+    counts = {}
+    for status in statuses:
+        counts[status] = counts.get(status, 0) + 1
+    if errors:
+        health = "SELL_ERROR"
+    elif any(s in SELL_QUARANTINE_STATUSES for s in statuses):
+        health = "SELL_QUARANTINED"
+    elif any(s == "CONFIRMED" for s in statuses):
+        health = "SELL_EXECUTED"
+    elif any(s in SELL_PENDING_STATUSES for s in statuses):
+        health = "SELL_PENDING"
+    else:
+        health = "SELL_HOLD"
+    return {"health": health, "evaluated": len(rows), "status_counts": counts,
+            "errors": [{"token": a.get("token"), "symbol": a.get("symbol"),
+                        "status": a.get("status"), "error": a.get("error") or a.get("failure_code")}
+                       for a in errors][:20],
+            "at": _now()}
 
 
 def _now():
@@ -100,7 +138,9 @@ def reconcile():
     # persisted hashes/receipts and never blindly resubmits an UNKNOWN tx.
     try:
         for recovered in swing_executor.startup_recovery():
-            actions.append({"action": "SELL_RECOVERY", **recovered, "at": _now()})
+            label = "ACCOUNTING_REPAIR" if recovered.get("action") == "ACCOUNTING_REPAIR" else "SELL_RECOVERY"
+            actions.append({**recovered, "action": label,
+                            "result_action": recovered.get("action"), "at": _now()})
     except Exception as exc:
         actions.append({"action": "SELL_RECOVERY", "status": "ERROR",
                         "error": str(exc)[:500], "at": _now()})
@@ -176,7 +216,14 @@ def reconcile():
                     continue
                 symbol = str(real_pos.get("symbol") or token[:8])
                 try:
-                    wallet_reconciliation = swing_executor.reconcile_position_wallet(token)
+                    # A known automatic SELL is finalized before the wallet may be compared.
+                    reconciliation = swing_executor.reconcile_position(token)
+                    intent_result = reconciliation.get("intent")
+                    if intent_result:
+                        actions.append({**intent_result, "action": "SELL_RECOVERY",
+                                        "result_action": intent_result.get("action"),
+                                        "token": token, "symbol": symbol, "at": _now()})
+                    wallet_reconciliation = reconciliation.get("wallet") or {}
                     if wallet_reconciliation.get("status") == "CLOSED_MANUAL_RECONCILED":
                         actions.append({"action": "MANUAL_SELL_RECONCILIATION",
                                         "token": token, "symbol": symbol,
@@ -186,6 +233,13 @@ def reconcile():
                         actions.append({"action": "MANUAL_SELL_RECONCILIATION",
                                         "token": token, "symbol": symbol,
                                         "status": "PARTIAL", "at": _now()})
+                    if wallet_reconciliation.get("status") == "SELL_INTENT_ACTIVE":
+                        actions.append({"action": "SELL_DECISION", "token": token,
+                                        "symbol": symbol, "status": "SELL_INTENT_PENDING",
+                                        "stage": wallet_reconciliation.get("stage"), "at": _now()})
+                        continue
+                    if wallet_reconciliation.get("status") == "NO_POSITION":
+                        continue
                     market = market_prices.resolve_market_price(
                         token, market_snapshot,
                         now=datetime.now(timezone.utc),
@@ -223,11 +277,23 @@ def reconcile():
     state["pending_sell"] = []
     state["last_run"] = _now()
     state["last_actions"] = actions
+    health = sell_health(actions)
+    if migrated:
+        health["note"] = "MIGRATION_BASELINE"
+    state["sell_health"] = health
     _save(STATE_FILE, state)
     if actions:
         events = _load(EVENTS_FILE, [])
         events.extend(actions)
         _save(EVENTS_FILE, events[-1000:])
-    return {"status": "reconciled", "actions": actions,
+    if health["health"] == "SELL_ERROR":
+        print(f"::error::REAL SELL HEALTH SELL_ERROR {json.dumps(health['errors'], default=str)[:1500]}",
+              file=sys.stderr, flush=True)
+    elif health["health"] == "SELL_QUARANTINED":
+        print(f"::warning::REAL SELL HEALTH SELL_QUARANTINED {json.dumps(health['status_counts'])}",
+              file=sys.stderr, flush=True)
+    return {"status": "reconciled" if health["health"] != "SELL_ERROR" else "reconciled_with_sell_error",
+            "sell_health": health["health"], "sell_health_detail": health,
+            "actions": actions,
             "paper_open": len(now_keys), "opened": len(opened),
             "closed": len(previous - now_keys), "sell_strategy": "swing_v2"}
