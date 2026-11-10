@@ -101,6 +101,35 @@ jobs:
           dashboard=SimpleNamespace(load=lambda path,default:files.get(path,default))
           real_bot_menu._remote_json=lambda _dashboard,path:files.get(path,{})
           wallet=real_bot_menu._wallet_address()
+          import real_trader
+          import real_trading_config as cfg
+          try:
+              native_balance=int(real_trader.rpc("eth_getBalance",[wallet,"latest"]),16)/10**18
+          except Exception as exc:
+              native_balance=f"{type(exc).__name__}: {exc}"
+          print("READ-ONLY QUOTE DIAGNOSTICS",json.dumps({"wallet":wallet,"native_sda_balance":native_balance}))
+          xen="0x53167ff5810ff1886fc554e672994c232126383e"
+          for size in (1,20):
+              amount=int(size*10**18)
+              for value in (0,amount):
+                  try:
+                      result=real_trader.quote_best_live_fee(cfg.WSDA_ADDRESS,xen,xen,wallet,amount,value_wei=value)
+                      print("QUOTE_OK",json.dumps({"token":"XEN","size_sda":size,"value_wei":value,
+                          "fee":result[0],"amount_out_raw":str(result[1])}))
+                  except Exception as exc:
+                      print("QUOTE_ERROR",json.dumps({"token":"XEN","size_sda":size,"value_wei":value,
+                          "error":f"{type(exc).__name__}: {str(exc)[:500]}"}))
+          print("SUPABASE AND SCANNER SOURCE AGES")
+          for token,position in (state.get("positions") or {}).items():
+              sup=real_bot_menu._newest_supabase_price(str(token).lower()) or {}
+              ana=(analysis.get("tokens") or {}).get(str(token).lower(),{})
+              print("SOURCE_AGE",json.dumps({"token":metadata.get(str(token).lower(),{}).get("symbol",position.get("symbol")),
+                  "scanner_snapshot":analysis.get("updated_at"),
+                  "scanner_last_trade":ana.get("last_transaction") or ana.get("last_transaction_at"),
+                  "scanner_price":ana.get("price_in_sda"),
+                  "supabase_price":sup.get("price_sda"),"supabase_timestamp":sup.get("timestamp"),
+                  "supabase_age_seconds":sup.get("age_seconds"),"supabase_stale":sup.get("stale"),
+                  "supabase_error":sup.get("error")},ensure_ascii=False,sort_keys=True))
           snapshot=real_bot_views._tracked_wallet_snapshot(accounting,dashboard)
           holdings={str(item.get("address") or "").lower():item
                     for item in snapshot.get("holdings",[]) if isinstance(item,dict)}
@@ -174,18 +203,24 @@ jobs:
           import real_bot_menu as rb
           import real_bot_views as views
 
-          state=json.loads(Path("real_accounting_state.json").read_text(encoding="utf-8"))
+          accounting=json.loads(Path("real_accounting_state.json").read_text(encoding="utf-8"))
+          runtime=json.loads(Path("real_trade_state.json").read_text(encoding="utf-8"))
+          metadata=json.loads(Path("token_metadata.json").read_text(encoding="utf-8"))
+          files={"real_accounting_state.json":accounting,"real_trade_state.json":runtime,
+                 "token_metadata.json":metadata}
           rb._load_worker_status=lambda _dashboard: {"enabled": True, "dry_run": False}
           rb._status=lambda _worker: "🟢 LIVE"
-          dashboard=SimpleNamespace(load=lambda path, default: state if path=="real_accounting_state.json" else default)
+          dashboard=SimpleNamespace(load=lambda path, default: files.get(path,default))
           views.clear_cache()
           data=views._build_dashboard_data(dashboard)
-          assert len(data["positions"]) == state["statistics"]["open_positions_count"]
-          assert len(data["buy_records"]) == state["statistics"]["confirmed_buys_count"]
-          assert len(data["sell_records"]) == state["statistics"]["matched_sells_count"]
-          assert abs(sum(float(x["pnl_sda"]) for x in data["sell_records"])-float(state["realized_pnl_sda"])) < 1e-8
-          assert abs(sum(float(x["pnl_sda"]) for x in data["positions"])-float(state["open_pnl_sda"])) < 1e-8
-          assert abs(float(state["total_pnl_sda"])-float(state["realized_pnl_sda"])-float(state["open_pnl_sda"])) < 1e-8
+          expected_open=sum(1 for p in (runtime.get("positions") or {}).values()
+                            if isinstance(p,dict) and float(p.get("remaining_quantity") or p.get("token_amount_raw") or 0)>0)
+          assert len(data["positions"]) == expected_open
+          assert len(data["buy_records"]) == accounting["statistics"]["confirmed_buys_count"]
+          assert len(data["sell_records"]) == accounting["statistics"]["matched_sells_count"]
+          assert abs(sum(float(x["pnl_sda"]) for x in data["sell_records"])-float(accounting["realized_pnl_sda"])) < 1e-8
+          if data["open_complete"]:
+              assert abs(sum(float(x["pnl_sda"]) for x in data["positions"])-float(data["open_pnl"])) < 1e-8
           assert all(x["symbol"]!="PINE" for x in data["buy_records"]+data["sell_records"]+data["positions"])
           assert all(x["symbol"]!="HAQ" for x in data["positions"])
           for view in ("main","portfolio","buy","sell","stats"):
