@@ -21,6 +21,7 @@ on:
       - "swing_sell_v2.py"
       - "real_swing_sell_executor.py"
       - "real_swing_sell_report.py"
+      - "real_market_price.py"
       - "tests/test_real_swing_sell_report.py"
       - "tests/test_swing_sell_v2.py"
       - "tests/test_real_swing_sell_executor.py"
@@ -74,24 +75,52 @@ jobs:
         run: python -m pytest -q tests/test_swing_sell_v2.py
       - name: Run read-only Swing SELL V2 decision report tests
         run: python -m pytest -q tests/test_real_swing_sell_report.py
-      - name: Capture current read-only REAL SELL V2 decisions
+      - name: Capture current read-only REAL market prices and SELL V2 decisions
+        env:
+          REAL_TRADING_ENABLED: "false"
+          REAL_TRADING_DRY_RUN: "true"
         run: |
           python - <<'PY'
           import json
+          from datetime import datetime, timezone
           from pathlib import Path
           import real_bot_menu
+          import real_bot_views
           import real_swing_sell_report
 
           state=json.loads(Path("real_trade_state.json").read_text(encoding="utf-8"))
           analysis=json.loads(Path("market_analysis.json").read_text(encoding="utf-8"))
           metadata=json.loads(Path("token_metadata.json").read_text(encoding="utf-8"))
+          wallet=real_bot_menu._wallet_address()
+          def reference_quote(token):
+              item=metadata.get(str(token).lower(),{})
+              decimals=item.get("decimals") if isinstance(item,dict) else None
+              if decimals is None:
+                  return None
+              price=real_bot_views._read_only_buy_price(token,int(decimals),wallet)
+              return {"price_sda":str(price),
+                  "timestamp":datetime.now(timezone.utc).isoformat(),
+                  "source":"PinetSwap 1 SDA BUY-side reference quote",
+                  "quote_amount_sda":1}
           rows=real_swing_sell_report.build_decision_rows(
               state, analysis, metadata,
               supabase_lookup=real_bot_menu._newest_supabase_price,
+              reference_quote_lookup=reference_quote,
           )
-          print("READ-ONLY SELL V2 SNAPSHOT")
+          print("READ-ONLY REAL MARKET PRICE + SELL V2 SNAPSHOT")
           for row in rows:
-              print(json.dumps(row, ensure_ascii=False, sort_keys=True))
+              print(json.dumps({
+                  "token":row["token"],"token_address":row["token_address"],
+                  "quantity":row.get("quantity"),"entry_price":row.get("entry_price"),
+                  "cost_sda":row.get("cost_sda"),"decision_price":row.get("decision_price"),
+                  "market_value_sda":row.get("market_value_sda"),
+                  "market_pnl_sda":row.get("market_pnl_sda"),"pnl_pct":row.get("pnl_pct"),
+                  "price_source":row.get("price_source"),"price_timestamp":row.get("price_timestamp"),
+                  "price_age_seconds":row.get("price_age_seconds"),
+                  "state":row.get("swing_state"),"action":row.get("action"),
+                  "quarantine_reason":row.get("quarantine_reason"),
+              }, ensure_ascii=False, sort_keys=True))
+          print("REAL TRANSACTIONS SENT: 0 (eth_call only)")
           PY
       - name: Run Swing SELL V2 live-executor mock integration tests
         run: python -m pytest -q tests/test_real_swing_sell_executor.py
