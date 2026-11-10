@@ -122,7 +122,7 @@ def built_data(monkeypatch):
         "tracked_missing_contracts": [],
         "market_complete": True,
     }
-    monkeypatch.setattr(views, "_tracked_wallet_snapshot", lambda _accounting: tracked_snapshot)
+    monkeypatch.setattr(views, "_tracked_wallet_snapshot", lambda _accounting, _dashboard=None: tracked_snapshot)
     return views._build_dashboard_data(dashboard)
 
 
@@ -243,3 +243,44 @@ def test_legacy_position_action_panel_shows_only_verified_bot_positions(monkeypa
     assert "PINE" not in text and "HAQ" not in text
     for symbol, _value, _pnl in POSITION_ROWS:
         assert symbol in text
+
+
+def test_wallet_portfolio_includes_new_live_bot_position_while_fifo_lags(monkeypatch):
+    state = _accounting_state()
+    extra_token = "0x" + f"{99:040x}"
+    runtime_state = {
+        "positions": {
+            extra_token: {
+                "token": extra_token,
+                "remaining_quantity": "500",
+                "remaining_cost_basis": "20",
+                "buy_tx": "0xconfirmed-new-buy",
+            }
+        }
+    }
+    dashboard = SimpleNamespace(load=lambda path, default: runtime_state if path == "real_trade_state.json" else default)
+    wallet_snapshot = {
+        "native_sda": 100.0,
+        "wallet_address": rb.BOT_WALLET_ADDRESS,
+        "token_balances_loaded": True,
+        "holdings": [
+            {"address": item["token"], "symbol": item["symbol"], "amount": 100,
+             "market_value_sda": Decimal("10")}
+            for item in state["open_positions"]
+        ] + [
+            {"address": extra_token, "symbol": "BZST", "amount": 500,
+             "market_value_sda": Decimal("17.4823")},
+            {"address": "0x" + f"{98:040x}", "symbol": "PINE", "amount": 1,
+             "market_value_sda": Decimal("99")},
+        ],
+    }
+    monkeypatch.setattr(views, "_ORIGINAL_FETCH_WALLET_SNAPSHOT", lambda include_prices=False: wallet_snapshot)
+    monkeypatch.setattr(views, "_price_holding", lambda holding, wallet: holding)
+    result = views._tracked_wallet_snapshot(state, dashboard)
+    addresses = {item["address"] for item in result["holdings"]}
+    assert extra_token in addresses
+    assert "0x" + f"{98:040x}" not in addresses
+    assert len(result["holdings"]) == 10
+    assert result["tracked_expected_count"] == 10
+    assert result["market_complete"] is True
+    assert sum(float(item["market_value_sda"]) for item in result["holdings"]) + result["native_sda"] == pytest.approx(217.4823)
