@@ -241,3 +241,58 @@ def test_live_quote_probes_fee_tiers_when_token_has_no_trusted_fee(monkeypatch):
     assert amount_out == 300
     assert calldata == "calldata-3000"
     assert deadline == 123
+
+def test_telegram_wallet_holding_uses_shared_fresh_market_mark(monkeypatch):
+    import real_market_price
+
+    token = "0x" + "e" * 40
+    wallet = real_bot_menu.BOT_WALLET_ADDRESS
+    now = datetime.now(timezone.utc)
+    stale = (now - timedelta(hours=1)).isoformat()
+    monkeypatch.setattr(real_bot_menu, "_newest_supabase_price",
+                        lambda _token: {"price_sda": "0.20", "timestamp": stale})
+    quote = {"price_sda": Decimal("0.25"), "timestamp": datetime.now(timezone.utc).isoformat(),
+             "source": "PinetSwap 1 SDA BUY-side reference quote",
+             "fee_tier": 3000, "quote_amount_sda": 1}
+    monkeypatch.setattr(real_market_price, "read_only_pinet_swap_buy_reference_quote",
+                        lambda *_args: quote)
+    holding = {"address": token, "decimals": 18, "amount": Decimal("100"),
+               "price_sda": None, "market_value_sda": None}
+    result = real_bot_menu._price_wallet_holding(
+        holding, wallet, {"updated_at": stale, "tokens": {}}
+    )
+    assert result["price_sda"] == Decimal("0.25")
+    assert result["market_value_sda"] == Decimal("25")
+    assert result["price_source"] == "PinetSwap 1 SDA BUY-side reference quote"
+    assert result["price_fee_tier"] == 3000
+    assert result["price_age_seconds"] == 0
+
+
+def test_telegram_wallet_holding_prefers_fresh_supabase_trade(monkeypatch):
+    import real_market_price
+
+    token = "0x" + "e" * 40
+    wallet = real_bot_menu.BOT_WALLET_ADDRESS
+    timestamp = (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
+    monkeypatch.setattr(real_bot_menu, "_newest_supabase_price",
+                        lambda _token: {"price_sda": "0.20", "timestamp": timestamp})
+    monkeypatch.setattr(real_market_price, "read_only_pinet_swap_buy_reference_quote",
+                        lambda *_args: pytest.fail("fresh Supabase trade should win"))
+    holding = {"address": token, "decimals": 18, "amount": Decimal("100"),
+               "price_sda": None, "market_value_sda": None}
+    result = real_bot_menu._price_wallet_holding(
+        holding, wallet, {"updated_at": "stale", "tokens": {}}
+    )
+    assert result["price_sda"] == Decimal("0.20")
+    assert result["market_value_sda"] == Decimal("20")
+    assert result["price_source"] == "supabase_transaction"
+
+
+def test_portfolio_position_line_includes_concise_pnl_percentage():
+    line = real_bot_menu._position_lines("XEN", {
+        "market_value_sda": 20.62, "market_pnl_sda": 0.62,
+        "market_pnl_pct": 3.1,
+    })[0]
+    assert "XEN 20.62 SDA +0.62 (+3.1%)" in line
+
+
