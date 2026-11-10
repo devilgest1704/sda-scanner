@@ -152,6 +152,7 @@ def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None,re
             "market_pnl_sda":float(market_pnl) if market_pnl is not None else None,
             "price_timestamp":market.get("timestamp") if market else None,
             "price_age_seconds":market.get("age_seconds") if market else None,"price_source":market.get("source") if market else None,
+            "price_fee_tier":market.get("fee_tier") if market else None,
             "pnl_pct":pnl,"profit_partial_done":partial,"trailing_armed":trailing,
             "current_peak":float(peak) if peak is not None else None,"trailing_price":float(trail) if trail is not None else None,
             "swing_state":swing_state,"action":action,"quarantine_reason":quarantine_reason})
