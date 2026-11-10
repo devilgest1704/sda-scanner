@@ -157,6 +157,7 @@ jobs:
                   "wallet_compatible_value_sda":str(wallet_value) if wallet_value is not None else None,
                   "difference_sda":float(wallet_value)-bot_value if wallet_value is not None and bot_value is not None else None,
                   "price_source":holding.get("price_source"),
+                  "price_fee_tier":holding.get("price_fee_tier"),
                   "price_timestamp":holding.get("price_timestamp"),
                   "price_age_seconds":holding.get("price_age_seconds")},ensure_ascii=False,sort_keys=True))
           def reference_quote(token):
@@ -164,11 +165,11 @@ jobs:
               decimals=item.get("decimals") if isinstance(item,dict) else None
               if decimals is None:
                   return None
-              price=real_bot_views._read_only_buy_price(token,int(decimals),wallet)
-              return {"price_sda":str(price),
+              quote=real_bot_views._read_only_buy_market_quote(token,int(decimals),wallet)
+              return {"price_sda":str(quote["price_sda"]),
                   "timestamp":datetime.now(timezone.utc).isoformat(),
                   "source":"PinetSwap 1 SDA BUY-side reference quote",
-                  "quote_amount_sda":1}
+                  "quote_amount_sda":1,"fee_tier":quote["fee_tier"]}
           rows=real_swing_sell_report.build_decision_rows(
               state, analysis, metadata,
               supabase_lookup=real_bot_menu._newest_supabase_price,
@@ -184,6 +185,7 @@ jobs:
                   "market_pnl_sda":row.get("market_pnl_sda"),"pnl_pct":row.get("pnl_pct"),
                   "price_source":row.get("price_source"),"price_timestamp":row.get("price_timestamp"),
                   "price_age_seconds":row.get("price_age_seconds"),
+                  "price_fee_tier":row.get("price_fee_tier"),
                   "state":row.get("swing_state"),"action":row.get("action"),
                   "quarantine_reason":row.get("quarantine_reason"),
               }, ensure_ascii=False, sort_keys=True))
@@ -226,7 +228,7 @@ jobs:
           assert all(x["symbol"]!="PINE" for x in data["buy_records"]+data["sell_records"]+data["positions"])
           assert all(x["symbol"]!="HAQ" for x in data["positions"])
           for view in ("main","portfolio","buy","sell","sell_v2","stats"):
-              text,_=views.render_view(dashboard,view,refresh=True)
+              text,_=views.render_view(dashboard,view,refresh=(view=="main"))
               print(f"===== REAL {view.upper()} =====")
               print(text)
           PY
