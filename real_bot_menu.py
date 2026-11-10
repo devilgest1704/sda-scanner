@@ -779,7 +779,9 @@ def _position_lines(symbol, mark):
     if pnl is None:
         return [f"⚪ {symbol} {float(value):.2f} SDA PnL unavailable"]
     icon = "🟢" if pnl >= 0 else "🔴"
-    return [f"{icon} {symbol} {float(value):.2f} SDA {float(pnl):+.2f}"]
+    pct = mark.get("market_pnl_pct")
+    pct_text = f" ({float(pct):+.1f}%)" if pct is not None else ""
+    return [f"{icon} {symbol} {float(value):.2f} SDA {float(pnl):+.2f}{pct_text}"]
 
 def _build_bot_report(dashboard):
     # Independent remote reads are fetched once each and concurrently.
