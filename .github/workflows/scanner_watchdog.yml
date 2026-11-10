@@ -87,7 +87,7 @@ jobs:
             run_sha="$(echo "$active_run" | jq -r '.headSha')"
             run_created="$(echo "$active_run" | jq -r '.createdAt')"
             run_age=$(( $(date -u +%s) - $(date -u -d "$run_created" +%s) ))
-            if [ "$run_age" -ge 600 ]; then
+            if [ "$run_age" -ge 300 ]; then
               # A running job is not proof of a completed scan. Use the
               # scanner-owned market checkpoint, never the agent report time.
               stale_checkpoint="$(python -m tools.scanner_checkpoint_health)"
