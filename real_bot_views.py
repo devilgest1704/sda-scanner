@@ -464,7 +464,17 @@ def _sell_v2_text(dashboard):
         return "🎯 SELL V2 • READ ONLY\\n\\n⚪ Data temporarily unavailable"
     analysis=load("market_analysis.json")
     metadata=load("token_metadata.json")
-    rows=report.build_decision_rows(state, analysis, metadata, supabase_lookup=rb._newest_supabase_price)
+    wallet=rb._wallet_address().strip().lower()
+    def reference_quote(token):
+        item=metadata.get(str(token).lower(),{}) if isinstance(metadata,dict) else {}
+        decimals=item.get("decimals") if isinstance(item,dict) else None
+        if decimals is None:
+            return None
+        price=_read_only_buy_price(token,int(decimals),wallet)
+        return {"price_sda":str(price),"timestamp":datetime.now(timezone.utc).isoformat(),
+            "source":"PinetSwap 1 SDA BUY-side reference quote","quote_amount_sda":1}
+    rows=report.build_decision_rows(state, analysis, metadata,
+        supabase_lookup=rb._newest_supabase_price,reference_quote_lookup=reference_quote)
     lines=["🎯 SELL V2 • READ ONLY",""]
     if not rows:
         lines.append("⚪ No open REAL positions")
@@ -479,7 +489,11 @@ def _sell_v2_text(dashboard):
             "FULL_SELL_EMERGENCY":"🔴","FULL_SELL_TRAILING":"🔴",
             "FULL_SELL_TP":"🔴","PRICE_UNAVAILABLE":"⚪","SELL_QUARANTINED":"⚠️",
         }[row["action"]]
-        lines.append(f'{symbol}  Entry {entry} → Now {current}  {pnl}  {icon} {row["action"]}')
+        value="N/A" if row.get("market_value_sda") is None else f'{row["market_value_sda"]:.2f} SDA'
+        lines.append(f'{symbol}  Entry {entry} → Now {current}  Value {value}  {pnl}  {icon} {row["action"]}')
+        if row.get("price_source"):
+            age=int(row.get("price_age_seconds") or 0)
+            lines.append(f'  Price {row["price_source"]} • age {age}s')
         lines.append(f'P:{ "Y" if row["profit_partial_done"] else "N"}  T:{ "Y" if row["trailing_armed"] else "N"}  State: {row["swing_state"]}')
         if row["trailing_armed"]:
             peak="N/A" if row["current_peak"] is None else f'{row["current_peak"]:.6g}'
