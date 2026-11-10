@@ -106,10 +106,18 @@ def resolve_market_price(token, analysis, now=None, supabase_lookup=None,
         if isinstance(quote, dict):
             # The read-only BUY-side reference quote is stamped at acquisition.
             # It must carry its own timestamp; we never refresh an old quote's age.
+            quote_stamp = parse_timestamp(quote.get("timestamp"))
+            validation_now = now
+            # A live eth_call is timestamped after the resolver starts. Accept
+            # only a tiny acquisition-time skew; larger future timestamps fail closed.
+            if quote_stamp is not None:
+                future_skew = (quote_stamp - now.astimezone(timezone.utc)).total_seconds()
+                if 0 < future_skew <= 5:
+                    validation_now = quote_stamp
             return _validated(
                 quote.get("price_sda"), quote.get("timestamp"),
                 quote.get("source") or "pinet_swap_buy_reference_1_sda",
-                now, max_age, quote_amount_sda=quote.get("quote_amount_sda", 1),
+                validation_now, max_age, quote_amount_sda=quote.get("quote_amount_sda", 1),
                 quote_side="BUY_REFERENCE",
             )
     return None
