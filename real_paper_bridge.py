@@ -133,9 +133,44 @@ def reconcile():
     # the authoritative Swing SELL V2 policy. A PAPER close is NOT a SELL signal.
     if not migrated:
         try:
-            import real_bot_menu
-            market_snapshot = real_bot_menu.load_market_snapshot()
+            # Production SELL decisions use the same standalone market-price
+            # resolver as the read-only REAL portfolio and SELL V2 preview.
+            # Telegram/menu modules are deliberately absent from this path.
+            import real_market_price as market_prices
+            market_snapshot = market_prices.load_market_snapshot()
+            token_metadata = market_prices.load_token_metadata()
             real_state = real_trader.load_state()
+
+            def reference_quote(token):
+                item = token_metadata.get(str(token).lower())
+                if not isinstance(item, dict):
+                    return None
+                try:
+                    decimals = int(item["decimals"])
+                    if not 0 <= decimals <= 36:
+                        return None
+                    wallet = real_trader.wallet_address()
+                    amount_in = 10 ** 18
+                    fee, amount_out_raw, _calldata, _deadline = real_trader.quote_best_live_fee(
+                        cfg.WSDA_ADDRESS, token, token, wallet, amount_in,
+                        value_wei=amount_in,
+                    )
+                    amount_out_raw = int(amount_out_raw)
+                    if amount_out_raw <= 0:
+                        return None
+                    # Read-only 1 SDA BUY-side mark, never an executable SELL quote.
+                    price = (10 ** decimals) / amount_out_raw
+                    return {
+                        "price_sda": price,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "source": "PinetSwap 1 SDA BUY-side reference quote",
+                        "quote_amount_sda": 1,
+                        "quote_side": "BUY_REFERENCE",
+                        "fee_tier": int(fee),
+                    }
+                except Exception:
+                    return None
+
             for token, real_pos in list(real_state.get("positions", {}).items()):
                 if not isinstance(real_pos, dict):
                     continue
@@ -151,22 +186,28 @@ def reconcile():
                         actions.append({"action": "MANUAL_SELL_RECONCILIATION",
                                         "token": token, "symbol": symbol,
                                         "status": "PARTIAL", "at": _now()})
-                    market = real_bot_menu._newest_market_price(
-                        token, market_snapshot=market_snapshot, max_age_seconds=300
+                    market = market_prices.resolve_market_price(
+                        token, market_snapshot,
+                        now=datetime.now(timezone.utc),
+                        supabase_lookup=market_prices.newest_supabase_price,
+                        reference_quote_lookup=reference_quote,
                     )
-                    price = market.get("price_sda") if isinstance(market, dict) else None
-                    age = market.get("age_seconds") if isinstance(market, dict) else None
-                    if price is None or market.get("stale") or age is None or float(age) > 300:
+                    if market is None:
                         actions.append({"action": "SELL_DECISION", "token": token,
                                         "symbol": symbol, "status": "PRICE_UNAVAILABLE",
                                         "at": _now()})
                         continue
                     result = swing_executor.evaluate_position(
-                        token, symbol, price, market.get("timestamp"),
+                        token, symbol, market["price_sda"], market.get("timestamp"),
                         wallet_reconciled=True
                     )
                     actions.append({"action": "SELL_DECISION", "token": token,
-                                    "symbol": symbol, **result, "at": _now()})
+                                    "symbol": symbol,
+                                    "decision_price": market["price_sda"],
+                                    "price_timestamp": market.get("timestamp"),
+                                    "price_age_seconds": market.get("age_seconds"),
+                                    "price_source": market.get("source"),
+                                    **result, "at": _now()})
                 except Exception as exc:
                     actions.append({"action": "SELL_DECISION", "token": token,
                                     "symbol": symbol, "status": "ERROR",

@@ -121,3 +121,61 @@ def resolve_market_price(token, analysis, now=None, supabase_lookup=None,
                 quote_side="BUY_REFERENCE", fee_tier=quote.get("fee_tier"),
             )
     return None
+
+
+def load_market_snapshot(path="market_analysis.json"):
+    """Load the scanner snapshot without importing Telegram/menu code."""
+    import json
+    from pathlib import Path
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def load_token_metadata(path="token_metadata.json"):
+    """Load scanner token metadata for the read-only 1 SDA reference mark."""
+    import json
+    from pathlib import Path
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def newest_supabase_price(token):
+    """Return the newest observed Supabase trade price; freshness is validated by resolver."""
+    import requests
+    token = str(token).strip().lower()
+    try:
+        response = requests.get(
+            "https://uhrsigapvhlpudafxqfg.supabase.co/rest/v1/token_transactions",
+            params={"select": "token_address,price_in_sda,tx_timestamp,tx_type",
+                    "token_address": f"eq.{token}", "order": "tx_timestamp.desc", "limit": "100"},
+            headers={"apikey": "sb_publishable_fL6m94CTRdZESg1licW9Qw_BuLIkm1Z",
+                     "accept-profile": "public"},
+            timeout=(1.5, 3.0),
+        )
+        response.raise_for_status()
+        rows = response.json()
+    except Exception:
+        return None
+    if not isinstance(rows, list):
+        return None
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("token_address") or "").lower() != token:
+            continue
+        if str(row.get("tx_type") or "").lower() not in {"buy", "sell"}:
+            continue
+        stamp = parse_timestamp(row.get("tx_timestamp"))
+        price = decimal_price(row.get("price_in_sda"))
+        if stamp is None or price is None or stamp > now:
+            continue
+        return {"price_sda": float(price), "timestamp": stamp.isoformat(),
+                "source": "Supabase token_transactions.price_in_sda"}
+    return None

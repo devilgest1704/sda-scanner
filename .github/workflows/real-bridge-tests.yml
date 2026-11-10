@@ -16,6 +16,7 @@ on:
       - "tests/test_real_bot_views.py"
       - "tests/test_telegram_callback_router.py"
       - "tests/test_real_paper_bridge.py"
+      - "tests/test_real_paper_bridge_swing_v2_integration.py"
       - "tests/test_real_trader_calldata.py"
       - "real_trader.py"
       - "swing_sell_v2.py"
@@ -48,7 +49,10 @@ on:
       - "real_trader.py"
       - "real_swing_sell_executor.py"
       - "real_swing_sell_report.py"
+      - "real_market_price.py"
       - "tests/test_real_swing_sell_report.py"
+      - "tests/test_real_market_price.py"
+      - "tests/test_real_paper_bridge_swing_v2_integration.py"
       - "swing_sell_v2.py"
       - "tests/test_swing_sell_v2.py"
       - "tests/test_real_swing_sell_executor.py"
@@ -68,7 +72,7 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install requests eth-account pytest fastapi httpx
       - name: Static Python syntax validation
-        run: python -m compileall -q real_trader.py real_paper_bridge.py real_swing_sell_executor.py real_swing_sell_report.py swing_sell_v2.py
+        run: python -m compileall -q real_trader.py real_paper_bridge.py real_swing_sell_executor.py real_swing_sell_report.py real_market_price.py swing_sell_v2.py
       - name: Run repository unittest suite
         run: python -m unittest discover -s tests -v
         continue-on-error: true
@@ -195,6 +199,8 @@ jobs:
         run: python -m pytest -q tests/test_real_swing_sell_executor.py
       - name: Run PAPER-to-REAL bridge regression tests
         run: python -m pytest -q tests/test_real_paper_bridge.py
+      - name: Run production bridge to Swing SELL V2 integration tests
+        run: python -m pytest -q tests/test_real_paper_bridge_swing_v2_integration.py
       - name: Run REAL Telegram accounting and callback regression tests
         run: python -m pytest -q tests/test_real_bot_views.py tests/test_telegram_callback_router.py
       - name: Render and reconcile all REAL menus from generated blockchain state
