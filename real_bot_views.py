@@ -358,11 +358,11 @@ def _get_data(dashboard,refresh=False,cache_only=False):
 
 def _main_keyboard():
     return {"inline_keyboard":[
-        [{"text":"📊 Portfolio","callback_data":"REAL_BOT_PORTFOLIO"},{"text":"🟢 BUY","callback_data":"REAL_BOT_BUY"}],
-        [{"text":"🔴 SELL","callback_data":"REAL_BOT_SELL"},{"text":"🎯 SELL V2","callback_data":"REAL_BOT_SELL_V2"}],
-        [{"text":"📈 Statistics","callback_data":"REAL_BOT_STATS"},{"text":"🔄 Refresh","callback_data":"REAL_BOT_REFRESH"}],
-        [{"text":"📈 PnL statistika","callback_data":"REAL_BOT_PNL"}],
-        [{"text":"⬅️ Back","callback_data":"MAIN"}],
+        [{"text":"📊 Portfolio","callback_data":"REAL_BOT_PORTFOLIO"}],
+        [{"text":"🎯 SELL V2","callback_data":"REAL_BOT_SELL_V2"}],
+        [{"text":"🟢 BUY","callback_data":"REAL_BOT_BUY"},{"text":"🔴 SELL","callback_data":"REAL_BOT_SELL"}],
+        [{"text":"📈 Statistics","callback_data":"REAL_BOT_STATS"},{"text":"📈 PnL statistika","callback_data":"REAL_BOT_PNL"}],
+        [{"text":"🔄 Refresh","callback_data":"REAL_BOT_REFRESH"},{"text":"⬅️ Back","callback_data":"MAIN"}],
     ]}
 
 PNL_VIEWS={"pnl","pnl_daily","pnl_weekly","pnl_monthly"}

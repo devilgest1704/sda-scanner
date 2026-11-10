@@ -117,7 +117,7 @@ def test_real_trading_bot_button_is_explicitly_routed(monkeypatch):
     assert calls == [("main", False, False)]
     assert _last_edit(dashboard)["text"] == "BOT MAIN"
     callbacks = [b["callback_data"] for row in _last_edit(dashboard)["reply_markup"]["inline_keyboard"] for b in row]
-    assert callbacks == ["REAL_BOT_PORTFOLIO", "REAL_BOT_BUY", "REAL_BOT_SELL", "REAL_BOT_SELL_V2", "REAL_BOT_STATS", "REAL_BOT_REFRESH", "REAL_BOT_PNL", "MAIN"]
+    assert callbacks == ["REAL_BOT_PORTFOLIO", "REAL_BOT_SELL_V2", "REAL_BOT_BUY", "REAL_BOT_SELL", "REAL_BOT_STATS", "REAL_BOT_PNL", "REAL_BOT_REFRESH", "MAIN"]
 
 
 @pytest.mark.parametrize("callback,view", [
@@ -203,4 +203,4 @@ def test_real_bot_menu_has_required_seven_actions(monkeypatch):
     dashboard = _router(monkeypatch)
     dashboard.handle_update(_update("REAL_BOT", 23))
     buttons = [button for row in _last_edit(dashboard)["reply_markup"]["inline_keyboard"] for button in row]
-    assert [button["callback_data"] for button in buttons] == ["REAL_BOT_PORTFOLIO","REAL_BOT_BUY","REAL_BOT_SELL","REAL_BOT_SELL_V2","REAL_BOT_STATS","REAL_BOT_REFRESH","REAL_BOT_PNL","MAIN"]
+    assert [button["callback_data"] for button in buttons] == ["REAL_BOT_PORTFOLIO","REAL_BOT_SELL_V2","REAL_BOT_BUY","REAL_BOT_SELL","REAL_BOT_STATS","REAL_BOT_PNL","REAL_BOT_REFRESH","MAIN"]

@@ -1,12 +1,9 @@
 name: SDA Telegram Hourly Report
 
 on:
-  # Four opportunities per hour protect against missed or delayed GitHub cron.
-  # The dedupe step sends at most one successful scheduled report per UTC hour;
-  # external cronjob.org may also dispatch the same classic report.
-  schedule:
-    - cron: '7,22,37,52 * * * *'
-  # Run one end-to-end verification when this workflow is repaired.
+  # Automatic dashboard pushes are disabled: no schedule. The interactive
+  # Telegram menu is the user-facing dashboard. Manual dispatch remains for debugging.
+  # Run delivery tests when this workflow is changed.
   push:
     branches: [main]
     paths:
@@ -50,7 +47,7 @@ jobs:
       - name: Test Telegram delivery helpers
         run: python -m unittest discover -s tests -p 'test_telegram_delivery.py' -v
 
-      - name: Avoid duplicate automatic reports within a UTC hour
+      - name: Avoid automatic dashboard reports
         id: dedupe
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -63,30 +60,13 @@ jobs:
             echo "Workflow update: delivery tests only; no extra Telegram post."
             exit 0
           fi
-          if [ "$EVENT_NAME" != "schedule" ] && [ "$REPORT_REASON" != "Cronjob hourly" ]; then
-            echo "Manual Telegram report requested."
+          if [ "$EVENT_NAME" != "workflow_dispatch" ] || [ "$REPORT_REASON" = "Cronjob hourly" ] || [ "$REPORT_REASON" = "Telegram Refresh" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Automatic Telegram dashboard reports are disabled; no push."
             exit 0
           fi
-          if ! gh run list --workflow telegram_hourly.yml --repo "$GITHUB_REPOSITORY" --limit 30 \
-               --json databaseId,createdAt,status,conclusion,event > /tmp/hourly-runs.json; then
-            echo "::warning::Cannot check previous reports; attempting delivery rather than skipping."
-            exit 0
-          fi
-          python - <<'PY'
-          import json,os
-          from datetime import datetime, timezone
-          runs=json.load(open('/tmp/hourly-runs.json',encoding='utf-8'))
-          hour=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:')
-          previous=next((r for r in runs if str(r.get('databaseId'))!=os.environ.get('GITHUB_RUN_ID')
-              and r.get('event')!='push'
-              and r.get('status')=='completed' and r.get('conclusion')=='success'
-              and str(r.get('createdAt') or '').startswith(hour)),None)
-          if previous:
-              with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as f:f.write('skip=true\n')
-              print(f"Hourly Telegram report already succeeded this UTC hour (run {previous['databaseId']}); skip duplicate.")
-          else:
-              print('No successful hourly report this UTC hour; send now.')
-          PY
+          echo "Manual Telegram report requested."
+          exit 0
 
       - name: Send hourly Telegram dashboard
         # A workflow source update runs tests only; don't send extra Telegram posts.

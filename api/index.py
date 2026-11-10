@@ -142,12 +142,8 @@ def _handle_update_with_actions(update, state=None):
         if configured_chat and str(chat_id) != str(configured_chat):
             dashboard.answer_callback(cb.get("id"), "Unauthorized")
             return state
-        dashboard.answer_callback(cb.get("id"), "Report started…")
-        ok, result = _dispatch_hourly_report(run_reason="Telegram Refresh")
-        if ok:
-            dashboard.edit(chat_id, message_id, dashboard.main_dashboard() + "\n\n⏳ Telegram Hourly Report started manually…", dashboard.menu_keyboard())
-        else:
-            dashboard.edit(chat_id, message_id, dashboard.main_dashboard() + f"\n\n❌ Hourly Report start failed: {result}", dashboard.menu_keyboard())
+        dashboard.answer_callback(cb.get("id"))
+        dashboard.edit(chat_id, message_id, dashboard.main_dashboard(), dashboard.menu_keyboard())
         return state
 
     if data == "DEBUG":
@@ -203,6 +199,12 @@ telegram_callback_router.patch_dashboard(dashboard)
 dashboard._v30_dashboard_patched = False
 v30_dashboard_patch.patch_dashboard(dashboard)
 
+# Concise mobile home replaces the verbose legacy dashboard (kept as legacy_main_dashboard).
+import telegram_home
+telegram_home.install(dashboard)
+
+AUTOMATIC_DASHBOARD_DISABLED = "Automatic Telegram dashboard reports are disabled; use the interactive menu."
+
 app = FastAPI()
 
 def _cron_authorized(request: Request) -> bool:
@@ -233,14 +235,10 @@ def _dispatch_workflow(workflow_file, run_reason):
 def _dispatch_scanner(run_reason="Cron scanner"):
     return _dispatch_workflow("scanner_v18.yml", run_reason)
 
-def _dispatch_hourly_report(run_reason="Telegram hourly report"):
-    return _dispatch_workflow("telegram_hourly.yml", run_reason)
-
 @app.get("/api/hourly", response_class=PlainTextResponse)
 async def hourly(request: Request):
     if not _cron_authorized(request): return PlainTextResponse("Unauthorized", status_code=401)
-    ok, message = _dispatch_hourly_report("Cronjob hourly")
-    return PlainTextResponse(message, status_code=200 if ok else 502)
+    return PlainTextResponse(AUTOMATIC_DASHBOARD_DISABLED, status_code=200)
 
 @app.get("/api/watchdog", response_class=PlainTextResponse)
 async def watchdog(request: Request):

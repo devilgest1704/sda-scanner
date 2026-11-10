@@ -3,10 +3,7 @@
 Installed after dashboard patches so every visible menu callback has one
 explicit route, one prompt callback acknowledgement, and a safe edit fallback.
 """
-import json
 import os
-import urllib.error
-import urllib.request
 
 MAX_TELEGRAM_TEXT = 3900
 
@@ -61,30 +58,6 @@ def patch_dashboard(dashboard):
             print(f"Telegram edit fallback trigger: {type(exc).__name__}")
         return _send_fallback(chat_id, text, keyboard)
 
-    def _dispatch_hourly_report():
-        token = os.environ.get("GITHUB_DISPATCH_TOKEN", "")
-        if not token:
-            return False, "missing GITHUB_DISPATCH_TOKEN"
-        url = "https://api.github.com/repos/devilgest1704/sda-scanner/actions/workflows/telegram_hourly.yml/dispatches"
-        payload = json.dumps({"ref": "main", "inputs": {"run_reason": "Telegram Refresh"}}).encode("utf-8")
-        req = urllib.request.Request(
-            url, data=payload,
-            headers={"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}",
-                     "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=12) as response:
-                return response.status in (200, 201, 204), f"GitHub dispatch HTTP {response.status}"
-        except urllib.error.HTTPError as exc:
-            try:
-                body = exc.read().decode("utf-8", errors="replace")
-            except Exception:
-                body = ""
-            return False, f"GitHub dispatch HTTP {exc.code}: {body[:200]}"
-        except Exception as exc:
-            return False, f"{type(exc).__name__}: {exc}"
-
     def _real_bot_report(data):
         import real_bot_views
         return real_bot_views.render_view(
@@ -104,6 +77,7 @@ def patch_dashboard(dashboard):
             "REAL_BOT_STATS", "REAL_BOT_STATS_REFRESH",
             "REAL_BOT_SELL_V2", "REAL_BOT_SELL_V2_REFRESH",
             "REAL_BOT_PNL", "REAL_BOT_PNL_DAILY", "REAL_BOT_PNL_WEEKLY", "REAL_BOT_PNL_MONTHLY",
+            "BUY_SCANNER", "BUY_SCANNER_DETAIL",
         )
         if data not in handled:
             return original_handle(update, state)
@@ -147,6 +121,17 @@ def patch_dashboard(dashboard):
                     [{"text": "⬅️ REAL Menu", "callback_data": "REAL_BOT_BACK"}],
                 ]}
             _safe_edit(chat_id, message_id, text, keyboard)
+            return state
+
+        if data in ("BUY_SCANNER", "BUY_SCANNER_DETAIL"):
+            import telegram_home
+            detail = data == "BUY_SCANNER_DETAIL"
+            try:
+                text = telegram_home.buy_scanner_text(dashboard, detail=detail)
+            except Exception as exc:
+                print(f"BUY Scanner error: {type(exc).__name__}: {exc}")
+                text = "🔥 BUY SCANNER\n\n⚠️ Scanner data temporarily unavailable."
+            _safe_edit(chat_id, message_id, text, telegram_home.buy_scanner_keyboard(detail))
             return state
 
         if data in ("OPTIMIZER", "OPTIMIZER_STRATEGIES", "OPTIMIZER_V30"):
@@ -205,13 +190,11 @@ def patch_dashboard(dashboard):
             _safe_edit(chat_id, message_id, text, dashboard.back_keyboard())
             return state
 
-        # REFRESH: callback was already acknowledged above. Never answer it twice.
+        # REFRESH re-renders the home screen; automatic/hourly dashboard pushes are disabled.
         try:
-            ok, result = _dispatch_hourly_report()
-            text = dashboard.main_dashboard() + (
-                "\n\n⏳ Telegram Hourly Report started manually…" if ok
-                else f"\n\n❌ Hourly Report start failed: {result}"
-            )
+            import real_bot_views
+            real_bot_views.clear_cache()
+            text = dashboard.main_dashboard()
         except Exception as exc:
             text = "⚠️ Refresh failed. Main menu remains available."
             print(f"Telegram refresh error: {type(exc).__name__}: {exc}")
