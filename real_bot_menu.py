@@ -323,6 +323,42 @@ def _human_token_amount(raw, decimals):
     return Decimal(raw_integer) / (Decimal(10) ** decimals)
 
 
+def _price_wallet_holding(holding, wallet, analysis):
+    """Apply the shared fresh market mark to one wallet holding."""
+    from real_market_price import (
+        read_only_pinet_swap_buy_reference_quote,
+        resolve_market_price,
+    )
+    token = str(holding.get("address") or "").lower()
+    if not token or token == str(cfg.WSDA_ADDRESS).lower():
+        return holding
+    def reference_quote(address):
+        return read_only_pinet_swap_buy_reference_quote(
+            address, int(holding["decimals"]), wallet
+        )
+    market = resolve_market_price(
+        token, analysis, now=datetime.now(timezone.utc),
+        supabase_lookup=_newest_supabase_price,
+        reference_quote_lookup=reference_quote,
+    )
+    if market is None:
+        holding.update({
+            "price_sda": None, "market_value_sda": None,
+            "price_timestamp": None, "price_age_seconds": None,
+            "price_stale": True, "price_source": None, "price_fee_tier": None,
+            "market_error": "no fresh scanner/Supabase market price or live PinetSwap BUY reference quote",
+        })
+        return holding
+    price = Decimal(str(market["price_sda"]))
+    holding.update({
+        "price_sda": price, "market_value_sda": Decimal(str(holding["amount"])) * price,
+        "price_timestamp": market["timestamp"], "price_age_seconds": market["age_seconds"],
+        "price_stale": False, "price_source": market["source"],
+        "price_fee_tier": market.get("fee_tier"), "market_error": None,
+    })
+    return holding
+
+
 def _fetch_wallet_snapshot(include_prices=True):
     """Read-only wallet snapshot; price lookups may be skipped for live-quote-first callers."""
     wallet = _wallet_address().strip().lower()
@@ -404,18 +440,12 @@ def _fetch_wallet_snapshot(include_prices=True):
 
     priced = [h for h in holdings if h["price_sda"] is None]
     if include_prices and priced:
-        with ThreadPoolExecutor(max_workers=min(8, len(priced))) as pool:
-            prices = list(pool.map(lambda h: _newest_supabase_price(h["address"]), priced))
-        for holding, price in zip(priced, prices):
-            holding["price_sda"] = price.get("price_sda")
-            holding["price_timestamp"] = price.get("timestamp")
-            holding["price_age_seconds"] = price.get("age_seconds")
-            holding["price_stale"] = bool(price.get("stale"))
-            holding["market_error"] = price.get("error")
-            if price.get("price_sda") is not None and not price.get("stale"):
-                holding["market_value_sda"] = holding["amount"] * Decimal(str(price["price_sda"]))
-            elif price.get("stale"):
-                holding["market_error"] = "stale market price"
+        try:
+            analysis = _remote_json(object(), "market_analysis.json")
+        except Exception:
+            analysis = {}
+        with ThreadPoolExecutor(max_workers=min(4, len(priced))) as pool:
+            priced = list(pool.map(lambda h: _price_wallet_holding(h, wallet, analysis), priced))
     snapshot["holdings"] = holdings
     snapshot["market_valued_count"] = sum(h.get("market_value_sda") is not None for h in holdings)
     snapshot["market_complete"] = snapshot["market_valued_count"] == len(holdings)
