@@ -26,15 +26,21 @@ def _symbol(token,fallback=None):
     except Exception:
         return fallback or str(token)[:10]
 
-def _read_only_buy_price(token,decimals,wallet):
+def _read_only_buy_market_quote(token,decimals,wallet):
+    """Return a 1 SDA WSDA->token eth_call mark and the actual selected fee tier."""
     import real_trader
     amount_in=10**18
-    _fee,amount_out_raw,_calldata,_deadline=real_trader.quote_best_live_fee(
+    fee,amount_out_raw,_calldata,_deadline=real_trader.quote_best_live_fee(
         cfg.WSDA_ADDRESS,token,token,wallet,amount_in,value_wei=amount_in)
     amount_out=Decimal(int(amount_out_raw))/(Decimal(10)**int(decimals))
     if amount_out<=0:
         raise ValueError("router returned zero token output")
-    return Decimal(1)/amount_out
+    return {"price_sda":Decimal(1)/amount_out,"fee_tier":int(fee),
+        "quote_amount_sda":1,"quote_side":"BUY_REFERENCE"}
+
+
+def _read_only_buy_price(token,decimals,wallet):
+    return _read_only_buy_market_quote(token,decimals,wallet)["price_sda"]
 
 def _price_holding(holding,wallet,analysis=None):
     """Apply the shared fresh market mark; executable SELL quotes are never used."""
@@ -48,16 +54,18 @@ def _price_holding(holding,wallet,analysis=None):
         return holding
     from real_market_price import resolve_market_price
     def reference_quote(token):
-        price=_read_only_buy_price(token,int(holding["decimals"]),wallet)
-        return {"price_sda":str(price),"timestamp":datetime.now(timezone.utc).isoformat(),
-            "source":"PinetSwap 1 SDA BUY-side reference quote","quote_amount_sda":1}
+        quote=_read_only_buy_market_quote(token,int(holding["decimals"]),wallet)
+        return {"price_sda":str(quote["price_sda"]),"timestamp":datetime.now(timezone.utc).isoformat(),
+            "source":"PinetSwap 1 SDA BUY-side reference quote",
+            "quote_amount_sda":1,"fee_tier":quote["fee_tier"]}
     market=resolve_market_price(address,analysis,now=datetime.now(timezone.utc),
         supabase_lookup=rb._newest_supabase_price,reference_quote_lookup=reference_quote)
     if market is not None:
         price=Decimal(str(market["price_sda"]))
         holding.update({"price_sda":price,"market_value_sda":amount*price,
             "price_timestamp":market["timestamp"],"price_age_seconds":market["age_seconds"],
-            "price_stale":False,"price_source":market["source"],"market_error":None})
+            "price_stale":False,"price_source":market["source"],
+            "price_fee_tier":market.get("fee_tier"),"market_error":None})
         return holding
     holding["market_value_sda"]=None
     holding["price_sda"]=None
@@ -479,9 +487,10 @@ def _sell_v2_text(dashboard):
         decimals=item.get("decimals") if isinstance(item,dict) else None
         if decimals is None:
             return None
-        price=_read_only_buy_price(token,int(decimals),wallet)
-        return {"price_sda":str(price),"timestamp":datetime.now(timezone.utc).isoformat(),
-            "source":"PinetSwap 1 SDA BUY-side reference quote","quote_amount_sda":1}
+        quote=_read_only_buy_market_quote(token,int(decimals),wallet)
+        return {"price_sda":str(quote["price_sda"]),"timestamp":datetime.now(timezone.utc).isoformat(),
+            "source":"PinetSwap 1 SDA BUY-side reference quote",
+            "quote_amount_sda":1,"fee_tier":quote["fee_tier"]}
     rows=report.build_decision_rows(state, analysis, metadata,
         supabase_lookup=rb._newest_supabase_price,reference_quote_lookup=reference_quote)
     lines=["🎯 SELL V2 • READ ONLY",""]
