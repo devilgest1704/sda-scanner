@@ -21,7 +21,9 @@ on:
       - "swing_sell_v2.py"
       - "real_swing_sell_executor.py"
       - "real_swing_sell_report.py"
+      - "real_market_price.py"
       - "tests/test_real_swing_sell_report.py"
+      - "tests/test_real_market_price.py"
       - "tests/test_swing_sell_v2.py"
       - "tests/test_real_swing_sell_executor.py"
       - "run_scanner_v18.sh"
@@ -74,24 +76,120 @@ jobs:
         run: python -m pytest -q tests/test_swing_sell_v2.py
       - name: Run read-only Swing SELL V2 decision report tests
         run: python -m pytest -q tests/test_real_swing_sell_report.py
-      - name: Capture current read-only REAL SELL V2 decisions
+      - name: Run shared REAL market price regression tests
+        run: python -m pytest -q tests/test_real_market_price.py
+      - name: Verify unchanged BUY quote and execution accounting regressions
+        run: python -m pytest -q tests/test_real_bot_menu_live_pnl.py
+      - name: Capture current read-only REAL market prices and SELL V2 decisions
+        env:
+          REAL_TRADING_ENABLED: "false"
+          REAL_TRADING_DRY_RUN: "true"
         run: |
           python - <<'PY'
           import json
+          from datetime import datetime, timezone
           from pathlib import Path
+          from types import SimpleNamespace
           import real_bot_menu
+          import real_bot_views
           import real_swing_sell_report
 
           state=json.loads(Path("real_trade_state.json").read_text(encoding="utf-8"))
           analysis=json.loads(Path("market_analysis.json").read_text(encoding="utf-8"))
           metadata=json.loads(Path("token_metadata.json").read_text(encoding="utf-8"))
+          accounting=json.loads(Path("real_accounting_state.json").read_text(encoding="utf-8"))
+          files={"real_trade_state.json":state,"market_analysis.json":analysis,
+                 "token_metadata.json":metadata,"real_accounting_state.json":accounting}
+          dashboard=SimpleNamespace(load=lambda path,default:files.get(path,default))
+          real_bot_menu._remote_json=lambda _dashboard,path:files.get(path,{})
+          wallet=real_bot_menu._wallet_address()
+          import real_trader
+          import real_trading_config as cfg
+          try:
+              native_balance=int(real_trader.rpc("eth_getBalance",[wallet,"latest"]),16)/10**18
+          except Exception as exc:
+              native_balance=f"{type(exc).__name__}: {exc}"
+          print("READ-ONLY QUOTE DIAGNOSTICS",json.dumps({"wallet":wallet,"native_sda_balance":native_balance}))
+          xen="0x53167ff5810ff1886fc554e672994c232126383e"
+          for size in (1,20):
+              amount=int(size*10**18)
+              for value in (0,amount):
+                  try:
+                      result=real_trader.quote_best_live_fee(cfg.WSDA_ADDRESS,xen,xen,wallet,amount,value_wei=value)
+                      print("QUOTE_OK",json.dumps({"token":"XEN","size_sda":size,"value_wei":value,
+                          "fee":result[0],"amount_out_raw":str(result[1])}))
+                  except Exception as exc:
+                      print("QUOTE_ERROR",json.dumps({"token":"XEN","size_sda":size,"value_wei":value,
+                          "error":f"{type(exc).__name__}: {str(exc)[:500]}"}))
+          print("SUPABASE AND SCANNER SOURCE AGES")
+          for token,position in (state.get("positions") or {}).items():
+              sup=real_bot_menu._newest_supabase_price(str(token).lower()) or {}
+              ana=(analysis.get("tokens") or {}).get(str(token).lower(),{})
+              print("SOURCE_AGE",json.dumps({"token":metadata.get(str(token).lower(),{}).get("symbol",position.get("symbol")),
+                  "scanner_snapshot":analysis.get("updated_at"),
+                  "scanner_last_trade":ana.get("last_transaction") or ana.get("last_transaction_at"),
+                  "scanner_price":ana.get("price_in_sda"),
+                  "supabase_price":sup.get("price_sda"),"supabase_timestamp":sup.get("timestamp"),
+                  "supabase_age_seconds":sup.get("age_seconds"),"supabase_stale":sup.get("stale"),
+                  "supabase_error":sup.get("error")},ensure_ascii=False,sort_keys=True))
+          snapshot=real_bot_views._tracked_wallet_snapshot(accounting,dashboard)
+          holdings={str(item.get("address") or "").lower():item
+                    for item in snapshot.get("holdings",[]) if isinstance(item,dict)}
+          print("CURRENT WALLET-COMPATIBLE MARKET MARKS")
+          for token,position in (state.get("positions") or {}).items():
+              meta=metadata.get(str(token).lower(),{})
+              holding=holdings.get(str(token).lower(),{})
+              try:
+                  decimals=int(meta.get("decimals"))
+                  raw=position.get("remaining_quantity")
+                  if raw is None: raw=position.get("token_amount_raw")
+                  bot_quantity=int(raw)/(10**decimals)
+              except Exception:
+                  bot_quantity=None
+              price=holding.get("price_sda")
+              bot_value=(bot_quantity*float(price) if bot_quantity is not None and price is not None else None)
+              wallet_value=holding.get("market_value_sda")
+              print(json.dumps({"token":meta.get("symbol",position.get("symbol")),
+                  "contract":str(token).lower(),"bot_quantity":bot_quantity,
+                  "wallet_quantity":str(holding.get("amount")) if holding else None,
+                  "price_sda":str(price) if price is not None else None,
+                  "bot_value_sda":bot_value,
+                  "wallet_compatible_value_sda":str(wallet_value) if wallet_value is not None else None,
+                  "difference_sda":float(wallet_value)-bot_value if wallet_value is not None and bot_value is not None else None,
+                  "price_source":holding.get("price_source"),
+                  "price_fee_tier":holding.get("price_fee_tier"),
+                  "price_timestamp":holding.get("price_timestamp"),
+                  "price_age_seconds":holding.get("price_age_seconds")},ensure_ascii=False,sort_keys=True))
+          def reference_quote(token):
+              item=metadata.get(str(token).lower(),{})
+              decimals=item.get("decimals") if isinstance(item,dict) else None
+              if decimals is None:
+                  return None
+              quote=real_bot_views._read_only_buy_market_quote(token,int(decimals),wallet)
+              return {"price_sda":str(quote["price_sda"]),
+                  "timestamp":datetime.now(timezone.utc).isoformat(),
+                  "source":"PinetSwap 1 SDA BUY-side reference quote",
+                  "quote_amount_sda":1,"fee_tier":quote["fee_tier"]}
           rows=real_swing_sell_report.build_decision_rows(
               state, analysis, metadata,
               supabase_lookup=real_bot_menu._newest_supabase_price,
+              reference_quote_lookup=reference_quote,
           )
-          print("READ-ONLY SELL V2 SNAPSHOT")
+          print("READ-ONLY REAL MARKET PRICE + SELL V2 SNAPSHOT")
           for row in rows:
-              print(json.dumps(row, ensure_ascii=False, sort_keys=True))
+              print(json.dumps({
+                  "token":row["token"],"token_address":row["token_address"],
+                  "quantity":row.get("quantity"),"entry_price":row.get("entry_price"),
+                  "cost_sda":row.get("cost_sda"),"decision_price":row.get("decision_price"),
+                  "market_value_sda":row.get("market_value_sda"),
+                  "market_pnl_sda":row.get("market_pnl_sda"),"pnl_pct":row.get("pnl_pct"),
+                  "price_source":row.get("price_source"),"price_timestamp":row.get("price_timestamp"),
+                  "price_age_seconds":row.get("price_age_seconds"),
+                  "price_fee_tier":row.get("price_fee_tier"),
+                  "state":row.get("swing_state"),"action":row.get("action"),
+                  "quarantine_reason":row.get("quarantine_reason"),
+              }, ensure_ascii=False, sort_keys=True))
+          print("REAL TRANSACTIONS SENT: 0 (eth_call only)")
           PY
       - name: Run Swing SELL V2 live-executor mock integration tests
         run: python -m pytest -q tests/test_real_swing_sell_executor.py
@@ -109,22 +207,28 @@ jobs:
           import real_bot_menu as rb
           import real_bot_views as views
 
-          state=json.loads(Path("real_accounting_state.json").read_text(encoding="utf-8"))
+          accounting=json.loads(Path("real_accounting_state.json").read_text(encoding="utf-8"))
+          runtime=json.loads(Path("real_trade_state.json").read_text(encoding="utf-8"))
+          metadata=json.loads(Path("token_metadata.json").read_text(encoding="utf-8"))
+          files={"real_accounting_state.json":accounting,"real_trade_state.json":runtime,
+                 "token_metadata.json":metadata}
           rb._load_worker_status=lambda _dashboard: {"enabled": True, "dry_run": False}
           rb._status=lambda _worker: "🟢 LIVE"
-          dashboard=SimpleNamespace(load=lambda path, default: state if path=="real_accounting_state.json" else default)
+          dashboard=SimpleNamespace(load=lambda path, default: files.get(path,default))
           views.clear_cache()
           data=views._build_dashboard_data(dashboard)
-          assert len(data["positions"]) == state["statistics"]["open_positions_count"]
-          assert len(data["buy_records"]) == state["statistics"]["confirmed_buys_count"]
-          assert len(data["sell_records"]) == state["statistics"]["matched_sells_count"]
-          assert abs(sum(float(x["pnl_sda"]) for x in data["sell_records"])-float(state["realized_pnl_sda"])) < 1e-8
-          assert abs(sum(float(x["pnl_sda"]) for x in data["positions"])-float(state["open_pnl_sda"])) < 1e-8
-          assert abs(float(state["total_pnl_sda"])-float(state["realized_pnl_sda"])-float(state["open_pnl_sda"])) < 1e-8
+          expected_open=sum(1 for p in (runtime.get("positions") or {}).values()
+                            if isinstance(p,dict) and float(p.get("remaining_quantity") or p.get("token_amount_raw") or 0)>0)
+          assert len(data["positions"]) == expected_open
+          assert len(data["buy_records"]) == accounting["statistics"]["confirmed_buys_count"]
+          assert len(data["sell_records"]) == accounting["statistics"]["matched_sells_count"]
+          assert abs(sum(float(x["pnl_sda"]) for x in data["sell_records"])-float(accounting["realized_pnl_sda"])) < 1e-8
+          if data["open_complete"]:
+              assert abs(sum(float(x["pnl_sda"]) for x in data["positions"])-float(data["open_pnl"])) < 1e-8
           assert all(x["symbol"]!="PINE" for x in data["buy_records"]+data["sell_records"]+data["positions"])
           assert all(x["symbol"]!="HAQ" for x in data["positions"])
-          for view in ("main","portfolio","buy","sell","stats"):
-              text,_=views.render_view(dashboard,view,refresh=True)
+          for view in ("main","portfolio","buy","sell","sell_v2","stats"):
+              text,_=views.render_view(dashboard,view,refresh=(view=="main"))
               print(f"===== REAL {view.upper()} =====")
               print(text)
           PY

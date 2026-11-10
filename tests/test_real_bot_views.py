@@ -275,7 +275,7 @@ def test_wallet_portfolio_includes_new_live_bot_position_while_fifo_lags(monkeyp
         ],
     }
     monkeypatch.setattr(views, "_ORIGINAL_FETCH_WALLET_SNAPSHOT", lambda include_prices=False: wallet_snapshot)
-    monkeypatch.setattr(views, "_price_holding", lambda holding, wallet: holding)
+    monkeypatch.setattr(views, "_price_holding", lambda holding, wallet, analysis=None: holding)
     result = views._tracked_wallet_snapshot(state, dashboard)
     addresses = {item["address"] for item in result["holdings"]}
     assert extra_token in addresses
@@ -284,3 +284,56 @@ def test_wallet_portfolio_includes_new_live_bot_position_while_fifo_lags(monkeyp
     assert result["tracked_expected_count"] == 10
     assert result["market_complete"] is True
     assert sum(float(item["market_value_sda"]) for item in result["holdings"]) + result["native_sda"] == pytest.approx(207.4823)
+
+def test_jsft_is_current_bot_position_when_runtime_ledger_and_wallet_balance_match(monkeypatch):
+    token = "0xb4ac5dd62f700e271bffb52aeae1dba40135427f"
+    raw_quantity = 60289268908555890000
+    wallet_quantity = 60289292740346120000
+    accounting = {
+        "schema_version": 1,
+        "bot_reconciliation_status": "COMPLETE",
+        "bot_unresolved_transactions": [],
+        "realized_pnl_sda": "22.817132860146615733",
+        "open_positions": [],
+        "buy_transactions": [],
+        "sell_transactions": [],
+        "statistics": {},
+    }
+    runtime = {"positions": {token: {
+        "token": token, "symbol": "JSFT",
+        "remaining_quantity": str(raw_quantity),
+        "remaining_cost_basis": "20",
+        "wallet_available_quantity": str(wallet_quantity),
+        "buy_tx": "0x0fb5d4ee4d1b9c7da4099b6fd00ee96422ea3de736a103d313d9e80e25485794",
+        "opened_at": "2026-11-09T21:30:13.771361+00:00",
+    }}}
+    metadata = {token: {"symbol": "JSFT", "decimals": "18"}}
+    dashboard = SimpleNamespace(load=lambda path, default:
+        accounting if path == "real_accounting_state.json" else
+        runtime if path == "real_trade_state.json" else
+        metadata if path == "token_metadata.json" else default)
+    monkeypatch.setattr(rb, "_load_worker_status", lambda _d: {"enabled": True, "dry_run": False})
+    monkeypatch.setattr(rb, "_status", lambda _w: "🟢 LIVE")
+    wallet_price = Decimal("0.393352")
+    wallet_amount = Decimal(wallet_quantity) / Decimal(10**18)
+    snapshot = {
+        "native_sda": 100.0, "wallet_address": rb.BOT_WALLET_ADDRESS,
+        "token_balances_loaded": True, "tracked_expected_count": 1,
+        "tracked_missing_contracts": [], "market_complete": True,
+        "holdings": [{"address": token, "symbol": "JSFT", "amount": wallet_amount,
+            "price_sda": wallet_price, "market_value_sda": wallet_amount * wallet_price,
+            "price_timestamp": "2026-11-10T08:30:00+00:00", "price_age_seconds": 0,
+            "price_source": "PinetSwap 1 SDA BUY-side reference quote"}],
+    }
+    monkeypatch.setattr(views, "_tracked_wallet_snapshot", lambda _accounting, _dashboard=None: snapshot)
+    data = views._build_dashboard_data(dashboard)
+    assert len(data["positions"]) == 1
+    position = data["positions"][0]
+    assert position["symbol"] == "JSFT"
+    assert position["token"] == token
+    assert position["cost_sda"] == pytest.approx(20)
+    assert position["value_sda"] == pytest.approx(float(Decimal(raw_quantity) / Decimal(10**18) * wallet_price))
+    assert position["pnl_sda"] > 3.7
+    assert position["buy_verified"] is True
+    assert data["total_pnl"] == pytest.approx(data["realized_pnl"] + data["open_pnl"])
+
