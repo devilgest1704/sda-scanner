@@ -112,13 +112,36 @@ def _verify_trades(state,wallet):
     with ThreadPoolExecutor(max_workers=min(12,len(rows))) as pool:
         return list(pool.map(verify,rows))
 
-def _tracked_wallet_snapshot(accounting):
-    """Value native SDA and only tokens backed by verified open BOT FIFO lots."""
+def _tracked_wallet_snapshot(accounting, dashboard=None):
+    """Value native SDA and all current bot positions, without importing unrelated wallet assets.
+
+    FIFO accounting can briefly lag a newly confirmed bot BUY. Include the
+    current REAL position ledger as an additional allow-list, but still require
+    an actual on-chain wallet holding before it contributes to portfolio value.
+    """
     expected = {
         str(item.get("token") or "").lower()
         for item in (accounting.get("open_positions") or [])
         if isinstance(item, dict) and item.get("token")
     }
+    runtime_positions = {}
+    if dashboard is not None:
+        try:
+            runtime_state = dashboard.load("real_trade_state.json", {})
+            runtime_positions = runtime_state.get("positions", {}) if isinstance(runtime_state, dict) else {}
+        except Exception:
+            runtime_positions = {}
+    if isinstance(runtime_positions, dict):
+        for token, position in runtime_positions.items():
+            if not isinstance(position, dict):
+                continue
+            quantity = position.get("remaining_quantity", position.get("token_amount_raw"))
+            try:
+                has_quantity = Decimal(str(quantity)) > 0
+            except Exception:
+                has_quantity = False
+            if has_quantity:
+                expected.add(str(position.get("token") or token).lower())
     try:
         snapshot = _ORIGINAL_FETCH_WALLET_SNAPSHOT(include_prices=False)
     except Exception as exc:
@@ -192,7 +215,7 @@ def _build_dashboard_data(dashboard):
             "pnl_sda":rb._finite_number(p.get("open_pnl_sda")),
             "pnl_pct":rb._finite_number(p.get("pnl_pct")),"valued":p.get("value_sda") is not None,
             "balance_matches":True,"buy_verified":True})
-    snapshot=_tracked_wallet_snapshot(accounting)
+    snapshot=_tracked_wallet_snapshot(accounting, dashboard)
     holdings=snapshot.get("holdings") if isinstance(snapshot.get("holdings"),list) else []
     market_count=sum(item.get("market_value_sda") is not None for item in holdings)
     token_total=sum((float(item["market_value_sda"]) for item in holdings
