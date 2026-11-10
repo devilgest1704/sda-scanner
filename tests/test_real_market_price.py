@@ -55,11 +55,13 @@ class SharedMarketPriceTests(unittest.TestCase):
     def test_live_buy_reference_is_used_after_observed_prices_expire(self):
         snapshot = {"updated_at": "2026-11-10T08:00:00Z", "tokens": {}}
         quote = lambda _token: {"price_sda": "0.26", "timestamp": "2026-11-10T08:30:00Z",
-                                "source": "PinetSwap 1 SDA BUY-side reference quote"}
+                                "source": "PinetSwap 1 SDA BUY-side reference quote",
+                                "fee_tier": 3000}
         result = market.resolve_market_price(TOKEN, snapshot, NOW, reference_quote_lookup=quote)
         self.assertEqual(result["source"], "PinetSwap 1 SDA BUY-side reference quote")
         self.assertEqual(result["quote_side"], "BUY_REFERENCE")
         self.assertEqual(result["quote_amount_sda"], 1)
+        self.assertEqual(result["fee_tier"], 3000)
 
     def test_executable_sell_quote_is_not_a_market_price_input(self):
         quote = {"price_sda": "0.30", "timestamp": "2026-11-10T08:30:00Z",
