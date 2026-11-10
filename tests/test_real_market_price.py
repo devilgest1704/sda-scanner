@@ -1,6 +1,9 @@
 import unittest
 from datetime import datetime, timezone
 from decimal import Decimal
+from unittest.mock import patch
+
+import real_trading_config as cfg
 
 import real_market_price as market
 import real_swing_sell_report as report
@@ -11,6 +14,22 @@ OTHER = "0x" + "2" * 40
 
 
 class SharedMarketPriceTests(unittest.TestCase):
+    def test_read_only_buy_reference_uses_exact_wsda_to_token_contract_and_native_value(self):
+        wallet = "0x" + "a" * 40
+        amount_out_raw = 15 * 10**18
+        with patch("real_trader.quote_best_live_fee",
+                   return_value=(3000, amount_out_raw, "0x", 123)) as quote:
+            result = market.read_only_pinet_swap_buy_reference_quote(
+                TOKEN, 18, wallet, now=NOW
+            )
+        quote.assert_called_once_with(
+            cfg.WSDA_ADDRESS, TOKEN, TOKEN, wallet, 10**18, value_wei=10**18
+        )
+        self.assertAlmostEqual(float(result["price_sda"]), 1 / 15)
+        self.assertEqual(result["fee_tier"], 3000)
+        self.assertEqual(result["quote_side"], "BUY_REFERENCE")
+        self.assertEqual(result["timestamp"], NOW.isoformat())
+
     def test_price_is_mapped_by_exact_normalized_contract(self):
         snapshot = {"updated_at": "2026-11-10T08:29:00Z", "tokens": {
             TOKEN: {"price_in_sda": "0.25", "last_transaction": "2026-11-10T08:29:00Z"},

@@ -87,6 +87,37 @@ def supabase_market_price(token, lookup, now=None, max_age=MAX_MARKET_PRICE_AGE_
                       "supabase_transaction", now, max_age)
 
 
+def read_only_pinet_swap_buy_reference_quote(token, decimals, wallet, now=None):
+    """Read a 1 SDA WSDA->token reference quote with eth_call only.
+
+    This is a market-decision reference mark, not an executable SELL quote.
+    The router's native SDA value is retained because the route wraps SDA into
+    WSDA; value=0 would revert with STF for this route.
+    """
+    import real_trader
+    import real_trading_config as cfg
+
+    token = str(token).lower()
+    wallet = str(wallet).lower()
+    decimals = int(decimals)
+    amount_in = 10**18
+    fee, amount_out_raw, _calldata, _deadline = real_trader.quote_best_live_fee(
+        cfg.WSDA_ADDRESS, token, token, wallet, amount_in, value_wei=amount_in
+    )
+    amount_out = Decimal(int(amount_out_raw)) / (Decimal(10) ** decimals)
+    if amount_out <= 0:
+        raise ValueError("PinetSwap returned zero token output for 1 SDA reference quote")
+    stamp = now or datetime.now(timezone.utc)
+    return {
+        "price_sda": Decimal(1) / amount_out,
+        "timestamp": stamp.astimezone(timezone.utc).isoformat(),
+        "source": "PinetSwap 1 SDA BUY-side reference quote",
+        "quote_amount_sda": 1,
+        "quote_side": "BUY_REFERENCE",
+        "fee_tier": int(fee),
+    }
+
+
 def resolve_market_price(token, analysis, now=None, supabase_lookup=None,
                          reference_quote_lookup=None,
                          max_age=MAX_MARKET_PRICE_AGE_SECONDS):

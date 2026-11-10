@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -45,10 +46,12 @@ class BridgeTests(unittest.TestCase):
             load_state=unittest.mock.Mock(return_value={"positions": {
                 TOKEN: {"symbol": "TEST", "token_amount_raw": 123}
             }}),
+            token_decimals=unittest.mock.Mock(return_value=18),
         )
         self.swing = SimpleNamespace(
             migrate_if_needed=unittest.mock.Mock(return_value=True),
             startup_recovery=unittest.mock.Mock(return_value=[]),
+            reconcile_position_wallet=unittest.mock.Mock(return_value={"status": "UNCHANGED"}),
             evaluate_position=unittest.mock.Mock(return_value={"action": "HOLD", "status": "NO_THRESHOLD"}),
         )
         self.modules = patch.dict("sys.modules", {
@@ -145,6 +148,43 @@ class BridgeTests(unittest.TestCase):
         self.trader.execute_sell.assert_not_called()
         self.assertEqual(result["closed"], 1)
         self.assertEqual(result["actions"], [])
+
+    def test_live_sell_bridge_uses_shared_fresh_market_mark_without_executing_sell(self):
+        import real_bot_menu
+        import real_market_price
+
+        self.state.write_text(json.dumps({
+            "initialized": True, "paper_positions": [TOKEN],
+            "pending_buy": [], "pending_sell": [],
+        }), encoding="utf-8")
+        self.write_paper({})
+        self.swing.migrate_if_needed.return_value = False
+        self.trader.load_state.return_value = {
+            "positions": {TOKEN: {
+                "symbol": "TEST", "remaining_quantity": str(100 * 10**18),
+                "remaining_cost_basis": "20",
+            }},
+            "pending_buys": {}, "pending_sells": {},
+        }
+        now = datetime.now(timezone.utc)
+        stale_stamp = (now - timedelta(hours=1)).isoformat()
+        analysis = {"updated_at": stale_stamp, "tokens": {}}
+        reference = {
+            "price_sda": "0.25", "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": "PinetSwap 1 SDA BUY-side reference quote",
+            "quote_amount_sda": 1, "quote_side": "BUY_REFERENCE", "fee_tier": 3000,
+        }
+        with patch.object(real_bot_menu, "_remote_json", return_value=analysis), patch.object(real_bot_menu, "_wallet_address", return_value="0x" + "b" * 40), patch.object(real_bot_menu, "_newest_supabase_price", return_value={"price_sda": "0.20", "timestamp": stale_stamp}), patch.object(real_market_price, "read_only_pinet_swap_buy_reference_quote", return_value=reference):
+            result = bridge.reconcile()
+
+        self.swing.evaluate_position.assert_called_once_with(
+            TOKEN, "TEST", 0.25, reference["timestamp"], wallet_reconciled=True
+        )
+        self.trader.execute_sell.assert_not_called()
+        self.trader.execute_buy.assert_not_called()
+        decision = next(a for a in result["actions"] if a.get("symbol") == "TEST" and a.get("status") == "NO_THRESHOLD")
+        self.assertEqual(decision["action"], "HOLD")
+        self.assertEqual(decision["status"], "NO_THRESHOLD")
 
     def test_legacy_bridge_pending_sell_is_archived_not_executed(self):
         self.state.write_text(json.dumps({

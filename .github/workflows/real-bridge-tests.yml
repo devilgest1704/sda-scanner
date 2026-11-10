@@ -215,6 +215,14 @@ jobs:
           rb._load_worker_status=lambda _dashboard: {"enabled": True, "dry_run": False}
           rb._status=lambda _worker: "🟢 LIVE"
           dashboard=SimpleNamespace(load=lambda path, default: files.get(path,default))
+          snapshot=views._tracked_wallet_snapshot(accounting,dashboard)
+          rb._fetch_wallet_snapshot=lambda include_prices=True:snapshot
+          views._tracked_wallet_snapshot=lambda _accounting,_dashboard=None:snapshot
+          report=rb.bot_report(dashboard,refresh=True)
+          assert "XEN" in report and "JSFT" in report
+          assert "OPEN POSITIONS" in report
+          print("=== ACTUAL REAL TELEGRAM BOT REPORT (READ ONLY) ===")
+          print(report)
           views.clear_cache()
           data=views._build_dashboard_data(dashboard)
           expected_open=sum(1 for p in (runtime.get("positions") or {}).values()

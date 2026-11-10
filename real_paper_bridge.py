@@ -40,6 +40,27 @@ def _paper_positions():
             if isinstance(v, dict) and str(k).startswith("0x")}
 
 
+def _resolve_sell_market_price(token, market_snapshot, wallet=None):
+    """Shared fresh market mark for the actual Swing SELL V2 bridge."""
+    import real_bot_menu
+    import real_trader
+    from real_market_price import (
+        read_only_pinet_swap_buy_reference_quote,
+        resolve_market_price,
+    )
+
+    wallet = wallet or real_bot_menu._wallet_address()
+    def reference_quote(address):
+        return read_only_pinet_swap_buy_reference_quote(
+            address, real_trader.token_decimals(address), wallet
+        )
+    return resolve_market_price(
+        token, market_snapshot, now=datetime.now(timezone.utc),
+        supabase_lookup=real_bot_menu._newest_supabase_price,
+        reference_quote_lookup=reference_quote,
+    )
+
+
 def reconcile():
     # Do not even import the executor while disabled.
     enabled = os.getenv("REAL_TRADING_ENABLED", "false").strip().lower() == "true"
@@ -134,7 +155,10 @@ def reconcile():
     if not migrated:
         try:
             import real_bot_menu
-            market_snapshot = real_bot_menu.load_market_snapshot()
+            # Read the same scanner snapshot consumed by Portfolio and SELL V2.
+            # The old load_market_snapshot() symbol did not exist in real_bot_menu.
+            market_snapshot = real_bot_menu._remote_json(object(), "market_analysis.json")
+            wallet_address = real_bot_menu._wallet_address()
             real_state = real_trader.load_state()
             for token, real_pos in list(real_state.get("positions", {}).items()):
                 if not isinstance(real_pos, dict):
@@ -151,12 +175,12 @@ def reconcile():
                         actions.append({"action": "MANUAL_SELL_RECONCILIATION",
                                         "token": token, "symbol": symbol,
                                         "status": "PARTIAL", "at": _now()})
-                    market = real_bot_menu._newest_market_price(
-                        token, market_snapshot=market_snapshot, max_age_seconds=300
+                    market = _resolve_sell_market_price(
+                        token, market_snapshot, wallet=wallet_address
                     )
                     price = market.get("price_sda") if isinstance(market, dict) else None
                     age = market.get("age_seconds") if isinstance(market, dict) else None
-                    if price is None or market.get("stale") or age is None or float(age) > 300:
+                    if price is None or age is None or float(age) < 0 or float(age) > 300:
                         actions.append({"action": "SELL_DECISION", "token": token,
                                         "symbol": symbol, "status": "PRICE_UNAVAILABLE",
                                         "at": _now()})

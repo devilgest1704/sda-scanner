@@ -27,16 +27,8 @@ def _symbol(token,fallback=None):
         return fallback or str(token)[:10]
 
 def _read_only_buy_market_quote(token,decimals,wallet):
-    """Return a 1 SDA WSDA->token eth_call mark and the actual selected fee tier."""
-    import real_trader
-    amount_in=10**18
-    fee,amount_out_raw,_calldata,_deadline=real_trader.quote_best_live_fee(
-        cfg.WSDA_ADDRESS,token,token,wallet,amount_in,value_wei=amount_in)
-    amount_out=Decimal(int(amount_out_raw))/(Decimal(10)**int(decimals))
-    if amount_out<=0:
-        raise ValueError("router returned zero token output")
-    return {"price_sda":Decimal(1)/amount_out,"fee_tier":int(fee),
-        "quote_amount_sda":1,"quote_side":"BUY_REFERENCE"}
+    from real_market_price import read_only_pinet_swap_buy_reference_quote
+    return read_only_pinet_swap_buy_reference_quote(token,decimals,wallet)
 
 
 def _read_only_buy_price(token,decimals,wallet):
