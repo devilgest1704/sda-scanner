@@ -84,7 +84,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_real_buy_uses_committed_paper_position_size(self):
         bridge.reconcile()
-        self.write_paper({TOKEN: {"symbol": "TEST", "investment_sda": 18.0}})
+        self.write_paper({TOKEN: {"symbol": "TEST", "investment_sda": 18.0, "opened_at": bridge._now()}})
         bridge.reconcile()
         self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 18.0)
 
@@ -96,7 +96,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_new_paper_position_triggers_one_buy(self):
         bridge.reconcile()  # baseline empty
-        self.write_paper({TOKEN: {"symbol": "TEST"}})
+        self.write_paper({TOKEN: {"symbol": "TEST", "opened_at": bridge._now()}})
         result = bridge.reconcile()
         self.assertEqual(result["opened"], 1)
         self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 20.0)

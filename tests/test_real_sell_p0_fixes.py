@@ -453,7 +453,8 @@ class SellHealthVisibility(unittest.TestCase):
     def test_sell_exception_is_sell_error_and_buy_still_runs(self):
         chain = FakeChain(self)
         harness = BridgeHarness(self, chain)
-        harness.paper.write_text(json.dumps({"positions": {NEW_TOKEN: {"symbol": "NEW", "investment_sda": 20}}}),
+        harness.paper.write_text(json.dumps({"positions": {NEW_TOKEN: {"symbol": "NEW", "investment_sda": 20,
+                                                                       "opened_at": bridge._now()}}}),
                                  encoding="utf-8")
         with patch.object(executor, "evaluate_position", side_effect=RuntimeError("forced SELL failure")):
             result = harness.run()
