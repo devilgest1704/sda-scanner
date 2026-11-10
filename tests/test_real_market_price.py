@@ -33,6 +33,25 @@ class SharedMarketPriceTests(unittest.TestCase):
         lookup = lambda _token: {"price_sda": "0.24", "timestamp": "2026-11-10T08:00:00Z"}
         self.assertIsNone(market.resolve_market_price(TOKEN, snapshot, NOW, supabase_lookup=lookup))
 
+    def test_fresh_supabase_trade_is_accepted_when_scanner_is_stale(self):
+        snapshot = {"updated_at": "2026-11-10T08:00:00Z", "tokens": {}}
+        lookup = lambda _token: {"price_sda": "0.24", "timestamp": "2026-11-10T08:29:30Z"}
+        result = market.resolve_market_price(TOKEN, snapshot, NOW, supabase_lookup=lookup)
+        self.assertEqual(result["source"], "supabase_transaction")
+        self.assertAlmostEqual(result["price_sda"], 0.24)
+
+    def test_live_quote_timestamp_acquired_after_resolver_start_is_accepted(self):
+        snapshot = {"updated_at": "2026-11-10T08:00:00Z", "tokens": {}}
+        quote = lambda _token: {"price_sda": "0.26", "timestamp": "2026-11-10T08:30:02Z"}
+        result = market.resolve_market_price(TOKEN, snapshot, NOW, reference_quote_lookup=quote)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["age_seconds"], 0)
+
+    def test_far_future_quote_timestamp_is_rejected(self):
+        quote = lambda _token: {"price_sda": "0.26", "timestamp": "2026-11-10T08:30:10Z"}
+        result = market.resolve_market_price(TOKEN, {}, NOW, reference_quote_lookup=quote)
+        self.assertIsNone(result)
+
     def test_live_buy_reference_is_used_after_observed_prices_expire(self):
         snapshot = {"updated_at": "2026-11-10T08:00:00Z", "tokens": {}}
         quote = lambda _token: {"price_sda": "0.26", "timestamp": "2026-11-10T08:30:00Z",
