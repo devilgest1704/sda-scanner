@@ -36,7 +36,8 @@ def _read_only_buy_price(token,decimals,wallet):
         raise ValueError("router returned zero token output")
     return Decimal(1)/amount_out
 
-def _price_holding(holding,wallet):
+def _price_holding(holding,wallet,analysis=None):
+    """Apply the shared fresh market mark; executable SELL quotes are never used."""
     address=str(holding.get("address") or "").lower()
     symbol=str(holding.get("symbol") or address[:10])
     amount=Decimal(str(holding.get("amount") or 0))
@@ -45,35 +46,26 @@ def _price_holding(holding,wallet):
             "price_timestamp":datetime.now(timezone.utc).isoformat(),"price_age_seconds":0,
             "price_stale":False,"price_source":"WSDA 1:1","market_error":None})
         return holding
-    fallback={}
-    try:
-        fallback=rb._newest_supabase_price(address) or {}
-    except Exception as fallback_exc:
-        _log(f"Supabase price lookup failed symbol={symbol} reason={type(fallback_exc).__name__}: {fallback_exc}")
-    fresh_price=rb._finite_number(fallback.get("price_sda"))
-    stale=bool(fallback.get("stale"))
-    # Prefer a recent observed swap price over a 1 SDA router quote: the latter
-    # includes trade-size price impact and is not a spot mark for the whole balance.
-    if fresh_price is not None and fresh_price>0 and not stale:
-        holding.update({"price_sda":Decimal(str(fresh_price)),
-            "market_value_sda":amount*Decimal(str(fresh_price)),
-            "price_timestamp":fallback.get("timestamp"),"price_age_seconds":fallback.get("age_seconds"),
-            "price_stale":False,"price_source":"Supabase fresh observed swap price","market_error":None})
-        return holding
-    try:
-        price=_read_only_buy_price(address,holding.get("decimals",18),wallet)
+    from real_market_price import resolve_market_price
+    def reference_quote(token):
+        price=_read_only_buy_price(token,int(holding["decimals"]),wallet)
+        return {"price_sda":str(price),"timestamp":datetime.now(timezone.utc).isoformat(),
+            "source":"PinetSwap 1 SDA BUY-side reference quote","quote_amount_sda":1}
+    market=resolve_market_price(address,analysis,now=datetime.now(timezone.utc),
+        supabase_lookup=rb._newest_supabase_price,reference_quote_lookup=reference_quote)
+    if market is not None:
+        price=Decimal(str(market["price_sda"]))
         holding.update({"price_sda":price,"market_value_sda":amount*price,
-            "price_timestamp":datetime.now(timezone.utc).isoformat(),"price_age_seconds":0,
-            "price_stale":False,"price_source":"PinetSwap read-only BUY quote (1 SDA; price impact included)",
-            "market_error":None})
+            "price_timestamp":market["timestamp"],"price_age_seconds":market["age_seconds"],
+            "price_stale":False,"price_source":market["source"],"market_error":None})
         return holding
-    except Exception as exc:
-        holding["market_value_sda"]=None
-        reason=fallback.get("error") or ("stale Supabase price" if stale else "no valid Supabase price row")
-        holding["market_error"]=f"{type(exc).__name__}: {str(exc)[:180]}; Supabase: {reason}"
-        holding["price_source"]=None
-        _log(f"valuation unavailable symbol={symbol} address={address} reason={holding['market_error']}")
-        return holding
+    holding["market_value_sda"]=None
+    holding["price_sda"]=None
+    holding["price_stale"]=True
+    holding["market_error"]="no fresh market trade or live PinetSwap BUY reference quote"
+    holding["price_source"]=None
+    _log(f"valuation unavailable symbol={symbol} address={address} reason={holding['market_error']}")
+    return holding
 
 def _fetch_wallet_snapshot():
     snapshot=_ORIGINAL_FETCH_WALLET_SNAPSHOT(include_prices=False)
@@ -113,24 +105,27 @@ def _verify_trades(state,wallet):
         return list(pool.map(verify,rows))
 
 def _tracked_wallet_snapshot(accounting, dashboard=None):
-    """Value native SDA and all current bot positions, without importing unrelated wallet assets.
-
-    FIFO accounting can briefly lag a newly confirmed bot BUY. Include the
-    current REAL position ledger as an additional allow-list, but still require
-    an actual on-chain wallet holding before it contributes to portfolio value.
-    """
+    """Value current bot contracts from the same market source used by SELL V2."""
     expected = {
         str(item.get("token") or "").lower()
         for item in (accounting.get("open_positions") or [])
         if isinstance(item, dict) and item.get("token")
     }
     runtime_positions = {}
+    analysis = {}
     if dashboard is not None:
         try:
             runtime_state = dashboard.load("real_trade_state.json", {})
             runtime_positions = runtime_state.get("positions", {}) if isinstance(runtime_state, dict) else {}
         except Exception:
             runtime_positions = {}
+        try:
+            analysis = rb._remote_json(dashboard, "market_analysis.json")
+        except Exception:
+            try:
+                analysis = dashboard.load("market_analysis.json", {})
+            except Exception:
+                analysis = {}
     if isinstance(runtime_positions, dict):
         for token, position in runtime_positions.items():
             if not isinstance(position, dict):
@@ -164,7 +159,7 @@ def _tracked_wallet_snapshot(accounting, dashboard=None):
     wallet = str(snapshot.get("wallet_address") or rb._wallet_address()).lower()
     if tracked:
         with ThreadPoolExecutor(max_workers=min(12, len(tracked))) as pool:
-            tracked = list(pool.map(lambda item: _price_holding(item, wallet), tracked))
+            tracked = list(pool.map(lambda item: _price_holding(item, wallet, analysis), tracked))
     present = {str(item.get("address") or "").lower() for item in tracked}
     missing = sorted(expected - present)
     valued = sum(item.get("market_value_sda") is not None for item in tracked)
@@ -174,7 +169,9 @@ def _tracked_wallet_snapshot(accounting, dashboard=None):
     snapshot["market_valued_count"] = valued
     snapshot["market_complete"] = valued == len(tracked_addresses) and not missing
     snapshot["token_balances_loaded"] = bool(snapshot.get("token_balances_loaded"))
+    snapshot["market_price_method"] = "shared scanner/Supabase fresh trade; fallback PinetSwap 1 SDA BUY reference eth_call"
     return snapshot
+
 
 
 def _build_dashboard_data(dashboard):
@@ -206,17 +203,64 @@ def _build_dashboard_data(dashboard):
         worker=None
     stats=accounting.get("statistics") if isinstance(accounting.get("statistics"),dict) else {}
     complete=str(accounting.get("bot_reconciliation_status") or "INCOMPLETE").upper()=="COMPLETE"
-    positions=[]
-    for p in accounting.get("open_positions") or []:
-        if not isinstance(p,dict): continue
-        positions.append({"token":p.get("token"),"symbol":p.get("symbol") or "UNKNOWN",
-            "amount":p.get("quantity"),"value_sda":rb._finite_number(p.get("value_sda")),
-            "cost_sda":rb._finite_number(p.get("cost_basis_sda")),
-            "pnl_sda":rb._finite_number(p.get("open_pnl_sda")),
-            "pnl_pct":rb._finite_number(p.get("pnl_pct")),"valued":p.get("value_sda") is not None,
-            "balance_matches":True,"buy_verified":True})
+    accounting_positions={str(p.get("token") or "").lower():p for p in (accounting.get("open_positions") or []) if isinstance(p,dict) and p.get("token")}
+    try:
+        runtime_state=dashboard.load("real_trade_state.json",{})
+    except Exception:
+        runtime_state={}
+    runtime_positions=runtime_state.get("positions",{}) if isinstance(runtime_state,dict) else {}
+    try:
+        metadata=dashboard.load("token_metadata.json",{})
+    except Exception:
+        metadata={}
+    holdings_by_address={}
     snapshot=_tracked_wallet_snapshot(accounting, dashboard)
     holdings=snapshot.get("holdings") if isinstance(snapshot.get("holdings"),list) else []
+    for item in holdings:
+        if isinstance(item,dict):
+            holdings_by_address[str(item.get("address") or "").lower()]=item
+    position_source=[]
+    if isinstance(runtime_positions,dict):
+        for token,position in runtime_positions.items():
+            if isinstance(position,dict):
+                try:
+                    raw_quantity=Decimal(str(position.get("remaining_quantity",position.get("token_amount_raw")) or 0))
+                except Exception:
+                    raw_quantity=Decimal(0)
+                if raw_quantity>0:
+                    position_source.append((str(position.get("token") or token).lower(),position,True))
+    if not position_source:
+        position_source=[(str(p.get("token") or "").lower(),p,False) for p in (accounting.get("open_positions") or []) if isinstance(p,dict) and p.get("token")]
+    positions=[]
+    for token,position,is_runtime in position_source:
+        if not token: continue
+        meta=metadata.get(token,{}) if isinstance(metadata,dict) else {}
+        meta=meta if isinstance(meta,dict) else {}
+        symbol=str(meta.get("symbol") or position.get("symbol") or "UNKNOWN")
+        holding=holdings_by_address.get(token)
+        decimals=meta.get("decimals",holding.get("decimals") if holding else None)
+        try:
+            decimals=int(decimals)
+            raw_quantity=Decimal(str(position.get("remaining_quantity",position.get("token_amount_raw"))))
+            quantity=raw_quantity/(Decimal(10)**decimals)
+        except Exception:
+            quantity=Decimal(str(position.get("quantity") or position.get("amount") or 0))
+        accounting_position=accounting_positions.get(token,{})
+        cost_raw=(accounting_position.get("cost_basis_sda") if accounting_position else None)
+        if cost_raw is None:
+            cost_raw=position.get("remaining_cost_basis",position.get("amount_sda",position.get("cost_sda")))
+        cost=rb._finite_number(cost_raw)
+        price=rb._finite_number(holding.get("price_sda")) if holding else None
+        value=(float(quantity)*price if price is not None and quantity>0 else
+               rb._finite_number(holding.get("market_value_sda")) if holding and not is_runtime else None)
+        pnl=value-cost if value is not None and cost is not None else None
+        pnl_pct=pnl/cost*100 if pnl is not None and cost and cost>0 else None
+        positions.append({"token":token,"symbol":symbol,"amount":str(quantity),
+            "value_sda":value,"cost_sda":cost,"pnl_sda":pnl,"pnl_pct":pnl_pct,
+            "price_sda":price,"price_timestamp":holding.get("price_timestamp") if holding else None,
+            "price_age_seconds":holding.get("price_age_seconds") if holding else None,
+            "price_source":holding.get("price_source") if holding else None,
+            "valued":value is not None,"balance_matches":True,"buy_verified":True})
     market_count=sum(item.get("market_value_sda") is not None for item in holdings)
     token_total=sum((float(item["market_value_sda"]) for item in holdings
                      if item.get("market_value_sda") is not None),0.0)
@@ -241,6 +285,10 @@ def _build_dashboard_data(dashboard):
     buy_values=[x["invested_sda"] for x in buy_records]
     open_values=[x["value_sda"] for x in positions if x["value_sda"] is not None]
     open_costs=[x["cost_sda"] for x in positions if x["cost_sda"] is not None]
+    live_open_pnl=sum(x["pnl_sda"] for x in positions if x["pnl_sda"] is not None) if positions and all(x["pnl_sda"] is not None for x in positions) else None
+    live_open_value=sum(open_values) if open_values else 0.0
+    live_open_cost=sum(open_costs) if open_costs else 0.0
+    live_open_complete=complete and len(positions)>0 and all(x["value_sda"] is not None and x["pnl_sda"] is not None for x in positions)
     best=stats.get("best_trade") if isinstance(stats.get("best_trade"),dict) else {}
     worst=stats.get("worst_trade") if isinstance(stats.get("worst_trade"),dict) else {}
     return {"source":"blockchain_fifo","load_error":None,"worker":worker,
@@ -259,14 +307,14 @@ def _build_dashboard_data(dashboard):
         "worst_trade":rb._finite_number(worst.get("net_pnl_sda")),
         "best_trade_label":best.get("symbol"),"worst_trade_label":worst.get("symbol"),
         "total_invested":sum(buy_values) if buy_values and all(x is not None for x in buy_values) else None,
-        "open_value":sum(open_values) if open_values else 0.0,
-        "open_cost":sum(open_costs) if open_costs else 0.0,
-        "open_pnl":rb._finite_number(accounting.get("open_pnl_sda")),
-        "open_complete":complete and all(p["value_sda"] is not None and p["pnl_sda"] is not None for p in positions),
+        "open_value":live_open_value,
+        "open_cost":live_open_cost,
+        "open_pnl":live_open_pnl,
+        "open_complete":live_open_complete,
         "realized_pnl":rb._finite_number(accounting.get("realized_pnl_sda")),
         "realized_partial":not complete,
-        "total_pnl":rb._finite_number(accounting.get("total_pnl_sda")),
-        "total_partial":not complete,"portfolio_value":portfolio,
+        "total_pnl":(rb._finite_number(accounting.get("realized_pnl_sda"))+live_open_pnl) if live_open_pnl is not None and rb._finite_number(accounting.get("realized_pnl_sda")) is not None else None,
+        "total_partial":not (complete and live_open_complete),"portfolio_value":portfolio,
         "portfolio_complete":portfolio_complete,
         "portfolio_valued_count":portfolio_valued_count,
         "portfolio_total_count":portfolio_total_count,
