@@ -1,4 +1,5 @@
 """Production bridge -> Swing SELL V2 integration tests; never broadcast transactions."""
+import copy
 import json
 import os
 import tempfile
@@ -56,8 +57,9 @@ def _run_case(price=None, unavailable=False):
             return real_state
 
         def save_state(value):
+            saved = copy.deepcopy(value)
             real_state.clear()
-            real_state.update(value)
+            real_state.update(saved)
 
         send_transaction = Mock(side_effect=AssertionError("transaction broadcast attempted"))
         with ExitStack() as stack:
