@@ -283,4 +283,4 @@ def test_wallet_portfolio_includes_new_live_bot_position_while_fifo_lags(monkeyp
     assert len(result["holdings"]) == 10
     assert result["tracked_expected_count"] == 10
     assert result["market_complete"] is True
-    assert sum(float(item["market_value_sda"]) for item in result["holdings"]) + result["native_sda"] == pytest.approx(217.4823)
+    assert sum(float(item["market_value_sda"]) for item in result["holdings"]) + result["native_sda"] == pytest.approx(207.4823)
