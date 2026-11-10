@@ -130,7 +130,9 @@ def _tracked_wallet_snapshot(accounting, dashboard=None):
         for token, position in runtime_positions.items():
             if not isinstance(position, dict):
                 continue
-            quantity = position.get("remaining_quantity", position.get("token_amount_raw"))
+            quantity = position.get("remaining_quantity")
+            if quantity is None:
+                quantity = position.get("token_amount_raw")
             try:
                 has_quantity = Decimal(str(quantity)) > 0
             except Exception:
@@ -224,7 +226,10 @@ def _build_dashboard_data(dashboard):
         for token,position in runtime_positions.items():
             if isinstance(position,dict):
                 try:
-                    raw_quantity=Decimal(str(position.get("remaining_quantity",position.get("token_amount_raw")) or 0))
+                    raw=position.get("remaining_quantity")
+                    if raw is None:
+                        raw=position.get("token_amount_raw")
+                    raw_quantity=Decimal(str(raw or 0))
                 except Exception:
                     raw_quantity=Decimal(0)
                 if raw_quantity>0:
@@ -241,7 +246,10 @@ def _build_dashboard_data(dashboard):
         decimals=meta.get("decimals",holding.get("decimals") if holding else None)
         try:
             decimals=int(decimals)
-            raw_quantity=Decimal(str(position.get("remaining_quantity",position.get("token_amount_raw"))))
+            raw=position.get("remaining_quantity")
+            if raw is None:
+                raw=position.get("token_amount_raw")
+            raw_quantity=Decimal(str(raw))
             quantity=raw_quantity/(Decimal(10)**decimals)
         except Exception:
             quantity=Decimal(str(position.get("quantity") or position.get("amount") or 0))
