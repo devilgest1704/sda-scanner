@@ -30,6 +30,7 @@ def cohort(ledger, exit_profile=None):
              milestone_15_reached=valid>=15,includes_invalid_and_unknown_in_net=True)
  if exit_profile is None:
   result['swing_v1']=cohort(ledger,'swing_v1')
+  result['swing_v2']=cohort(ledger,'swing_v2')
  return result
 
 def lines(s):
@@ -42,5 +43,8 @@ def lines(s):
  if 'swing_v1' in s:
   swing=s['swing_v1']
   output.append(f"Swing v1: closed {swing['closed']} • open {swing['open']} • net {swing['net_sda']:+.2f} SDA")
+ if 'swing_v2' in s:
+  swing=s['swing_v2']
+  output.append(f"Swing SELL V2: closed {swing['closed']} • open {swing['open']} • net {swing['net_sda']:+.2f} SDA")
  return output
 

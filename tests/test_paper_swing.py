@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime,timedelta,timezone
 from types import SimpleNamespace
 from unittest.mock import patch
-import engine_legacy as engine
+import engine  # production engine (paper_stats_patch moves partial rows to partial_exits)
 import v30_pump_hunter as v
 from tools.temporal_recovery_buy import evaluate_tp4_v10 as evaluate_tp4,evaluate_tp4_legacy,evaluate_paper
 from tests.test_paper_confirmed_continuation import NOW,ADDRESS,prior,candidate,ActivePaperEntryTests
@@ -44,8 +44,9 @@ class SwingExitTests(unittest.TestCase):
             v.patch(SimpleNamespace(),e)
             pos=e.create('x',{'price_in_sda':100},d,{}, {},100)
             self.assertEqual(pos['investment_sda'],20) # real engine clamps to >=50 unless overridden
-            self.assertAlmostEqual(pos['sl'],92)
-            self.assertAlmostEqual(pos['tp1'],116)
+            self.assertAlmostEqual(pos['sl'],100.1*1.01*.5)
+            self.assertAlmostEqual(pos['tp1'],100.1*1.01*1.25)
+            self.assertEqual(pos['paper_exit_profile'],'swing_v2')
             pos.update(opened_at=(datetime.now(timezone.utc)-timedelta(hours=hours)).isoformat(),pump_peak_price=peak)
             if legacy:pos.pop('paper_exit_profile')
             book=dict(positions={'x':pos},closed_trades=[])
@@ -53,22 +54,24 @@ class SwingExitTests(unittest.TestCase):
             e._auto_exit(book,{'x':{'analysis':{'price_in_sda':price,'last_transaction':qt}}},{})
             return book
     def test_no_premature_stop_take_or_trail(self):
-        for price,peak in [(97,100),(104,104),(98,101.3),(105,109.9)]:
+        for price,peak in [(97,100),(104,104),(98,101.3),(105,109.9),(51,100),(126,130)]:
             with self.subTest(price=price):self.assertFalse(self.run_exit(price,peak=peak)['closed_trades'])
     def test_stop_take_and_costs(self):
-        for price,reason in [(92,'SWING STOP'),(116,'SWING TAKE')]:
+        for price,reason in [(50,'SWING V2 STOP -50'),(152,'SWING V2 TP +50')]:
             t=self.run_exit(price)['closed_trades'][0]
             self.assertEqual(t['close_reason'],reason)
             self.assertAlmostEqual(t['closed_profit_sda'],20*(price/100*.999*.99/1.001-1.01))
             self.assertFalse(t['paper_sellability_verified'])
-    def test_trailing_only_after_ten_percent_peak(self):
-        self.assertFalse(self.run_exit(103,peak=109.9)['closed_trades'])
-        t=self.run_exit(103,peak=110)['closed_trades'][0]
-        self.assertEqual(t['close_reason'],'SWING TRAIL');self.assertGreater(t['closed_profit_sda'],0)
-    def test_time_and_stale_data(self):
+    def test_first_profit_is_a_partial_not_a_full_exit(self):
+        book=self.run_exit(127)
+        t=book['partial_exits'][0]
+        self.assertFalse(book['closed_trades'])
+        self.assertEqual(t['close_reason'],'SWING V2 PARTIAL +25');self.assertEqual(t['status'],'PARTIAL CLOSED')
+        self.assertAlmostEqual(book['positions']['x']['remaining_fraction'],.8)
+    def test_no_time_exit_and_stale_data(self):
         self.assertFalse(self.run_exit(101,hours=47.9)['closed_trades'])
-        self.assertEqual(self.run_exit(101,hours=48.1)['closed_trades'][0]['close_reason'],'SWING TIME')
-        self.assertFalse(self.run_exit(80,hours=49,quote_age=301)['closed_trades'])
+        self.assertFalse(self.run_exit(101,hours=500)['closed_trades'])
+        self.assertFalse(self.run_exit(40,hours=49,quote_age=301)['closed_trades'])
     def test_existing_tp4_keeps_old_exit_rules(self):
         self.assertEqual(self.run_exit(104,legacy=True)['closed_trades'][0]['close_reason'],'TP4 TAKE')
 
@@ -82,4 +85,5 @@ class SwingReportingTests(unittest.TestCase):
         self.assertEqual(s['net_sda'],-3)
         self.assertEqual(s['swing_v1']['net_sda'],2)
         self.assertEqual(s['swing_v1']['open_principal_at_risk_sda'],20)
-        self.assertIn('Swing v1:',lines(s)[-1])
+        self.assertIn('Swing v1:',lines(s)[-2])
+        self.assertIn('Swing SELL V2:',lines(s)[-1])

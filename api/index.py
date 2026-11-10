@@ -203,6 +203,10 @@ v30_dashboard_patch.patch_dashboard(dashboard)
 import telegram_home
 telegram_home.install(dashboard)
 
+# PAPER Champion vs Challenger optimizer screens (read-only).
+import paper_optimizer_view
+paper_optimizer_view.install(dashboard)
+
 AUTOMATIC_DASHBOARD_DISABLED = "Automatic Telegram dashboard reports are disabled; use the interactive menu."
 
 app = FastAPI()

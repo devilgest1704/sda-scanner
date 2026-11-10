@@ -51,6 +51,6 @@ class SingleQuoteSwingTests(unittest.TestCase):
                 return pos
             e.create=one
         with patch.object(v,'patch',side_effect=attach):
-            t=SwingExitTests().run_exit(116)['closed_trades'][0]
+            t=SwingExitTests().run_exit(152)['closed_trades'][0]
         self.assertIsNone(t['paper_quote_quality_valid'])
         self.assertFalse(t['paper_sellability_verified'])

@@ -71,6 +71,7 @@ def patch_dashboard(dashboard):
         handled = (
             "MAIN", "REAL", "REAL_STATS", "REFRESH", "DEBUG",
             "OPTIMIZER", "OPTIMIZER_STRATEGIES", "OPTIMIZER_V30",
+            "OPT_CHAMPION", "OPT_CHALLENGER", "OPT_COMPARE", "OPT_RESEARCH", "OPT_ROLLBACK",
             "REAL_BOT", "REAL_BOT_REFRESH", "REAL_BOT_BACK",
             "REAL_BOT_PORTFOLIO", "REAL_BOT_PORTFOLIO_REFRESH",
             "REAL_BOT_BUY", "REAL_BOT_SELL",
@@ -134,14 +135,19 @@ def patch_dashboard(dashboard):
             _safe_edit(chat_id, message_id, text, telegram_home.buy_scanner_keyboard(detail))
             return state
 
-        if data in ("OPTIMIZER", "OPTIMIZER_STRATEGIES", "OPTIMIZER_V30"):
+        optimizer_views = {
+            "OPTIMIZER": "optimizer_overview_report",
+            "OPTIMIZER_STRATEGIES": "optimizer_strategies_report",
+            "OPTIMIZER_V30": "optimizer_research_report",
+            "OPT_CHAMPION": "optimizer_champion_report",
+            "OPT_CHALLENGER": "optimizer_challenger_report",
+            "OPT_COMPARE": "optimizer_comparison_report",
+            "OPT_RESEARCH": "optimizer_paper_research_report",
+            "OPT_ROLLBACK": "optimizer_rollback_report",
+        }
+        if data in optimizer_views:
             try:
-                name = {
-                    "OPTIMIZER": "optimizer_overview_report",
-                    "OPTIMIZER_STRATEGIES": "optimizer_strategies_report",
-                    "OPTIMIZER_V30": "optimizer_research_report",
-                }[data]
-                report_fn = getattr(dashboard, name, None)
+                report_fn = getattr(dashboard, optimizer_views[data], None)
                 text = report_fn() if callable(report_fn) else "⚠️ Statistiky optimizeru nejsou dostupné."
             except Exception as exc:
                 print(f"Optimizer menu error: {type(exc).__name__}: {exc}")

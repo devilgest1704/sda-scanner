@@ -9,6 +9,8 @@ from tools.paper_loss_circuit import paper_entry_risk_gate
 from tools.paper_quote_quality import entry_gate as quote_quality_gate
 from tools.temporal_recovery_buy import evaluate_paper as temporal_recovery_signal
 from tools.temporal_recovery_buy import evaluate_tp4 as strict_temporal_signal
+import paper_swing_sell_v2 as paper_v2
+import paper_champion_config
 
 VERSION="V30.17-CONFIRMED-FLOW-PAPER"
 PAPER_TP4 = os.environ.get("SDA_PAPER_TP4", "0") == "1"
@@ -452,6 +454,16 @@ def decision(address,a,ws=None,persist=True):
     if not quote_quality["ready"]:
         gate_failures.append("quote_continuity")
         reason="quote_continuity: "+quote_quality["reason"]
+    # PAPER champion filters (stricter-only, empty by default) never loosen any gate above.
+    champion_failures=paper_champion_config.buy_veto({
+        "pump_score":s,"pump_quality":q,"pump_change":entry_impulse,"net_1h":c["flow"],
+        "flow_15m":c["flow15"],"volume_1h":c["vol"],"trades_1h":c["trades"],
+        "buy_ratio":c["buy_ratio"],"m1h":c["m1"],"m15":c["m15"]})
+    if champion_failures:
+        if not blocked:
+            reason="paper_champion_filter: "+"; ".join(champion_failures[:2])
+        blocked=True
+        gate_failures.append("paper_champion_filter")
 
     # V30.4 Shadow diagnostics: explain every failed confirmation gate.
     # Diagnostic only; this does not alter Champion or Shadow eligibility.
@@ -522,6 +534,34 @@ def decision(address,a,ws=None,persist=True):
       "v30":{"version":VERSION,"entry_score":entry_score,"agent_config":agent_cfg,"sl_pct":SL_PCT,"max_open":MAX_OPEN,
              "max_buys":MAX_BUYS_PER_RUN,"phase":phase,"max_entry_data_age_sec":MAX_ENTRY_DATA_AGE_SEC}}
 
+def _research_observation(pos,observed,a,s,cur,data_age,roi,mfe,peak,engine):
+    """Persist one fresh PAPER price observation; research data never blocks PAPER exits."""
+    try:
+        from tools import paper_research_dataset as dataset
+        champion=paper_champion_config.load()
+        fee=n(getattr(engine,"FEE_RATE",.01),.01)
+        dataset.record_observation(pos,{
+            "at":observed.isoformat(),"quote_at":a.get("last_transaction"),"price":cur,
+            "source":"scanner_market_analysis","age_seconds":round(float(data_age),1),"quality":"fresh",
+            "score":n(s.get("pump_score")),"quality_score":n(s.get("pump_quality")),"phase":s.get("pump_phase"),
+            "flow_1h":n(s.get("net_1h")),"flow_15m":n(s.get("flow_15m")),"volume_1h":n(s.get("volume_1h")),
+            "trades_1h":n(s.get("trades_1h")),"buy_ratio":n(s.get("buy_ratio")),
+            "state":{"gross_roi_pct":round(roi,4),"mfe_pct":round(mfe,4),"mae_pct":round(n(pos.get("pump_mae_pct")),4),
+                     "peak":peak,"remaining_fraction":n(pos.get("remaining_fraction"),1),
+                     "remaining_quantity":pos.get("remaining_quantity"),"remaining_cost_basis":pos.get("remaining_cost_basis"),
+                     "realized_pnl":pos.get("realized_pnl"),"trailing_armed":bool(pos.get("trailing_armed")),
+                     "trailing_price":pos.get("current_trailing_price")}},
+            fee,paper_champion_config.config_hash(champion.get("buy_filters")),champion.get("version"))
+    except Exception as exc:
+        print("PAPER RESEARCH DATASET ERROR:",repr(exc))
+
+def _research_exit(pos,row,engine,final):
+    try:
+        from tools import paper_research_dataset as dataset
+        dataset.record_exit(pos,row,n(getattr(engine,"FEE_RATE",.01),.01),final)
+    except Exception as exc:
+        print("PAPER RESEARCH DATASET ERROR:",repr(exc))
+
 def age_hours(pos):
     raw=str(pos.get("opened_at") or "")
     try:
@@ -542,10 +582,9 @@ def patch(main_module,engine):
             z["paper_strategy_experimental"]=True
             # Freeze exit ownership at entry; existing TP4 positions keep TP4 exits.
             z["investment_sda"]=20.0  # override legacy engine minimum for PAPER swing risk
-            z["paper_exit_profile"]="swing_v1"
-            z["paper_exit_rules"]={"stop_pct": .08, "take_pct": .16,
-                                   "trail_pct": .06, "trail_activation_pct": .10,
-                                   "max_hold_hours": 48}
+            # PAPER exits use the shared Swing SELL V2 policy (same pure decide() as REAL).
+            z["paper_exit_profile"]=paper_v2.PROFILE
+            z["paper_exit_rules"]=dict(paper_v2.RULES)
             z["paper_entry_quote_quality"]=s.get("paper_quote_quality")
             z["paper_max_quote_gap_seconds"]=0.0
         e=n(z.get("entry_price"),n(an.get("price_in_sda")))
@@ -558,10 +597,12 @@ def patch(main_module,engine):
                   "entry_paper_buy_mode":s.get("paper_buy_mode","baseline"),
                   "entry_temporal_recovery":s.get("paper_temporal_recovery")})
         if PAPER_TP4:
-            z.update({"sl_pct": .08, "sl": n(z.get("reference_price"),n(an.get("price_in_sda"),e)) * .92,
-                      "initial_sl": n(z.get("reference_price"),n(an.get("price_in_sda"),e)) * .92, "tp1_pct": .16, "tp2_pct": .16,
-                      "tp1": n(z.get("reference_price"),n(an.get("price_in_sda"),e)) * 1.16, "tp2": n(z.get("reference_price"),n(an.get("price_in_sda"),e)) * 1.16,
-                      "trail_pct": .06})
+            fee=n(getattr(engine,"FEE_RATE",.01),.01)
+            paper_v2.ensure_state(z,fee)
+            unit=n(z.get("entry_price"),e)*(1+fee)
+            z.update({"sl_pct": .50, "sl": unit*.50, "initial_sl": unit*.50,
+                      "tp1_pct": .25, "tp2_pct": .50, "tp1": unit*1.25, "tp2": unit*1.50,
+                      "trail_pct": .15})
         z["pump_entry_snapshot"]={
             "at":z.get("opened_at"),"price_sda":e,"reference_price_sda":n(an.get("price_in_sda")),
             "score":n(s.get("pump_score",s.get("confidence"))),
@@ -654,6 +695,8 @@ def patch(main_module,engine):
                 "volume_1h":n(s.get("volume_1h")),"trades_1h":n(s.get("trades_1h"))
             })
             if len(samples)>96:del samples[:-96]
+            if pos.get("paper_strategy") == "temporal_recovery_tp4":
+                _research_observation(pos,observed,a,s,cur,data_age,roi,mfe,peak,engine)
             age=age_hours(pos)
             if pos.get("paper_strategy") == "temporal_recovery_tp4":
                 # Thresholds use observed reference quotes, not the entry price
@@ -661,17 +704,28 @@ def patch(main_module,engine):
                 reference=n(pos.get("reference_price"),entry)
                 move=cur/reference-1
                 if pos.get("paper_exit_profile") == "swing_v1":
-                    # All thresholds are raw-reference moves; close() charges costs.
-                    # Never activate trailing on a small, still net-negative bounce.
-                    stop=reference*.92
-                    trailing_active=peak/reference >= 1.10
-                    if trailing_active:
-                        stop=max(stop, peak*.94)
-                    reason=("STOP" if cur <= reference*.92 else
-                            "TAKE" if cur >= reference*1.16 else
-                            "TRAIL" if trailing_active and cur <= stop else
-                            "TIME" if age >= 48 else None)
-                    prefix="SWING "
+                    # One-way migration: open swing_v1 PAPER positions continue under Swing SELL V2.
+                    pos["paper_exit_profile_previous"]="swing_v1"
+                    pos["paper_exit_profile"]=paper_v2.PROFILE
+                    pos["paper_exit_rules"]=dict(paper_v2.RULES)
+                    pos["paper_sell_policy_migrated_at"]=observed.isoformat()
+                if pos.get("paper_exit_profile") == paper_v2.PROFILE:
+                    fee=n(getattr(engine,"FEE_RATE",.01),.01)
+                    v2,v2_pnl=paper_v2.evaluate(pos,cur,fee)
+                    unit_cost=n(pos.get("remaining_cost_basis"))/max(n(pos.get("remaining_quantity")),1e-30)
+                    stop=(n(pos.get("current_trailing_price")) if pos.get("trailing_armed") else unit_cost*.50)
+                    pos["sl"]=stop
+                    pos["paper_v2_last_decision"]={"at":observed.isoformat(),"action":v2["action"],
+                        "reason":v2["reason"],"pnl_pct":float(v2_pnl*100) if v2_pnl is not None else None}
+                    if v2["action"]=="FULL_SELL":
+                        r=engine.close(p,address,cur,paper_v2.REASONS[v2["reason"]])
+                    elif v2["action"]=="PARTIAL_SELL":
+                        r=engine.close(p,address,cur,paper_v2.REASONS["FIRST_PROFIT_PARTIAL"],
+                                       fraction=paper_v2.partial_close_fraction(pos))
+                        if r:
+                            paper_v2.apply_partial(pos,r,cur,paper_v2.policy.PARTIAL_FRACTION)
+                    else:
+                        r=None
                 else:
                     stop=reference*.975
                     reason=("STOP" if move <= -.025 else
@@ -679,8 +733,9 @@ def patch(main_module,engine):
                             "TRAIL" if age >= .25 and cur/peak-1 <= -.035 else
                             "TIME" if age >= 4 else None)
                     prefix="TP4 "
-                pos["sl"]=stop
-                r=engine.close(p,address,cur,prefix+reason) if reason else None
+                if pos.get("paper_exit_profile") != paper_v2.PROFILE:
+                    pos["sl"]=stop
+                    r=engine.close(p,address,cur,prefix+reason) if reason else None
             else:
                 # Profit protection: once positive, stop giving the trade back.
                 stop=n(pos.get("sl"),entry*(1-SL_PCT))
@@ -713,7 +768,7 @@ def patch(main_module,engine):
                             and (pos.get("paper_entry_quote_quality") or {}).get("continuity_verified",True) is True) else None)
                     r["paper_sellability_verified"]=False
                     closed_rows=p.get("closed_trades") or []
-                    if closed_rows and closed_rows[-1].get("address")==address:
+                    if closed_rows and closed_rows[-1].get("address")==address and r.get("status")=="CLOSED":
                         closed_rows[-1].update({k:r[k] for k in ("paper_max_quote_gap_seconds","paper_quote_quality_valid","paper_sellability_verified")})
                 r['pump_exit_stop_price']=stop
                 r['pump_exit_stop_gap_pct']=round((cur/stop-1)*100,3) if stop>0 else None
@@ -729,7 +784,7 @@ def patch(main_module,engine):
                     "observation_gap_seconds":round(gap_seconds,1) if gap_seconds is not None else None}
                 # close() appends a copy; update that copy for persistence.
                 closed=p.get("closed_trades") or []
-                if closed and closed[-1].get("address")==address:
+                if closed and closed[-1].get("address")==address and r.get("status")=="CLOSED":
                     closed[-1].update({
                         "pump_exit_stop_price":r["pump_exit_stop_price"],
                         "pump_exit_stop_gap_pct":r["pump_exit_stop_gap_pct"],
@@ -738,6 +793,9 @@ def patch(main_module,engine):
                         "pump_exit_snapshot":r["pump_exit_snapshot"]})
                 if "STOP" in str(r.get("close_reason","")) or "WEAK" in str(r.get("close_reason","")) or "STALE" in str(r.get("close_reason","")) or "BREAKDOWN" in str(r.get("close_reason","")):
                     st=load_state();st.setdefault("cooldowns",{})[str(address).lower()]=(datetime.now(timezone.utc)+timedelta(hours=COOLDOWN_HOURS)).isoformat();save_state(st)
+                if pos.get("paper_strategy") == "temporal_recovery_tp4":
+                    # close() returns the booked row (partials live in p["partial_exits"] under engine.py).
+                    _research_exit(pos,r,engine,r.get("status")=="CLOSED")
                 events.append(f"V30.3 {r.get('close_reason','EXIT')} {r.get('label',address)} | ROI {roi:+.2f}% | MFE {mfe:+.2f}%")
         return events
 
