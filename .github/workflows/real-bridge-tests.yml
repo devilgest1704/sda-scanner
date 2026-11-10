@@ -225,7 +225,7 @@ jobs:
               assert abs(sum(float(x["pnl_sda"]) for x in data["positions"])-float(data["open_pnl"])) < 1e-8
           assert all(x["symbol"]!="PINE" for x in data["buy_records"]+data["sell_records"]+data["positions"])
           assert all(x["symbol"]!="HAQ" for x in data["positions"])
-          for view in ("main","portfolio","buy","sell","stats"):
+          for view in ("main","portfolio","buy","sell","sell_v2","stats"):
               text,_=views.render_view(dashboard,view,refresh=True)
               print(f"===== REAL {view.upper()} =====")
               print(text)
