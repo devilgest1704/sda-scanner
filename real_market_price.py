@@ -118,6 +118,6 @@ def resolve_market_price(token, analysis, now=None, supabase_lookup=None,
                 quote.get("price_sda"), quote.get("timestamp"),
                 quote.get("source") or "pinet_swap_buy_reference_1_sda",
                 validation_now, max_age, quote_amount_sda=quote.get("quote_amount_sda", 1),
-                quote_side="BUY_REFERENCE",
+                quote_side="BUY_REFERENCE", fee_tier=quote.get("fee_tier"),
             )
     return None
