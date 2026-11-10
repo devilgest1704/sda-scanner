@@ -485,6 +485,8 @@ def _position_mark_to_market(dashboard, token, pos, holding=None):
         "price_timestamp": None,
         "price_age_seconds": None,
         "price_stale": False,
+        "price_source": None,
+        "price_fee_tier": None,
         "market_value_sda": None,
         "market_pnl_sda": None,
         "market_pnl_pct": None,
@@ -509,6 +511,8 @@ def _position_mark_to_market(dashboard, token, pos, holding=None):
     mark["price_timestamp"] = holding.get("price_timestamp")
     mark["price_age_seconds"] = holding.get("price_age_seconds")
     mark["price_stale"] = bool(holding.get("price_stale"))
+    mark["price_source"] = holding.get("price_source")
+    mark["price_fee_tier"] = holding.get("price_fee_tier")
     mark["market_value_sda"] = (_finite_number(holding.get("market_value_sda"))
                                 if holding.get("market_value_sda") is not None else None)
     mark["market_error"] = holding.get("market_error")
