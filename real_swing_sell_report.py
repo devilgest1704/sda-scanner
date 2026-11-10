@@ -67,7 +67,7 @@ def _action(decision,trailing_armed):
         return {"LOSS_LIMIT":"FULL_SELL_EMERGENCY","TRAILING_STOP":"FULL_SELL_TRAILING","HARD_TP":"FULL_SELL_TP"}.get(decision.get("reason"),"SELL_QUARANTINED")
     return "TRAILING_HOLD" if trailing_armed else "HOLD"
 
-def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None):
+def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None,reference_quote_lookup=None):
     now=now or datetime.now(timezone.utc)
     positions=state.get("positions") if isinstance(state,dict) else {}
     positions=positions if isinstance(positions,dict) else {}
@@ -76,14 +76,11 @@ def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None):
     metadata=metadata if isinstance(metadata,dict) else {}
     migration=_stamp((state or {}).get("sell_migration_observation_started_at") or (state or {}).get("sell_strategy_migrated_at"))
     rows=[]
+    from real_market_price import resolve_market_price
     tokens=[str(token).lower() for token,position in positions.items() if isinstance(position,dict)]
-    scanner_prices={token:scanner_market_price(token,analysis,now) for token in tokens}
-    fallback_tokens=[token for token in tokens if scanner_prices.get(token) is None]
-    fallback_prices={}
-    if callable(supabase_lookup) and fallback_tokens:
-        with ThreadPoolExecutor(max_workers=min(8,len(fallback_tokens))) as pool:
-            values=list(pool.map(lambda token:_supabase_market_price(token,supabase_lookup,now,MAX_PRICE_AGE_SECONDS),fallback_tokens))
-        fallback_prices=dict(zip(fallback_tokens,values))
+    market_prices={token:resolve_market_price(token,analysis,now=now,
+        supabase_lookup=supabase_lookup,reference_quote_lookup=reference_quote_lookup,
+        max_age=MAX_PRICE_AGE_SECONDS) for token in tokens}
     for token,position in positions.items():
         if not isinstance(position,dict): continue
         token=str(token).lower()
@@ -106,7 +103,7 @@ def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None):
         partial=bool(position.get("profit_partial_done")); trailing=bool(position.get("trailing_armed"))
         peak=_decimal(position.get("highest_price_since_trailing_activation"))
         trail=peak*Decimal("0.85") if trailing and peak and peak>0 else None
-        market=scanner_prices.get(token) or fallback_prices.get(token)
+        market=market_prices.get(token)
         if market and migration:
             observed=_stamp(market.get("timestamp"))
             if observed is None or observed<=migration: market=None
@@ -140,8 +137,15 @@ def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None):
             action=_action(result,trailing)
             swing_state="TRAILING_ACTIVE" if trailing else ("PARTIAL_DONE" if partial else "WAITING_PARTIAL")
         else: swing_state="TRAILING_ACTIVE" if trailing else ("PARTIAL_DONE" if partial else "WAITING_PARTIAL")
-        rows.append({"token":symbol,"token_address":token,"entry_price":float(entry) if entry is not None else None,
-            "decision_price":float(price) if price is not None else None,"price_timestamp":market.get("timestamp") if market else None,
+        market_value=(Decimal(quantity)/(Decimal(10)**decimals))*price if price is not None and valid else None
+        market_pnl=market_value-cost if market_value is not None and cost is not None else None
+        rows.append({"token":symbol,"token_address":token,"quantity":float(Decimal(quantity)/(Decimal(10)**decimals)) if valid else None,
+            "cost_sda":float(cost) if cost is not None else None,
+            "entry_price":float(entry) if entry is not None else None,
+            "decision_price":float(price) if price is not None else None,
+            "market_value_sda":float(market_value) if market_value is not None else None,
+            "market_pnl_sda":float(market_pnl) if market_pnl is not None else None,
+            "price_timestamp":market.get("timestamp") if market else None,
             "price_age_seconds":market.get("age_seconds") if market else None,"price_source":market.get("source") if market else None,
             "pnl_pct":pnl,"profit_partial_done":partial,"trailing_armed":trailing,
             "current_peak":float(peak) if peak is not None else None,"trailing_price":float(trail) if trail is not None else None,
