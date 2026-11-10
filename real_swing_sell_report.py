@@ -78,9 +78,14 @@ def build_decision_rows(state,analysis,metadata,now=None,supabase_lookup=None,re
     rows=[]
     from real_market_price import resolve_market_price
     tokens=[str(token).lower() for token,position in positions.items() if isinstance(position,dict)]
-    market_prices={token:resolve_market_price(token,analysis,now=now,
-        supabase_lookup=supabase_lookup,reference_quote_lookup=reference_quote_lookup,
-        max_age=MAX_PRICE_AGE_SECONDS) for token in tokens}
+    if tokens:
+        with ThreadPoolExecutor(max_workers=min(8,len(tokens))) as pool:
+            values=list(pool.map(lambda token:resolve_market_price(token,analysis,now=now,
+                supabase_lookup=supabase_lookup,reference_quote_lookup=reference_quote_lookup,
+                max_age=MAX_PRICE_AGE_SECONDS),tokens))
+        market_prices=dict(zip(tokens,values))
+    else:
+        market_prices={}
     for token,position in positions.items():
         if not isinstance(position,dict): continue
         token=str(token).lower()
