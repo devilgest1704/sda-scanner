@@ -101,7 +101,7 @@ def _run_case(price=None, unavailable=False):
         # real post-migration reconciliation and allows the SELL loop to run.
         assert real_state["sell_strategy_version"] == policy.STRATEGY_VERSION
         sell_rows = [x for x in result["actions"] if x.get("action") == "SELL_DECISION"]
-        assert len(sell_rows) == 1
+        assert len(sell_rows) == 1, f"bridge_result={result!r}; real_state={real_state!r}"
         assert resolver.call_count == 1
         assert send_transaction.call_count == 0
         return sell_rows[0], real_state, evaluate.call_count, decide.call_count
