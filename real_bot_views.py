@@ -388,7 +388,8 @@ def _portfolio_text(data):
         if pnl is None:lines.append(f"⚪ {p['symbol']} {value:.2f} SDA PnL unavailable");continue
         icon="🟢" if pnl>=0 else "🔴"
         pct=f" ({p['pnl_pct']:+.1f}%)" if p.get("pnl_pct") is not None else ""
-        lines.append(f"{icon} {p['symbol']} {value:.2f} SDA {pnl:+.2f}{pct}")
+        price=f" @ {p['price_sda']:.6g}" if p.get("price_sda") is not None else ""
+        lines.append(f"{icon} {p['symbol']} {value:.2f} SDA {pnl:+.2f}{pct}{price}")
     if not data.get("positions"):lines.append("No open REAL positions")
     if not data.get("open_complete"):
         valued=sum(p.get("value_sda") is not None for p in data.get("positions") or [])
