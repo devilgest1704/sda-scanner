@@ -112,7 +112,7 @@ def resolve_market_price(token, analysis, now=None, supabase_lookup=None,
             # only a tiny acquisition-time skew; larger future timestamps fail closed.
             if quote_stamp is not None:
                 future_skew = (quote_stamp - now.astimezone(timezone.utc)).total_seconds()
-                if 0 < future_skew <= 5:
+                if 0 < future_skew <= 30:
                     validation_now = quote_stamp
             return _validated(
                 quote.get("price_sda"), quote.get("timestamp"),
