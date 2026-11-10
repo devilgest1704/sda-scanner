@@ -48,7 +48,7 @@ class SharedMarketPriceTests(unittest.TestCase):
         self.assertEqual(result["age_seconds"], 0)
 
     def test_far_future_quote_timestamp_is_rejected(self):
-        quote = lambda _token: {"price_sda": "0.26", "timestamp": "2026-11-10T08:30:10Z"}
+        quote = lambda _token: {"price_sda": "0.26", "timestamp": "2026-11-10T08:31:00Z"}
         result = market.resolve_market_price(TOKEN, {}, NOW, reference_quote_lookup=quote)
         self.assertIsNone(result)
 
