@@ -75,7 +75,7 @@ def _fetch_wallet_snapshot():
     wallet=str(snapshot.get("wallet_address") or rb._wallet_address()).lower()
     priced=[h for h in holdings if isinstance(h,dict)]
     if priced:
-        with ThreadPoolExecutor(max_workers=min(16,len(priced))) as pool:
+        with ThreadPoolExecutor(max_workers=min(4,len(priced))) as pool:
             updated=list(pool.map(lambda h:_price_holding(h,wallet),priced))
         snapshot["holdings"]=updated
     snapshot["market_valued_count"]=sum(h.get("market_value_sda") is not None for h in priced)
@@ -160,7 +160,7 @@ def _tracked_wallet_snapshot(accounting, dashboard=None):
                and str(item.get("address") or "").lower() in tracked_addresses]
     wallet = str(snapshot.get("wallet_address") or rb._wallet_address()).lower()
     if tracked:
-        with ThreadPoolExecutor(max_workers=min(12, len(tracked))) as pool:
+        with ThreadPoolExecutor(max_workers=min(4, len(tracked))) as pool:
             tracked = list(pool.map(lambda item: _price_holding(item, wallet, analysis), tracked))
     present = {str(item.get("address") or "").lower() for item in tracked}
     missing = sorted(expected - present)
