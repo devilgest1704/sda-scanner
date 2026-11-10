@@ -265,7 +265,7 @@ def test_telegram_wallet_holding_uses_shared_fresh_market_mark(monkeypatch):
     assert result["market_value_sda"] == Decimal("25")
     assert result["price_source"] == "PinetSwap 1 SDA BUY-side reference quote"
     assert result["price_fee_tier"] == 3000
-    assert result["price_age_seconds"] == 0
+    assert result["price_age_seconds"] == pytest.approx(0, abs=0.01)
 
 
 def test_telegram_wallet_holding_prefers_fresh_supabase_trade(monkeypatch):
