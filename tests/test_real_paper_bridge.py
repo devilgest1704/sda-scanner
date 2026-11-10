@@ -182,7 +182,8 @@ class BridgeTests(unittest.TestCase):
         )
         self.trader.execute_sell.assert_not_called()
         self.trader.execute_buy.assert_not_called()
-        decision = next(a for a in result["actions"] if a["action"] == "SELL_DECISION")
+        decision = next(a for a in result["actions"] if a.get("symbol") == "TEST" and a.get("status") == "NO_THRESHOLD")
+        self.assertEqual(decision["action"], "HOLD")
         self.assertEqual(decision["status"], "NO_THRESHOLD")
 
     def test_legacy_bridge_pending_sell_is_archived_not_executed(self):
