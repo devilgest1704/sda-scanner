@@ -84,6 +84,7 @@ jobs:
           import json
           from datetime import datetime, timezone
           from pathlib import Path
+          from types import SimpleNamespace
           import real_bot_menu
           import real_bot_views
           import real_swing_sell_report
@@ -91,7 +92,39 @@ jobs:
           state=json.loads(Path("real_trade_state.json").read_text(encoding="utf-8"))
           analysis=json.loads(Path("market_analysis.json").read_text(encoding="utf-8"))
           metadata=json.loads(Path("token_metadata.json").read_text(encoding="utf-8"))
+          accounting=json.loads(Path("real_accounting_state.json").read_text(encoding="utf-8"))
+          files={"real_trade_state.json":state,"market_analysis.json":analysis,
+                 "token_metadata.json":metadata,"real_accounting_state.json":accounting}
+          dashboard=SimpleNamespace(load=lambda path,default:files.get(path,default))
+          real_bot_menu._remote_json=lambda _dashboard,path:files.get(path,{})
           wallet=real_bot_menu._wallet_address()
+          snapshot=real_bot_views._tracked_wallet_snapshot(accounting,dashboard)
+          holdings={str(item.get("address") or "").lower():item
+                    for item in snapshot.get("holdings",[]) if isinstance(item,dict)}
+          print("CURRENT WALLET-COMPATIBLE MARKET MARKS")
+          for token,position in (state.get("positions") or {}).items():
+              meta=metadata.get(str(token).lower(),{})
+              holding=holdings.get(str(token).lower(),{})
+              try:
+                  decimals=int(meta.get("decimals"))
+                  raw=position.get("remaining_quantity")
+                  if raw is None: raw=position.get("token_amount_raw")
+                  bot_quantity=int(raw)/(10**decimals)
+              except Exception:
+                  bot_quantity=None
+              price=holding.get("price_sda")
+              bot_value=(bot_quantity*float(price) if bot_quantity is not None and price is not None else None)
+              wallet_value=holding.get("market_value_sda")
+              print(json.dumps({"token":meta.get("symbol",position.get("symbol")),
+                  "contract":str(token).lower(),"bot_quantity":bot_quantity,
+                  "wallet_quantity":str(holding.get("amount")) if holding else None,
+                  "price_sda":str(price) if price is not None else None,
+                  "bot_value_sda":bot_value,
+                  "wallet_compatible_value_sda":str(wallet_value) if wallet_value is not None else None,
+                  "difference_sda":float(wallet_value)-bot_value if wallet_value is not None and bot_value is not None else None,
+                  "price_source":holding.get("price_source"),
+                  "price_timestamp":holding.get("price_timestamp"),
+                  "price_age_seconds":holding.get("price_age_seconds")},ensure_ascii=False,sort_keys=True))
           def reference_quote(token):
               item=metadata.get(str(token).lower(),{})
               decimals=item.get("decimals") if isinstance(item,dict) else None
