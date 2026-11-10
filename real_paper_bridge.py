@@ -207,7 +207,9 @@ def reconcile():
                                     "price_timestamp": market.get("timestamp"),
                                     "price_age_seconds": market.get("age_seconds"),
                                     "price_source": market.get("source"),
-                                    **result, "at": _now()})
+                                    **{key: value for key, value in result.items() if key != "action"},
+                                    "decision_action": result.get("action"),
+                                    "at": _now()})
                 except Exception as exc:
                     actions.append({"action": "SELL_DECISION", "token": token,
                                     "symbol": symbol, "status": "ERROR",

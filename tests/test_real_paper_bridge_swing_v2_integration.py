@@ -110,7 +110,8 @@ def _run_case(price=None, unavailable=False):
 def test_fresh_normal_pnl_reaches_executor_and_policy_then_holds():
     row, state, evaluate_calls, decide_calls = _run_case("0.0202")
     assert row["decision_price"] == 0.0202
-    assert row["action"] == "HOLD"
+    assert row["action"] == "SELL_DECISION"
+    assert row["decision_action"] == "HOLD"
     assert evaluate_calls == 1
     assert decide_calls == 1
     assert state["pending_sells"] == {}
@@ -118,6 +119,8 @@ def test_fresh_normal_pnl_reaches_executor_and_policy_then_holds():
 
 def test_minus_50_percent_creates_full_sell_decision_without_broadcast():
     row, state, evaluate_calls, decide_calls = _run_case("0.01")
+    assert row["action"] == "SELL_DECISION"
+    assert row["decision_action"] == "SELL"
     assert row["status"] == "DRY_RUN"
     assert evaluate_calls == 1
     assert decide_calls == 1
@@ -128,6 +131,8 @@ def test_minus_50_percent_creates_full_sell_decision_without_broadcast():
 
 def test_plus_25_percent_creates_one_20_percent_partial_without_broadcast():
     row, state, evaluate_calls, decide_calls = _run_case("0.025")
+    assert row["action"] == "SELL_DECISION"
+    assert row["decision_action"] == "SELL"
     assert row["status"] == "DRY_RUN"
     assert evaluate_calls == 1
     assert decide_calls == 1
@@ -138,6 +143,8 @@ def test_plus_25_percent_creates_one_20_percent_partial_without_broadcast():
 
 def test_plus_50_percent_creates_full_sell_decision_without_broadcast():
     row, state, evaluate_calls, decide_calls = _run_case("0.03")
+    assert row["action"] == "SELL_DECISION"
+    assert row["decision_action"] == "SELL"
     assert row["status"] == "DRY_RUN"
     assert evaluate_calls == 1
     assert decide_calls == 1
