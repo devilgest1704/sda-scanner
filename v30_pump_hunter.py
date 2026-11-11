@@ -1073,6 +1073,12 @@ def write_scan_funnel(market_file="market_analysis.json"):
         tmp.write_text(json.dumps(state,indent=2,ensure_ascii=False),encoding="utf-8")
         tmp.replace(p)
         print(f"V30 FUNNEL • tokens {total} • fresh {fresh} • champion {champion} • shadow {shadow} • gates {fresh_gate_counts}")
+        try:
+            # Research-only SHADOW lane recorder; never affects BUY/SELL.
+            from tools import lane_research
+            lane_research.record_scan(candidates, scan_at)
+        except Exception as exc:
+            print("LANE RESEARCH RECORDER ERROR:",repr(exc))
     except Exception as exc:
         print("V30 FUNNEL TELEMETRY ERROR:",repr(exc))
 

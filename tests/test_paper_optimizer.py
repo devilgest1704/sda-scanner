@@ -44,9 +44,12 @@ class Workspace:
         self.state = base / "state.json"
         self.positions = base / "positions.json"
 
-    def run(self, now, apply=True):
+    def run(self, now, apply=True, counterfactual=None):
+        base = Path(self.tmp.name)
         return opt.run(now=now, dataset_root=self.data, positions_file=self.positions, report_file=self.report,
-                       state_file=self.state, config_file=self.config, apply=apply)
+                       state_file=self.state, config_file=self.config, apply=apply,
+                       lane_state_file=base / "lane.json", lane_archive_file=base / "archive.json",
+                       counterfactual_gate=counterfactual or (lambda filters, when: (True, [])))
 
 
 def digest(names):
@@ -161,6 +164,21 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(config["sell_policy"], "swing_v2")
         self.assertEqual(final["real_promotion"], "NEVER")
         self.assertEqual(digest(REAL_FILES), before)
+
+    def test_counterfactual_capacity_replay_blocks_promotion(self):
+        for i in range(100):
+            write_trade(self.ws.data, i, T0 + timedelta(hours=3 * i), i % 2 == 0)
+        start = T0 + timedelta(hours=301)
+        self.ws.run(start)
+        for i in range(100, 150):
+            write_trade(self.ws.data, i, start + timedelta(hours=3 * (i - 99)), i % 2 == 0)
+        blocked = self.ws.run(start + timedelta(days=8),
+                              counterfactual=lambda filters, when: (False, ["net PnL not above Champion"]))
+        self.assertEqual(blocked["status"], "SHADOW")
+        self.assertFalse(blocked["promotion_applied"])
+        self.assertIn("counterfactual capacity replay", blocked["reasons"][0])
+        self.assertFalse(self.ws.config.exists())
+        self.assertEqual(blocked["lane_research"]["decision"], "KEEP CHAMPION")
 
     def test_sell_variants_are_never_promoted(self):
         report_like = opt.generate_challengers([])

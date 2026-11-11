@@ -175,6 +175,9 @@ def research(report=None):
     for item in (r.get("shadow") or [])[:3]:
         lines.append(f"Shadow {item.get('candidate_id')}: {item['challenger'].get('trades')} trades, "
                      f"{item.get('days')} d • {'PASS' if item.get('passed') else 'waiting'}")
+    if r.get("lane_research"):
+        from tools import lane_research
+        lines += ["", lane_research.render_text(r["lane_research"])]
     return _clip("\n".join(lines))
 
 

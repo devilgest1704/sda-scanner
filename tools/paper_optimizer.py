@@ -512,6 +512,17 @@ def _research_counters():
             "tested_rules": source.get("tested_rules"), "updated_at": source.get("updated_at")}
 
 
+def _lane_research(now, lane_files, positions_file, dataset_root):
+    """Research-only BUY-lane challengers; never promoted, never changes PAPER or REAL."""
+    from tools import lane_research
+    try:
+        return lane_research.research(now, positions_file=positions_file or POSITIONS_FILE,
+                                      dataset_dir=dataset_root or dataset.DATASET_DIR, **lane_files)
+    except Exception as exc:  # research must never block the Champion report
+        return {"status": "FAILED", "error": f"{type(exc).__name__}: {exc}"[:300],
+                "decision": "KEEP CHAMPION", "promotion_applied": False}
+
+
 def acquire_lock(path=LOCK_FILE):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -545,7 +556,13 @@ def _comparison(champ, chall):
 
 
 def run(now=None, dataset_root=None, positions_file=None, report_file=REPORT_FILE, state_file=STATE_FILE,
-        config_file=None, apply=True):
+        config_file=None, apply=True, lane_state_file=None, lane_archive_file=None, counterfactual_gate=None):
+    from tools import lane_research
+    lane_files = {"state_file": lane_state_file or lane_research.STATE_FILE,
+                  "archive_file": lane_archive_file or lane_research.CANDIDATE_ARCHIVE}
+    if counterfactual_gate is None:
+        def counterfactual_gate(buy_filters, when):
+            return lane_research.counterfactual_gate(buy_filters, when, **lane_files)
     now = now or _now()
     config = champion_config.load(config_file)
     state = _load_json(state_file, {})
@@ -609,6 +626,12 @@ def run(now=None, dataset_root=None, positions_file=None, report_file=REPORT_FIL
         elif not enrolled["passed"]:
             status, reasons = "SHADOW", enrolled["reasons"]
         else:
+            # Subset replay ignores freed slots; the full-stream capacity replay must agree.
+            cf_ok, cf_reasons = counterfactual_gate(best["candidate"]["buy_filters"], now)
+            best["counterfactual_passed"] = cf_ok
+            if not cf_ok:
+                status, reasons = "SHADOW", ["counterfactual capacity replay: " + r for r in cf_reasons]
+        if enrolled is not None and enrolled["passed"] and best.get("counterfactual_passed"):
             status = "PROMOTION_READY"
             if apply:
                 version = f"PAPER-CHAMPION-{best['candidate']['id']}"
@@ -632,7 +655,8 @@ def run(now=None, dataset_root=None, positions_file=None, report_file=REPORT_FIL
                 "train": e.get("train"), "validation": e.get("validation"), "holdout": e.get("holdout"),
                 "fee_sensitivity": e.get("fee_sensitivity"),
                 "gates": {"train": e.get("train_passed"), "validation": e.get("validation_passed"),
-                          "holdout": e.get("holdout_passed"), "robustness": e.get("robustness_passed")},
+                          "holdout": e.get("holdout_passed"), "robustness": e.get("robustness_passed"),
+                          "counterfactual": e.get("counterfactual_passed")},
                 "reasons": e.get("reasons", [])}
 
     best_view = view(best)
@@ -665,6 +689,7 @@ def run(now=None, dataset_root=None, positions_file=None, report_file=REPORT_FIL
         "shadow": shadow, "rollback": {k: v for k, v in rollback.items() if k != "forward"},
         "score_weights": SCORE_WEIGHTS,
         "research": _research_counters(),
+        "lane_research": _lane_research(now, lane_files, positions_file, dataset_root),
     }
     state.update({"last_run_at": now.isoformat(), "last_decision": decision, "last_status": status})
     _atomic_write(state_file, state)
@@ -681,6 +706,8 @@ def main(argv=None):
     try:
         report = run()
         print(json.dumps({k: report[k] for k in ("decision", "status", "reasons", "dataset")}, indent=2, default=str))
+        from tools import lane_research
+        print(lane_research.render_text(report.get("lane_research")))
         return 0
     finally:
         Path(lock).unlink(missing_ok=True)

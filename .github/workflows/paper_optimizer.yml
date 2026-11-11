@@ -15,6 +15,8 @@ on:
       - 'paper_optimizer_view.py'
       - 'tests/test_paper_optimizer.py'
       - 'tests/test_paper_swing_sell_v2.py'
+      - 'tools/lane_research.py'
+      - 'tests/test_lane_research.py'
 
 permissions:
   contents: write
@@ -43,9 +45,10 @@ jobs:
 
       - name: Test PAPER Swing SELL V2 parity and optimizer gates
         run: |
-          python -m py_compile paper_swing_sell_v2.py paper_champion_config.py paper_optimizer_view.py tools/paper_optimizer.py tools/paper_research_dataset.py
+          python -m py_compile paper_swing_sell_v2.py paper_champion_config.py paper_optimizer_view.py tools/paper_optimizer.py tools/paper_research_dataset.py tools/lane_research.py
           python -m unittest discover -s tests -p 'test_paper_swing_sell_v2.py' -v
           python -m unittest discover -s tests -p 'test_paper_optimizer.py' -v
+          python -m unittest discover -s tests -p 'test_lane_research.py' -v
 
       - name: Run PAPER optimizer (PAPER only, never REAL)
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
