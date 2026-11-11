@@ -213,8 +213,10 @@ jobs:
           dashboard=SimpleNamespace(load=lambda path, default: files.get(path,default))
           views.clear_cache()
           data=views._build_dashboard_data(dashboard)
-          expected_open=sum(1 for p in (runtime.get("positions") or {}).values()
-                            if isinstance(p,dict) and float(p.get("remaining_quantity") or p.get("token_amount_raw") or 0)>0)
+          # Shared dust policy: negligible residuals are not open BOT positions.
+          expected_open=sum(1 for t,p in (runtime.get("positions") or {}).items()
+                            if isinstance(p,dict) and float(p.get("remaining_quantity") or p.get("token_amount_raw") or 0)>0
+                            and not views._runtime_dust(t,p,metadata))
           assert len(data["positions"]) == expected_open
           assert len(data["buy_records"]) == accounting["statistics"]["confirmed_buys_count"]
           assert len(data["sell_records"]) == accounting["statistics"]["matched_sells_count"]
