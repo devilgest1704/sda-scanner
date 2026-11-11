@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal, ROUND_DOWN
 
 # Real trading is deliberately OFF until the trading wallet and dry-run checks
 # have been verified. Never commit a private key or seed phrase.
@@ -37,3 +38,30 @@ UNWRAP_SELECTOR = "0x2e1a7d4d"  # WSDA withdraw(uint256)
 def position_sda(value=None):
     value = POSITION_DEFAULT_SDA if value is None else float(value)
     return max(POSITION_MIN_SDA, min(POSITION_MAX_SDA, value))
+
+
+# Single BOT-position dust policy shared by the REAL worker, Telegram and the
+# blockchain FIFO accounting rebuild (scripts/rebuild_real_accounting.py).
+DUST_TOKEN_QUANTITY = Decimal("0.001")
+# Value guard (below typical SELL gas): a residual whose cost basis or known market value exceeds this is never dust.
+DUST_MAX_VALUE_SDA = Decimal("0.1")
+
+
+def dust_threshold_raw(decimals):
+    return int((DUST_TOKEN_QUANTITY * (Decimal(10) ** int(decimals))).to_integral_value(rounding=ROUND_DOWN))
+
+
+def is_dust_quantity(raw_quantity, decimals, cost_basis_sda=None, price_sda=None):
+    """True for a non-zero residual <= DUST_TOKEN_QUANTITY whose known value is negligible.
+
+    Zero is not dust (it is a plain close); unknown cost/price only skip that guard.
+    """
+    raw = int(Decimal(str(raw_quantity)))
+    if raw <= 0 or raw > dust_threshold_raw(decimals):
+        return False
+    values = []
+    if cost_basis_sda not in (None, ""):
+        values.append(Decimal(str(cost_basis_sda)))
+    if price_sda not in (None, ""):
+        values.append(Decimal(str(price_sda)) * Decimal(raw) / (Decimal(10) ** int(decimals)))
+    return all(value.is_finite() and value <= DUST_MAX_VALUE_SDA for value in values)

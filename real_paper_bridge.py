@@ -23,7 +23,8 @@ REAL_LIMIT_ERRORS = (
     "Daily real-trading loss limit reached",
 )
 
-SELL_ACTIONS = {"SELL_DECISION", "SELL_RECOVERY", "MANUAL_SELL_RECONCILIATION", "ACCOUNTING_REPAIR"}
+SELL_ACTIONS = {"SELL_DECISION", "SELL_RECOVERY", "MANUAL_SELL_RECONCILIATION", "ACCOUNTING_REPAIR",
+                "DUST_RECONCILIATION"}
 SELL_ERROR_STATUSES = {
     "ERROR", "FAILED", "DROPPED", "QUOTE_FAILED", "SWAP_REVERTED", "APPROVAL_REVERTED",
     "BROADCAST_PREPARATION_FAILED", "PRE_BROADCAST_ABORTED", "ACCOUNTING_UNVERIFIED",
@@ -301,6 +302,17 @@ def reconcile():
                         actions.append({"action": "MANUAL_SELL_RECONCILIATION",
                                         "token": token, "symbol": symbol,
                                         "status": "PARTIAL", "at": _now()})
+                    if wallet_reconciliation.get("status") == "DUST_RECONCILED":
+                        if wallet_reconciliation.get("manual_disposal"):
+                            actions.append({"action": "MANUAL_SELL_RECONCILIATION",
+                                            "token": token, "symbol": symbol,
+                                            "status": "CLOSED", "at": _now()})
+                        actions.append({"action": "DUST_RECONCILIATION", "token": token,
+                                        "symbol": symbol, "status": "DUST_CLOSED",
+                                        "wallet_quantity_raw": wallet_reconciliation.get("wallet_quantity"),
+                                        "reason": "NEGLIGIBLE_RESIDUAL_AFTER_DISPOSAL",
+                                        "at": _now()})
+                        continue
                     if wallet_reconciliation.get("status") == "SELL_INTENT_ACTIVE":
                         actions.append({"action": "SELL_DECISION", "token": token,
                                         "symbol": symbol, "status": "SELL_INTENT_PENDING",

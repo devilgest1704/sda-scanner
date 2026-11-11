@@ -178,11 +178,43 @@ def _record_manual_disposal(state, token, position, previous_qty, wallet_qty):
     })
 
 
+def _dust_decimals(token, position, quantity_raw):
+    """Decimals when the BOT residual is negligible dust under the shared policy, else None."""
+    try:
+        decimals = trader.token_decimals(token)
+        cost = position.get("remaining_cost_basis", position.get("amount_sda", position.get("cost_sda")))
+        if cfg.is_dust_quantity(quantity_raw, decimals, cost, position.get("last_market_price")):
+            return decimals
+    except Exception:
+        pass
+    return None
+
+
+def _close_dust_position(state, token, position, wallet_qty, tracked_qty, decimals):
+    """Close the BOT position; the residual stays in the wallet and is only audited."""
+    state["positions"].pop(token, None)
+    position_id = str(position.get("position_id") or position.get("buy_tx") or token)
+    records = state.setdefault("dust_reconciliations", [])
+    if any(isinstance(item, dict) and item.get("position_id") == position_id for item in records):
+        return
+    records.append({
+        "action": "DUST_RECONCILIATION", "token": token, "symbol": position.get("symbol"),
+        "position_id": position_id, "wallet_quantity_raw": int(wallet_qty),
+        "wallet_quantity": str(Decimal(int(wallet_qty)) / (Decimal(10) ** decimals)),
+        "closed_bot_quantity_raw": int(tracked_qty),
+        "remaining_cost_basis": str(position.get("remaining_cost_basis",
+                                                 position.get("amount_sda", 0)) or 0),
+        "dust_threshold_token_quantity": str(cfg.DUST_TOKEN_QUANTITY),
+        "reason": "NEGLIGIBLE_RESIDUAL_AFTER_DISPOSAL", "at": trader.now(),
+    })
+
+
 def reconcile_position_wallet(token):
     """Wallet balance is authoritative; manual disposals never create fake proceeds.
 
     A reduction that an unfinished automatic SELL may explain is never
-    classified as manual: callers must first resolve that intent.
+    classified as manual: callers must first resolve that intent. A remaining
+    negligible residual (shared dust policy) closes the BOT position without a SELL.
     """
     token = trader.addr(token)
     state = trader.load_state()
@@ -199,17 +231,22 @@ def reconcile_position_wallet(token):
     wallet_qty = int(trader.token_balance(token, owner))
     recorded = int(position.get("remaining_quantity",
                                 position.get("token_amount_raw", 0)) or 0)
-    if wallet_qty == recorded:
-        position["wallet_available_quantity"] = wallet_qty
-        return {"status": "UNCHANGED", "wallet_quantity": wallet_qty}
     if wallet_qty < recorded:
         _record_manual_disposal(state, token, position, recorded, wallet_qty)
         adjusted = policy.reconcile_wallet_quantity(position, wallet_qty)
+        dust_decimals = _dust_decimals(token, adjusted, wallet_qty) if wallet_qty > 0 else None
         if wallet_qty == 0:
             state["positions"].pop(token, None)
             adjusted["status"] = "CLOSED_MANUAL_RECONCILED"
             state.setdefault("manual_disposals", []).append({
                 "token": token, "quantity_raw": recorded,
+                "proceeds_sda": None, "realized_pnl_sda": None,
+                "status": "PROCEEDS_UNKNOWN", "at": trader.now(),
+            })
+        elif dust_decimals is not None:
+            _close_dust_position(state, token, adjusted, wallet_qty, wallet_qty, dust_decimals)
+            state.setdefault("manual_disposals", []).append({
+                "token": token, "quantity_raw": recorded - wallet_qty,
                 "proceeds_sda": None, "realized_pnl_sda": None,
                 "status": "PROCEEDS_UNKNOWN", "at": trader.now(),
             })
@@ -220,8 +257,22 @@ def reconcile_position_wallet(token):
         state["updated_at"] = trader.now()
         trader.save_state(state)
         _request_accounting_refresh(state)
+        if dust_decimals is not None:
+            return {"status": "DUST_RECONCILED", "manual_disposal": True,
+                    "wallet_quantity": wallet_qty, "previous_quantity": recorded}
         return {"status": "CLOSED_MANUAL_RECONCILED" if wallet_qty == 0 else "MANUAL_RECONCILED",
                 "wallet_quantity": wallet_qty, "previous_quantity": recorded}
+    # Residual left by an earlier disposal (manual or automatic); external excess is not BOT quantity.
+    dust_decimals = _dust_decimals(token, position, recorded)
+    if dust_decimals is not None:
+        _close_dust_position(state, token, position, wallet_qty, recorded, dust_decimals)
+        state["updated_at"] = trader.now()
+        trader.save_state(state)
+        return {"status": "DUST_RECONCILED", "manual_disposal": False,
+                "wallet_quantity": wallet_qty, "previous_quantity": recorded}
+    if wallet_qty == recorded:
+        position["wallet_available_quantity"] = wallet_qty
+        return {"status": "UNCHANGED", "wallet_quantity": wallet_qty}
     # External deposits are not silently added to the bot's costed position.
     position["wallet_available_quantity"] = wallet_qty
     trader.save_state(state)
@@ -942,6 +993,8 @@ def evaluate_position(token, symbol, market_price, price_timestamp=None, wallet_
                       else reconcile_position_wallet(token))
         if reconciled["status"] == "CLOSED_MANUAL_RECONCILED":
             return {"action": "SELL", "status": "MANUAL_CLOSED", "token": token}
+        if reconciled["status"] == "DUST_RECONCILED":
+            return {"action": "HOLD", "status": "DUST_ONLY", "token": token}
         state = trader.load_state()
         position = state.get("positions", {}).get(token)
         if not isinstance(position, dict):
@@ -964,6 +1017,8 @@ def evaluate_position(token, symbol, market_price, price_timestamp=None, wallet_
         decimals = trader.token_decimals(token)
         quantity_human = Decimal(int(position["remaining_quantity"])) / (Decimal(10) ** decimals)
         cost = Decimal(str(position["remaining_cost_basis"]))
+        if cfg.is_dust_quantity(position["remaining_quantity"], decimals, cost, price):
+            return {"action": "HOLD", "status": "DUST_ONLY", "token": token}
         if quantity_human <= 0 or cost <= 0:
             return {"action": "HOLD", "status": "INVALID_POSITION_BASIS", "token": token}
         entry_price = cost / quantity_human

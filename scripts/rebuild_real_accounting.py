@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Read-only Sidra blockchain accounting reconstruction. No signing or trading."""
-import os, json, time, hashlib, requests
+import os, sys, json, time, hashlib, requests
 from pathlib import Path
 from datetime import datetime, timezone
 from decimal import Decimal
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from real_trading_config import DUST_TOKEN_QUANTITY
 
 BASE=os.getenv("SIDRA_EXPLORER_API","https://ledger.sidrachain.com/api/v2").rstrip("/")
 RPC=os.getenv("SIDRA_RPC_URL","https://node.sidrachain.com")
@@ -321,7 +324,7 @@ def main():
     for lot in open_lots:
         c=lot["contract"]; h=holdmap.get(c)
         qty=Decimal(lot["quantity"]); cost=Decimal(lot["total_cost_basis_sda"])
-        if qty<=Decimal("0.001"):
+        if qty<=DUST_TOKEN_QUANTITY:
             residual_dust.append(lot)
             continue
         if not h or Decimal(h["quantity"]) < qty-Decimal("0.00000001"):
@@ -407,7 +410,7 @@ def main():
                 "blockchain_gross_pnl_sda":next((x["gross_pnl_sda"] for x in closed if x["sell_tx"]==r["hash"]),None)})
         else: manual_unmatched.append(m)
     matched_manual_hashes={x["matched_sell_tx"] for x in manual_matches}
-    active_open_contracts={x["contract"] for x in open_lots if Decimal(x["quantity"])>Decimal("0.001")}
+    active_open_contracts={x["contract"] for x in open_lots if Decimal(x["quantity"])>DUST_TOKEN_QUANTITY}
     ledger_contracts={str(k).lower() for k in ledger_positions}
     historical_buys=sorted(r["hash"] for r in records if r["action"]=="BUY" and ledger_start and str(r["timestamp"])<ledger_start)
     historical_sells=sorted(r["hash"] for r in records if r["action"]=="SELL" and ledger_start and str(r["timestamp"])<ledger_start)
@@ -538,7 +541,7 @@ def main():
     for p in open_positions:
         contract=str(p.get("contract") or "").lower()
         quantity=Decimal(str(p.get("quantity") or "0"))
-        if contract not in bot_buy_contracts or str(p.get("token") or "").upper()=="PINE" or quantity<=Decimal("0.001"):
+        if contract not in bot_buy_contracts or str(p.get("token") or "").upper()=="PINE" or quantity<=DUST_TOKEN_QUANTITY:
             continue
         pnl=Decimal(str(p.get("open_pnl_sda") or "0"))
         value=Decimal(str(p.get("current_value_sda"))) if p.get("current_value_sda") is not None else None
@@ -599,7 +602,7 @@ def main():
             "unknown_basis_assets":[{"symbol":x.get("symbol"),"contract":x.get("contract")} for x in external_assets]},
         "method":{"lot_matching":"FIFO","bot_buy_rule":"successful wallet-funded router BUY with received token delta",
             "bot_sell_rule":"successful SELL fully matched to confirmed bot BUY FIFO basis",
-            "dust_threshold_token_quantity":"0.001",
+            "dust_threshold_token_quantity":str(DUST_TOKEN_QUANTITY),
             "external_receipts":"excluded from BOT performance without verified router BUY cost basis",
             "wallet_value":"all priced wallet assets, including external receipts/airdrops"}}
     report["bot_reconciliation_status"]=bot_state["bot_reconciliation_status"]

@@ -21,6 +21,18 @@ def clear_cache():
 def _log(message):
     print(f"[REAL_TELEGRAM] {message}")
 
+def _runtime_dust(token,position,metadata):
+    """Shared BOT dust policy: a residual the worker closes is never an open BOT position."""
+    meta=metadata.get(str(token).lower()) if isinstance(metadata,dict) else None
+    try:
+        raw=position.get("remaining_quantity")
+        if raw is None:
+            raw=position.get("token_amount_raw")
+        return cfg.is_dust_quantity(raw,int(meta["decimals"]),
+            position.get("remaining_cost_basis",position.get("amount_sda")),position.get("last_market_price"))
+    except Exception:
+        return False
+
 def _symbol(token,fallback=None):
     try:
         return rb._token_label(token,{"symbol":fallback or ""}).split(" — ",1)[0]
@@ -122,12 +134,17 @@ def _tracked_wallet_snapshot(accounting, dashboard=None):
     }
     runtime_positions = {}
     analysis = {}
+    metadata = {}
     if dashboard is not None:
         try:
             runtime_state = dashboard.load("real_trade_state.json", {})
             runtime_positions = runtime_state.get("positions", {}) if isinstance(runtime_state, dict) else {}
         except Exception:
             runtime_positions = {}
+        try:
+            metadata = dashboard.load("token_metadata.json", {})
+        except Exception:
+            metadata = {}
         try:
             analysis = rb._remote_json(dashboard, "market_analysis.json")
         except Exception:
@@ -146,7 +163,7 @@ def _tracked_wallet_snapshot(accounting, dashboard=None):
                 has_quantity = Decimal(str(quantity)) > 0
             except Exception:
                 has_quantity = False
-            if has_quantity:
+            if has_quantity and not _runtime_dust(token, position, metadata):
                 expected.add(str(position.get("token") or token).lower())
     try:
         snapshot = _ORIGINAL_FETCH_WALLET_SNAPSHOT(include_prices=False)
@@ -241,7 +258,7 @@ def _build_dashboard_data(dashboard):
                     raw_quantity=Decimal(str(raw or 0))
                 except Exception:
                     raw_quantity=Decimal(0)
-                if raw_quantity>0:
+                if raw_quantity>0 and not _runtime_dust(token,position,metadata):
                     position_source.append((str(position.get("token") or token).lower(),position,True))
     if not position_source:
         position_source=[(str(p.get("token") or "").lower(),p,False) for p in (accounting.get("open_positions") or []) if isinstance(p,dict) and p.get("token")]
