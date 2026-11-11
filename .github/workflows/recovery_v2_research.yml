@@ -1,0 +1,42 @@
+name: Recovery V2 Research Checks
+
+on:
+  pull_request:
+    paths:
+      - 'strategy_lab/research_recovery_v2.py'
+      - 'strategy_lab/recovery_v2_snapshot_adapter.py'
+      - 'strategy_lab/recovery_v2_shadow_diagnostic.py'
+      - 'strategy_lab/recovery_v2_frozen_export.py'
+      - 'tests/test_recovery_v2_frozen_export.py'
+      - 'tests/test_research_recovery_v2.py'
+      - 'tests/test_recovery_v2_shadow_diagnostic.py'
+      - '.github/workflows/recovery_v2_research.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile isolated research modules
+        run: python -m py_compile strategy_lab/research_recovery_v2.py strategy_lab/recovery_v2_snapshot_adapter.py strategy_lab/recovery_v2_shadow_diagnostic.py strategy_lab/recovery_v2_frozen_export.py
+      - name: Unit tests
+        run: |
+          python -m unittest discover -s tests -p 'test_research_recovery_v2.py' -v
+          python -m unittest discover -s tests -p 'test_recovery_v2_shadow_diagnostic.py' -v
+          python -m unittest discover -s tests -p 'test_recovery_v2_frozen_export.py' -v
+      - name: Verify no production or paper integration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path("tools/forward_shadow_agent.py").read_text()
+          assert "research_recovery_v2" not in s
+          print("Research only: production SHADOW and PAPER unchanged")
+          PY
