@@ -11,6 +11,8 @@ on:
     workflows:
       - SDA Scanner V18
       - Autonomous SDA Paper Agent
+      # A green REAL test gate is the moment approved code may be rolled out.
+      - Real bridge unit tests
     types:
       - completed
   schedule:
@@ -36,7 +38,9 @@ jobs:
       - name: Checkout current main
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          # Blobless full history: approval is resolved over code commits.
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Dispatch scanner only when no worker is active
         env:
@@ -73,10 +77,10 @@ jobs:
 
           echo "Scanner active/pending runs: ${active_or_pending}"
 
-          # A long-lived worker checks out source and paper Champion settings once.
-          # If watched execution code OR paper-only champion config changes,
-          # restart an older worker after a grace period so changes to the
-          # hourly missed-pump learner and other research/entry code take effect.
+          # A long-lived worker is pinned to CI-approved code for its whole life.
+          # Replace it only when the newest approved code (REAL test gate green)
+          # or the PAPER champion/agent config differs from what it runs.
+          # Failed or pending tests never roll new code into production.
           # Do not cancel fresh workers or workers already shutting down.
           active_run="$(timeout 30s gh run list --workflow scanner_v18.yml \
             --repo "${{ github.repository }}" --branch main --limit 20 \
@@ -91,15 +95,14 @@ jobs:
               # A running job is not proof of a completed scan. Use the
               # scanner-owned market checkpoint, never the agent report time.
               stale_checkpoint="$(python -m tools.scanner_checkpoint_health)"
-              # Shallow partial fetch avoids downloading many megabytes of
-              # historical paper-state blobs on each watchdog run.
-              if timeout 45s git fetch -q --filter=blob:none --depth=1 origin "$run_sha"; then
-                current_sources="$(git rev-parse HEAD:main.py HEAD:engine_legacy.py HEAD:tools/temporal_recovery_buy.py HEAD:tools/paper_quote_quality.py HEAD:tools/paper_strategy_stats.py HEAD:v30_pump_hunter.py HEAD:run_scanner_v18.sh HEAD:tools/candidate_price_tracker.py HEAD:tools/forward_shadow_agent.py HEAD:tools/strategy_evolution_agent.py HEAD:tools/missed_pump_learning.py HEAD:technical_analysis.py HEAD:tools/v32_hourly_macd.py HEAD:tools/temporal_paper_trial.py HEAD:v30_agent_config.json HEAD:real_paper_bridge.py HEAD:real_market_price.py HEAD:real_swing_sell_executor.py HEAD:swing_sell_v2.py HEAD:real_trader.py HEAD:real_trading_config.py)"
-                worker_sources="$(git rev-parse "$run_sha:main.py" "$run_sha:engine_legacy.py" "$run_sha:tools/temporal_recovery_buy.py" "$run_sha:tools/paper_quote_quality.py" "$run_sha:tools/paper_strategy_stats.py" "$run_sha:v30_pump_hunter.py" "$run_sha:run_scanner_v18.sh" "$run_sha:tools/candidate_price_tracker.py" "$run_sha:tools/forward_shadow_agent.py" "$run_sha:tools/strategy_evolution_agent.py" "$run_sha:tools/missed_pump_learning.py" "$run_sha:technical_analysis.py" "$run_sha:tools/v32_hourly_macd.py" "$run_sha:tools/temporal_paper_trial.py" "$run_sha:v30_agent_config.json" "$run_sha:real_paper_bridge.py" "$run_sha:real_market_price.py" "$run_sha:real_swing_sell_executor.py" "$run_sha:swing_sell_v2.py" "$run_sha:real_trader.py" "$run_sha:real_trading_config.py" 2>/dev/null || true)"
-                # A watched source newly added to main is absent from the old
-                # worker commit. That is a source change too; never treat an
-                # empty/missing worker fingerprint as "same version".
-                if [ "$stale_checkpoint" = "true" ] || [ -z "$worker_sources" ] || [ "$current_sources" != "$worker_sources" ]; then
+              if ! code_decision="$(timeout 120s python -m tools.worker_code_pin watchdog \
+                    --run-id "$run_id" --run-sha "$run_sha" --run-age "$run_age")"; then
+                # Unverifiable approval never rolls code; a stale worker is still replaced.
+                echo "::warning::Could not verify CI-approved code for the worker; no code rollout this run."
+                code_decision="keep"
+              fi
+              echo "Approved-code decision for worker $run_id: $code_decision"
+              if [ "$stale_checkpoint" = "true" ] || [ "$code_decision" = "replace" ]; then
                   echo "Worker $run_id requires replacement (stale_checkpoint=$stale_checkpoint); requesting controlled replacement."
                   timeout 30s gh run cancel "$run_id" --repo "${{ github.repository }}"
                   # Wait for GitHub to confirm that the prior paper writer
@@ -130,9 +133,6 @@ jobs:
                     --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending" or .status == "waiting" or .status == "requested")] | length')"
                   echo "After stopping old worker: active/pending runs = ${active_or_pending}"
                   # Fall through to the normal dispatch block if it is zero.
-                fi
-              else
-                echo "::warning::Could not inspect old scanner source within 45s; will retry later."
               fi
             fi
           fi

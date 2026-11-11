@@ -1,87 +1,67 @@
 name: Real bridge unit tests
 
+# Production gate for executable code. A green run on a push to main is the
+# ONLY approval that lets the scanner watchdog restart the REAL worker onto new
+# code and lets Vercel deploy it. Every code change triggers it; state-only
+# JSON checkpoints do not.
 on:
   pull_request:
     paths:
-      - "real_paper_bridge.py"
-      - "real_bot_menu.py"
-      - "real_bot_views.py"
-      - "real_wallet_market_fix.py"
-      - "position_action_v20.py"
-      - "telegram_dashboard.py"
-      - "telegram_callback_router.py"
-      - "scripts/rebuild_real_accounting.py"
+      - "**.py"
+      - "**.sh"
+      - "**.yml"
+      - "**.yaml"
+      - "requirements.txt"
+      - "vercel.json"
       - "real_accounting_state.json"
-      - "tests/test_real_bot_menu.py"
-      - "tests/test_real_bot_views.py"
-      - "tests/test_telegram_callback_router.py"
-      - "tests/test_real_paper_bridge.py"
-      - "tests/test_real_paper_bridge_swing_v2_integration.py"
-      - "tests/test_real_trader_calldata.py"
-      - "real_trader.py"
-      - "real_pnl_stats.py"
-      - "tests/test_real_sell_p0_fixes.py"
-      - "tests/test_real_pnl_stats.py"
-      - "swing_sell_v2.py"
-      - "real_swing_sell_executor.py"
-      - "real_swing_sell_report.py"
-      - "real_market_price.py"
-      - "tests/test_real_swing_sell_report.py"
-      - "tests/test_real_market_price.py"
-      - "tests/test_swing_sell_v2.py"
-      - "tests/test_real_swing_sell_executor.py"
-      - "run_scanner_v18.sh"
-      - ".github/workflows/real-bridge-tests.yml"
   push:
     branches:
       - main
       - "feature/paper-to-real-bridge"
     paths:
-      - "real_paper_bridge.py"
-      - "real_bot_menu.py"
-      - "real_bot_views.py"
-      - "real_wallet_market_fix.py"
-      - "position_action_v20.py"
-      - "telegram_dashboard.py"
-      - "telegram_callback_router.py"
-      - "scripts/rebuild_real_accounting.py"
+      - "**.py"
+      - "**.sh"
+      - "**.yml"
+      - "**.yaml"
+      - "requirements.txt"
+      - "vercel.json"
+      # Vercel bundles the accounting snapshot; redeploy only through this gate.
       - "real_accounting_state.json"
-      - "tests/test_real_bot_menu.py"
-      - "tests/test_real_bot_views.py"
-      - "tests/test_telegram_callback_router.py"
-      - "real_trader.py"
-      - "real_swing_sell_executor.py"
-      - "real_swing_sell_report.py"
-      - "real_market_price.py"
-      - "tests/test_real_swing_sell_report.py"
-      - "tests/test_real_market_price.py"
-      - "tests/test_real_paper_bridge_swing_v2_integration.py"
-      - "swing_sell_v2.py"
-      - "tests/test_swing_sell_v2.py"
-      - "tests/test_real_swing_sell_executor.py"
-      - "tests/test_real_paper_bridge.py"
-      - "tests/test_real_trader_calldata.py"
-      - "real_pnl_stats.py"
-      - "tests/test_real_sell_p0_fixes.py"
-      - "tests/test_real_pnl_stats.py"
-      - "run_scanner_v18.sh"
-      - ".github/workflows/real-bridge-tests.yml"
 
 jobs:
   bridge-tests:
     runs-on: ubuntu-latest
+    env:
+      REAL_TRADING_ENABLED: "false"
+      REAL_TRADING_DRY_RUN: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Install test dependencies
-        run: python -m pip install requests eth-account pytest fastapi httpx
+        run: python -m pip install -r requirements.txt pytest httpx
       - name: Static Python syntax validation
         run: python -m compileall -q real_trader.py real_paper_bridge.py real_swing_sell_executor.py real_swing_sell_report.py real_market_price.py swing_sell_v2.py
-      - name: Run repository unittest suite
-        run: python -m unittest discover -s tests -v
-        continue-on-error: true
+      - name: Run worker code pinning and state-only checkpoint gate tests
+        run: python -m pytest -q tests/test_worker_code_pin.py tests/test_state_checkpoint.py tests/test_ci_production_gate.py
+      - name: Run full repository test suite (blocking, one process per module)
+        # Each module runs in its own interpreter: several legacy PAPER tests
+        # monkeypatch shared engine modules and are order dependent in one process.
+        run: |
+          set -uo pipefail
+          failed=()
+          for module in tests/test_*.py; do
+            python -m pytest -q -p no:cacheprovider "$module"
+            rc=$?
+            if [ "$rc" -ne 0 ] && [ "$rc" -ne 5 ]; then
+              failed+=("$module")
+            fi
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            printf '::error::Failing test module: %s\n' "${failed[@]}"
+            exit 1
+          fi
       - name: Run Swing SELL V2 policy regression tests
         run: python -m pytest -q tests/test_swing_sell_v2.py
       - name: Run read-only Swing SELL V2 decision report tests

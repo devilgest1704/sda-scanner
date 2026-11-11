@@ -1,18 +1,13 @@
 name: Vercel Code Deploy
 
+# Deploy only code that passed the REAL trading test gate. State-only JSON
+# checkpoints never trigger the gate and therefore never deploy.
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '*.py'
-      - '*.txt'
-      - '*.md'
-      - 'api/**'
-      - 'requirements.txt'
-      - 'real_accounting_state.json'
-      - '.github/workflows/vercel_code_deploy.yml'
-      - '.github/workflows/real-bridge-tests.yml'
+  workflow_run:
+    workflows:
+      - Real bridge unit tests
+    types:
+      - completed
 
 permissions:
   contents: read
@@ -23,16 +18,33 @@ concurrency:
 
 jobs:
   deploy:
-    # The scanner may touch Python files while committing its generated state.
-    # Its commits must never create a Vercel deployment.
-    if: ${{ github.event.head_commit.message != 'Update SDA scanner state' }}
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_branch == 'main'
+          && github.event.workflow_run.head_commit.message != 'Update SDA scanner state' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout
+      - name: Checkout tested revision
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Refuse to deploy superseded code
+        run: |
+          set -euo pipefail
+          git fetch -q origin main
+          # A newer code commit on main has its own gate run; never deploy older code over it.
+          if ! python3 -m tools.worker_code_pin same-code HEAD FETCH_HEAD; then
+            echo "Tested revision is no longer main's code; skipping deploy."
+            echo "SKIP_DEPLOY=1" >> "$GITHUB_ENV"
+          fi
 
       - name: Deploy code to Vercel
+        if: env.SKIP_DEPLOY != '1'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: team_Ni66yEoQsvqh6CTUt6YjXqlv

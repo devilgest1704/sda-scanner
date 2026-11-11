@@ -74,38 +74,9 @@ checkpoint_state() {
     return 0
   fi
 
-  git config user.name 'sda-scanner-bot'
-  git config user.email 'scanner@github.local'
-
-  # Publish actual worker mode and checkpoint heartbeat for the Telegram REAL dashboard.
-  if ! python - <<'PY'
-import json
-import os
-from datetime import datetime, timezone
-from pathlib import Path
-
-def flag(name):
-    value = os.environ.get(name)
-    if value is None or value.strip().lower() not in ("true", "false"):
-        return None
-    return value.strip().lower() == "true"
-
-status = {
-    "source": "github-actions-real-worker",
-    "enabled": flag("REAL_TRADING_ENABLED"),
-    "dry_run": flag("REAL_TRADING_DRY_RUN"),
-    "updated_at": datetime.now(timezone.utc).isoformat(),
-}
-try:
-    ledger = json.loads(Path("real_trade_state.json").read_text(encoding="utf-8"))
-    status["ledger_updated_at"] = ledger.get("updated_at") if isinstance(ledger, dict) else None
-except Exception:
-    status["ledger_updated_at"] = None
-Path("real_worker_status.json").write_text(
-    json.dumps(status, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-)
-PY
-  then
+  # Worker heartbeat for the REAL dashboard, including the pinned code SHA and
+  # a CODE_SHA_DRIFT check of the executing checkout against the startup pin.
+  if ! python -m tools.worker_code_pin status --output real_worker_status.json; then
     echo "::warning::REAL worker status checkpoint unavailable; scanner continues." >&2
   fi
 
@@ -116,49 +87,15 @@ PY
     echo "::warning::NO BUY checkpoint diagnosis unavailable; state/stop processing continues." >&2
   fi
 
-  # Newly introduced research files may not exist in older checkouts.
-  # Stage only existing or already tracked paths; never terminate the PAPER
-  # risk worker because an optional state file is not yet initialized.
-  for state_file in $STATE_FILES; do
-    if [ -e "$state_file" ] || git ls-files --error-unmatch "$state_file" >/dev/null 2>&1; then
-      git add -- "$state_file"
-    fi
-  done
-  # Never let a large local market_data blob leak into the checkpoint via a prior index state.
-  git reset -q HEAD -- market_data.json 2>/dev/null || true
-  if git diff --staged --quiet; then
-    return 0
+  # State-only publish built on top of remote main with a temporary index.
+  # Never pull/rebase/reset/stash/checkout: the running worker keeps its code.
+  # On conflict or push failure nothing is published; the next checkpoint
+  # (or a watchdog-restarted worker) synchronizes.
+  # shellcheck disable=SC2086
+  if ! python -m tools.state_checkpoint --message 'Update SDA scanner state' $STATE_FILES; then
+    echo "STATE CHECKPOINT: not published this cycle; worker code unchanged." >&2
   fi
-
-  git commit -m 'Update SDA scanner state'
-
-  for attempt in 1 2 3 4 5; do
-    if git push origin HEAD:main; then
-      echo "STATE CHECKPOINT: push succeeded on attempt $attempt."
-      return 0
-    fi
-
-    if [ "$attempt" = "5" ]; then
-      echo "STATE CHECKPOINT: push failed after 5 attempts; keeping scanner alive for next checkpoint." >&2
-      git reset -q HEAD -- market_data.json 2>/dev/null || true
-      return 0
-    fi
-
-    # Runtime generates market_data.json but it is intentionally not versioned
-    # by checkpoints. Stash all remaining worktree changes so they cannot block
-    # rebasing the committed state onto a concurrently updated main.
-    git stash push -u -m scanner-checkpoint-rebase >/dev/null 2>&1 || true
-    git fetch origin main
-    if ! git rebase origin/main; then
-      echo "STATE CHECKPOINT: rebase conflict; aborting state push but keeping scanner alive." >&2
-      git rebase --abort || true
-      git stash pop >/dev/null 2>&1 || true
-      return 0
-    fi
-    git stash pop >/dev/null 2>&1 || true
-    git reset -q HEAD -- market_data.json 2>/dev/null || true
-    sleep 2
-  done
+  return 0
 }
 
 # Scanner checkpoint is the reliable heartbeat. GitHub scheduled workflows
@@ -402,6 +339,18 @@ python -m tools.paper_state_guard
 # Compile once per worker, not once per minute.
 python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py v30_pump_hunter.py tools/temporal_paper_trial.py
 find . -type d -name __pycache__ -prune -exec rm -rf {} +
+
+# Executable code is fixed for the life of this worker (pinned by the workflow
+# to the newest CI-approved revision). New code arrives only via a restart.
+WORKER_CODE_SHA="$(python -m tools.worker_code_pin sha)"
+readonly WORKER_CODE_SHA
+export WORKER_CODE_SHA
+echo "WORKER_CODE_SHA=${WORKER_CODE_SHA}"
+if [ -n "${GITHUB_ACTIONS:-}" ] && [ "$WORKER_CODE_SHA" = "UNPINNED" ]; then
+  echo "::warning::Worker code is not pinned to a CI-approved revision." >&2
+fi
+# Publish the pinned identity immediately so the watchdog can compare it.
+checkpoint_state
 
 echo "🔄 CONTINUOUS SDA SCANNER"
 echo "Target interval: ${INTERVAL}s"

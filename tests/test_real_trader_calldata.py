@@ -56,29 +56,40 @@ class SwapCalldataTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "capital cap"):
             real_trader.safety_check(15.0, state)
 
-    def test_live_intent_is_committed_before_broadcast_gate_returns(self):
+    def test_live_intent_is_published_state_only_before_broadcast_gate_returns(self):
+        from tools import state_checkpoint
         calls = []
 
-        def fake_run(args, **kwargs):
-            calls.append(args)
-            if args[:3] == ["git", "diff", "--cached"]:
-                return SimpleNamespace(returncode=1, stdout="", stderr="")
-            if args[:2] == ["git", "status"]:
-                return SimpleNamespace(returncode=0, stdout="", stderr="")
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        def fake_push(paths, message, **kwargs):
+            calls.append((paths, message, kwargs))
+            return {"status": "PUSHED", "commit": "c" * 40, "paths": list(paths), "attempt": 1}
 
         with patch.dict("os.environ", {
             "GITHUB_ACTIONS": "true",
             "GH_TOKEN": "test-token",
             "GITHUB_REPOSITORY": "devilgest1704/sda-scanner",
         }):
-            with patch.object(real_trader.subprocess, "run", side_effect=fake_run):
+            with patch.object(state_checkpoint, "push_state", side_effect=fake_push):
                 real_trader.persist_real_intent_before_broadcast()
 
-        commit_index = next(i for i, args in enumerate(calls) if args[:2] == ["git", "commit"])
-        push_index = next(i for i, args in enumerate(calls) if args[:2] == ["git", "push"])
-        self.assertLess(commit_index, push_index)
-        self.assertIn("Update SDA scanner state", calls[commit_index])
+        self.assertEqual(calls, [([real_trader.cfg.STATE_FILE], "Update SDA scanner state",
+                                  {"require_changed": [real_trader.cfg.STATE_FILE]})])
+
+    def test_live_intent_persistence_aborts_broadcast_on_state_conflict_or_no_change(self):
+        from tools import state_checkpoint
+        env = {"GITHUB_ACTIONS": "true", "GH_TOKEN": "t", "GITHUB_REPOSITORY": "o/r"}
+        with patch.dict("os.environ", env):
+            with patch.object(state_checkpoint, "push_state",
+                              return_value={"status": "CONFLICT", "paths": ["real_trade_state.json"]}):
+                with self.assertRaisesRegex(RuntimeError, "broadcast aborted"):
+                    real_trader.persist_real_intent_before_broadcast()
+            with patch.object(state_checkpoint, "push_state",
+                              side_effect=state_checkpoint.StateUnchanged("unchanged")):
+                with self.assertRaisesRegex(RuntimeError, "newly staged durable transaction intent"):
+                    real_trader.persist_real_intent_before_broadcast()
+            with patch.object(state_checkpoint, "push_state", return_value={"status": "FAILED"}):
+                with self.assertRaisesRegex(RuntimeError, "Unable to durably persist"):
+                    real_trader.persist_real_intent_before_broadcast()
 
     def test_live_intent_persistence_refuses_non_actions_runtime(self):
         with patch.dict("os.environ", {"GITHUB_ACTIONS": "false"}, clear=False):

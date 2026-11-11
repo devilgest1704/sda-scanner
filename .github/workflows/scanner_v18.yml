@@ -58,6 +58,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: true
+          # Blobless full history: needed to locate the newest CI-approved code revision.
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Backup last valid wallet snapshot
         run: |
@@ -67,6 +70,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Pin worker to CI-approved executable code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Fail closed: never start the REAL worker on code whose REAL trading
+        # tests are not green. Unapproved main code is replaced by the newest
+        # approved revision; state files stay at main HEAD. Runs before
+        # dependency install so requirements.txt is also the approved one.
+        run: python -m tools.worker_code_pin pin
 
       - name: Install dependencies
         run: |
@@ -145,10 +157,10 @@ jobs:
       - name: Verify scanner source and bytecode before run
         run: |
           echo "HEAD=$(git rev-parse HEAD)"
+          echo "WORKER_CODE_SHA=$(python -m tools.worker_code_pin sha)"
           git status --short
-          # Force tracked source files back to the exact blobs from HEAD.
-          # This prevents any stale workspace copy from reaching the Python interpreter.
-          git checkout HEAD -- v26_pump_hunter.py main.py paper_engine_v19.py
+          # The pin step already verified every executable file against the
+          # approved revision; never restore unapproved HEAD blobs here.
           echo "HEAD v26 blob:"
           git rev-parse HEAD:v26_pump_hunter.py
           echo "WORKTREE v26 sha256:"
