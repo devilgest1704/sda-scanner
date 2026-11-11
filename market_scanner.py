@@ -234,7 +234,7 @@ def get_transactions_in_window(history, current_time, minutes):
 
     for tx in history:
         timestamp = parse_timestamp(tx.get("timestamp"))
-        if timestamp is not None and timestamp >= cutoff:
+        if timestamp is not None and cutoff < timestamp <= current_time:
             result.append(tx)
 
     return result
@@ -330,13 +330,17 @@ def analyze_token(token_data):
 
     history.sort(key=lambda x: x.get("timestamp", ""))
 
-    latest = history[-1]
+    current_time = now_utc()
+    # Do not use future-dated trades as the current price.
+    eligible = [tx for tx in history
+                if (ts := parse_timestamp(tx.get("timestamp"))) is not None
+                and ts <= current_time]
+    if not eligible:
+        return None
+    latest = eligible[-1]
     current_price = float(latest.get("price", 0))
-
     if current_price <= 0:
         return None
-
-    current_time = now_utc()
 
     window_15m = calculate_window(history, current_time, 15)
     window_30m = calculate_window(history, current_time, 30)
