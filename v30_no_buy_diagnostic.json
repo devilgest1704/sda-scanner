@@ -1,18 +1,18 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-11-11T07:55:19.952754+00:00",
+  "checked_at": "2026-11-11T08:01:18.214747+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-11-11T07:54:35.903461+00:00",
+    "market_at": "2026-11-11T08:00:36.104475+00:00",
     "tokens": 167,
-    "quotes_last_5m": 5,
-    "quotes_last_15m": 7,
-    "quotes_last_60m": 53,
-    "fresh_with_8_trades_1h": 5,
-    "fresh_with_12_trades_1h": 5,
+    "quotes_last_5m": 3,
+    "quotes_last_15m": 9,
+    "quotes_last_60m": 43,
+    "fresh_with_8_trades_1h": 2,
+    "fresh_with_12_trades_1h": 1,
     "fresh_m15_ge_1_5pct": 2,
     "fresh_m15_ge_1_5pct_and_8_trades": 2,
-    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 0
+    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 1
   },
   "paper_loss_circuit": {
     "paper_only": true,
@@ -32,39 +32,40 @@
   "last_paper_close_at": "2026-11-10T14:48:09.109917+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-11-11T07:55:16.188861+00:00",
+    "at": "2026-11-11T08:01:14.487050+00:00",
     "age_minutes": 0.1,
     "aligned_to_market": true,
     "tokens_scored": 167,
-    "fresh_tokens": 7,
-    "champion_ready": 1,
+    "fresh_tokens": 9,
+    "champion_ready": 0,
     "shadow_ready": 0,
     "sampled_rows": 40,
     "sampled_phases": {
-      "WATCH": 10,
-      "NO": 30
+      "WATCH": 8,
+      "NO": 32
     },
     "sampled_rejections": {
-      "temporal_recovery": 39,
-      "quote_continuity": 38,
-      "v31_age": 38,
+      "temporal_recovery": 40,
+      "quote_continuity": 39,
+      "v31_age": 39,
       "v31_activity": 35,
       "late_spike": 3,
       "price_flow": 1
     },
     "fresh_rejections": {
-      "temporal_recovery": 6,
-      "quote_continuity": 4,
-      "v31_age": 4,
-      "v31_activity": 2
+      "temporal_recovery": 9,
+      "quote_continuity": 7,
+      "v31_age": 7,
+      "v31_activity": 4,
+      "late_spike": 1
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "single_quote_swing_filters_insufficient": 2,
-        "stale_or_invalid_current_quote": 4
+        "stale_or_invalid_current_quote": 7,
+        "single_quote_swing_filters_insufficient": 2
       },
       "confirmed_continuation": {
-        "missing_reason": 6
+        "missing_reason": 9
       }
     },
     "temporal_lane_ready": {
@@ -75,45 +76,33 @@
     "would_buy_if_only_loss_circuit_cleared": false,
     "top_near_ready": [
       {
-        "address": "0x05322f2356e8ffdc28c4a5e69d4feebebbb33649",
-        "symbol": "ATES",
-        "score": 18.7,
-        "quality": 18.7,
+        "address": "0xc0eff0278bef0931a03bc020ba3a51057c96b61c",
+        "symbol": "HLMR",
+        "score": 3.5,
+        "quality": 3.5,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 283.1,
-        "gates": [
-          "temporal_recovery"
-        ],
-        "reason": "NO / temporal_recovery: single_quote_swing_filters_insufficient / "
-      },
-      {
-        "address": "0x4765561e63914e72168bbd2a7e2ce72f9057ca04",
-        "symbol": "GMAI",
-        "score": 14.5,
-        "quality": 14.5,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 179.1,
-        "gates": [
-          "temporal_recovery"
-        ],
-        "reason": "NO / temporal_recovery: single_quote_swing_filters_insufficient / "
-      },
-      {
-        "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
-        "symbol": "JSFT",
-        "score": 71.4,
-        "quality": 71.4,
-        "impulse": 0.0,
-        "phase": "WATCH",
-        "data_age_sec": 336.1,
+        "data_age_sec": 280.4,
         "gates": [
           "temporal_recovery",
-          "v31_age",
-          "quote_continuity"
+          "v31_activity"
         ],
-        "reason": "quote_continuity: stale_or_invalid_current_quote"
+        "reason": "NO / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
+      },
+      {
+        "address": "0x1dbb8336663198bfc18346cfe8172da722918284",
+        "symbol": "ACV",
+        "score": 89.0,
+        "quality": 89.0,
+        "impulse": 0.0,
+        "phase": "WATCH",
+        "data_age_sec": 223.4,
+        "gates": [
+          "temporal_recovery",
+          "v31_activity",
+          "late_spike"
+        ],
+        "reason": "WATCH / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
       },
       {
         "address": "0x476cb65824472b74f66f2e03d72e8818bb2e37f0",
@@ -122,7 +111,7 @@
         "quality": 56.3,
         "impulse": 0.0,
         "phase": "WATCH",
-        "data_age_sec": 334.1,
+        "data_age_sec": 692.4,
         "gates": [
           "temporal_recovery",
           "v31_age",
@@ -131,24 +120,38 @@
         "reason": "quote_continuity: stale_or_invalid_current_quote"
       },
       {
-        "address": "0xbcd27707f604f9f9be1a5f8c5c17fee0f9630b38",
-        "symbol": "sUSDT",
-        "score": 30.8,
-        "quality": 30.8,
+        "address": "0xfaa37c365fa4d345b5115ede02f1bf8a9e721b48",
+        "symbol": "AGFU",
+        "score": 35.9,
+        "quality": 35.9,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 502.1,
+        "data_age_sec": 630.4,
         "gates": [
           "temporal_recovery",
           "v31_age",
-          "v31_activity",
+          "quote_continuity"
+        ],
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
+      },
+      {
+        "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
+        "symbol": "JSFT",
+        "score": 18.2,
+        "quality": 18.2,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 694.4,
+        "gates": [
+          "temporal_recovery",
+          "v31_age",
           "quote_continuity"
         ],
         "reason": "quote_continuity: stale_or_invalid_current_quote"
       }
     ]
   },
-  "assessment": "CHAMPION_BUY_READY_CHECK_EXECUTION_CAPACITY",
+  "assessment": "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED",
   "paper_buy_rules_modified": false,
   "real_trading": false
 }
