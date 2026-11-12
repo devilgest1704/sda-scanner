@@ -131,7 +131,7 @@ def patch_dashboard(dashboard):
                 text = telegram_home.buy_scanner_text(dashboard, detail=detail)
             except Exception as exc:
                 print(f"BUY Scanner error: {type(exc).__name__}: {exc}")
-                text = "🔥 BUY SCANNER\n\n⚠️ Scanner data temporarily unavailable."
+                text = "🔥 REAL BUY SCANNER\n\n⚠️ Scanner data temporarily unavailable."
             _safe_edit(chat_id, message_id, text, telegram_home.buy_scanner_keyboard(detail))
             return state
 

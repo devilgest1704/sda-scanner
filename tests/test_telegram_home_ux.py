@@ -1,5 +1,6 @@
 """Telegram UX cleanup: concise home, BUY Scanner, no automatic dashboard push, read-only navigation."""
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -61,12 +62,26 @@ def _candidate(symbol, status, score, m15, flow, blocked=True, phase="WATCH"):
                          "paper_buy_block_reason": "waiting for flow confirmation"}}
 
 
+def _rows(*rows, age_seconds=30):
+    result = telegram_home.ScannerRows(rows)
+    result.updated_at = (datetime.now(timezone.utc) - timedelta(seconds=age_seconds)).isoformat()
+    return result
+
+
+def _real(positions=8, max_positions=10, deployed=160.0, cap=300.0, next_buy=30.0, pending=0,
+          held=(), paper_held=(), paper_full=False):
+    return {"positions": positions, "max_positions": max_positions, "deployed": deployed, "cap": cap,
+            "available": max(0.0, cap - deployed), "next_buy": next_buy, "pending": pending,
+            "held": set(held), "paper_held": set(paper_held), "paper_full": paper_full}
+
+
 @pytest.fixture
 def ui(monkeypatch, real_data):
     monkeypatch.delenv("CHAT_ID", raising=False)
     dashboard = telegram_api.dashboard
-    rows = [_candidate("ACV", "WATCH", 89, 16.6, 1879), _candidate("GMAI", "WATCH", 65, 14.8, 4)]
+    rows = _rows(_candidate("ACV", "WATCH", 89, 16.6, 1879), _candidate("GMAI", "WATCH", 65, 14.8, 4))
     monkeypatch.setattr(telegram_home, "scanner_candidates", lambda _d: rows)
+    monkeypatch.setattr(telegram_home, "real_capacity", lambda _d: _real())
     events = []
     monkeypatch.setattr(dashboard, "api", lambda method, payload: events.append((method, payload)) or {"ok": True})
     monkeypatch.setattr(dashboard, "answer_callback", lambda *a, **k: events.append(("answer", a)))
@@ -114,12 +129,16 @@ def test_interactive_home_is_concise(ui):
     assert text.startswith("🤖 SDA TRADING BOT")
     assert "🟢 REAL Trading LIVE" in text
     for expected in ("💰 Portfolio", "📈 Bot PnL", "+5.75 SDA", "📊 Open PnL", "+1.50 SDA",
-                     "💵 Realized", "+4.25 SDA", "📦 Positions", "🧪 PAPER", "BUY-ready", "WATCH"):
+                     "💵 Realized", "+4.25 SDA", "📦 Positions", "🔥 REAL BUY SCANNER",
+                     "🟢 BUY-ready   0", "🟡 WATCH       2", "📦 Capacity    8/10",
+                     "💰 Available   140 SDA", "💵 Next BUY    30 SDA", "🟡 REAL BUY: NO SIGNAL"):
         assert expected in text
+    assert "🧪 PAPER" not in text
     for removed in ("TOP BUY", "POSITION ACTION", "REAL WALLET", "Historical realized P/L", "TOTAL WALLET VALUE",
-                    "P/L SUMMARY", "Shadow READY", "blocked:", "ACV", "PINE"):
+                    "P/L SUMMARY", "Shadow READY", "blocked:", "ACV", "PINE", "🎯"):
         assert removed not in text
     assert callbacks(screen) == ["REAL_BOT", "BUY_SCANNER", "REAL_BOT_PNL", "PAPER", "OPTIMIZER", "REFRESH"]
+    assert "🧪 PAPER" in labels(screen)
     assert not any("Debug" in label or "Real Wallet" in label for label in labels(screen))
     assert "DEBUG" not in callbacks(screen) and "REAL" not in callbacks(screen)
 
@@ -167,13 +186,16 @@ def test_portfolio_shows_only_bot_positions(ui):
 def test_buy_scanner_short_list_detail_and_back(ui):
     screen = press(ui, "BUY_SCANNER")
     text = screen["text"]
-    assert text.startswith("🔥 BUY SCANNER")
+    assert text.startswith("🔥 REAL BUY SCANNER")
     assert "BUY-ready: 0" in text and "WATCH: 2" in text
+    for expected in ("SHARED SIGNAL", "REAL\nPositions: 8/10", "Available: 140 SDA", "Next BUY: 30 SDA",
+                     "Status: NO SIGNAL", "Production admission: PAPER-coupled"):
+        assert expected in text
     assert "1. ACV" in text and "89/100" in text and "15m +16.6% | Flow +1879 SDA" in text
-    assert "waiting for flow confirmation" not in text
+    assert "waiting for flow confirmation" not in text and "REAL: READY" not in text
     assert callbacks(screen) == ["BUY_SCANNER_DETAIL", "BUY_SCANNER", "MAIN"]
     detail = press(ui, "BUY_SCANNER_DETAIL")
-    assert detail["text"].startswith("🔍 BUY SCANNER • DETAIL")
+    assert detail["text"].startswith("🔍 REAL BUY SCANNER • DETAIL")
     assert "waiting for flow confirmation" in detail["text"]
     assert "MAIN" in callbacks(detail)
     assert press(ui, "MAIN")["text"].startswith("🤖 SDA TRADING BOT")
