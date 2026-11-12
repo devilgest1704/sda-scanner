@@ -38,7 +38,7 @@ class SwapCalldataTests(unittest.TestCase):
 
     def test_real_exposure_uses_recorded_amount_sda(self):
         state = {
-            "positions": {"0x" + "44" * 20: {"amount_sda": 190.0}},
+            "positions": {"0x" + "44" * 20: {"amount_sda": 290.0}},
             "pending_buys": {},
             "daily_pnl_date": datetime.now(timezone.utc).date().isoformat(),
             "daily_realized_pnl_sda": 0.0,
@@ -49,7 +49,7 @@ class SwapCalldataTests(unittest.TestCase):
     def test_pending_buys_reserve_both_slot_and_capital(self):
         state = {
             "positions": {},
-            "pending_buys": {"0x" + "44" * 20: {"position_sda": 190.0}},
+            "pending_buys": {"0x" + "44" * 20: {"position_sda": 290.0}},
             "daily_pnl_date": datetime.now(timezone.utc).date().isoformat(),
             "daily_realized_pnl_sda": 0.0,
         }

@@ -264,10 +264,8 @@ def reconcile():
                                 "age_seconds": age, "max_age_seconds": MAX_PAPER_BUY_AGE_SECONDS,
                                 "at": _now()})
                 continue
-        paper_amount = pos.get("investment_sda", pos.get("amount_sda"))
-        if paper_amount is None:
-            paper_amount = cfg.POSITION_DEFAULT_SDA
-        amount = cfg.position_sda(float(paper_amount))
+        # REAL BUY size is the configured production size, not the PAPER research size.
+        amount = cfg.position_sda()
         try:
             result = real_trader.execute_buy(token, symbol, amount)
             status = result.get("status", "UNKNOWN")

@@ -111,8 +111,8 @@ class TradingLogicUnchangedTests(unittest.TestCase):
 
     def test_position_and_capital_limits_unchanged(self):
         workflow = text(WORKFLOWS / "scanner_v18.yml")
-        for line in ('REAL_MAX_OPEN_POSITIONS: "10"', 'REAL_TRADING_CAPITAL_SDA: "200"',
-                     'REAL_POSITION_MAX_SDA: "20"', 'SDA_PAPER_TP4: "1"',
+        for line in ('REAL_MAX_OPEN_POSITIONS: "10"', 'REAL_TRADING_CAPITAL_SDA: "300"',
+                     'REAL_POSITION_MAX_SDA: "30"', 'REAL_POSITION_DEFAULT_SDA: "30"', 'SDA_PAPER_TP4: "1"',
                      'SDA_PAPER_BUY_MODE: "temporal_recovery"',
                      'REAL_TRADING_ENABLED: "true"', 'REAL_TRADING_DRY_RUN: "false"'):
             self.assertIn(line, workflow)

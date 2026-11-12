@@ -237,6 +237,13 @@ def write_status(cwd=None, output=STATUS_FILE):
         status["ledger_updated_at"] = ledger.get("updated_at") if isinstance(ledger, dict) else None
     except Exception:
         status["ledger_updated_at"] = None
+    try:
+        import real_trading_config as cfg
+        status.update({"real_buy_size_sda": cfg.position_sda(),
+                       "real_capital_cap_sda": cfg.TRADING_WALLET_CAPITAL_SDA,
+                       "real_max_open_positions": cfg.MAX_OPEN_POSITIONS})
+    except Exception:
+        pass
     record = load_record(root) or {}
     for key in ("worker_code_sha", "worker_head_sha", "worker_code_approval", "worker_started_at",
                 "worker_run_id", "worker_pinned_fingerprint"):

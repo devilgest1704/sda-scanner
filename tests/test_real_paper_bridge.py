@@ -83,11 +83,12 @@ class BridgeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "requires the active PAPER profile"):
                 bridge.reconcile()
 
-    def test_real_buy_uses_committed_paper_position_size(self):
+    def test_real_buy_uses_configured_real_size_not_paper_size(self):
+        self.cfg.position_sda = lambda value=None: 30.0 if value is None else float(value)
         bridge.reconcile()
         self.write_paper({TOKEN: {"symbol": "TEST", "investment_sda": 18.0, "opened_at": bridge._now()}})
         bridge.reconcile()
-        self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 18.0)
+        self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 30.0)
 
     def test_first_run_only_sets_baseline(self):
         self.write_paper({TOKEN: {"symbol": "TEST"}})

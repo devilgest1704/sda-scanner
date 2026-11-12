@@ -6,7 +6,7 @@ Safety model:
 - Private key is read only from REAL_TRADING_PRIVATE_KEY.
 - No key/seed is ever written to disk, Telegram, GitHub or logs.
 - Every swap is quoted with eth_call first; a failed quote aborts the trade.
-- Position size is clamped to 10-20 SDA and total capital is capped at 200 SDA.
+- Position size is a fixed configured REAL BUY size; total remaining BOT cost basis is capped.
 
 The module is intentionally standalone. Existing paper trading remains unchanged
 until the real-trading integration is explicitly enabled later.
@@ -336,20 +336,31 @@ def approve_if_needed(account, token, amount):
     return {"tx": tx_hash, "gas": gas, "gas_price": gp}
 
 
+def deployed_cost_basis(state):
+    """Remaining verified BOT cost basis of open positions plus in-flight BUYs, in SDA."""
+    total = Decimal(0)
+    for item in (state.get("positions") or {}).values():
+        if isinstance(item, dict):
+            total += Decimal(str(item.get("remaining_cost_basis",
+                                         item.get("amount_sda", item.get("cost_sda"))) or 0))
+    for item in (state.get("pending_buys") or {}).values():
+        if isinstance(item, dict):
+            total += Decimal(str(item.get("position_sda") or 0))
+    return total
+
+
 def safety_check(position_sda, state):
     _reset_daily_pnl_if_needed(state)
     position_sda = float(position_sda)
     if position_sda < cfg.POSITION_MIN_SDA or position_sda > cfg.POSITION_MAX_SDA:
-        raise ValueError("Real position must be between 10 and 20 SDA")
+        raise ValueError(f"Real position must be between {cfg.POSITION_MIN_SDA:g} and {cfg.POSITION_MAX_SDA:g} SDA")
     positions = state.get("positions", {})
     pending_buys = state.get("pending_buys", {})
     open_count = len(positions) + len(pending_buys)
     if open_count >= cfg.MAX_OPEN_POSITIONS:
         raise RuntimeError("Maximum real open positions reached")
-    open_cost = sum(float(x.get("amount_sda") or x.get("cost_sda") or 0) for x in positions.values())
-    pending_cost = sum(float(x.get("position_sda") or 0) for x in pending_buys.values())
-    if open_cost + pending_cost + position_sda > cfg.TRADING_WALLET_CAPITAL_SDA:
-        raise RuntimeError("Real trading capital cap of 200 SDA would be exceeded")
+    if deployed_cost_basis(state) + Decimal(str(position_sda)) > Decimal(str(cfg.TRADING_WALLET_CAPITAL_SDA)):
+        raise RuntimeError(f"Real trading capital cap of {cfg.TRADING_WALLET_CAPITAL_SDA:g} SDA would be exceeded")
     if float(state.get("daily_realized_pnl_sda") or 0) <= -cfg.MAX_DAILY_LOSS_SDA:
         raise RuntimeError("Daily real-trading loss limit reached")
 

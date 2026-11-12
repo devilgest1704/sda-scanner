@@ -14,11 +14,11 @@ ROUTER_ADDRESS = os.getenv("SIDRA_ROUTER_ADDRESS", "0x35cAC72Db00e8dAC0e4f7F8A0F
 POOL_ADDRESS = os.getenv("SIDRA_POOL_ADDRESS", "0xCB94460F967f49E3a955278f252Ca9D6056ecE75")
 WSDA_ADDRESS = os.getenv("SIDRA_WSDA_ADDRESS", "0xE4095a910209D7BE03B55D02F40d4554B1666182")
 
-# Capital/risk limits requested for the real bot.
-TRADING_WALLET_CAPITAL_SDA = float(os.getenv("REAL_TRADING_CAPITAL_SDA", "200"))
+# Capital/risk limits for the real bot: 10 x 30 SDA; the rest of the wallet is operational reserve.
+TRADING_WALLET_CAPITAL_SDA = float(os.getenv("REAL_TRADING_CAPITAL_SDA", "300"))
 POSITION_MIN_SDA = float(os.getenv("REAL_POSITION_MIN_SDA", "10"))
-POSITION_MAX_SDA = float(os.getenv("REAL_POSITION_MAX_SDA", "20"))
-POSITION_DEFAULT_SDA = float(os.getenv("REAL_POSITION_DEFAULT_SDA", "20"))
+POSITION_MAX_SDA = float(os.getenv("REAL_POSITION_MAX_SDA", "30"))
+POSITION_DEFAULT_SDA = float(os.getenv("REAL_POSITION_DEFAULT_SDA", "30"))
 MAX_OPEN_POSITIONS = int(os.getenv("REAL_MAX_OPEN_POSITIONS", "10"))
 MAX_DAILY_LOSS_SDA = float(os.getenv("REAL_MAX_DAILY_LOSS_SDA", "30"))
 MAX_SLIPPAGE_PCT = float(os.getenv("REAL_MAX_SLIPPAGE_PCT", "1.0"))
