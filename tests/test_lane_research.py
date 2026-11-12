@@ -48,8 +48,28 @@ class ReplayTests(unittest.TestCase):
         paths = {s["token"]: path((100, 1.0)) for s in sigs}
         sim = lr.simulate(sigs, paths, lambda s: True, as_of=T0 + timedelta(days=1))
         self.assertEqual(sim["max_open"], 10)
+        self.assertEqual(sim["max_capital_used_sda"], 200.0)
         self.assertEqual(len(sim["trades"]), 10)
         self.assertEqual(sim["counters"]["blocked_capacity"], 5)
+
+    def test_architecture_b_uses_real_capacity_independently_of_paper(self):
+        sigs = [signal("a", 0), signal("b", 2)]
+        paths = {"a": path((60 * 20, 1.0)), "b": path((60 * 20, 1.0))}
+        result = lr.simulate_independent_capacity(sigs, paths, lambda _signal: True,
+                                                  as_of=T0 + timedelta(days=1), paper_slots=1,
+                                                  real_slots=2, capital_sda=200, investment_sda=20)
+        self.assertEqual(result["paper"]["max_open"], 1)
+        self.assertEqual(len(result["architecture_a_real"]["trades"]), 1)
+        self.assertEqual(len(result["architecture_b_real"]["trades"]), 2)
+        self.assertEqual(len(result["architecture_b_only"]), 1)
+
+    def test_independent_real_replay_rejects_stale_signals(self):
+        stale = signal("old", 0)
+        stale["quote_at"] = (T0 - timedelta(minutes=16)).isoformat()
+        result = lr.simulate_independent_capacity([stale], {"old": path((60, 1.0))},
+                                                  lambda _signal: True, as_of=T0 + timedelta(hours=1))
+        self.assertEqual(result["paper"]["trades"], [])
+        self.assertEqual(result["real"]["trades"], [])
 
     def test_slot_release_lets_later_candidate_occupy_freed_slot(self):
         sigs = [signal("a", 0), signal("b", 30), signal("c", 120)]
@@ -80,6 +100,14 @@ class ReplayTests(unittest.TestCase):
         sim = lr.simulate(sigs, paths, lambda s: True, as_of=T0 + timedelta(days=1), slots=1)
         self.assertEqual([t["token"] for t in sim["trades"]], ["a", "b"])
         self.assertEqual(sim["trades"][1]["opened_at"], (T0 + timedelta(minutes=60)).isoformat())
+
+    def test_one_shot_capacity_block_is_never_replayed_after_slot_release(self):
+        sigs = [signal("a", 0), signal("b", 30, seen_minutes=60)]
+        paths = {"a": path((60, 0.4)), "b": path((300, 1.0))}
+        sim = lr.simulate(sigs, paths, lambda _signal: True, as_of=T0 + timedelta(days=1),
+                          slots=1, one_shot_signals=True)
+        self.assertEqual([t["token"] for t in sim["trades"]], ["a"])
+        self.assertEqual(sim["counters"]["blocked_capacity"], 1)
 
     def test_one_buy_per_scan_and_cooldown(self):
         sigs = [signal("a", 0, score=90), signal("b", 0, score=80), signal("a", 120)]
@@ -203,6 +231,141 @@ class RecorderAndSafetyTests(unittest.TestCase):
     def record(self, rows, minutes):
         return lr.record_scan(rows, (T0 + timedelta(minutes=minutes)).isoformat(), state_file=self.state,
                               positions_file=self.positions, real_state_file=self.real)
+
+    def write_capacities(self, paper_open, real_open, held=None, pending=None):
+        def address(index):
+            return "0x" + f"{index:040x}"
+        paper_positions = {address(i): {"status": "OPEN"} for i in range(paper_open)}
+        real_positions = {address(i + 100): {"amount_sda": 20.0} for i in range(real_open)}
+        if held:
+            real_positions[held] = {"amount_sda": 20.0}
+            real_positions.pop(address(100 + real_open - 1), None)
+        self.positions.write_text(json.dumps({"positions": paper_positions}), encoding="utf-8")
+        self.real.write_text(json.dumps({"positions": real_positions, "pending_buys": pending or {}}),
+                             encoding="utf-8")
+
+    def valid_candidate(self, token, minutes=0, **kwargs):
+        return self.candidate("0x" + token * 40, minutes, **kwargs)
+
+    def test_independent_admission_capacity_matrix(self):
+        cases = ((9, 9, "PAPER_ADMISSION_ELIGIBLE", "SHADOW_REAL_BUY"),
+                 (10, 9, "PAPER_CAPACITY_BLOCKED", "SHADOW_REAL_BUY"),
+                 (9, 10, "PAPER_ADMISSION_ELIGIBLE", "REAL_CAPACITY_BLOCKED"),
+                 (10, 10, "PAPER_CAPACITY_BLOCKED", "REAL_CAPACITY_BLOCKED"))
+        for paper_open, real_open, paper_status, real_status in cases:
+            with self.subTest(paper_open=paper_open, real_open=real_open):
+                self.state.unlink(missing_ok=True)
+                self.write_capacities(paper_open, real_open)
+                result = self.record([self.valid_candidate("a")], 0)
+                self.assertEqual(result["shadow_real_admissions"][0]["paper_admission"], paper_status)
+                self.assertEqual(result["shadow_real_admissions"][0]["status"], real_status)
+
+    def test_same_token_real_held_or_pending_is_rejected(self):
+        token = "0x" + "a" * 40
+        self.write_capacities(9, 9, held=token)
+        held = self.record([self.candidate(token, 0)], 0)
+        self.assertEqual(held["shadow_real_admissions"][0]["status"], "REAL_ALREADY_HELD")
+
+        self.state.unlink(missing_ok=True)
+        self.write_capacities(9, 8, pending={token: {"position_sda": 20.0}})
+        pending = self.record([self.candidate(token, 0)], 0)
+        self.assertEqual(pending["shadow_real_admissions"][0]["status"], "REAL_BUY_PENDING")
+
+    def test_invalid_metadata_and_capital_overrun_are_rejected(self):
+        token = "0x" + "a" * 40
+        self.write_capacities(9, 9)
+        row = self.candidate(token, 0)
+        row["metadata_valid"] = False
+        invalid = self.record([row], 0)
+        self.assertEqual(invalid["shadow_real_admissions"][0]["status"], "INVALID_METADATA_SKIPPED")
+
+        self.state.unlink(missing_ok=True)
+        positions = {"0x" + f"{i + 100:040x}": {"amount_sda": 21.0} for i in range(9)}
+        self.real.write_text(json.dumps({"positions": positions, "pending_buys": {}}), encoding="utf-8")
+        over_cap = self.record([self.candidate(token, 0)], 0)
+        self.assertEqual(over_cap["shadow_real_admissions"][0]["status"], "REAL_CAPACITY_BLOCKED")
+        self.assertEqual(over_cap["shadow_real_admissions"][0]["reason"], "REAL slots or capital are full")
+
+    def test_repeated_signal_and_restart_are_idempotent(self):
+        self.write_capacities(9, 9)
+        row = self.valid_candidate("a")
+        first = self.record([row], 0)
+        second = self.record([row], 1)
+        self.assertEqual(len(first["shadow_real_buys"]), 1)
+        self.assertEqual(len(second["shadow_real_buys"]), 1)
+        self.assertEqual(len(second["shadow_real_admissions"]), 1)
+        signal_row = next(iter(second["signals"].values()))
+        self.assertEqual(signal_row["duplicate_result"], "DUPLICATE_SIGNAL_SKIPPED")
+        self.assertEqual(signal_row["duplicate_count"], 1)
+        self.assertEqual(second["shadow_real_admissions"][0]["duplicate_result"],
+                 "DUPLICATE_SIGNAL_SKIPPED")
+        self.assertEqual(second["shadow_real_admissions"][0]["freshness_result"], "FRESH")
+
+    def test_stale_signal_is_never_shadow_admitted(self):
+        self.write_capacities(9, 9)
+        row = self.valid_candidate("a")
+        row["quote_at"] = (T0 - timedelta(minutes=16)).isoformat()
+        row["data_age_sec"] = 960
+        result = self.record([row], 0)
+        self.assertEqual(result["shadow_real_admissions"][0]["status"], "STALE_SIGNAL_SKIPPED")
+        self.assertEqual(result["shadow_real_buys"], [])
+
+    def test_opened_real_slot_does_not_replay_old_signal(self):
+        token = "0x" + "a" * 40
+        self.write_capacities(10, 10)
+        row = self.candidate(token, 0)
+        first = self.record([row], 0)
+        self.assertEqual(first["shadow_real_admissions"][0]["status"], "REAL_CAPACITY_BLOCKED")
+        self.write_capacities(10, 9)
+        repeated = self.record([row], 1)
+        self.assertEqual(len(repeated["shadow_real_buys"]), 0)
+        fresh = self.record([self.candidate(token, 2)], 2)
+        self.assertEqual(fresh["shadow_real_buys"][-1]["status"], "SHADOW_REAL_BUY")
+
+    def test_shared_signal_preserves_policy_features_and_limits(self):
+        self.write_capacities(9, 9)
+        row = self.valid_candidate("a")
+        row.update({"strategy_version": "V30-test", "champion_version": "champion-test",
+                    "fee_tier": 500, "liquidity_evidence": {"volume_1h": 300},
+                    "decision_reason": "READY"})
+        canonical = {"signal_id": "canonical-v30-id", "contract": row["address"],
+                     "quote_at": row["quote_at"], "timestamp": T0.isoformat(),
+                 "buy_lane": row["paper_entry_lane"], "ready": True,
+                 "strategy_version": "V30-test", "champion_version": "champion-test",
+                 "score": row["score"], "freshness": {"data_age_sec": 20},
+                 "features": {"score": row["score"]}}
+        row["buy_signal"] = canonical
+        result = self.record([row], 0)
+        signal_row = next(iter(result["signals"].values()))
+        self.assertEqual(signal_row["signal_id"], "canonical-v30-id")
+        self.assertEqual(result["shadow_real_admissions"][0]["signal"], canonical)
+        self.assertEqual(signal_row["features"]["score"], row["score"])
+        self.assertEqual(signal_row["strategy_version"], "V30-test")
+        self.assertEqual(signal_row["champion_version"], "champion-test")
+        self.assertEqual(signal_row["fee_tier"], 500)
+        cap = lr.real_capacity(self.real)
+        self.assertEqual((cap["max_open"], cap["capital_sda"], cap["position_sda"]), (10, 200.0, 20.0))
+        self.assertLessEqual(cap["open"], 10)
+        self.assertLessEqual(cap["capital_used_sda"], 200.0)
+
+    def test_stale_profit_t1_t2_t3_t4_are_shadow_only(self):
+        held = signal("held", 0, price=1.0)
+        paths = {"held": [(T0 + timedelta(hours=24), 1.05, T0 + timedelta(hours=24), 10),
+                           (T0 + timedelta(hours=48), 1.05, T0 + timedelta(hours=48), 10)]}
+        replacement = signal("replacement", 48 * 60, score=80.0)
+        replacement["freshness"] = {"data_age_seconds": 20}
+        replacement["paper_open_at_signal"] = lr.SLOTS
+        paths["replacement"] = [(T0 + timedelta(hours=49), 1.2, T0 + timedelta(hours=49), 10)]
+        report = lr.stale_profit_research([held, replacement], paths,
+                                          as_of=T0 + timedelta(hours=50))
+        variants = report["variants"]
+        self.assertFalse(report["production_real_time_exit"])
+        self.assertEqual(report["scope"], "PAPER_SHADOW_ONLY")
+        self.assertEqual(variants["T1"]["stale_profit_exits"], 1)
+        self.assertEqual(variants["T2"]["stale_profit_exits"], 0)
+        self.assertEqual(variants["T3"]["stale_profit_exits"], 0)
+        self.assertEqual(variants["T4"]["stale_profit_exits"], 1)
+        self.assertEqual(report["capital_recycling"]["by_variant"]["T4"]["replacement_opportunities"], 1)
 
     def test_recorder_tracks_lane_capacity_and_forward_quotes(self):
         self.record([self.candidate("0xaa", 0), self.candidate("0xbb", 0, eligible=False)], 0)

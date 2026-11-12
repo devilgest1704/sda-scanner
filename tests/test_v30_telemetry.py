@@ -28,11 +28,14 @@ class PaperTelemetryTests(unittest.TestCase):
             "pump_phase": "IGNITION", "m1h": 2, "m15": 1,
             "m4h": 1, "net_1h": 200, "volume_1h": 700,
             "trades_1h": 12, "data_age_sec": 60,
+            "buy_signal": {"signal_id": "shared-v30-signal", "ready": True},
         }
         with patch.object(v30, "decision", return_value=signal), patch.object(v30, "save_state"), patch.object(v30, "load_state", return_value={"cooldowns": {}}):
             v30.patch(main_module, engine)
             pos = engine.create("0xtest", {"price_in_sda": 100}, signal, {}, {})
             self.assertEqual(pos["pump_entry_snapshot"]["phase"], "IGNITION")
+            self.assertEqual(pos["buy_signal_id"], "shared-v30-signal")
+            self.assertEqual(pos["buy_signal"], signal["buy_signal"])
             state = {"positions": {"0xtest": pos}, "closed_trades": []}
             engine._auto_exit(state, {"0xtest": {"analysis": {"price_in_sda": 101}}}, {})
             self.assertEqual(len(pos["pump_price_samples"]), 1)

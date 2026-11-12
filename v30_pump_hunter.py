@@ -2,7 +2,7 @@
 Single entry model: ignition -> confirmation -> breakout.
 Entry and exit logic are intentionally separated.
 """
-import json, os
+import hashlib, inspect, json, os
 from datetime import datetime, timezone, timedelta
 from tools.v32_hourly_macd import paper_macd_veto
 from tools.paper_loss_circuit import paper_entry_risk_gate
@@ -271,7 +271,7 @@ def entry_gate(c,phase,quality,delta_impulse,snapshot_impulse,fresh,agent_cfg,da
     return {"buy":buy,"entry_impulse":entry_impulse,"liquidity_ok":liquidity_ok,
             "price_flow_ok":price_flow_ok,"ratio":ratio}
 
-def decision(address,a,ws=None,persist=True):
+def decision(address,a,ws=None,persist=True,ignore_consumed_signal=False):
     c,s,q,i,phase=score(address,a,persist=persist)
     cd=cooldown_active(address)
     agent_cfg=load_agent_config()
@@ -507,6 +507,43 @@ def decision(address,a,ws=None,persist=True):
     # temporal-ready entry normalize the PAPER eligibility score to 68.
     # Keep the unmodified observed score in pump_score and trade snapshots.
     eff=max(s,ENTRY_SCORE) if (PAPER_BUY_MODE=="temporal_recovery" and not blocked) else (s if not blocked else min(s,ENTRY_SCORE-1))
+    champion_version=str(paper_champion_config.load().get("version") or "unknown")
+    quote_at=c.get("last_transaction")
+    signal_id=(hashlib.sha256(
+        f"{str(address).lower()}|{quote_at}|{VERSION}|{champion_version}".encode()).hexdigest()
+        if quote_at else None)
+    used_signal_ids=load_state().get("paper_buy_signal_ids",[])
+    duplicate_signal=bool(not ignore_consumed_signal and signal_id and signal_id in used_signal_ids)
+    if duplicate_signal:
+        blocked=True
+        reason="duplicate BUY signal_id already consumed by PAPER"
+        if "duplicate_signal_id" not in gate_failures:
+            gate_failures.append("duplicate_signal_id")
+        eff=min(s,ENTRY_SCORE-1)
+    buy_signal={
+        "signal_id":signal_id,"token":str(address).lower(),"contract":str(address).lower(),
+        "timestamp":now(),"quote_at":quote_at,
+        "buy_lane":(temporal.get("lane") if temporal.get("ready") else
+                    "fresh_momentum_research_only" if fresh_momentum_ready else phase.lower()),
+        "ready":not blocked,"score":round(n(s),2),"quality":round(n(q),2),
+        "phase":phase,"impulse":round(n(entry_impulse),2),
+        "flow_15m":round(n(c.get("flow15")),2),"flow_1h":round(n(c.get("flow")),2),
+        "volume":round(n(c.get("vol")),2),"trade_count":round(n(c.get("trades")),2),
+        "buy_ratio":round(n(c.get("buy_ratio")),4),"m15":round(n(c.get("m15")),4),
+        "m1h":round(n(c.get("m1")),4),
+        "freshness":{"data_age_sec":data_age,"max_age_sec":MAX_ENTRY_DATA_AGE_SEC,
+                      "fresh_for_entry":data_fresh_for_entry},
+        "fee_tier":quote_quality.get("fee_tier"),
+        "liquidity_evidence":{"ok":liquidity_ok,"volume_1h":round(n(c.get("vol")),2),
+                              "flow_1h":round(n(c.get("flow")),2),
+                              "trade_count":round(n(c.get("trades")),2),
+                              "buy_ratio":round(n(c.get("buy_ratio")),4)},
+        "decision_reason":reason,"strategy_version":VERSION,"champion_version":champion_version,
+        "features":{"score":round(n(s),2),"quality":round(n(q),2),"impulse":round(n(entry_impulse),2),
+                    "flow_15m":round(n(c.get("flow15")),2),"flow_1h":round(n(c.get("flow")),2),
+                    "volume_1h":round(n(c.get("vol")),2),"trades_1h":round(n(c.get("trades")),2),
+                    "buy_ratio":round(n(c.get("buy_ratio")),4),"m15":round(n(c.get("m15")),4),
+                    "m1h":round(n(c.get("m1")),4),"phase":phase,"data_age_sec":data_age}}
     return {"score":eff,"confidence":eff,"buy_score":eff,"market_score":eff,
       "m1h":c["m1"],"m15":c["m15"],"m4h":c["m4"],"net_1h":c["flow"],"whale_net":c["flow"],"flow_15m":c["flow15"],
       "trades_1h":c["trades"],"volume_1h":c["vol"],"buy_ratio":c["buy_ratio"],"trade_ratio":c["trade_ratio"],
@@ -518,6 +555,7 @@ def decision(address,a,ws=None,persist=True):
       "paper_buy_mode":PAPER_BUY_MODE,
       "paper_temporal_recovery":temporal,
       "paper_quote_quality":quote_quality,
+    "buy_signal":buy_signal,
       "paper_entry_lane":(temporal.get("lane") if temporal.get("ready") else
                           "fresh_momentum_research_only" if fresh_momentum_ready else None),
       "fresh_momentum_research_ready":fresh_momentum_ready and not temporal["ready"],
@@ -596,6 +634,9 @@ def patch(main_module,engine):
                   "entry_pump_change":n(s.get("pump_change")),"entry_phase":s.get("pump_phase","NO"),
                   "entry_paper_buy_mode":s.get("paper_buy_mode","baseline"),
                   "entry_temporal_recovery":s.get("paper_temporal_recovery")})
+        if isinstance(s.get("buy_signal"),dict):
+            z["buy_signal"]=s["buy_signal"]
+            z["buy_signal_id"]=s["buy_signal"].get("signal_id")
         if PAPER_TP4:
             fee=n(getattr(engine,"FEE_RATE",.01),.01)
             paper_v2.ensure_state(z,fee)
@@ -615,6 +656,15 @@ def patch(main_module,engine):
             "paper_macd_filter_at_entry":s.get("paper_macd_filter")}
         z["pump_price_samples"]=[]
         z["pump_mae_pct"]=0.0
+        signal_id=(s.get("buy_signal") or {}).get("signal_id")
+        if signal_id:
+            runtime=load_state()
+            used=runtime.setdefault("paper_buy_signal_ids",[])
+            if signal_id not in used:
+                used.append(signal_id)
+                runtime["paper_buy_signal_ids"]=used[-20000:]
+                runtime["updated_at"]=now()
+                save_state(runtime)
         return z
 
     def auto_exit(p,tokens,ws):
@@ -884,13 +934,17 @@ def write_scan_funnel(market_file="market_analysis.json"):
         temporal_lane_ready={"temporal_recovery":0, "confirmed_continuation":0}
         near_ready=[]
         candidates=[]
+        champion_snapshot=paper_champion_config.load()
         scan_at=datetime.now(timezone.utc).isoformat()
         for address,td in tokens.items():
             an=td.get("analysis") if isinstance(td,dict) and isinstance(td.get("analysis"),dict) else td
             if not isinstance(an,dict) or n(an.get("price_in_sda"))<=0:
                 continue
             total+=1
-            d=decision(address,an,None,persist=False)
+            decision_parameters=inspect.signature(decision).parameters
+            diagnostic_options=({"ignore_consumed_signal":True}
+                                if "ignore_consumed_signal" in decision_parameters else {})
+            d=decision(address,an,None,persist=False,**diagnostic_options)
             # Record eligible AND rejected candidates with contemporaneous
             # decision features. Research-only; no BUY/SELL decisions changed.
             technical = an.get("technical") if isinstance(an,dict) else {}
@@ -916,6 +970,7 @@ def write_scan_funnel(market_file="market_analysis.json"):
             )
             candidates.append({
                 "at":scan_at,"address":str(address).lower(),
+                "contract":str(address).lower(),
                 "symbol":symbol,
                 "score":round(n(d.get("pump_score")),2),
                 "quality":round(n(d.get("pump_quality")),2),
@@ -935,6 +990,19 @@ def write_scan_funnel(market_file="market_analysis.json"):
                 "m1h":n(d.get("m1h")),
                 "data_age_sec":round(n(d.get("data_age_sec")),1),
                 "eligible":bool(d.get("eligible_for_buy")),
+                "strategy_version":VERSION,
+                "champion_version":champion_snapshot.get("version"),
+                "buy_signal":d.get("buy_signal"),
+                "metadata_valid":bool(ident),
+                "fee_tier":(d.get("paper_quote_quality") or {}).get("fee_tier"),
+                "liquidity_evidence":{
+                    "volume_1h":round(n(d.get("volume_1h")),2),
+                    "flow_1h":round(n(d.get("net_1h")),2),
+                    "flow_15m":round(n(flow(an,"15m").get("net_flow")),2),
+                    "trade_count":round(n(d.get("trades_1h")),2),
+                    "buy_ratio":round(n(d.get("buy_ratio")),4),
+                    "quote_quality":d.get("paper_quote_quality")},
+                "decision_reason":d.get("paper_buy_block_reason"),
                 "fresh_momentum_research_ready":bool(d.get("fresh_momentum_research_ready")),
                 "paper_entry_lane":d.get("paper_entry_lane"),
                 "gates":list(dict.fromkeys(d.get("paper_buy_gate_failures") or [])),

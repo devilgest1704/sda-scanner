@@ -73,7 +73,7 @@ class TwoQuoteSignalTests(unittest.TestCase):
 
 class ActivePaperEntryTests(unittest.TestCase):
     def decide(self, *, lane="confirmed_continuation", trades=9,
-               loss=False,macd=False,cooldown=False):
+               loss=False,macd=False,cooldown=False,used_ids=(),ignore_consumed_signal=False):
         raw={"price":1,"m1":7,"m15":2.5,"m4":5,"flow":400,
              "flow15":100,"vol":1200,"trades":trades,"buy_ratio":2,
              "trade_ratio":2,"data_age_sec":15,
@@ -86,7 +86,7 @@ class ActivePaperEntryTests(unittest.TestCase):
                 "buy":False,"entry_impulse":9,"liquidity_ok":True,
                 "price_flow_ok":True,"ratio":.5}),
             patch.object(v30,"cooldown_active",return_value=cooldown),
-            patch.object(v30,"load_state",return_value={"history":{ADDRESS:{
+            patch.object(v30,"load_state",return_value={"paper_buy_signal_ids":list(used_ids),"history":{ADDRESS:{
                 "prev":{"m1":1,"m15":1,"flow":300,"vol":700,"price":.98,
                         "trades":9}}}}),
             patch.object(v30,"temporal_recovery_signal",return_value=result),
@@ -95,7 +95,18 @@ class ActivePaperEntryTests(unittest.TestCase):
             patch.object(v30,"paper_entry_risk_gate",return_value={
                 "blocked":loss,"status":"LOSS_COOLDOWN" if loss else "ACTIVE"})
         ):
-            return v30.decision(ADDRESS,{},persist=False)
+            return v30.decision(ADDRESS,{},persist=False,
+                                ignore_consumed_signal=ignore_consumed_signal)
+
+    def test_consumed_signal_is_blocked_but_remains_visible_to_diagnostics(self):
+        first = self.decide()
+        signal_id = first["buy_signal"]["signal_id"]
+        repeated = self.decide(used_ids=[signal_id])
+        self.assertFalse(repeated["eligible_for_buy"])
+        self.assertIn("duplicate_signal_id", repeated["paper_buy_gate_failures"])
+        diagnostic = self.decide(used_ids=[signal_id], ignore_consumed_signal=True)
+        self.assertTrue(diagnostic["eligible_for_buy"])
+        self.assertEqual(diagnostic["buy_signal"]["signal_id"], signal_id)
 
     def test_only_confirmed_continuation_allows_8_to_11_trade_exception(self):
         for trades in (8,9,11):
