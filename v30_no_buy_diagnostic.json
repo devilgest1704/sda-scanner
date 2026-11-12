@@ -1,18 +1,18 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-11-12T14:20:13.371185+00:00",
+  "checked_at": "2026-11-12T14:25:13.986468+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-11-12T14:19:27.283061+00:00",
+    "market_at": "2026-11-12T14:24:27.267052+00:00",
     "tokens": 167,
-    "quotes_last_5m": 7,
-    "quotes_last_15m": 13,
-    "quotes_last_60m": 54,
+    "quotes_last_5m": 1,
+    "quotes_last_15m": 14,
+    "quotes_last_60m": 55,
     "fresh_with_8_trades_1h": 1,
     "fresh_with_12_trades_1h": 1,
-    "fresh_m15_ge_1_5pct": 3,
-    "fresh_m15_ge_1_5pct_and_8_trades": 1,
-    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 1
+    "fresh_m15_ge_1_5pct": 0,
+    "fresh_m15_ge_1_5pct_and_8_trades": 0,
+    "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 0
   },
   "paper_loss_circuit": {
     "paper_only": true,
@@ -32,41 +32,40 @@
   "last_paper_close_at": "2026-11-10T14:48:09.109917+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-11-12T14:20:07.929158+00:00",
+    "at": "2026-11-12T14:25:08.549530+00:00",
     "age_minutes": 0.1,
     "aligned_to_market": true,
     "tokens_scored": 167,
-    "fresh_tokens": 13,
+    "fresh_tokens": 14,
     "champion_ready": 0,
     "shadow_ready": 0,
     "sampled_rows": 40,
     "sampled_phases": {
-      "IGNITION": 3,
-      "WATCH": 4,
-      "NO": 33
+      "IGNITION": 1,
+      "WATCH": 5,
+      "NO": 34
     },
     "sampled_rejections": {
       "temporal_recovery": 40,
+      "v31_age": 39,
+      "quote_continuity": 39,
       "v31_activity": 38,
-      "quote_continuity": 35,
-      "v31_age": 35,
-      "late_spike": 3,
+      "late_spike": 2,
       "price_flow": 1
     },
     "fresh_rejections": {
-      "temporal_recovery": 13,
-      "v31_activity": 12,
-      "quote_continuity": 8,
-      "v31_age": 8,
-      "late_spike": 1
+      "temporal_recovery": 14,
+      "quote_continuity": 13,
+      "v31_activity": 13,
+      "v31_age": 13
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "stale_or_invalid_current_quote": 8,
-        "single_quote_swing_filters_insufficient": 5
+        "stale_or_invalid_current_quote": 13,
+        "single_quote_swing_filters_insufficient": 1
       },
       "confirmed_continuation": {
-        "missing_reason": 13
+        "missing_reason": 14
       }
     },
     "temporal_lane_ready": {
@@ -79,16 +78,47 @@
       {
         "address": "0xa9272a802125c2b800e76f3232ddca8fa8e81fad",
         "symbol": "DQLP",
-        "score": 86.1,
-        "quality": 85.3,
-        "impulse": 0.8,
+        "score": 49.6,
+        "quality": 49.6,
+        "impulse": 0.0,
         "phase": "WATCH",
-        "data_age_sec": 241.7,
+        "data_age_sec": 200.3,
+        "gates": [
+          "temporal_recovery"
+        ],
+        "reason": "WATCH / temporal_recovery: single_quote_swing_filters_insufficient / "
+      },
+      {
+        "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
+        "symbol": "JSFT",
+        "score": 60.7,
+        "quality": 60.7,
+        "impulse": 0.0,
+        "phase": "WATCH",
+        "data_age_sec": 345.3,
         "gates": [
           "temporal_recovery",
-          "late_spike"
+          "v31_age",
+          "v31_activity",
+          "quote_continuity"
         ],
-        "reason": "WATCH / temporal_recovery; late_spike: single_quote_swing_filters_insufficient / "
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
+      },
+      {
+        "address": "0x2ce9e7c168035d61cc3a3655949c147c063eecc4",
+        "symbol": "SMAf",
+        "score": 53.9,
+        "quality": 53.9,
+        "impulse": 0.0,
+        "phase": "IGNITION",
+        "data_age_sec": 629.3,
+        "gates": [
+          "temporal_recovery",
+          "v31_age",
+          "v31_activity",
+          "quote_continuity"
+        ],
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
       },
       {
         "address": "0xa1532a42406947949c91c6f796d43147856fb0fc",
@@ -97,54 +127,30 @@
         "quality": 34.3,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 261.7,
+        "data_age_sec": 562.3,
         "gates": [
           "temporal_recovery",
-          "v31_activity"
+          "v31_age",
+          "v31_activity",
+          "quote_continuity"
         ],
-        "reason": "NO / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
       },
       {
-        "address": "0xd4f2df7dcf040f19b3378afb9ab3e0a579288e4f",
-        "symbol": "IX",
-        "score": 29.4,
-        "quality": 29.4,
-        "impulse": 0.0,
+        "address": "0xc1e3d68f2c214617c102313c9d23864e3ea1618f",
+        "symbol": "SDO",
+        "score": 30.3,
+        "quality": 28.9,
+        "impulse": 1.4,
         "phase": "NO",
-        "data_age_sec": 99.7,
+        "data_age_sec": 378.3,
         "gates": [
           "temporal_recovery",
-          "v31_activity"
+          "v31_age",
+          "v31_activity",
+          "quote_continuity"
         ],
-        "reason": "NO / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
-      },
-      {
-        "address": "0xd0981e59c8b51778a3b7754298614820cf08c17b",
-        "symbol": "GPC",
-        "score": 15.4,
-        "quality": 15.4,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 297.7,
-        "gates": [
-          "temporal_recovery",
-          "v31_activity"
-        ],
-        "reason": "NO / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
-      },
-      {
-        "address": "0x0d3ec7134ac8708a891773b35329555c24a3bad6",
-        "symbol": "DBN",
-        "score": 10.0,
-        "quality": 10.0,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 298.7,
-        "gates": [
-          "temporal_recovery",
-          "v31_activity"
-        ],
-        "reason": "NO / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
       }
     ]
   },
