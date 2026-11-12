@@ -1,16 +1,16 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-11-12T10:30:31.906790+00:00",
+  "checked_at": "2026-11-12T10:35:31.906995+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-11-12T10:29:55.796946+00:00",
+    "market_at": "2026-11-12T10:34:55.849476+00:00",
     "tokens": 164,
-    "quotes_last_5m": 2,
-    "quotes_last_15m": 8,
-    "quotes_last_60m": 52,
-    "fresh_with_8_trades_1h": 2,
-    "fresh_with_12_trades_1h": 2,
-    "fresh_m15_ge_1_5pct": 2,
+    "quotes_last_5m": 9,
+    "quotes_last_15m": 21,
+    "quotes_last_60m": 57,
+    "fresh_with_8_trades_1h": 6,
+    "fresh_with_12_trades_1h": 3,
+    "fresh_m15_ge_1_5pct": 4,
     "fresh_m15_ge_1_5pct_and_8_trades": 2,
     "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 1
   },
@@ -32,40 +32,41 @@
   "last_paper_close_at": "2026-11-10T14:48:09.109917+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-11-12T10:30:28.668099+00:00",
+    "at": "2026-11-12T10:35:28.545230+00:00",
     "age_minutes": 0.1,
     "aligned_to_market": true,
     "tokens_scored": 164,
-    "fresh_tokens": 8,
-    "champion_ready": 0,
-    "shadow_ready": 0,
+    "fresh_tokens": 21,
+    "champion_ready": 1,
+    "shadow_ready": 1,
     "sampled_rows": 40,
     "sampled_phases": {
+      "CONFIRMATION": 1,
+      "IGNITION": 2,
       "WATCH": 7,
-      "NO": 33
+      "NO": 30
     },
     "sampled_rejections": {
-      "temporal_recovery": 40,
-      "quote_continuity": 38,
-      "v31_age": 38,
-      "v31_activity": 35,
-      "late_spike": 5,
+      "temporal_recovery": 39,
+      "v31_activity": 33,
+      "v31_age": 31,
+      "quote_continuity": 31,
+      "late_spike": 4,
       "price_flow": 3
     },
     "fresh_rejections": {
-      "temporal_recovery": 8,
-      "quote_continuity": 6,
-      "v31_age": 6,
-      "v31_activity": 5,
-      "late_spike": 1
+      "temporal_recovery": 20,
+      "v31_activity": 16,
+      "quote_continuity": 12,
+      "v31_age": 12
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "stale_or_invalid_current_quote": 6,
-        "single_quote_swing_filters_insufficient": 2
+        "stale_or_invalid_current_quote": 12,
+        "single_quote_swing_filters_insufficient": 8
       },
       "confirmed_continuation": {
-        "missing_reason": 8
+        "missing_reason": 20
       }
     },
     "temporal_lane_ready": {
@@ -76,82 +77,76 @@
     "would_buy_if_only_loss_circuit_cleared": false,
     "top_near_ready": [
       {
+        "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
+        "symbol": "JSFT",
+        "score": 82.7,
+        "quality": 82.1,
+        "impulse": 20.0,
+        "phase": "CONFIRMATION",
+        "data_age_sec": 64.5,
+        "gates": [
+          "temporal_recovery"
+        ],
+        "reason": "CONFIRMATION / temporal_recovery: single_quote_swing_filters_insufficient / "
+      },
+      {
         "address": "0x4765561e63914e72168bbd2a7e2ce72f9057ca04",
         "symbol": "GMAI",
-        "score": 52.2,
-        "quality": 52.2,
+        "score": 57.2,
+        "quality": 57.2,
         "impulse": 0.0,
         "phase": "WATCH",
-        "data_age_sec": 103.6,
+        "data_age_sec": 80.5,
         "gates": [
           "temporal_recovery"
         ],
         "reason": "WATCH / temporal_recovery: single_quote_swing_filters_insufficient / "
       },
       {
-        "address": "0xb4ac5dd62f700e271bffb52aeae1dba40135427f",
-        "symbol": "JSFT",
-        "score": 88.5,
-        "quality": 88.5,
-        "impulse": 0.0,
-        "phase": "WATCH",
-        "data_age_sec": 199.6,
+        "address": "0x4197589f68f83c8283901bf8d4980db8d6bae2d8",
+        "symbol": "FARMT",
+        "score": 48.2,
+        "quality": 48.0,
+        "impulse": 0.2,
+        "phase": "IGNITION",
+        "data_age_sec": 169.4,
         "gates": [
           "temporal_recovery",
-          "late_spike"
+          "v31_activity"
         ],
-        "reason": "WATCH / temporal_recovery; late_spike: single_quote_swing_filters_insufficient / "
+        "reason": "IGNITION / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
       },
       {
-        "address": "0x1dbb8336663198bfc18346cfe8172da722918284",
-        "symbol": "ACV",
-        "score": 23.1,
-        "quality": 23.1,
+        "address": "0xfaa37c365fa4d345b5115ede02f1bf8a9e721b48",
+        "symbol": "AGFU",
+        "score": 32.7,
+        "quality": 32.7,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 383.6,
+        "data_age_sec": 169.4,
         "gates": [
           "temporal_recovery",
-          "v31_age",
-          "quote_continuity"
+          "v31_activity"
         ],
-        "reason": "quote_continuity: stale_or_invalid_current_quote"
-      },
-      {
-        "address": "0x8d7a3eefbc25187a229d442c20b443d7675b44cd",
-        "symbol": "XAUS",
-        "score": 32.9,
-        "quality": 32.9,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 584.6,
-        "gates": [
-          "temporal_recovery",
-          "v31_age",
-          "v31_activity",
-          "quote_continuity"
-        ],
-        "reason": "quote_continuity: stale_or_invalid_current_quote"
+        "reason": "NO / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
       },
       {
         "address": "0xacb361fee5537c08b5504ccf936f5aa3e1c62f3d",
         "symbol": "sUSDC",
-        "score": 13.1,
-        "quality": 13.1,
+        "score": 14.3,
+        "quality": 14.3,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 626.6,
+        "data_age_sec": 108.5,
         "gates": [
           "temporal_recovery",
-          "v31_age",
-          "v31_activity",
-          "quote_continuity"
+          "v31_activity"
         ],
-        "reason": "quote_continuity: stale_or_invalid_current_quote"
+        "reason": "NO / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
       }
     ]
   },
-  "assessment": "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED",
+  "assessment": "CHAMPION_BUY_READY_CHECK_EXECUTION_CAPACITY",
   "paper_buy_rules_modified": false,
   "real_trading": false
 }
