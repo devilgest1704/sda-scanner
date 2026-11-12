@@ -6,6 +6,7 @@ All chain access is the in-memory FakeChain; no RPC, signing or broadcast happen
 import json
 import unittest
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -13,6 +14,7 @@ import pytest
 
 import real_bot_menu as rb
 import real_bot_views as views
+import real_paper_bridge as bridge
 import real_swing_sell_executor as executor
 import real_trader
 import real_trading_config as cfg
@@ -22,6 +24,10 @@ XEN_INITIAL = 317664255649068659320
 XEN_SOLD = 317664200000000000000
 XEN_RESIDUAL = 55649068659320
 ONE_TOKEN = 10**18
+DBN_TOKEN = "0x0d3ec7134ac8708a891773b35329555c24a3bad6"
+DBN_INITIAL = 77609830015817723504
+DBN_SOLD = 77609800000000000000
+DBN_RESIDUAL = 30015817723504
 
 
 def _chain(test, quantity=XEN_INITIAL, cost="20", decimals=18):
@@ -81,6 +87,25 @@ class SharedDustPolicy(unittest.TestCase):
 
 
 class WalletDustReconciliation(unittest.TestCase):
+    def test_current_dbn_manual_sell_fixture_closes_actual_residual_once(self):
+        chain = _chain(self, quantity=DBN_INITIAL, cost="20", decimals=18)
+        position = chain.state["positions"].pop(TOKEN)
+        position.update({"token": DBN_TOKEN, "symbol": "DBN", "remaining_quantity": DBN_INITIAL,
+                         "remaining_cost_basis": "20"})
+        chain.state["positions"][DBN_TOKEN] = position
+        chain.balances[DBN_TOKEN] = DBN_RESIDUAL
+
+        result = executor.reconcile_position_wallet(DBN_TOKEN)
+
+        self.assertEqual(result["status"], "DUST_RECONCILED")
+        self.assertNotIn(DBN_TOKEN, chain.state["positions"])
+        self.assertEqual(chain.trades("MANUAL_SELL")[-1]["sold_quantity_raw"], DBN_SOLD)
+        self.assertEqual(len(chain.trades("MANUAL_SELL")), 1)
+        self.assertEqual(chain.trades("SELL"), [])
+        self.assertEqual(chain.state["dust_reconciliations"][-1]["wallet_quantity_raw"], DBN_RESIDUAL)
+        self.assertEqual(executor.reconcile_position_wallet(DBN_TOKEN)["status"], "NO_POSITION")
+        self.assertEqual(chain.sent, [])
+
     def test_wallet_zero_still_closes_as_manual(self):
         chain = _chain(self)
         chain.balances[TOKEN] = 0
@@ -256,6 +281,41 @@ class DustNeverSold(unittest.TestCase):
         self.assertAlmostEqual(float(chain.position()["remaining_cost_basis"]), 10.0)
 
 
+class PaperIndependentReconciliation(unittest.TestCase):
+    def test_manual_close_reconciles_when_paper_is_missing_before_baseline(self):
+        chain = _chain(self)
+        chain.balances[TOKEN] = 0
+        harness = BridgeHarness(self, chain)
+        harness.paper.write_text("{", encoding="utf-8")
+        Path(bridge.STATE_FILE).write_text(json.dumps({"initialized": False}), encoding="utf-8")
+
+        result = harness.run()
+
+        self.assertEqual(result["status"], "paper_state_unavailable")
+        self.assertNotIn(TOKEN, chain.state["positions"])
+        self.assertIn("MANUAL_SELL_RECONCILIATION", json.dumps(result["actions"]))
+        self.assertEqual(len(chain.trades("MANUAL_SELL")), 1)
+        self.assertEqual(chain.sent, [])
+
+    def test_manual_close_reconciles_when_paper_book_is_full(self):
+        chain = _chain(self)
+        chain.balances[TOKEN] = 0
+        harness = BridgeHarness(self, chain)
+        paper_positions = {"0x" + f"{i + 1:040x}": {"symbol": f"P{i}"} for i in range(10)}
+        harness.paper.write_text(json.dumps({"positions": paper_positions}), encoding="utf-8")
+        Path(bridge.STATE_FILE).write_text(json.dumps({
+            "initialized": True, "paper_positions": sorted(paper_positions),
+            "pending_buy": [], "pending_sell": [],
+        }), encoding="utf-8")
+
+        result = harness.run()
+
+        self.assertEqual(result["status"], "reconciled")
+        self.assertNotIn(TOKEN, chain.state["positions"])
+        self.assertEqual(len(chain.trades("MANUAL_SELL")), 1)
+        self.assertEqual(chain.sent, [])
+
+
 class DustCapacity(unittest.TestCase):
     def _fill(self, chain):
         for i in range(9):
@@ -288,16 +348,27 @@ def _telegram_dashboard(runtime, metadata, accounting):
 def test_telegram_portfolio_excludes_dust_only_bot_position(monkeypatch):
     xen = "0x53167ff5810ff1886fc554e672994c232126383e"
     jsft = "0xb4ac5dd62f700e271bffb52aeae1dba40135427f"
+    dbn = DBN_TOKEN
     accounting = {"schema_version": 1, "bot_reconciliation_status": "COMPLETE",
                   "bot_unresolved_transactions": [], "realized_pnl_sda": "2.0678",
-                  "open_positions": [], "buy_transactions": [], "sell_transactions": [], "statistics": {}}
+                  "open_positions": [{"token": jsft, "symbol": "JSFT", "quantity": "60",
+                                      "cost_basis_sda": "20"}],
+                  "buy_transactions": [{"tx": "0xbot-buy"}],
+                  "sell_transactions": [{"tx": "0xmanual-dbn", "at": "2026-11-12T09:39:50Z",
+                      "symbol": "DBN", "contract": dbn, "buy_tx": ["0xbot-buy"],
+                      "quantity": "77.6098", "proceeds_sda": "22.52791677495276164",
+                      "cost_basis_sda": "19.99999226494434599677607364",
+                      "net_pnl_sda": "2.461687522036394546889323562"}], "statistics": {}}
     runtime = {"positions": {
         xen: {"token": xen, "symbol": "0x53167f", "remaining_quantity": XEN_RESIDUAL,
               "remaining_cost_basis": "0.0000035036", "last_market_price": "0.0684"},
         jsft: {"token": jsft, "symbol": "JSFT", "remaining_quantity": str(60 * ONE_TOKEN),
                "remaining_cost_basis": "20"},
+        dbn: {"token": dbn, "symbol": "DBN", "remaining_quantity": str(DBN_INITIAL),
+              "remaining_cost_basis": "20"},
     }}
-    metadata = {xen: {"symbol": "XEN", "decimals": 18}, jsft: {"symbol": "JSFT", "decimals": "18"}}
+    metadata = {xen: {"symbol": "XEN", "decimals": 18}, jsft: {"symbol": "JSFT", "decimals": "18"},
+                dbn: {"symbol": "DBN", "decimals": "18"}}
     dashboard = _telegram_dashboard(runtime, metadata, accounting)
     monkeypatch.setattr(rb, "_load_worker_status", lambda _d: {"enabled": True, "dry_run": False})
     monkeypatch.setattr(rb, "_status", lambda _w: "🟢 LIVE")
@@ -314,6 +385,8 @@ def test_telegram_portfolio_excludes_dust_only_bot_position(monkeypatch):
     data = views._build_dashboard_data(dashboard)
     assert [p["token"] for p in data["positions"]] == [jsft]
     text = views._portfolio_text(data)
-    assert "XEN" not in text
+    assert "XEN" not in text and "DBN" not in text
     assert "JSFT" in text
     assert data["open_cost"] == pytest.approx(20)
+    assert data["realized_pnl"] == pytest.approx(2.4616875220363945)
+    assert sum(record["tx"] == "0xmanual-dbn" for record in data["sell_records"]) == 1

@@ -48,6 +48,7 @@ class BridgeTests(unittest.TestCase):
         )
         self.swing = SimpleNamespace(
             migrate_if_needed=unittest.mock.Mock(return_value=True),
+            reconcile_position_wallet=unittest.mock.Mock(return_value={"status": "UNCHANGED"}),
             startup_recovery=unittest.mock.Mock(return_value=[]),
             evaluate_position=unittest.mock.Mock(return_value={"action": "HOLD", "status": "NO_THRESHOLD"}),
         )

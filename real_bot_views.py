@@ -236,7 +236,6 @@ def _build_dashboard_data(dashboard):
         runtime_state=dashboard.load("real_trade_state.json",{})
     except Exception:
         runtime_state={}
-    runtime_positions=runtime_state.get("positions",{}) if isinstance(runtime_state,dict) else {}
     try:
         metadata=dashboard.load("token_metadata.json",{})
     except Exception:
@@ -247,21 +246,9 @@ def _build_dashboard_data(dashboard):
     for item in holdings:
         if isinstance(item,dict):
             holdings_by_address[str(item.get("address") or "").lower()]=item
-    position_source=[]
-    if isinstance(runtime_positions,dict):
-        for token,position in runtime_positions.items():
-            if isinstance(position,dict):
-                try:
-                    raw=position.get("remaining_quantity")
-                    if raw is None:
-                        raw=position.get("token_amount_raw")
-                    raw_quantity=Decimal(str(raw or 0))
-                except Exception:
-                    raw_quantity=Decimal(0)
-                if raw_quantity>0 and not _runtime_dust(token,position,metadata):
-                    position_source.append((str(position.get("token") or token).lower(),position,True))
-    if not position_source:
-        position_source=[(str(p.get("token") or "").lower(),p,False) for p in (accounting.get("open_positions") or []) if isinstance(p,dict) and p.get("token")]
+    position_source=[(str(p.get("token") or "").lower(),p,False)
+        for p in (accounting.get("open_positions") or [])
+        if isinstance(p,dict) and p.get("token")]
     positions=[]
     for token,position,is_runtime in position_source:
         if not token: continue
@@ -365,10 +352,10 @@ def _build_dashboard_data(dashboard):
 def _get_data(dashboard,refresh=False,cache_only=False):
     now=time.monotonic()
     if not refresh and _CACHE.get("data") is not None:
-        if cache_only or now-float(_CACHE.get("at") or 0)<=_CACHE_TTL:
+        if now-float(_CACHE.get("at") or 0)<=_CACHE_TTL:
             return _CACHE["data"]
     if cache_only:
-        return _CACHE.get("data")
+        return None
     data=_build_dashboard_data(dashboard)
     _CACHE.update({"at":time.monotonic(),"data":data})
     return data

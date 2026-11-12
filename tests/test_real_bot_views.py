@@ -294,7 +294,9 @@ def test_jsft_is_current_bot_position_when_runtime_ledger_and_wallet_balance_mat
         "bot_reconciliation_status": "COMPLETE",
         "bot_unresolved_transactions": [],
         "realized_pnl_sda": "22.817132860146615733",
-        "open_positions": [],
+        "open_positions": [{"token": token, "symbol": "JSFT",
+                    "quantity": str(Decimal(raw_quantity) / Decimal(10**18)),
+                    "cost_basis_sda": "20"}],
         "buy_transactions": [],
         "sell_transactions": [],
         "statistics": {},
@@ -336,4 +338,17 @@ def test_jsft_is_current_bot_position_when_runtime_ledger_and_wallet_balance_mat
     assert position["pnl_sda"] > 3.7
     assert position["buy_verified"] is True
     assert data["total_pnl"] == pytest.approx(data["realized_pnl"] + data["open_pnl"])
+
+
+def test_expired_cache_only_portfolio_does_not_show_stale_manual_sell(monkeypatch):
+    monkeypatch.setitem(views._CACHE, "at", 1.0)
+    monkeypatch.setitem(views._CACHE, "data", {
+        "positions": [{"token": "0x0d3ec7134ac8708a891773b35329555c24a3bad6", "symbol": "DBN"}],
+    })
+    monkeypatch.setattr(views.time, "monotonic", lambda: 1.0 + views._CACHE_TTL + 1)
+
+    text, _keyboard = views.render_view(SimpleNamespace(), "portfolio", cache_only=True)
+
+    assert "DBN" not in text
+    assert "not loaded yet" in text
 

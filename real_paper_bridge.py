@@ -80,6 +80,49 @@ def _save(path, value):
     os.replace(tmp, path)
 
 
+def _persist_events(actions):
+    if not actions:
+        return
+    events = _load(EVENTS_FILE, [])
+    events.extend(actions)
+    _save(EVENTS_FILE, events[-1000:])
+
+
+def _reconcile_real_wallets(real_trader, swing_executor):
+    actions = []
+    try:
+        positions = real_trader.load_state().get("positions", {})
+    except Exception as exc:
+        return [{"action": "MANUAL_SELL_RECONCILIATION", "status": "ERROR",
+                 "error": f"{type(exc).__name__}: {str(exc)[:400]}", "at": _now()}]
+    for token, position in list(positions.items()):
+        if not isinstance(position, dict):
+            continue
+        symbol = str(position.get("symbol") or token[:8])
+        try:
+            result = swing_executor.reconcile_position_wallet(token)
+            status = result.get("status")
+            if status == "CLOSED_MANUAL_RECONCILED":
+                actions.append({"action": "MANUAL_SELL_RECONCILIATION", "token": token,
+                                "symbol": symbol, "status": "CLOSED", "at": _now()})
+            elif status == "MANUAL_RECONCILED":
+                actions.append({"action": "MANUAL_SELL_RECONCILIATION", "token": token,
+                                "symbol": symbol, "status": "PARTIAL", "at": _now()})
+            elif status == "DUST_RECONCILED":
+                if result.get("manual_disposal"):
+                    actions.append({"action": "MANUAL_SELL_RECONCILIATION", "token": token,
+                                    "symbol": symbol, "status": "CLOSED", "at": _now()})
+                actions.append({"action": "DUST_RECONCILIATION", "token": token,
+                                "symbol": symbol, "status": "DUST_CLOSED",
+                                "wallet_quantity_raw": result.get("wallet_quantity"),
+                                "reason": "NEGLIGIBLE_RESIDUAL_AFTER_DISPOSAL", "at": _now()})
+        except Exception as exc:
+            actions.append({"action": "MANUAL_SELL_RECONCILIATION", "token": token,
+                            "symbol": symbol, "status": "ERROR",
+                            "error": f"{type(exc).__name__}: {str(exc)[:400]}", "at": _now()})
+    return actions
+
+
 def _paper_positions():
     """Return (positions, None) for a valid PAPER ledger, else (None, reason)."""
     try:
@@ -125,6 +168,16 @@ def reconcile():
         # validation; reconciliation is reserved for live-enabled operation.
         return {"status": "dry_run", "actions": []}
 
+    import real_trading_config as cfg
+    import real_trader
+    import real_swing_sell_executor as swing_executor
+
+    # Wallet reconciliation is REAL-state work, not PAPER signal processing.
+    migrated = swing_executor.migrate_if_needed()
+    actions = _reconcile_real_wallets(real_trader, swing_executor)
+    pre_paper_action_count = len(actions)
+    _persist_events(actions)
+
     # REAL must follow the exact active PAPER entry/exit profile. Fail closed
     # rather than trading a different strategy after a workflow config drift.
     paper_buy_mode = os.getenv("SDA_PAPER_BUY_MODE", "temporal_recovery").strip()
@@ -145,23 +198,19 @@ def reconcile():
     if not state.get("initialized"):
         if paper_error:
             # Never create a baseline from an unknown PAPER state.
+            actions.append({"action": "PAPER_STATE_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
+                            "reason": paper_error, "at": _now()})
+            _persist_events(actions[pre_paper_action_count:])
             return {"status": "paper_state_unavailable", "paper_state_error": paper_error,
-                    "actions": []}
+                    "actions": actions}
         state = {"initialized": True, "paper_positions": sorted(current),
                  "initialized_at": _now(), "last_run": _now()}
         _save(STATE_FILE, state)
-        return {"status": "baseline_initialized", "actions": []}
+        return {"status": "baseline_initialized", "actions": actions}
 
     previous = set(state.get("paper_positions", []))
     paper_valid = paper_error is None
     now_keys = set(current) if paper_valid else set(previous)
-    import real_trading_config as cfg
-    import real_trader
-    import real_swing_sell_executor as swing_executor
-
-    # Runtime migration archives old pending SELLs. Nothing from the legacy
-    # bridge or old executor is replayed or broadcast during migration.
-    migrated = swing_executor.migrate_if_needed()
     legacy_bridge = state.setdefault("legacy_pending_sell", [])
     for token in list(state.get("pending_sell", [])):
         legacy_bridge.append({"token": token, "archived_at": _now(),
@@ -173,7 +222,6 @@ def reconcile():
     newly_seen = now_keys - previous
     opened = sorted(newly_seen | pending_buy) if paper_valid else []
     next_pending_buy = set() if paper_valid else set(state.get("pending_buy", []))
-    actions = []
     detected_at = datetime.now(timezone.utc)
     if not paper_valid:
         # BUY discovery is skipped; REAL SELL V2 below still uses REAL state only.
@@ -362,10 +410,7 @@ def reconcile():
         health["note"] = "MIGRATION_BASELINE"
     state["sell_health"] = health
     _save(STATE_FILE, state)
-    if actions:
-        events = _load(EVENTS_FILE, [])
-        events.extend(actions)
-        _save(EVENTS_FILE, events[-1000:])
+    _persist_events(actions[pre_paper_action_count:])
     if health["health"] == "SELL_ERROR":
         print(f"::error::REAL SELL HEALTH SELL_ERROR {json.dumps(health['errors'], default=str)[:1500]}",
               file=sys.stderr, flush=True)

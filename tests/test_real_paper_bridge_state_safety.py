@@ -38,6 +38,7 @@ class PaperStateSafetyTests(unittest.TestCase):
         self.swing = SimpleNamespace(
             migrate_if_needed=Mock(return_value=False),
             startup_recovery=Mock(return_value=[]),
+            reconcile_position_wallet=Mock(return_value={"status": "UNCHANGED"}),
             reconcile_position=Mock(return_value={"intent": None, "wallet": {"status": "UNCHANGED"}}),
             evaluate_position=Mock(return_value={"action": "HOLD", "status": "NO_THRESHOLD"}),
         )
@@ -211,6 +212,25 @@ class PaperStateSafetyTests(unittest.TestCase):
         self.assertEqual([c.args[0] for c in self.swing.evaluate_position.call_args_list], [HELD])
         self.swing.startup_recovery.assert_called_once()
         self.assertEqual(self.buys(), [])
+
+    def test_scanner_wrapper_runs_real_bridge_when_paper_engine_raises(self):
+        import main
+        import tools.paper_telemetry_report as telemetry
+
+        reconcile = Mock(return_value={"status": "reconciled", "actions": []})
+        previous_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as working_directory:
+            try:
+                os.chdir(working_directory)
+                with patch.object(main.engine, "main", side_effect=RuntimeError("paper failed")), \
+                        patch.object(main._v30, "write_scan_funnel"), \
+                        patch.object(telemetry, "report", return_value={"status": "ok"}), \
+                        patch.dict("sys.modules", {"real_paper_bridge": SimpleNamespace(reconcile=reconcile)}):
+                    with self.assertRaisesRegex(RuntimeError, "paper failed"):
+                        main._run_with_paper_telemetry()
+            finally:
+                os.chdir(previous_cwd)
+        reconcile.assert_called_once_with()
 
     def test_invalid_paper_never_initializes_a_baseline(self):
         self.state_file.unlink()
