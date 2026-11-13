@@ -103,6 +103,12 @@ def _status(worker_state=None):
         return "⚪ STATUS UNKNOWN"
     if not enabled:
         return "🔴 REAL TRADING DISABLED"
+    if worker_state.get("worker_health") == "CRITICAL_FAILURE":
+        return "🔴 CRITICAL FAILURE"
+    if worker_state.get("worker_health") == "BUY_DATA_DEGRADED":
+        if worker_state.get("whale_source_health") == "SOURCE_UNAVAILABLE":
+            return "🟠 LIVE — BUY DATA DEGRADED — WHALE SOURCE UNAVAILABLE"
+        return "🟠 LIVE — BUY DATA DEGRADED"
     return "🟡 DRY RUN" if dry_run else "🟢 LIVE"
 
 

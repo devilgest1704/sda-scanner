@@ -47,7 +47,11 @@ def env(monkeypatch):
     for name in ("send_transaction", "private_account", "quote_best_live_fee", "execute_buy", "rpc",
                  "persist_real_intent_before_broadcast"):
         monkeypatch.setattr(real_trader, name, forbidden)
-    files = {"token_metadata.json": {XEN: {"symbol": "XEN", "decimals": 18}}, "positions.json": {"positions": {}}}
+    files = {"token_metadata.json": {XEN: {"symbol": "XEN", "decimals": 18}},
+             "positions.json": {"positions": {}},
+             "whale_state.json": {"updated_at": datetime.now(timezone.utc).isoformat(),
+                                  "last_successful_whale_at": datetime.now(timezone.utc).isoformat(),
+                                  "whale_source_health": "HEALTHY"}}
     holder = SimpleNamespace(state=_state(), worker={"enabled": True, "dry_run": False}, files=files,
                              forbidden=forbidden)
     monkeypatch.setattr(rb, "_state", lambda _d: holder.state)
@@ -148,6 +152,29 @@ def test_stale_scanner_shows_data_stale_without_counts_or_candidate(env, monkeyp
     assert "⚪ REAL BUY: DATA STALE" in text
     unknown = telegram_home.ScannerRows([_row("ACV", "BUY", 89, blocked=False)])
     assert telegram_home._scanner_stale(unknown)
+
+
+def test_whale_source_failure_fails_closed_and_recovers_automatically(env, monkeypatch):
+    rows = _rows(_row("ACV", "BUY", 89, blocked=False, phase="CONFIRMATION"))
+    env.files["whale_state.json"] = {
+        "updated_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+        "last_successful_whale_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+        "whale_source_health": "SOURCE_UNAVAILABLE",
+        "last_error_http_status": 521,
+    }
+    degraded = _home(env, monkeypatch, rows)
+    assert "⚪ Data stale" in degraded
+    assert "REAL BUY: DATA STALE" in degraded
+    assert "BUY-ready" not in degraded
+
+    env.files["whale_state.json"] = {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "last_successful_whale_at": datetime.now(timezone.utc).isoformat(),
+        "whale_source_health": "HEALTHY",
+    }
+    recovered = _home(env, monkeypatch, rows)
+    assert "⚪ Data stale" not in recovered
+    assert "REAL BUY: READY" in recovered
 
 
 def test_watch_is_never_counted_or_labelled_buy_ready(env, monkeypatch):

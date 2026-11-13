@@ -133,6 +133,42 @@ class WorkerCodePinTests(unittest.TestCase):
         write(self.root, "swing_sell_v2.py", "POLICY = 2\n")
         self.assertEqual(pin.write_status(cwd=self.root)["health"], "CODE_SHA_DRIFT")
 
+    def test_status_persists_runtime_freshness_and_degraded_health(self):
+        self.do_pin(runs((self.h.S2, "completed", "success")), run_id="556")
+        stamp = pin._now()
+        write(self.root, "market_data.json", json.dumps({"updated_at": stamp}))
+        write(self.root, "market_analysis.json", json.dumps({"updated_at": stamp}))
+        write(self.root, "whale_state.json", json.dumps({
+            "updated_at": stamp, "last_successful_whale_at": stamp,
+            "whale_source_health": "HEALTHY"}))
+        write(self.root, "paper_stats.json", json.dumps({"updated_at": stamp}))
+        write(self.root, "real_trade_state.json", json.dumps({
+            "updated_at": stamp, "positions": {"a": {}, "b": {}}}))
+        write(self.root, "real_paper_bridge_state.json", json.dumps({
+            "last_run": stamp, "last_real_reconciliation_at": stamp,
+            "last_real_sell_evaluation_at": stamp, "real_positions_evaluated": 2,
+            "sell_health": {"at": stamp, "evaluated": 2, "health": "SELL_HOLD"}}))
+        write(self.root, "strategy_lab/lane_research_state.json", json.dumps({"updated_at": stamp}))
+
+        status = pin.write_status(cwd=self.root)
+        self.assertEqual(status["last_successful_scan_at"], stamp)
+        self.assertEqual(status["last_successful_market_at"], stamp)
+        self.assertEqual(status["last_successful_market_analysis_at"], stamp)
+        self.assertEqual(status["last_successful_whale_at"], stamp)
+        self.assertEqual(status["last_real_sell_evaluation_at"], stamp)
+        self.assertEqual(status["last_real_reconciliation_at"], stamp)
+        self.assertEqual(status["last_lane_research_update_at"], stamp)
+        self.assertEqual(status["real_positions_evaluated"], 2)
+        self.assertEqual(status["real_sell_protection"], "ACTIVE")
+        self.assertEqual(status["worker_health"], "HEALTHY")
+
+        write(self.root, "whale_state.json", json.dumps({
+            "updated_at": stamp, "last_successful_whale_at": stamp,
+            "whale_source_health": "SOURCE_UNAVAILABLE", "last_error_http_status": 521}))
+        status = pin.write_status(cwd=self.root)
+        self.assertEqual(status["whale_source_health"], "SOURCE_UNAVAILABLE")
+        self.assertEqual(status["worker_health"], "BUY_DATA_DEGRADED")
+
     def test_unpinned_checkout_is_reported_not_drift(self):
         self.assertEqual(pin.verify(self.root)["code_integrity"], "UNPINNED")
 

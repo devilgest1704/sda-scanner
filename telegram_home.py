@@ -196,7 +196,15 @@ def _scanner_inputs(dashboard):
     except Exception as exc:
         print(f"REAL capacity error: {type(exc).__name__}: {exc}")
         real = None
-    return rows, real, _scanner_stale(rows)
+    whale_state = dashboard.load("whale_state.json", {})
+    whale_stamp = ((whale_state or {}).get("last_successful_whale_at")
+                   or (whale_state or {}).get("updated_at")) if isinstance(whale_state, dict) else None
+    whale_rows = ScannerRows()
+    whale_rows.updated_at = whale_stamp
+    whale_stale = (not isinstance(whale_state, dict)
+                   or whale_state.get("whale_source_health") == "SOURCE_UNAVAILABLE"
+                   or _scanner_stale(whale_rows))
+    return rows, real, _scanner_stale(rows) or whale_stale
 
 
 def _home_scanner_lines(dashboard):
@@ -234,7 +242,11 @@ def home_text(dashboard):
         lines.append("⚪ REAL Trading data unavailable")
     else:
         status = str(data.get("worker_status") or "")
-        if "LIVE" in status:
+        if "CRITICAL FAILURE" in status:
+            lines.append("🔴 REAL Trading CRITICAL FAILURE")
+        elif "BUY DATA DEGRADED" in status:
+            lines.append("🟠 REAL Trading BUY DATA DEGRADED")
+        elif "LIVE" in status:
             lines.append("🟢 REAL Trading LIVE")
         elif "DRY" in status:
             lines.append("🟡 REAL Trading DRY RUN")

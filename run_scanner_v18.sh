@@ -215,6 +215,7 @@ maybe_dispatch_research_and_optimizer() {
 
 run_one_scan() {
   local started ended elapsed
+  local buy_data_available=true
   started="$(date +%s)"
 
   echo
@@ -222,9 +223,9 @@ run_one_scan() {
   echo "🚀 SDA SCAN START $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
   echo "════════════════════════════════════════════════════════════"
 
-  # Supabase can return transient 5xx/522 errors. The whale scanner
-  # retries those internally; if they still fail, skip this whole scan and
-  # keep the long-lived worker alive for the next cadence.
+  # Supabase can return transient 5xx errors. If whale data remains unavailable
+  # after bounded retries, keep BUY discovery fail-closed but continue all
+  # market, PAPER, REAL SELL, wallet-reconciliation and checkpoint stages.
   set +e
   local whale_started whale_elapsed
   whale_started="$(date +%s)"
@@ -234,11 +235,11 @@ run_one_scan() {
   echo "⏱️ SCAN STAGE whale_scanner: ${whale_elapsed}s (exit=${whale_rc})"
   set -e
   if [ "$whale_rc" -eq 75 ]; then
-    echo "⚠️ WHALE SCAN SKIPPED: transient Supabase failure; worker remains alive."
-    return 0
+    echo "⚠️ WHALE SCAN DEGRADED: source unavailable; BUY discovery is fail-closed, worker continues."
+    buy_data_available=false
   elif [ "$whale_rc" -ne 0 ]; then
-    echo "❌ WHALE SCANNER FAILED: exit $whale_rc" >&2
-    return "$whale_rc"
+    echo "::warning::WHALE SCANNER FAILED: exit $whale_rc; BUY discovery is fail-closed, worker continues." >&2
+    buy_data_available=false
   fi
 
   # Keep a single writer for positions.json. Do not launch a parallel exit worker.
@@ -246,29 +247,51 @@ run_one_scan() {
   run_timed_stage() {
     local stage="$1"
     shift
-    local stage_started stage_elapsed
+    local stage_started stage_elapsed stage_rc
     stage_started="$(date +%s)"
     timeout --kill-after=15s 300s "$@"
+    stage_rc=$?
     stage_elapsed=$(( $(date +%s) - stage_started ))
     echo "⏱️ SCAN STAGE ${stage}: ${stage_elapsed}s"
     if [ "$stage_elapsed" -gt 120 ]; then
       echo "⚠️ SCAN STAGE SLOW: ${stage} took ${stage_elapsed}s (>120s)." >&2
     fi
+    return "$stage_rc"
   }
 
-  run_timed_stage market_scanner python market_scanner.py
-  run_timed_stage technical_analysis python technical_analysis.py
-  run_timed_stage market_analysis_export python market_analysis_export.py
-  run_timed_stage token_metadata python token_metadata.py
-  run_timed_stage liquidity_scanner python liquidity_scanner.py
+  if ! run_timed_stage market_scanner python market_scanner.py; then
+    echo "::warning::MARKET SCANNER failed; BUY discovery is fail-closed, other protections continue." >&2
+    buy_data_available=false
+  fi
+  if ! run_timed_stage technical_analysis python technical_analysis.py; then
+    echo "::warning::Technical-analysis stage failed; scanner continues." >&2
+  fi
+  if ! run_timed_stage market_analysis_export python market_analysis_export.py; then
+    echo "::warning::Market-analysis export failed; dashboard remains stale until recovery." >&2
+  fi
+  if ! run_timed_stage token_metadata python token_metadata.py; then
+    echo "::warning::Token metadata failed; REAL BUY discovery is fail-closed, protections continue." >&2
+    buy_data_available=false
+  fi
+  if ! run_timed_stage liquidity_scanner python liquidity_scanner.py; then
+    echo "::warning::Liquidity data failed; REAL BUY discovery is fail-closed, protections continue." >&2
+    buy_data_available=false
+  fi
 
-  run_timed_stage paper_engine env TELEGRAM_TOKEN="" python paper_engine_v19.py
+  if ! run_timed_stage paper_engine env TELEGRAM_TOKEN="" python paper_engine_v19.py; then
+    echo "::warning::PAPER evaluation failed; REAL BUY discovery is fail-closed, REAL SELL and wallet reconciliation continue." >&2
+    buy_data_available=false
+  fi
   # Mirror only committed PAPER position transitions. The bridge is strictly
-  # opt-in and returns disabled under the production defaults.
-  if ! python -c 'from real_paper_bridge import reconcile; print("PAPER->REAL bridge:", reconcile())'; then
+  # opt-in and returns disabled under the production defaults. It also owns
+  # independent REAL SELL V2 and manual wallet reconciliation, so always run
+  # it after a BUY-data or PAPER evaluation failure.
+  if ! SDA_SCANNER_BUY_DATA_AVAILABLE="$buy_data_available" python -c 'from real_paper_bridge import reconcile; print("PAPER->REAL bridge:", reconcile())'; then
     echo "::warning::PAPER->REAL bridge failed; PAPER ledger and exits remain authoritative." >&2
   fi
-  run_timed_stage paper_stats env TELEGRAM_TOKEN="" python paper_stats.py
+  if ! run_timed_stage paper_stats env TELEGRAM_TOKEN="" python paper_stats.py; then
+    echo "::warning::PAPER statistics failed; scanner continues." >&2
+  fi
   # Read-only risk telemetry; must never interrupt exits or checkpoint safety.
   if ! python -m tools.paper_loss_circuit; then
     echo "::warning::24h paper risk circuit telemetry failed; continue existing stop/exit checks." >&2

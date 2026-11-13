@@ -210,6 +210,7 @@ def reconcile():
 
     previous = set(state.get("paper_positions", []))
     paper_valid = paper_error is None
+    buy_data_available = os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE", "true").strip().lower() == "true"
     now_keys = set(current) if paper_valid else set(previous)
     legacy_bridge = state.setdefault("legacy_pending_sell", [])
     for token in list(state.get("pending_sell", [])):
@@ -220,8 +221,12 @@ def reconcile():
     real_snapshot = real_trader.load_state()
     pending_buy = set(state.get("pending_buy", [])) | set(real_snapshot.get("pending_buys", {}))
     newly_seen = now_keys - previous
-    opened = sorted(newly_seen | pending_buy) if paper_valid else []
-    next_pending_buy = set() if paper_valid else set(state.get("pending_buy", []))
+    opened = sorted(newly_seen | pending_buy) if paper_valid and buy_data_available else []
+    next_pending_buy = (set() if paper_valid else set(state.get("pending_buy", [])))
+    if not buy_data_available:
+        next_pending_buy = pending_buy
+        actions.append({"action": "BUY_DATA_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
+                        "reason": "required market or whale data unavailable", "at": _now()})
     detected_at = datetime.now(timezone.utc)
     if not paper_valid:
         # BUY discovery is skipped; REAL SELL V2 below still uses REAL state only.
@@ -233,7 +238,7 @@ def reconcile():
                         "at": _now()})
         print(f"::warning::PAPER_STATE_UNAVAILABLE ({paper_error}); REAL BUY discovery skipped, "
               "previous PAPER baseline preserved", file=sys.stderr, flush=True)
-    else:
+    elif buy_data_available:
         state["paper_state"] = {"status": "VALID", "consecutive_failures": 0, "at": _now()}
 
     # Recover only post-migration Swing V2 intents. The executor checks their
@@ -404,6 +409,9 @@ def reconcile():
     state["last_run"] = _now()
     state["last_actions"] = actions
     health = sell_health(actions)
+    state["last_real_reconciliation_at"] = state["last_run"]
+    state["last_real_sell_evaluation_at"] = health["at"]
+    state["real_positions_evaluated"] = health["evaluated"]
     if migrated:
         health["note"] = "MIGRATION_BASELINE"
     state["sell_health"] = health

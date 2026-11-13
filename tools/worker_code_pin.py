@@ -226,17 +226,75 @@ def _flag(name):
     return value.strip().lower() == "true"
 
 
+def _read_json(root, name):
+    try:
+        value = json.loads((root / name).read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _freshness(value, max_age=900):
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()
+        return age >= 0 and age <= max_age
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def write_status(cwd=None, output=STATUS_FILE):
     """Worker heartbeat for the REAL dashboard including the pinned code identity."""
     root = Path(cwd or ".").resolve()
     status = {"source": "github-actions-real-worker",
               "enabled": _flag("REAL_TRADING_ENABLED"), "dry_run": _flag("REAL_TRADING_DRY_RUN"),
               "updated_at": _now()}
-    try:
-        ledger = json.loads((root / "real_trade_state.json").read_text(encoding="utf-8"))
-        status["ledger_updated_at"] = ledger.get("updated_at") if isinstance(ledger, dict) else None
-    except Exception:
-        status["ledger_updated_at"] = None
+    ledger = _read_json(root, "real_trade_state.json")
+    status["ledger_updated_at"] = ledger.get("updated_at")
+    whale = _read_json(root, "whale_state.json")
+    market_data = _read_json(root, "market_data.json")
+    market = _read_json(root, "market_analysis.json")
+    paper = _read_json(root, "paper_stats.json")
+    bridge = _read_json(root, "real_paper_bridge_state.json")
+    bridge_health = bridge.get("sell_health") if isinstance(bridge.get("sell_health"), dict) else {}
+    lane = _read_json(root, "strategy_lab/lane_research_state.json")
+
+    whale_stamp = whale.get("last_successful_whale_at") or whale.get("updated_at")
+    market_data_stamp = market_data.get("updated_at")
+    market_analysis_stamp = market.get("updated_at")
+    whale_health = whale.get("whale_source_health")
+    if whale_health != "SOURCE_UNAVAILABLE":
+        whale_health = "HEALTHY" if _freshness(whale_stamp) else "STALE"
+    market_health = ("HEALTHY" if _freshness(market_data_stamp) and _freshness(market_analysis_stamp)
+                     else "STALE")
+    sell_stamp = bridge.get("last_real_sell_evaluation_at") or bridge_health.get("at")
+    sell_total = len(ledger.get("positions", {})) if isinstance(ledger.get("positions"), dict) else 0
+    sell_evaluated = int(bridge.get("real_positions_evaluated", bridge_health.get("evaluated", 0)) or 0)
+    sell_recent = _freshness(sell_stamp)
+    sell_failed = bridge_health.get("health") == "SELL_ERROR"
+    sell_protection = ("ACTIVE" if sell_recent and not sell_failed and sell_evaluated >= sell_total
+                       else "FAILING" if sell_recent and sell_failed else "UNKNOWN")
+    reconciliation_stamp = bridge.get("last_real_reconciliation_at") or bridge.get("last_run")
+    reconciliation_health = "ACTIVE" if _freshness(reconciliation_stamp) else "UNKNOWN"
+
+    status.update({
+        "last_successful_scan_at": paper.get("updated_at"),
+        "last_paper_evaluation_at": paper.get("updated_at"),
+        "last_successful_whale_at": whale_stamp,
+        "last_successful_market_at": market_data_stamp,
+        "last_successful_market_analysis_at": market_analysis_stamp,
+        "last_real_sell_evaluation_at": sell_stamp,
+        "last_real_reconciliation_at": reconciliation_stamp,
+        "last_lane_research_update_at": lane.get("updated_at") or lane.get("last_run_at"),
+        "data_source_health": {"market": market_health, "whale": whale_health},
+        "whale_source_health": whale_health,
+        "real_sell_protection": sell_protection,
+        "real_positions_evaluated": sell_evaluated,
+        "real_positions_total": sell_total,
+        "manual_reconciliation": reconciliation_health,
+    })
     try:
         import real_trading_config as cfg
         status.update({"real_buy_size_sda": cfg.position_sda(),
@@ -250,6 +308,13 @@ def write_status(cwd=None, output=STATUS_FILE):
         status[key] = record.get(key)
     status.update(verify(root))
     status["health"] = "CODE_SHA_DRIFT" if status["code_integrity"] == "CODE_SHA_DRIFT" else "OK"
+    if (status["health"] == "CODE_SHA_DRIFT" or sell_protection != "ACTIVE"
+            or reconciliation_health != "ACTIVE"):
+        status["worker_health"] = "CRITICAL_FAILURE"
+    elif whale_health != "HEALTHY" or market_health != "HEALTHY":
+        status["worker_health"] = "BUY_DATA_DEGRADED"
+    else:
+        status["worker_health"] = "HEALTHY"
     path = root / output
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(status, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
