@@ -136,7 +136,9 @@ class WorkerCodePinTests(unittest.TestCase):
     def test_status_persists_runtime_freshness_and_degraded_health(self):
         self.do_pin(runs((self.h.S2, "completed", "success")), run_id="556")
         stamp = pin._now()
-        write(self.root, "market_data.json", json.dumps({"updated_at": stamp}))
+        write(self.root, "market_data.json", json.dumps({"updated_at": "2026-10-07T15:05:14+00:00"}))
+        write(self.root, "market_source_state.json", json.dumps({
+            "source_health": "HEALTHY", "last_successful_market_at": stamp}))
         write(self.root, "market_analysis.json", json.dumps({"updated_at": stamp}))
         write(self.root, "whale_state.json", json.dumps({
             "updated_at": stamp, "last_successful_whale_at": stamp,
@@ -154,6 +156,7 @@ class WorkerCodePinTests(unittest.TestCase):
         self.assertEqual(status["last_successful_scan_at"], stamp)
         self.assertEqual(status["last_successful_market_at"], stamp)
         self.assertEqual(status["last_successful_market_analysis_at"], stamp)
+        self.assertEqual(status["market_source_health"], "HEALTHY")
         self.assertEqual(status["last_successful_whale_at"], stamp)
         self.assertEqual(status["last_real_sell_evaluation_at"], stamp)
         self.assertEqual(status["last_real_reconciliation_at"], stamp)
@@ -161,6 +164,13 @@ class WorkerCodePinTests(unittest.TestCase):
         self.assertEqual(status["real_positions_evaluated"], 2)
         self.assertEqual(status["real_sell_protection"], "ACTIVE")
         self.assertEqual(status["worker_health"], "HEALTHY")
+
+        write(self.root, "market_source_state.json", json.dumps({
+            "source_health": "SOURCE_UNAVAILABLE", "last_successful_market_at": stamp,
+            "last_error_http_status": 521}))
+        status = pin.write_status(cwd=self.root)
+        self.assertEqual(status["market_source_health"], "SOURCE_UNAVAILABLE")
+        self.assertEqual(status["worker_health"], "BUY_DATA_DEGRADED")
 
         write(self.root, "whale_state.json", json.dumps({
             "updated_at": stamp, "last_successful_whale_at": stamp,

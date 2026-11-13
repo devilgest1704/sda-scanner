@@ -255,6 +255,7 @@ def write_status(cwd=None, output=STATUS_FILE):
     status["ledger_updated_at"] = ledger.get("updated_at")
     whale = _read_json(root, "whale_state.json")
     market_data = _read_json(root, "market_data.json")
+    market_source = _read_json(root, "market_source_state.json")
     market = _read_json(root, "market_analysis.json")
     paper = _read_json(root, "paper_stats.json")
     bridge = _read_json(root, "real_paper_bridge_state.json")
@@ -262,13 +263,18 @@ def write_status(cwd=None, output=STATUS_FILE):
     lane = _read_json(root, "strategy_lab/lane_research_state.json")
 
     whale_stamp = whale.get("last_successful_whale_at") or whale.get("updated_at")
-    market_data_stamp = market_data.get("updated_at")
+    market_data_stamp = (market_source.get("last_successful_market_at")
+                         or market_data.get("updated_at"))
     market_analysis_stamp = market.get("updated_at")
     whale_health = whale.get("whale_source_health")
     if whale_health != "SOURCE_UNAVAILABLE":
         whale_health = "HEALTHY" if _freshness(whale_stamp) else "STALE"
-    market_health = ("HEALTHY" if _freshness(market_data_stamp) and _freshness(market_analysis_stamp)
-                     else "STALE")
+    market_source_health = market_source.get("source_health")
+    if market_source_health == "SOURCE_UNAVAILABLE":
+        market_health = "SOURCE_UNAVAILABLE"
+    else:
+        market_health = ("HEALTHY" if _freshness(market_data_stamp) and _freshness(market_analysis_stamp)
+                         else "STALE")
     sell_stamp = bridge.get("last_real_sell_evaluation_at") or bridge_health.get("at")
     sell_total = len(ledger.get("positions", {})) if isinstance(ledger.get("positions"), dict) else 0
     sell_evaluated = int(bridge.get("real_positions_evaluated", bridge_health.get("evaluated", 0)) or 0)
@@ -289,6 +295,7 @@ def write_status(cwd=None, output=STATUS_FILE):
         "last_real_reconciliation_at": reconciliation_stamp,
         "last_lane_research_update_at": lane.get("updated_at") or lane.get("last_run_at"),
         "data_source_health": {"market": market_health, "whale": whale_health},
+        "market_source_health": market_health,
         "whale_source_health": whale_health,
         "real_sell_protection": sell_protection,
         "real_positions_evaluated": sell_evaluated,

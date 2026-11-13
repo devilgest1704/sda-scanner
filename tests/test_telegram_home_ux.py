@@ -80,11 +80,15 @@ def ui(monkeypatch, real_data):
     monkeypatch.delenv("CHAT_ID", raising=False)
     dashboard = telegram_api.dashboard
     original_load = dashboard.load
-    whale_state = {"updated_at": datetime.now(timezone.utc).isoformat(),
-                   "last_successful_whale_at": datetime.now(timezone.utc).isoformat(),
-                   "whale_source_health": "HEALTHY"}
+    now = datetime.now(timezone.utc).isoformat()
+    states = {
+        "whale_state.json": {"updated_at": now, "last_successful_whale_at": now,
+                             "whale_source_health": "HEALTHY"},
+        "market_source_state.json": {"source_health": "HEALTHY",
+                                     "last_successful_market_at": now},
+    }
     monkeypatch.setattr(dashboard, "load", lambda path, default: (
-        whale_state if path == "whale_state.json" else original_load(path, default)))
+        states[path] if path in states else original_load(path, default)))
     rows = _rows(_candidate("ACV", "WATCH", 89, 16.6, 1879), _candidate("GMAI", "WATCH", 65, 14.8, 4))
     monkeypatch.setattr(telegram_home, "scanner_candidates", lambda _d: rows)
     monkeypatch.setattr(telegram_home, "real_capacity", lambda _d: _real())

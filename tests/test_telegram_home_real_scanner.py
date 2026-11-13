@@ -49,6 +49,9 @@ def env(monkeypatch):
         monkeypatch.setattr(real_trader, name, forbidden)
     files = {"token_metadata.json": {XEN: {"symbol": "XEN", "decimals": 18}},
              "positions.json": {"positions": {}},
+             "market_source_state.json": {
+                 "source_health": "HEALTHY",
+                 "last_successful_market_at": datetime.now(timezone.utc).isoformat()},
              "whale_state.json": {"updated_at": datetime.now(timezone.utc).isoformat(),
                                   "last_successful_whale_at": datetime.now(timezone.utc).isoformat(),
                                   "whale_source_health": "HEALTHY"}}
@@ -171,6 +174,32 @@ def test_whale_source_failure_fails_closed_and_recovers_automatically(env, monke
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "last_successful_whale_at": datetime.now(timezone.utc).isoformat(),
         "whale_source_health": "HEALTHY",
+    }
+    recovered = _home(env, monkeypatch, rows)
+    assert "⚪ Data stale" not in recovered
+    assert "REAL BUY: READY" in recovered
+
+    env.files.pop("market_source_state.json")
+    env.worker = {**env.worker, "market_source_health": "STALE"}
+    worker_degraded = _home(env, monkeypatch, rows)
+    assert "⚪ Data stale" in worker_degraded
+    assert "REAL BUY: DATA STALE" in worker_degraded
+
+
+def test_market_source_failure_fails_closed_and_recovers_automatically(env, monkeypatch):
+    rows = _rows(_row("ACV", "BUY", 89, blocked=False, phase="CONFIRMATION"))
+    env.files["market_source_state.json"] = {
+        "source_health": "SOURCE_UNAVAILABLE",
+        "last_successful_market_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+    }
+    degraded = _home(env, monkeypatch, rows)
+    assert "⚪ Data stale" in degraded
+    assert "REAL BUY: DATA STALE" in degraded
+    assert "BUY-ready" not in degraded
+
+    env.files["market_source_state.json"] = {
+        "source_health": "HEALTHY",
+        "last_successful_market_at": datetime.now(timezone.utc).isoformat(),
     }
     recovered = _home(env, monkeypatch, rows)
     assert "⚪ Data stale" not in recovered

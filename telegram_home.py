@@ -204,7 +204,19 @@ def _scanner_inputs(dashboard):
     whale_stale = (not isinstance(whale_state, dict)
                    or whale_state.get("whale_source_health") == "SOURCE_UNAVAILABLE"
                    or _scanner_stale(whale_rows))
-    return rows, real, _scanner_stale(rows) or whale_stale
+    market_state = dashboard.load("market_source_state.json", {})
+    market_stamp = ((market_state or {}).get("last_successful_market_at")
+                    or (market_state or {}).get("updated_at")) if isinstance(market_state, dict) else None
+    market_rows = ScannerRows()
+    market_rows.updated_at = market_stamp
+    worker = rb._load_worker_status(dashboard) or {}
+    source_health = (worker.get("market_source_health")
+                     or (worker.get("data_source_health") or {}).get("market"))
+    market_stale = (isinstance(market_state, dict)
+                    and (market_state.get("source_health") == "SOURCE_UNAVAILABLE"
+                         or (market_stamp is not None and _scanner_stale(market_rows))))
+    market_stale = market_stale or source_health in ("STALE", "SOURCE_UNAVAILABLE")
+    return rows, real, _scanner_stale(rows) or whale_stale or market_stale
 
 
 def _home_scanner_lines(dashboard):
