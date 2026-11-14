@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import fcntl
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 
@@ -23,13 +23,13 @@ def _stamp(value):
         result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         if result.tzinfo is None:
             return None
-        return result.astimezone(timezone.utc)
+        return result.astimezone(UTC)
     except (TypeError, ValueError, OverflowError):
         return None
 
 
 def snapshot_health(snapshot, now=None, max_age=MAX_SNAPSHOT_AGE_SECONDS):
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if not isinstance(snapshot, dict) or snapshot.get("schema_version") != 1:
         return False, "accounting snapshot missing or unsupported"
     generated = _stamp(snapshot.get("generated_at"))
@@ -71,8 +71,8 @@ def _quantity_raw(quantity, decimals):
 def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                           now=None, max_age=MAX_SNAPSHOT_AGE_SECONDS):
     """Import missing confirmed BUY lots; return a fail-closed health record."""
-    now = now or datetime.now(timezone.utc)
-    attempted = now.astimezone(timezone.utc).isoformat()
+    now = now or datetime.now(UTC)
+    attempted = now.astimezone(UTC).isoformat()
     try:
         lock_handle = LOCK_FILE.open("a+", encoding="utf-8")
     except OSError as exc:
@@ -89,7 +89,7 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
         try:
             try:
                 snapshot = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - surface unexpected snapshot/RPC failures to the health state
                 return {"ok": False, "syncStatus": "FAILED",
                         "syncError": f"snapshot read failed: {type(exc).__name__}: {exc}",
                         "lastSyncAttemptAt": attempted, "imported": []}
