@@ -118,7 +118,7 @@ def test_next_buy_and_cap_follow_running_worker_config_not_hardcoded(env, monkey
                   "real_max_open_positions": 9}
     real = telegram_home.real_capacity(env.dashboard)
     assert (real["next_buy"], real["cap"], real["max_positions"]) == (25.0, 250.0, 9)
-    env.worker = {**env.worker, "enabled": True, "dry_run": False}
+    env.worker = {**env.worker, "enabled": True, "dry_run": False, "real_buy_size_sda": None}
     monkeypatch.setattr(cfg, "POSITION_DEFAULT_SDA", 20.0)
     monkeypatch.setattr(cfg, "POSITION_MAX_SDA", 20.0)
     assert telegram_home.real_capacity(env.dashboard)["next_buy"] == 20.0
