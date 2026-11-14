@@ -102,13 +102,15 @@ def _status(worker_state=None):
         return f"⚪ STATUS UNKNOWN — {worker_state['status_read_error']}"
     enabled, dry_run = worker_state.get("enabled"), worker_state.get("dry_run")
     if not isinstance(enabled, bool) or not isinstance(dry_run, bool):
-        return "⚪ STATUS UNKNOWN"
-    heartbeat = _parse_timestamp(worker_state.get("updated_at"))
+        return "⚪ STATUS UNKNOWN — enabled/dry_run flags missing"
+    heartbeat = _parse_timestamp(worker_state.get("lastWorkerHeartbeat") or worker_state.get("updated_at"))
     if heartbeat is None:
-        return "⚪ STATUS UNKNOWN"
+        return "⚪ STATUS UNKNOWN — worker heartbeat missing or invalid"
     heartbeat_age = (datetime.now(timezone.utc) - heartbeat).total_seconds()
-    if heartbeat_age < 0 or heartbeat_age > REAL_LEDGER_FRESHNESS_SECONDS:
-        return "⚪ STATUS UNKNOWN"
+    if heartbeat_age < 0:
+        return "⚪ STATUS UNKNOWN — worker heartbeat is in the future"
+    if heartbeat_age > REAL_LEDGER_FRESHNESS_SECONDS:
+        return f"⚪ STATUS UNKNOWN — worker heartbeat stale ({int(heartbeat_age)}s)"
     if not enabled:
         return "🔴 REAL TRADING DISABLED"
     if worker_state.get("worker_health") == "CRITICAL_FAILURE":
