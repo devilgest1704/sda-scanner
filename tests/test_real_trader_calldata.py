@@ -36,6 +36,20 @@ class SwapCalldataTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Daily real-trading loss limit"):
             real_trader.safety_check(real_trader.cfg.POSITION_DEFAULT_SDA, state)
 
+    def test_live_buy_is_blocked_until_wallet_reconciliation_is_fresh(self):
+        state = {
+            "positions": {}, "pending_buys": {},
+            "daily_pnl_date": datetime.now(timezone.utc).date().isoformat(),
+            "daily_realized_pnl_sda": 0.0,
+        }
+        with patch.object(real_trader.cfg, "REAL_TRADING_ENABLED", True), \
+             patch.object(real_trader.cfg, "REAL_TRADING_DRY_RUN", False):
+            with self.assertRaisesRegex(RuntimeError, "REAL BUY blocked"):
+                real_trader.safety_check(10, state)
+            state.update({"syncStatus": "FRESH", "walletSyncHealthy": True,
+                          "reconciliationHealthy": True, "buyDataHealthy": True})
+            real_trader.safety_check(10, state)
+
     def test_real_exposure_uses_recorded_amount_sda(self):
         state = {
             "positions": {"0x" + "44" * 20: {"amount_sda": 290.0}},
