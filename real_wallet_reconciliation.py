@@ -191,6 +191,13 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                         "trailing_armed": False,
                     }
                     positions[token] = position
+                    receipt_fee = None
+                    try:
+                        gas_used = int(receipt.get("gasUsed", "0x0"), 16)
+                        gas_price = int(receipt.get("effectiveGasPrice") or receipt.get("gasPrice") or "0x0", 16)
+                        receipt_fee = str(Decimal(gas_used * gas_price) / Decimal(10 ** 18))
+                    except (TypeError, ValueError):
+                        pass
                     record = {
                         "action": "MANUAL_BUY", "source": "MANUAL", "status": "OPEN",
                         "token": token, "symbol": position["symbol"], "tx": tx,
@@ -198,6 +205,9 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                         "quantity_raw": raw_quantity, "decimals": decimals,
                         "invested_sda": str(invested), "cost_basis_sda": str(cost),
                         "execution_price_sda": str(price),
+                        "network_fee_sda": receipt_fee,
+                        "swap_fee_sda": None,
+                        "swap_fee_included_in_execution_price": True,
                         "accounting_identity": position["accounting_identity"],
                         "sellManagementEnabled": True,
                     }
@@ -210,7 +220,6 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                     skipped.append({"token": token, "tx": tx,
                                     "reason": f"{type(exc).__name__}: {str(exc)[:240]}"})
 
-            state["updated_at"] = attempted
             state["lastSyncAttemptAt"] = attempted
             state["lastSuccessfulWalletSync"] = snapshot.get("generated_at")
             state["lastBlockchainDataAt"] = (snapshot.get("blockchain_range") or {}).get("latest_timestamp")
@@ -219,8 +228,7 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
             state["syncStatus"] = "FRESH" if not skipped else "DEGRADED"
             state["lastSyncError"] = "; ".join(item["reason"] for item in skipped) if skipped else None
             state["walletSyncSource"] = "real_accounting_state.json"
-            if imported:
-                real_trader.save_state(state)
+            real_trader.save_state(state)
             return {"ok": not skipped, "syncStatus": state["syncStatus"],
                     "syncError": state["lastSyncError"], "lastSyncAttemptAt": attempted,
                     "lastSuccessfulWalletSync": state["lastSuccessfulWalletSync"],
