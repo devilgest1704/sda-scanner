@@ -44,6 +44,14 @@ def _state(count=8, cost=20, extra=None, pending=None):
 
 def _set_state(env, state):
     env.state = state
+    live_state = dict(state)
+    live_state.update({
+        "syncStatus": "FRESH", "walletSyncHealthy": True,
+        "reconciliationHealthy": True, "buyDataHealthy": True,
+        "lastSuccessfulWalletSyncAt": env.worker.get("lastSuccessfulWalletSync"),
+        "walletBalances": {"native_sda_wei": str(1000 * 10**18)},
+    })
+    env.files["real_trade_state.json"] = live_state
     rows = []
     for token, position in state.get("positions", {}).items():
         try:
@@ -82,8 +90,10 @@ def env(monkeypatch):
                                   "last_successful_whale_at": datetime.now(timezone.utc).isoformat(),
                                   "whale_source_health": "HEALTHY"}}
     holder = SimpleNamespace(state=_state(), worker={"enabled": True, "dry_run": False,
-                             "syncStatus": "FRESH",
+                             "syncStatus": "FRESH", "walletSyncHealthy": True,
+                             "reconciliationHealthy": True,
                              "lastSuccessfulWalletSync": datetime.now(timezone.utc).isoformat(),
+                             "lastSuccessfulWalletSyncAt": datetime.now(timezone.utc).isoformat(),
                              "updated_at": datetime.now(timezone.utc).isoformat()}, files=files,
                              forbidden=forbidden)
     monkeypatch.setattr(rb, "_state", lambda _d: holder.state)
