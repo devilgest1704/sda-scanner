@@ -311,6 +311,7 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
             # Current balances are read only and validated before the cursor commit.
             native = real_trader.native_balance(wallet)
             known.update(staged["positions"].keys())
+            known.add(str(cfg.WSDA_ADDRESS).lower())
             balances = {}
             for token in sorted(known):
                 raw_balance = int(real_trader.token_balance(token, wallet))
