@@ -192,7 +192,12 @@ def reconcile():
     # newly discovered manual BUY lots. This path never signs or broadcasts.
     migrated = swing_executor.migrate_if_needed()
     import real_wallet_reconciliation
-    wallet_sync = real_wallet_reconciliation.reconcile_manual_buys(real_trader)
+    try:
+        wallet_sync = real_wallet_reconciliation.reconcile_manual_buys(real_trader)
+    except Exception as exc:  # noqa: BLE001 - keep independent SELL reconciliation alive
+        wallet_sync = {"ok": False, "syncStatus": "FAILED",
+                       "syncError": f"wallet reconciliation exception: {type(exc).__name__}: {str(exc)[:240]}",
+                       "lastSyncAttemptAt": _now(), "imported": []}
     actions = []
     for imported in wallet_sync.get("imported", []):
         actions.append({"action": "MANUAL_BUY_IMPORT" if imported.get("source") == "MANUAL" else "BUY_RECONCILED",
