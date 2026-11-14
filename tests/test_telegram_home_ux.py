@@ -170,8 +170,8 @@ def test_real_trading_menu_and_all_submenus_with_back(ui):
     assert real["text"].startswith("🤖 REAL TRADING 🟢")
     assert callbacks(real) == ["REAL_BOT_PORTFOLIO", "REAL_BOT_SELL_V2", "REAL_BOT_BUY", "REAL_BOT_SELL",
                                "REAL_BOT_STATS", "REAL_BOT_PNL", "REAL_BOT_REFRESH", "MAIN"]
-    checks = {"REAL_BOT_PORTFOLIO": "📊 PORTFOLIO", "REAL_BOT_BUY": "🟢 CONFIRMED BOT BUY HISTORY",
-              "REAL_BOT_SELL": "🔴 MATCHED BOT SELL HISTORY", "REAL_BOT_STATS": "📈 REAL STATISTICS",
+    checks = {"REAL_BOT_PORTFOLIO": "📊 PORTFOLIO", "REAL_BOT_BUY": "🟢 CONFIRMED REAL BUY HISTORY",
+              "REAL_BOT_SELL": "🔴 MATCHED REAL SELL HISTORY", "REAL_BOT_STATS": "📈 REAL STATISTICS",
               "REAL_BOT_PNL": "📈 REAL PNL", "REAL_BOT_PNL_DAILY": "📅 DAILY PNL",
               "REAL_BOT_PNL_WEEKLY": "📆 WEEKLY PNL", "REAL_BOT_PNL_MONTHLY": "🗓 MONTHLY PNL"}
     for callback, title in checks.items():
