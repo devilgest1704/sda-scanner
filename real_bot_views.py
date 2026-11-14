@@ -240,6 +240,11 @@ def _build_dashboard_data(dashboard):
         metadata=dashboard.load("token_metadata.json",{})
     except Exception:
         metadata={}
+    runtime_buy_txs = {
+        str(trade.get("tx") or trade.get("tx_hash") or "").lower()
+        for trade in (runtime_state.get("trades") or [])
+        if isinstance(trade,dict) and str(trade.get("action") or "").upper() in {"BUY","MANUAL_BUY"}
+    } if isinstance(runtime_state,dict) else set()
     holdings_by_address={}
     snapshot=_tracked_wallet_snapshot(accounting, dashboard)
     holdings=snapshot.get("holdings") if isinstance(snapshot.get("holdings"),list) else []
@@ -283,7 +288,8 @@ def _build_dashboard_data(dashboard):
             "price_sda":price,"price_timestamp":holding.get("price_timestamp") if holding else None,
             "price_age_seconds":holding.get("price_age_seconds") if holding else None,
             "price_source":holding.get("price_source") if holding else None,
-            "source":runtime_position.get("source") or "BOT",
+            "source":(runtime_position.get("source") or
+                      ("MANUAL" if str(position.get("buy_tx") or "").lower() not in runtime_buy_txs else "BOT")),
             "sell_management_enabled":runtime_position.get("sellManagementEnabled", True),
             "valued":value is not None,"balance_matches":True,"buy_verified":True})
     market_count=sum(item.get("market_value_sda") is not None for item in holdings)
