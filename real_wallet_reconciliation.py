@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import fcntl
 import json
-import os
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
