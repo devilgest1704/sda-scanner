@@ -204,7 +204,7 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=None,
                         raise ValueError("BUY transaction receipt missing or unsuccessful")
                     transaction = real_trader.rpc("eth_getTransactionByHash", [tx])
                     if not isinstance(transaction, dict):
-                        raise ValueError("BUY transaction data unavailable")
+                        raise TypeError("BUY transaction data unavailable")
                     if str(transaction.get("from") or "").lower() != wallet:
                         raise ValueError("BUY transaction sender does not match REAL wallet")
                     pool_fee_tier = _pool_fee_tier(transaction)
