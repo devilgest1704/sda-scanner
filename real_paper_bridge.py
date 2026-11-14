@@ -95,6 +95,11 @@ def _wallet_sync_summary(sync_result, real_trader):
         "lastBlockchainDataAt": sync_result.get("lastBlockchainDataAt") or persisted.get("lastBlockchainDataAt"),
         "ledgerUpdatedAt": sync_result.get("ledgerUpdatedAt") or persisted.get("ledgerUpdatedAt"),
         "lastSyncError": sync_result.get("syncError") or persisted.get("lastSyncError"),
+        "walletSyncHealth": persisted.get("walletSyncHealth"),
+        "buyDataHealthy": persisted.get("buyDataHealthy"),
+        "walletSyncHealthy": persisted.get("walletSyncHealthy"),
+        "reconciliationHealthy": persisted.get("reconciliationHealthy"),
+        "sellDataHealthy": persisted.get("sellDataHealthy"),
         "imported_count": len(sync_result.get("imported", [])),
     }
 
