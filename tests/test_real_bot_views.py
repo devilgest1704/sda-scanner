@@ -150,7 +150,7 @@ def test_portfolio_contains_only_nine_blockchain_fifo_positions(built_data):
 
 def test_buy_history_uses_only_confirmed_bot_buys(built_data):
     text = views._buy_text(built_data)
-    assert "Confirmed bot BUY transactions: 21" in text
+    assert "Confirmed REAL BUY transactions: 21" in text
     assert "Total invested: 436.59 SDA" in text
     assert "PINE" not in text
 
