@@ -202,11 +202,12 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=None,
                     receipt = real_trader.rpc("eth_getTransactionReceipt", [tx])
                     if not isinstance(receipt, dict) or int(receipt.get("status", "0x0"), 16) != 1:
                         raise ValueError("BUY transaction receipt missing or unsuccessful")
-                    try:
-                        transaction = real_trader.rpc("eth_getTransactionByHash", [tx])
-                        pool_fee_tier = _pool_fee_tier(transaction)
-                    except Exception:  # noqa: BLE001 - fee tier is optional metadata; receipt remains authoritative
-                        pool_fee_tier = None
+                    transaction = real_trader.rpc("eth_getTransactionByHash", [tx])
+                    if not isinstance(transaction, dict):
+                        raise ValueError("BUY transaction data unavailable")
+                    if str(transaction.get("from") or "").lower() != wallet:
+                        raise ValueError("BUY transaction sender does not match REAL wallet")
+                    pool_fee_tier = _pool_fee_tier(transaction)
                     cost = Decimal(str(row.get("cost_basis_sda") or buy.get("invested_sda")))
                     invested = Decimal(str(buy.get("invested_sda") or cost))
                     if not cost.is_finite() or cost <= 0 or invested <= 0:
