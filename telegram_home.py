@@ -145,7 +145,8 @@ def real_capacity(dashboard):
     paper = dashboard.load("positions.json", {})
     paper_positions = paper.get("positions", {}) if isinstance(paper, dict) else {}
     return {
-        "positions": len(accounting_positions) + len(pending), "pending": len(pending),
+        "positions": len(accounting_positions), "reserved_positions": len(accounting_positions) + len(pending),
+        "pending": len(pending),
         "max_positions": int(worker.get("real_max_open_positions") or cfg.MAX_OPEN_POSITIONS),
         "cap": float(cap), "deployed": float(deployed), "available": float(available),
         "next_buy": float(worker.get("real_buy_size_sda") or cfg.position_sda()),
@@ -164,7 +165,7 @@ def real_gate(real, token=None):
     token = str(token or "").lower()
     if token and (token in real["held"] or token in real["paper_held"]):
         return "BLOCKED", "Already held"
-    if real["positions"] >= real["max_positions"]:
+    if real["reserved_positions"] >= real["max_positions"]:
         return "BLOCKED", "Position limit"
     if real["deployed"] + real["next_buy"] > real["cap"] + 1e-9:
         return "BLOCKED", "Capital limit"
