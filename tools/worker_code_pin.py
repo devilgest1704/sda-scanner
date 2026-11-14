@@ -293,9 +293,18 @@ def write_status(cwd=None, output=STATUS_FILE):
     sell_protection = ("ACTIVE" if sell_recent and not sell_failed and sell_evaluated >= sell_total
                        else "FAILING" if sell_recent and sell_failed else "UNKNOWN")
     reconciliation_stamp = (wallet_sync.get("lastSuccessfulReconciliation")
-                             or ledger.get("lastSuccessfulReconciliation"))
-    reconciliation_health = ("ACTIVE" if wallet_sync.get("syncStatus") == "FRESH"
-                             and _freshness(reconciliation_stamp) else "FAILING")
+                             or ledger.get("lastSuccessfulReconciliation")
+                             or bridge.get("last_real_reconciliation_at"))
+    sync_status = wallet_sync.get("syncStatus") or ledger.get("syncStatus")
+    if sync_status == "FRESH":
+        reconciliation_health = "ACTIVE" if _freshness(reconciliation_stamp) else "FAILING"
+    elif sync_status in {"STALE", "FAILED", "DEGRADED", "IN_PROGRESS"}:
+        reconciliation_health = "FAILING"
+    else:
+        # Legacy workers have no snapshot health object. Preserve the old
+        # reconciliation timestamp for diagnostics, but BUY admission still
+        # requires syncStatus=FRESH in the scanner.
+        reconciliation_health = "ACTIVE" if _freshness(reconciliation_stamp) else "UNKNOWN"
 
     status.update({
         "last_successful_scan_at": paper.get("updated_at"),
