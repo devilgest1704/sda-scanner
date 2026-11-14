@@ -276,7 +276,8 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=None,
             if imported:
                 state["updated_at"] = attempted
             state["lastSyncAttemptAt"] = attempted
-            state["lastSuccessfulWalletSync"] = snapshot.get("generated_at")
+            state["lastSuccessfulWalletSync"] = attempted
+            state["lastBlockchainSnapshotGeneratedAt"] = snapshot.get("generated_at")
             state["lastBlockchainDataAt"] = (snapshot.get("blockchain_range") or {}).get("latest_timestamp")
             state["ledgerUpdatedAt"] = attempted if imported else state.get("ledgerUpdatedAt")
             state["lastSuccessfulReconciliation"] = attempted if not skipped else state.get("lastSuccessfulReconciliation")
@@ -287,6 +288,7 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=None,
             return {"ok": not skipped, "syncStatus": state["syncStatus"],
                     "syncError": state["lastSyncError"], "lastSyncAttemptAt": attempted,
                     "lastSuccessfulWalletSync": state["lastSuccessfulWalletSync"],
+                    "lastBlockchainSnapshotGeneratedAt": state["lastBlockchainSnapshotGeneratedAt"],
                     "lastSuccessfulReconciliation": state["lastSuccessfulReconciliation"],
                     "lastBlockchainDataAt": state["lastBlockchainDataAt"],
                     "ledgerUpdatedAt": state["ledgerUpdatedAt"],
