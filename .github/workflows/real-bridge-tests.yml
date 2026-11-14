@@ -217,11 +217,16 @@ jobs:
           dashboard=SimpleNamespace(load=lambda path, default: files.get(path,default))
           views.clear_cache()
           data=views._build_dashboard_data(dashboard)
-          # Shared dust policy: negligible residuals are not open BOT positions.
-          expected_open=sum(1 for t,p in (runtime.get("positions") or {}).items()
-                            if isinstance(p,dict) and float(p.get("remaining_quantity") or p.get("token_amount_raw") or 0)>0
-                            and not views._runtime_dust(t,p,metadata))
-          assert len(data["positions"]) == expected_open
+          # Blockchain accounting is authoritative for displayed open positions.
+          accounting_tokens={str(p.get("token") or "").lower()
+                             for p in accounting.get("open_positions") or [] if isinstance(p,dict)}
+          runtime_tokens={str(t).lower() for t,p in (runtime.get("positions") or {}).items()
+                          if isinstance(p,dict) and float(p.get("remaining_quantity") or p.get("token_amount_raw") or 0)>0
+                          and not views._runtime_dust(t,p,metadata)}
+          assert {str(p["token"]).lower() for p in data["positions"]} == accounting_tokens
+          missing_runtime_tokens=accounting_tokens-runtime_tokens
+          assert all(p["source"]=="MANUAL" for p in data["positions"]
+                     if str(p["token"]).lower() in missing_runtime_tokens)
           assert len(data["buy_records"]) == accounting["statistics"]["confirmed_buys_count"]
           assert len(data["sell_records"]) == accounting["statistics"]["matched_sells_count"]
           assert abs(sum(float(x["pnl_sda"]) for x in data["sell_records"])-float(accounting["realized_pnl_sda"])) < 1e-8
