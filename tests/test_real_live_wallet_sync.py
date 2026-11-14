@@ -55,7 +55,7 @@ class FakeTrader:
             if number == 10:
                 txs = [{
                     "hash": "0x" + "d" * 64, "from": WALLET,
-                    "to": "0x" + "e" * 40, "value": hex(2 * 10**18),
+                    "to": live.cfg.ROUTER_ADDRESS, "value": hex(2 * 10**18),
                     "gasPrice": hex(1),
                 }]
             return {"timestamp": hex(1_800_000_000 + number), "transactions": txs}
@@ -144,7 +144,7 @@ class LiveWalletSyncTests(unittest.TestCase):
                 if method == "eth_getBlockByNumber":
                     return {"timestamp": "0x6a000000", "transactions": [{
                         "hash": "0x" + "f" * 64, "from": WALLET,
-                        "to": "0x" + "e" * 40, "value": "0x0", "gasPrice": "0x1",
+                        "to": live.cfg.ROUTER_ADDRESS, "value": "0x0", "gasPrice": "0x1",
                     }]}
                 if method == "eth_getTransactionReceipt":
                     return {"status": "0x1", "gasUsed": "0x5208", "effectiveGasPrice": "0x1",
