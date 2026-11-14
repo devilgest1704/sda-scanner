@@ -195,9 +195,9 @@ def _real_lines(real, labelled=True):
         return ["⚪ REAL capacity unavailable"]
     capacity = f"{real['positions']}/{real['max_positions']}"
     if labelled:
-        return [_line("📦 Positions", capacity), _line("💰 Available", _sda(real["available"])),
+        return [_line("💰 Available", _sda(real["available"])),
                 _line("💵 Next BUY", _sda(real["next_buy"]))]
-    return [f"Positions: {capacity}", f"Available: {_sda(real['available'])}",
+    return [f"Available: {_sda(real['available'])}",
             f"Next BUY: {_sda(real['next_buy'])}"]
 
 
@@ -300,7 +300,7 @@ def home_text(dashboard):
             _line("📈 Bot PnL", real_bot_views._signed_sda(data.get("total_pnl")) + partial),
             _line("📊 Open PnL", real_bot_views._signed_sda(data.get("open_pnl"))),
             _line("💵 Realized", real_bot_views._signed_sda(data.get("realized_pnl"))),
-            _line("📦 Positions", str(len(data.get("positions") or []))),
+            _line("📦 Positions", f"{len(data.get('positions') or [])}/{int(data.get('max_positions') or 10)}"),
         ]
     try:
         lines += _home_scanner_lines(dashboard)
