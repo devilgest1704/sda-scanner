@@ -404,7 +404,8 @@ def _fmt(value,signed=False):
 
 def _main_text(data):
     status=data.get("worker_status") or "⚪ UNKNOWN"
-    status_icon="🟢" if "LIVE" in status else ("🟡" if "DRY RUN" in status else "🔴")
+    status_icon=("🟠" if "BUY DATA DEGRADED" in status else
+                 "🟢" if "LIVE" in status else ("🟡" if "DRY RUN" in status else "🔴"))
     if data.get("portfolio_value") is None: portfolio="unavailable"
     elif data.get("portfolio_complete"): portfolio=f"{data['portfolio_value']:.2f} SDA"
     else: portfolio=f"≥{data['portfolio_value']:.2f} SDA ({data['portfolio_valued_count']}/{data['portfolio_total_count']})"
