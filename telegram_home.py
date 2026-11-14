@@ -239,6 +239,38 @@ def _scanner_inputs(dashboard):
     return rows, real, _scanner_stale(rows) or whale_stale or market_stale or wallet_sync_stale
 
 
+def _timestamp_age(value):
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            return None
+        return max(0, int((datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _wallet_diagnostics(worker):
+    worker = worker if isinstance(worker, dict) else {}
+    sync_stamp = worker.get("lastSuccessfulWalletSyncAt") or worker.get("lastSuccessfulWalletSync")
+    reconcile_stamp = worker.get("lastSuccessfulReconciliationAt") or worker.get("lastSuccessfulReconciliation")
+    sync_age = _timestamp_age(sync_stamp)
+    reconcile_age = _timestamp_age(reconcile_stamp)
+    sync_icon = "🟢" if sync_age is not None and sync_age <= 120 else (
+        "🟠" if sync_age is not None and sync_age <= 300 else "🔴")
+    reconcile_icon = "🟢" if reconcile_age is not None and reconcile_age <= 120 else (
+        "🟠" if reconcile_age is not None and reconcile_age <= 300 else "🔴")
+    wallet_ok = worker.get("walletSyncHealthy") is True
+    lines = [
+        f"{sync_icon} Blockchain sync {sync_age}s ago" if sync_age is not None else "🔴 Blockchain sync unavailable",
+        f"{reconcile_icon} Reconciliation {reconcile_age}s ago" if reconcile_age is not None else "🔴 Reconciliation unavailable",
+        ("🟢 Wallet OK" if wallet_ok else "🔴 Wallet not verified"),
+    ]
+    reason = worker.get("lastSyncError")
+    if reason:
+        lines.append(f"⚠ {reason}")
+    return lines
+
+
 def _home_scanner_lines(dashboard):
     rows, real, stale = _scanner_inputs(dashboard)
     worker = rb._load_worker_status(dashboard) or {}
@@ -253,11 +285,7 @@ def _home_scanner_lines(dashboard):
             if source_health and source_health not in {"HEALTHY", "ACTIVE", "FRESH", "OK"}:
                 lines.append(f"⚠ {label}: {source_health}")
         if worker.get("syncStatus") != "FRESH" or "STATUS UNKNOWN" in rb._status(worker):
-            detail = worker.get("lastSyncError") or rb._status(worker)
-            lines.append(f"⚠ {detail}")
-            last_sync = worker.get("lastSuccessfulWalletSync")
-            if last_sync:
-                lines.append(f"Last successful wallet sync: {last_sync}")
+            lines.extend(_wallet_diagnostics(worker))
     else:
         ready, watch = _counts(rows)
         lines += [_line("🟢 BUY-ready", str(ready)), _line("🟡 WATCH", str(watch))]
@@ -341,6 +369,8 @@ def buy_scanner_text(dashboard, detail=False):
         lines += ["SHARED SIGNAL", f"BUY-ready: {ready}", f"WATCH: {watch}", ""]
     state, reason, _best = real_buy_status(rows, real, stale)
     lines += ["REAL"] + _real_lines(real, labelled=False)
+    worker = rb._load_worker_status(dashboard) or {}
+    lines.extend(_wallet_diagnostics(worker))
     lines.append(f"Status: {state}" + (f" — {reason}" if reason and state == "BLOCKED" else ""))
     lines += ["Production admission: PAPER-coupled", ""]
     if stale:
