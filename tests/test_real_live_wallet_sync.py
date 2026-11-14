@@ -81,6 +81,8 @@ class LiveWalletSyncTests(unittest.TestCase):
         self.assertTrue(position["sellManagementEnabled"])
         self.assertEqual(position["token_amount_raw"], 10 * 10**18)
         self.assertEqual(position["buy_tx"], "0x" + "d" * 64)
+        self.assertEqual(position["amount_sda"], 2.0)
+        self.assertEqual(trader.state["walletBalances"]["tokens_raw"][TOKEN], str(10 * 10**18))
         self.assertTrue(position["opened_at"])
         self.assertGreater(float(position["network_fee_sda"]), 0)
         self.assertAlmostEqual(float(position["execution_price_sda"]), 0.2, places=8)
