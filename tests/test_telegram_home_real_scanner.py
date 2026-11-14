@@ -129,7 +129,7 @@ def test_home_shows_real_buy_scanner_and_no_paper_summary(env, monkeypatch):
     text = _home(env, monkeypatch, _rows(_row("IDM", "WATCH", 77), _row("AGFU", "NO", 52)))
     assert "🔥 REAL BUY SCANNER" in text
     assert "🟢 BUY-ready   0" in text and "🟡 WATCH       1" in text
-    assert "📦 Positions    8/10" in text and "💰 Available   140 SDA" in text
+    assert "📦 Positions   8/10" in text and "💰 Available   140 SDA" in text
     assert "💵 Next BUY    30 SDA" in text
     assert "🟡 REAL BUY: NO SIGNAL" in text
     assert "🧪 PAPER" not in text and "🎯" not in text and "IDM" not in text
@@ -149,7 +149,7 @@ def test_ready_signal_blocked_by_position_limit(env, monkeypatch):
     _set_state(env, _state(count=10, cost=1))
     text = _home(env, monkeypatch, _rows(_row("ACV", "BUY", 89, blocked=False, phase="CONFIRMATION")))
     assert "🔴 REAL BUY: BLOCKED\nPosition limit" in text
-    assert "📦 Positions    10/10" in text
+    assert "📦 Positions   10/10" in text
 
 
 def test_ready_signal_blocked_by_capital(env, monkeypatch):
@@ -173,7 +173,7 @@ def test_pending_buy_is_pending(env, monkeypatch):
     _set_state(env, _state(count=8, pending={"0x" + "a" * 40: {"position_sda": 30.0}}))
     text = _home(env, monkeypatch, _rows(_row("IDM", "WATCH", 77)))
     assert "🟡 REAL BUY: PENDING" in text
-    assert "📦 Positions    9/10" in text and "💰 Available   110 SDA" in text
+    assert "📦 Positions   9/10" in text and "💰 Available   110 SDA" in text
 
 
 def test_stale_scanner_shows_data_stale_without_counts_or_candidate(env, monkeypatch):
