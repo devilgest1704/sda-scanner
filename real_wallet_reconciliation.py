@@ -44,6 +44,14 @@ def snapshot_health(snapshot, now=None, max_age=MAX_SNAPSHOT_AGE_SECONDS):
         return False, "accounting snapshot timestamp is in the future"
     if age > max_age:
         return False, f"stale blockchain snapshot ({int(age)}s old)"
+    blockchain_data = _stamp((snapshot.get("blockchain_range") or {}).get("latest_timestamp"))
+    if blockchain_data is None:
+        return False, "latest blockchain data timestamp missing or invalid"
+    blockchain_age = (now - blockchain_data).total_seconds()
+    if blockchain_age < 0:
+        return False, "latest blockchain data timestamp is in the future"
+    if blockchain_age > max_age:
+        return False, f"stale blockchain data ({int(blockchain_age)}s old)"
     if int(snapshot.get("chain_id") or 0) != CHAIN_ID:
         return False, "accounting snapshot chain mismatch"
     if not snapshot.get("wallet"):
