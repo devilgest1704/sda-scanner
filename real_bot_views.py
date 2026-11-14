@@ -178,6 +178,34 @@ def _tracked_wallet_snapshot(accounting, dashboard=None):
                        if isinstance(runtime_state, dict) else {})
     raw_tokens = wallet_balances.get("tokens_raw") if isinstance(wallet_balances, dict) else {}
     raw_tokens = raw_tokens if isinstance(raw_tokens, dict) else {}
+    if not raw_tokens:
+        # Migration-only display fallback for workers that have not yet run the
+        # new RPC sync. This path never grants BUY capacity; real_capacity()
+        # requires the persisted worker RPC balance record.
+        try:
+            snapshot = _ORIGINAL_FETCH_WALLET_SNAPSHOT(include_prices=False)
+        except Exception as exc:
+            return {"native_sda": None, "holdings": [], "token_balances_loaded": False,
+                    "tracked_expected_count": len(expected), "tracked_missing_contracts": sorted(expected),
+                    "market_complete": False, "errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
+        all_holdings = snapshot.get("holdings") if isinstance(snapshot, dict) else []
+        all_holdings = all_holdings if isinstance(all_holdings, list) else []
+        tracked_addresses = set(expected) | {_WSDA}
+        tracked = [item for item in all_holdings if isinstance(item, dict)
+                   and str(item.get("address") or "").lower() in tracked_addresses]
+        wallet = str(snapshot.get("wallet_address") or rb._wallet_address()).lower()
+        if tracked:
+            with ThreadPoolExecutor(max_workers=min(4, len(tracked))) as pool:
+                tracked = list(pool.map(lambda item: _price_holding(item, wallet, analysis), tracked))
+        present = {str(item.get("address") or "").lower() for item in tracked}
+        missing = sorted(expected - present)
+        valued = sum(item.get("market_value_sda") is not None for item in tracked)
+        return {**snapshot, "wallet_address": wallet, "holdings": tracked,
+                "tracked_expected_count": len(tracked_addresses),
+                "tracked_missing_contracts": missing, "market_valued_count": valued,
+                "market_complete": valued == len(tracked_addresses) and not missing,
+                "token_balances_loaded": bool(snapshot.get("token_balances_loaded")),
+                "market_price_method": "read-only wallet explorer migration fallback"}
     tracked_addresses = set(expected) | {_WSDA}
     wallet = str(wallet_balances.get("wallet") or rb._wallet_address()).lower()
     holdings = []
@@ -291,9 +319,19 @@ def _build_dashboard_data(dashboard):
     # accounting-only rows during migration, but never hide a newly reconciled
     # wallet position merely because the audit snapshot has not been rebuilt.
     runtime_positions = (runtime_state.get("positions") or {}) if isinstance(runtime_state,dict) else {}
-    position_source=[(str(p.get("token") or token).lower(),p,True)
-        for token,p in runtime_positions.items()
-        if isinstance(p,dict) and p.get("token",token)]
+    position_source=[]
+    for token,position in runtime_positions.items():
+        if not isinstance(position,dict):
+            continue
+        quantity=position.get("remaining_quantity",position.get("token_amount_raw"))
+        cost=position.get("remaining_cost_basis",position.get("amount_sda",position.get("cost_sda")))
+        try:
+            valid_runtime_position=(Decimal(str(quantity or 0))>0 and cost is not None
+                                    and Decimal(str(cost))>=0)
+        except Exception:
+            valid_runtime_position=False
+        if valid_runtime_position:
+            position_source.append((str(position.get("token") or token).lower(),position,True))
     runtime_tokens={token for token,_,_ in position_source}
     position_source.extend((str(p.get("token") or "").lower(),p,False)
         for p in (accounting.get("open_positions") or [])
@@ -352,7 +390,10 @@ def _build_dashboard_data(dashboard):
         "invested_sda":rb._finite_number(x.get("invested_sda")),"tx":x.get("tx")}
         for x in (accounting.get("buy_transactions") or []) if isinstance(x,dict)]
     seen_buy_txs={str(x.get("tx") or "").lower() for x in buy_records if x.get("tx")}
-    for trade in (runtime_state.get("trades") or []) if isinstance(runtime_state,dict) else []:
+    runtime_sync_fresh=(isinstance(runtime_state,dict)
+                        and runtime_state.get("syncStatus")=="FRESH"
+                        and runtime_state.get("walletSyncHealthy") is True)
+    for trade in (runtime_state.get("trades") or []) if runtime_sync_fresh else []:
         if not isinstance(trade,dict) or str(trade.get("action") or "").upper() not in {"BUY","MANUAL_BUY","BUY_RECONCILED"}:
             continue
         tx=str(trade.get("tx") or trade.get("tx_hash") or "").lower()
