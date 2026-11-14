@@ -111,6 +111,50 @@ class LiveWalletSyncTests(unittest.TestCase):
         self.assertEqual(trader.state["lastProcessedBlock"], 5)
         self.assertGreaterEqual(trader.state["walletSyncRetryAfterSeconds"], 1)
 
+
+    def test_manual_partial_sell_reconciles_proceeds_and_remaining_cost(self):
+        state = {
+            "positions": {TOKEN: {
+                "token": TOKEN, "symbol": "TEST", "source": "MANUAL",
+                "sellManagementEnabled": True, "buy_tx": "0xbuy",
+                "remaining_quantity": 10 * 10**18, "token_amount_raw": 10 * 10**18,
+                "remaining_cost_basis": "20", "amount_sda": 20,
+            }},
+            "trades": [], "lastProcessedBlock": 9,
+        }
+        class SellTrader(FakeTrader):
+            def __init__(self):
+                super().__init__(state)
+            def rpc(self, method, params):
+                if method == "eth_chainId":
+                    return hex(live.cfg.CHAIN_ID)
+                if method == "eth_blockNumber":
+                    return "0xa"
+                if method == "eth_getBlockByNumber":
+                    return {"timestamp": "0x6a000000", "transactions": [{
+                        "hash": "0x" + "f" * 64, "from": WALLET,
+                        "to": "0x" + "e" * 40, "value": "0x0", "gasPrice": "0x1",
+                    }]}
+                if method == "eth_getTransactionReceipt":
+                    return {"status": "0x1", "gasUsed": "0x5208", "effectiveGasPrice": "0x1",
+                        "logs": [
+                            {"address": TOKEN, "topics": [TRANSFER, TOPIC_WALLET, TOPIC_SENDER],
+                             "data": hex(5 * 10**18), "logIndex": "0x1"},
+                            {"address": live.cfg.WSDA_ADDRESS, "topics": [TRANSFER, TOPIC_SENDER, TOPIC_WALLET],
+                             "data": hex(12 * 10**18), "logIndex": "0x2"},
+                        ]}
+                raise AssertionError(method)
+        trader = SellTrader()
+        result = live.sync_once(trader)
+        self.assertTrue(result["ok"])
+        position = trader.state["positions"][TOKEN]
+        self.assertEqual(position["remaining_quantity"], 5 * 10**18)
+        self.assertEqual(position["remaining_cost_basis"], "10")
+        sell = [x for x in trader.state["trades"] if x.get("action") == "MANUAL_SELL"]
+        self.assertEqual(len(sell), 1)
+        self.assertEqual(sell[0]["proceeds_sda"], "12")
+        self.assertGreater(float(sell[0]["net_pnl_sda"]), 1.99)
+
     def test_freshness_thresholds(self):
         now = datetime(2026, 11, 15, tzinfo=timezone.utc)
         stamp = now.isoformat()
