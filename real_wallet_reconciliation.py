@@ -135,10 +135,9 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                 if any(str(p.get("buy_tx") or "").lower() == tx
                        for p in positions.values() if isinstance(p, dict)):
                     continue
-                if any(str(item.get("tx") or "").lower() == tx and
-                       str(item.get("token") or "").lower() == token
-                       for item in imports if isinstance(item, dict)):
-                    continue
+                already_imported = any(str(item.get("tx") or "").lower() == tx and
+                                        str(item.get("token") or "").lower() == token
+                                        for item in imports if isinstance(item, dict))
                 if token in positions and isinstance(positions[token], dict):
                     # Do not merge distinct lots into an existing position with a
                     # different cost basis. Leave it for explicit multi-lot handling.
@@ -234,7 +233,7 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                         pending_buys.pop(token, None)
                     if not existing_trade:
                         trades.append(record)
-                    if source == "MANUAL":
+                    if source == "MANUAL" and not already_imported:
                         imports.append({"tx": tx, "token": token, "at": opened,
                                         "accounting_identity": position["accounting_identity"]})
                     imported.append({"token": token, "symbol": position["symbol"], "tx": tx,
