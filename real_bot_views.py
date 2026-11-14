@@ -315,6 +315,18 @@ def _build_dashboard_data(dashboard):
     buy_records=[{"symbol":x.get("symbol") or "UNKNOWN","at":x.get("at"),
         "invested_sda":rb._finite_number(x.get("invested_sda")),"tx":x.get("tx")}
         for x in (accounting.get("buy_transactions") or []) if isinstance(x,dict)]
+    seen_buy_txs={str(x.get("tx") or "").lower() for x in buy_records if x.get("tx")}
+    for trade in (runtime_state.get("trades") or []) if isinstance(runtime_state,dict) else []:
+        if not isinstance(trade,dict) or str(trade.get("action") or "").upper() not in {"BUY","MANUAL_BUY","BUY_RECONCILED"}:
+            continue
+        tx=str(trade.get("tx") or trade.get("tx_hash") or "").lower()
+        if tx and tx in seen_buy_txs:
+            continue
+        buy_records.append({"symbol":trade.get("symbol") or "UNKNOWN","at":trade.get("at"),
+            "invested_sda":rb._finite_number(trade.get("invested_sda",trade.get("cost_basis_sda",trade.get("amount_sda")))),
+            "tx":trade.get("tx") or trade.get("tx_hash")})
+        if tx:
+            seen_buy_txs.add(tx)
     buy_records.sort(key=lambda x:str(x.get("at") or ""),reverse=True)
     unresolved=accounting.get("bot_unresolved_transactions") or []
     buy_values=[x["invested_sda"] for x in buy_records]
@@ -340,10 +352,10 @@ def _build_dashboard_data(dashboard):
     return {"source":"blockchain_fifo","load_error":None,"worker":worker,
         "worker_status":rb._status(worker),"state":accounting,"snapshot":snapshot,
         "positions":positions,"buy_records":buy_records,"sell_records":sell_records,
-        "buy_count":int(stats.get("confirmed_buys_count") or len(buy_records)),
-        "sell_count":int(stats.get("matched_sells_count") or len(sell_records)),
+        "buy_count":len(buy_records),
+        "sell_count":len(sell_records),
         "unverified_buy_count":0,"unverified_sell_count":len(unresolved),
-        "closed_count":int(stats.get("matched_sells_count") or len(sell_records)),
+        "closed_count":len(sell_records),
         "wins":int(stats.get("wins") or 0),"losses":int(stats.get("losses") or 0),
         "win_rate":rb._finite_number(stats.get("win_rate_pct")),
         "average_win":rb._finite_number(stats.get("average_win_sda")),
