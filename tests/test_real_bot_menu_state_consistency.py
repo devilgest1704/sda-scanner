@@ -49,7 +49,8 @@ def test_worker_status_is_live_dry_run_disabled_or_unknown():
     assert real_bot_menu._status({"enabled": True, "dry_run": False, "updated_at": now}) == "🟢 LIVE"
     assert real_bot_menu._status({"enabled": True, "dry_run": True, "updated_at": now}) == "🟡 DRY RUN"
     assert real_bot_menu._status({"enabled": False, "dry_run": False, "updated_at": now}) == "🔴 REAL TRADING DISABLED"
-    assert real_bot_menu._status(None) == "⚪ STATUS UNKNOWN"
+    assert real_bot_menu._status(None) == "⚪ STATUS UNKNOWN — worker status unavailable"
+    assert "RPC timeout" in real_bot_menu._status({"status_read_error": "RPC timeout"})
 
 
 def test_worker_status_distinguishes_live_buy_data_degradation():
