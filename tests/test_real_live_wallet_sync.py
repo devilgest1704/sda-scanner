@@ -6,6 +6,7 @@ from unittest.mock import patch
 import real_live_wallet_sync as live
 import real_pnl_stats
 import real_bot_views
+import telegram_home
 
 
 WALLET = "0x" + "a" * 40
@@ -178,6 +179,36 @@ class LiveWalletSyncTests(unittest.TestCase):
         model = real_pnl_stats.build_pnl_model(accounting, runtime, 0, True)
         self.assertEqual(len(model["events"]), 1)
         self.assertAlmostEqual(float(model["realized"]), 1.99, places=8)
+
+
+    def test_telegram_capacity_uses_live_runtime_not_accounting_snapshot(self):
+        now = datetime.now(timezone.utc).isoformat()
+        state = {
+            "syncStatus": "FRESH", "walletSyncHealthy": True, "reconciliationHealthy": True,
+            "lastSuccessfulWalletSyncAt": now,
+            "walletBalances": {"native_sda_wei": str(50 * 10**18)},
+            "positions": {TOKEN: {"remaining_quantity": 10, "remaining_cost_basis": "20"}},
+            "pending_buys": {},
+        }
+        class Dashboard:
+            def load(self, path, default):
+                if path == "real_trade_state.json":
+                    return state
+                if path == "positions.json":
+                    return {"positions": {}}
+                if path == "real_accounting_state.json":
+                    raise AssertionError("historical accounting snapshot must not be required")
+                return default
+        worker = {"syncStatus": "FRESH", "walletSyncHealthy": True,
+                  "reconciliationHealthy": True, "lastSuccessfulWalletSyncAt": now,
+                  "real_capital_cap_sda": 300, "real_max_open_positions": 10,
+                  "real_buy_size_sda": 30}
+        with patch.object(telegram_home.rb, "_load_worker_status", return_value=worker):
+            capacity = telegram_home.real_capacity(Dashboard())
+        self.assertIsNotNone(capacity)
+        self.assertEqual(capacity["positions"], 1)
+        self.assertEqual(capacity["deployed"], 20)
+        self.assertEqual(capacity["available"], 50)
 
     def test_telegram_cache_invalidates_when_live_state_version_changes(self):
         state = {"updated_at": "v1"}
