@@ -246,13 +246,23 @@ def reconcile():
         actions.append({"action": "WALLET_RECONCILIATION", "status": wallet_sync.get("syncStatus", "FAILED"),
                         "error": wallet_sync.get("syncError"), "at": _now()})
     actions.extend(_reconcile_real_wallets(real_trader, swing_executor))
+    sell_reconcile_errors = [a for a in actions
+                             if a.get("action") == "MANUAL_SELL_RECONCILIATION"
+                             and a.get("status") in {"ERROR", "FAILED", "STALE", "DEGRADED"}]
     wallet_reconcile_errors = [a for a in actions
-                               if a.get("action") in {"MANUAL_SELL_RECONCILIATION",
-                                                     "WALLET_RECONCILIATION"}
+                               if a.get("action") == "WALLET_RECONCILIATION"
                                and a.get("status") in {"ERROR", "FAILED", "STALE", "DEGRADED"}]
-    snapshot_sync_ok = bool(wallet_sync.get("ok"))
-    wallet_sync["ok"] = snapshot_sync_ok and not wallet_reconcile_errors
+    live_sync_ok = bool(wallet_sync.get("ok"))
+    # BUY readiness follows wallet + ledger reconciliation only. A SELL
+    # position-management diagnostic is tracked separately and never disables
+    # the SELL executor or contaminates the BUY freshness boolean.
+    wallet_sync["ok"] = live_sync_ok and not wallet_reconcile_errors
     real_state = real_trader.load_state()
+    real_state["buyDataHealthy"] = bool(wallet_sync["ok"])
+    real_state["walletSyncHealthy"] = bool(wallet_sync["ok"])
+    real_state["reconciliationHealthy"] = bool(wallet_sync["ok"])
+    real_state["sellDataHealthy"] = not sell_reconcile_errors
+    real_state["sellReconciliationErrors"] = sell_reconcile_errors[:20]
     if wallet_sync["ok"]:
         real_state["lastSuccessfulReconciliation"] = _now()
         real_state["syncStatus"] = "FRESH"
