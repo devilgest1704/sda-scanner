@@ -121,6 +121,7 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
             positions = state.setdefault("positions", {})
             trades = state.setdefault("trades", [])
             imports = state.setdefault("manual_imports", [])
+            pending_buys = state.setdefault("pending_buys", {})
             imported = []
             skipped = []
             for row in snapshot.get("open_positions", []):
@@ -162,10 +163,14 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                     existing_trade = next((trade for trade in trades
                                            if isinstance(trade, dict)
                                            and str(trade.get("tx") or trade.get("tx_hash") or "").lower() == tx
+                                           and str(trade.get("token") or "").lower() == token
                                            and str(trade.get("action") or "").upper() == "BUY"), None)
+                    pending_intent = pending_buys.get(token) if isinstance(pending_buys, dict) else None
+                    pending_match = (isinstance(pending_intent, dict)
+                                     and str(pending_intent.get("tx_hash") or "").lower() == tx)
                     source = "MANUAL"
-                    if existing_trade:
-                        existing_source = str(existing_trade.get("source") or "BOT").upper()
+                    if existing_trade or pending_match:
+                        existing_source = str((existing_trade or {}).get("source") or "BOT").upper()
                         source = "MANUAL" if existing_source.startswith("MANUAL") else "BOT"
                     position = {
                         "symbol": str(row.get("symbol") or buy.get("symbol") or token[:8]),
@@ -224,6 +229,8 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                         "accounting_identity": position["accounting_identity"],
                         "sellManagementEnabled": True,
                     }
+                    if pending_match:
+                        pending_buys.pop(token, None)
                     if not existing_trade:
                         trades.append(record)
                     if source == "MANUAL":
