@@ -238,9 +238,16 @@ def _scanner_inputs(dashboard):
 
 def _home_scanner_lines(dashboard):
     rows, real, stale = _scanner_inputs(dashboard)
+    worker = rb._load_worker_status(dashboard) or {}
     lines = ["", "🔥 REAL BUY SCANNER"]
     if stale:
         lines.append("⚪ Data stale")
+        if worker.get("syncStatus") != "FRESH":
+            detail = worker.get("lastSyncError") or f"wallet sync {worker.get('syncStatus') or 'UNKNOWN'}"
+            lines.append(f"⚠ {detail}")
+            last_sync = worker.get("lastSuccessfulWalletSync")
+            if last_sync:
+                lines.append(f"Last successful wallet sync: {last_sync}")
     else:
         ready, watch = _counts(rows)
         lines += [_line("🟢 BUY-ready", str(ready)), _line("🟡 WATCH", str(watch))]
