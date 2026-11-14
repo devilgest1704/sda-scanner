@@ -133,7 +133,7 @@ def test_main_menu_uses_bot_pnl_and_wallet_total_separately(built_data):
     assert "Bot PnL +28.35 SDA" in text
     assert "Open PnL -4.21 SDA" in text
     assert "Realized +32.56 SDA" in text
-    assert "Positions 9" in text
+    assert "Positions 9/10" in text
     assert "(partial)" not in text
 
 
