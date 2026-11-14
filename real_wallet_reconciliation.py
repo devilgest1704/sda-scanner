@@ -224,6 +224,8 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                     skipped.append({"token": token, "tx": tx,
                                     "reason": f"{type(exc).__name__}: {str(exc)[:240]}"})
 
+            if imported:
+                state["updated_at"] = attempted
             state["lastSyncAttemptAt"] = attempted
             state["lastSuccessfulWalletSync"] = snapshot.get("generated_at")
             state["lastBlockchainDataAt"] = (snapshot.get("blockchain_range") or {}).get("latest_timestamp")
