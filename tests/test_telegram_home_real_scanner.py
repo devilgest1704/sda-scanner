@@ -83,7 +83,8 @@ def env(monkeypatch):
                                   "whale_source_health": "HEALTHY"}}
     holder = SimpleNamespace(state=_state(), worker={"enabled": True, "dry_run": False,
                              "syncStatus": "FRESH",
-                             "lastSuccessfulWalletSync": datetime.now(timezone.utc).isoformat()}, files=files,
+                             "lastSuccessfulWalletSync": datetime.now(timezone.utc).isoformat(),
+                             "updated_at": datetime.now(timezone.utc).isoformat()}, files=files,
                              forbidden=forbidden)
     monkeypatch.setattr(rb, "_state", lambda _d: holder.state)
     monkeypatch.setattr(rb, "_load_worker_status", lambda _d: holder.worker)
