@@ -214,17 +214,16 @@ def _build_dashboard_data(dashboard):
     else:
         load_error=None
     if not isinstance(accounting,dict) or accounting.get("schema_version")!=1:
-        return {"source":"unavailable","load_error":load_error or "real_accounting_state.json missing or unsupported",
-            "worker":None,"worker_status":"⚪ UNKNOWN","state":{},"snapshot":{},
-            "positions":[],"buy_records":[],"sell_records":[],"buy_count":0,"sell_count":0,
-            "unverified_buy_count":0,"unverified_sell_count":0,"closed_count":0,"wins":0,"losses":0,
-            "win_rate":None,"average_win":None,"average_loss":None,"average_trade":None,
-            "best_trade":None,"worst_trade":None,"best_trade_label":None,"worst_trade_label":None,
-            "total_invested":None,"open_value":None,"open_cost":None,"open_pnl":None,
-            "open_complete":False,"realized_pnl":None,"realized_partial":True,"total_pnl":None,
-            "total_partial":True,"portfolio_value":None,"portfolio_complete":False,
-            "portfolio_valued_count":0,"portfolio_total_count":0,"native_sda":None,"holdings":[],
-            "bot_reconciliation_status":"INCOMPLETE","bot_unresolved_transactions":[]}
+        # The historical accounting workflow is an audit/recovery source, not
+        # a runtime dependency. Build the live dashboard from REAL worker state
+        # when that snapshot is missing or stale; realized history remains
+        # explicitly partial until a complete FIFO history is available.
+        accounting = {
+            "schema_version": 1, "bot_reconciliation_status": "INCOMPLETE",
+            "open_positions": [], "buy_transactions": [], "sell_transactions": [],
+            "statistics": {}, "excluded_external_activity": {},
+            "bot_unresolved_transactions": [],
+        }
     try:
         worker=rb._load_worker_status(dashboard)
     except Exception:
