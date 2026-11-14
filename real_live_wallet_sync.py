@@ -331,7 +331,7 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
             staged["buyDataHealthy"] = cursor_complete
             staged["walletSyncHealthy"] = cursor_complete
             staged["reconciliationHealthy"] = cursor_complete
-            staged["sellDataHealthy"] = bool(staged["positions"])
+            staged["sellDataHealthy"] = True
             staged["processedBlockchainEvents"] = sorted(seen)[-50000:]
             staged["updated_at"] = attempted
             real_trader.save_state(staged)
@@ -340,6 +340,8 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                     "lastSuccessfulReconciliationAt": attempted,
                     "lastBlockchainDataAt": staged["lastBlockchainDataAt"],
                     "imported": discovered, "processed_blocks": max(0, end - start + 1),
+                    "syncError": None if cursor_complete else
+                        f"incremental blockchain catch-up: cursor {end} of {latest}",
                     "walletBalances": staged["walletBalances"]}
         except Exception as exc:
             try:
