@@ -164,14 +164,15 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                                            if isinstance(trade, dict)
                                            and str(trade.get("tx") or trade.get("tx_hash") or "").lower() == tx
                                            and str(trade.get("token") or "").lower() == token
-                                           and str(trade.get("action") or "").upper() == "BUY"), None)
+                                           and str(trade.get("action") or "").upper() in {"BUY", "MANUAL_BUY", "BUY_RECONCILED"}), None)
                     pending_intent = pending_buys.get(token) if isinstance(pending_buys, dict) else None
                     pending_match = (isinstance(pending_intent, dict)
                                      and str(pending_intent.get("tx_hash") or "").lower() == tx)
                     source = "MANUAL"
                     if existing_trade or pending_match:
                         existing_source = str((existing_trade or {}).get("source") or "BOT").upper()
-                        source = "MANUAL" if existing_source.startswith("MANUAL") else "BOT"
+                        existing_action = str((existing_trade or {}).get("action") or "").upper()
+                        source = "MANUAL" if existing_source.startswith("MANUAL") or existing_action == "MANUAL_BUY" else "BOT"
                     position = {
                         "symbol": str(row.get("symbol") or buy.get("symbol") or token[:8]),
                         "token": token,
