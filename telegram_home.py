@@ -249,7 +249,7 @@ def _home_scanner_lines(dashboard):
         for key, label in (("whale_source_health", "Whale source"),
                            ("market_source_health", "Market source")):
             source_health = worker.get(key)
-            if source_health and source_health not in {"HEALTHY", "ACTIVE"}:
+            if source_health and source_health not in {"HEALTHY", "ACTIVE", "FRESH", "OK"}:
                 lines.append(f"⚠ {label}: {source_health}")
         if worker.get("syncStatus") != "FRESH" or "STATUS UNKNOWN" in rb._status(worker):
             detail = worker.get("lastSyncError") or rb._status(worker)
