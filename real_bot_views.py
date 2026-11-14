@@ -190,7 +190,12 @@ def _tracked_wallet_snapshot(accounting, dashboard=None):
                     "market_complete": False, "errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
         all_holdings = snapshot.get("holdings") if isinstance(snapshot, dict) else []
         all_holdings = all_holdings if isinstance(all_holdings, list) else []
-        tracked_addresses = set(expected) | {_WSDA}
+        wsda_present = any(isinstance(item, dict)
+                           and str(item.get("address") or "").lower() == _WSDA
+                           for item in all_holdings)
+        tracked_addresses = set(expected)
+        if wsda_present:
+            tracked_addresses.add(_WSDA)
         tracked = [item for item in all_holdings if isinstance(item, dict)
                    and str(item.get("address") or "").lower() in tracked_addresses]
         wallet = str(snapshot.get("wallet_address") or rb._wallet_address()).lower()
