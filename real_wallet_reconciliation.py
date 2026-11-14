@@ -159,6 +159,14 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                         raise ValueError("invalid blockchain cost basis")
                     opened = row.get("at") or buy.get("at")
                     price = invested / Decimal(str(row.get("quantity")))
+                    existing_trade = next((trade for trade in trades
+                                           if isinstance(trade, dict)
+                                           and str(trade.get("tx") or trade.get("tx_hash") or "").lower() == tx
+                                           and str(trade.get("action") or "").upper() == "BUY"), None)
+                    source = "MANUAL"
+                    if existing_trade:
+                        existing_source = str(existing_trade.get("source") or "BOT").upper()
+                        source = "MANUAL" if existing_source.startswith("MANUAL") else "BOT"
                     position = {
                         "symbol": str(row.get("symbol") or buy.get("symbol") or token[:8]),
                         "token": token,
@@ -178,10 +186,10 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                         "realized_proceeds": "0",
                         "realized_pnl": "0",
                         "wallet_available_quantity": wallet_quantity,
-                        "source": "MANUAL",
+                        "source": source,
                         "sellManagementEnabled": True,
-                        "manual_imported": True,
-                        "manual_imported_at": attempted,
+                        "manual_imported": source == "MANUAL",
+                        "manual_imported_at": attempted if source == "MANUAL" else None,
                         "accounting_identity": f"{CHAIN_ID}:{wallet}:{tx}:{token}",
                         "execution_price_sda": str(price),
                         "last_market_price": str(Decimal(str(row.get("value_sda") or invested)) /
@@ -202,7 +210,8 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                     position["swap_fee_status"] = "embedded_in_swap_execution; not separately itemized"
                     position["all_in_cost_price_sda"] = str(cost / Decimal(str(row.get("quantity"))))
                     record = {
-                        "action": "MANUAL_BUY", "source": "MANUAL", "status": "OPEN",
+                        "action": "MANUAL_BUY" if source == "MANUAL" else "BUY_RECONCILED",
+                        "source": source, "status": "OPEN",
                         "token": token, "symbol": position["symbol"], "tx": tx,
                         "at": opened, "quantity": str(row.get("quantity")),
                         "quantity_raw": raw_quantity, "decimals": decimals,
@@ -215,11 +224,14 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                         "accounting_identity": position["accounting_identity"],
                         "sellManagementEnabled": True,
                     }
-                    trades.append(record)
-                    imports.append({"tx": tx, "token": token, "at": opened,
-                                    "accounting_identity": position["accounting_identity"]})
+                    if not existing_trade:
+                        trades.append(record)
+                    if source == "MANUAL":
+                        imports.append({"tx": tx, "token": token, "at": opened,
+                                        "accounting_identity": position["accounting_identity"]})
                     imported.append({"token": token, "symbol": position["symbol"], "tx": tx,
-                                     "quantity_raw": raw_quantity, "cost_basis_sda": str(cost)})
+                                     "source": source, "quantity_raw": raw_quantity,
+                                     "cost_basis_sda": str(cost)})
                 except Exception as exc:  # noqa: BLE001 - record unexpected per-position RPC failures
                     skipped.append({"token": token, "tx": tx,
                                     "reason": f"{type(exc).__name__}: {str(exc)[:240]}"})
