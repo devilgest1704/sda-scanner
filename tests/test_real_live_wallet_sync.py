@@ -178,7 +178,8 @@ class LiveWalletSyncTests(unittest.TestCase):
                       "excluded_external_activity": {}, "bot_unresolved_transactions": []}
         runtime = {"trades": [
             {"action": "MANUAL_BUY", "source": "MANUAL", "tx": "0xbuy", "at": "2026-11-14T10:00:00+00:00"},
-            {"action": "MANUAL_SELL", "source": "MANUAL", "tx": "0xsell", "buy_tx": "0xbuy",
+            {"action": "MANUAL_SELL", "source": "MANUAL", "status": "CONFIRMED",
+             "accounting_identity": "0xsell:2:" + TOKEN, "tx": "0xsell", "buy_tx": "0xbuy",
              "contract": TOKEN, "token": TOKEN, "at": "2026-11-14T11:00:00+00:00",
              "cost_basis_sda": "10", "proceeds_sda": "12", "net_pnl_sda": "1.99"},
         ]}
