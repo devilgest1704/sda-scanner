@@ -560,9 +560,9 @@ def _pnl_text(data):
     if not m:return "📈 REAL PNL\n\n⚪ Data temporarily unavailable"
     open_partial=data.get("open_pnl") is not None and not data.get("open_complete")
     return "\n".join(["📈 REAL PNL","",
-        f"Dnes          {_signed_sda(m['today']['pnl'])}{_partial(m['today']['partial'])}",
-        f"Tento týden   {_signed_sda(m['this_week']['pnl'])}{_partial(m['this_week']['partial'])}",
-        f"Tento měsíc   {_signed_sda(m['this_month']['pnl'])}{_partial(m['this_month']['partial'])}","",
+        f"Dnes Δ        {_signed_sda(m['today']['period_delta'])}  Σ {_signed_sda(m['today']['cumulative_sum'])}{_partial(m['today']['partial'])}",
+        f"Tento týden Δ {_signed_sda(m['this_week']['period_delta'])}  Σ {_signed_sda(m['this_week']['cumulative_sum'])}{_partial(m['this_week']['partial'])}",
+        f"Tento měsíc Δ {_signed_sda(m['this_month']['period_delta'])}  Σ {_signed_sda(m['this_month']['cumulative_sum'])}{_partial(m['this_month']['partial'])}","",
         f"Realized      {_signed_sda(data.get('realized_pnl'))}{_partial(data.get('realized_partial'))}",
         f"Open          {_signed_sda(data.get('open_pnl'))}{_partial(open_partial)}",
         f"Total         {_signed_sda(data.get('total_pnl'))}{_partial(data.get('total_pnl') is not None and data.get('total_partial'))}",
@@ -574,7 +574,7 @@ def _pnl_daily_text(data):
     daily=m["daily"];lines=["📅 DAILY PNL",""]
     for key in sorted(daily,reverse=True)[:14]:
         row=daily[key];day=datetime.fromisoformat(key)
-        lines.append(f"{day:%d.%m}  {float(row['pnl']):+.2f} SDA  Σ {float(row['cumulative']):+.2f} {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
+        lines.append(f"{day:%d.%m}  Δ {float(row['period_delta']):+.2f} SDA  Σ {float(row['cumulative_sum']):+.2f} {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
     if not daily:lines.append("No realized BOT SELL yet")
     window=[daily[k] for k in real_pnl_stats.recent_days(m,7) if k in daily]
     values=[row["pnl"] for row in window]
@@ -590,7 +590,7 @@ def _pnl_weekly_text(data):
     weekly=m["weekly"];lines=["📆 WEEKLY PNL",""]
     for key in sorted(weekly,reverse=True)[:8]:
         row=weekly[key]
-        lines.append(f"{key}  {float(row['pnl']):+.2f} SDA {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
+        lines.append(f"{key}  Δ {float(row['period_delta']):+.2f} SDA  Σ {float(row['cumulative_sum']):+.2f} {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
     if not weekly:lines.append("No realized BOT SELL yet")
     window=[weekly[k] for k in real_pnl_stats.recent_weeks(m,4) if k in weekly]
     values=[row["pnl"] for row in weekly.values()]
@@ -608,7 +608,7 @@ def _pnl_monthly_text(data):
     monthly=m["monthly"];lines=["🗓 MONTHLY PNL",""]
     for key in sorted(monthly,reverse=True):
         row=monthly[key];month=datetime.strptime(key,"%Y-%m")
-        lines.append(f"{month:%b %Y}  {float(row['pnl']):+.2f} SDA {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
+        lines.append(f"{month:%b %Y}  Δ {float(row['period_delta']):+.2f} SDA  Σ {float(row['cumulative_sum']):+.2f} {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
     if not monthly:lines.append("No realized BOT SELL yet")
     values=[row["pnl"] for row in monthly.values()]
     lines += ["",f"Best month   {_signed_sda(max(values)) if values else 'N/A'}",
