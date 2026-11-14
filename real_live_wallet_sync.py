@@ -306,7 +306,17 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
             known.update(staged["positions"].keys())
             balances = {}
             for token in sorted(known):
-                balances[token] = str(real_trader.token_balance(token, wallet))
+                raw_balance = int(real_trader.token_balance(token, wallet))
+                balances[token] = str(raw_balance)
+                position = staged["positions"].get(token)
+                if isinstance(position, dict):
+                    tracked = int(position.get("remaining_quantity",
+                                               position.get("token_amount_raw", 0)) or 0)
+                    if raw_balance < tracked:
+                        raise RuntimeError(
+                            f"wallet balance below reconciled REAL position for {token}: "
+                            f"wallet={raw_balance}, ledger={tracked}; missing SELL history"
+                        )
             staged["walletBalances"] = {"native_sda_wei": str(native),
                                         "tokens_raw": balances, "wallet": wallet,
                                         "chain_id": cfg.CHAIN_ID, "checked_at": attempted}
