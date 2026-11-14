@@ -52,8 +52,12 @@ def test_daily_weekly_monthly_grouping_and_cumulative():
     assert m["daily"]["2026-11-09"]["cumulative"] == Decimal("6.00")
     assert m["weekly"]["2026-W46"]["pnl"] == Decimal("3.25")
     assert m["weekly"]["2026-W43"]["pnl"] == Decimal("7.0")
+    assert m["weekly"]["2026-W46"]["period_delta"] == Decimal("3.25")
+    assert m["weekly"]["2026-W46"]["cumulative_sum"] == Decimal("10.25")
     assert m["monthly"]["2026-11"]["pnl"] == Decimal("3.25")
     assert m["monthly"]["2026-10"]["pnl"] == Decimal("7.0")
+    assert m["monthly"]["2026-11"]["period_delta"] == Decimal("3.25")
+    assert m["monthly"]["2026-11"]["cumulative_sum"] == Decimal("10.25")
     assert m["realized"] == Decimal("10.25")
     assert m["today"]["pnl"] == Decimal("4.25")
     assert m["this_week"]["pnl"] == Decimal("3.25")
@@ -198,6 +202,7 @@ def test_main_menu_pnl_statistics_and_sell_history_reconcile(monkeypatch):
     assert "Realized +2.93 SDA" in main and "Realized      +2.93 SDA" in stats
     assert "Open PnL +1.50 SDA" in main and "Open          +1.50 SDA" in stats
     assert "Bot PnL +4.43 SDA" in main and "Total         +4.43 SDA" in stats
+    assert "Dnes Δ" in stats and "Tento týden Δ" in stats and "Tento měsíc Δ" in stats
     assert "Realized: +2.93 SDA" in views._sell_text(data) or "Realized PnL: +2.93 SDA" in views._sell_text(data)
 
 
@@ -208,10 +213,10 @@ def test_period_screens_render_actual_values(monkeypatch):
     daily = views._pnl_daily_text(data)
     weekly = views._pnl_weekly_text(data)
     monthly = views._pnl_monthly_text(data)
-    assert "📅 DAILY PNL" in daily and "09.11  -1.32 SDA" in daily and "Σ +4.93" in daily
+    assert "📅 DAILY PNL" in daily and "09.11  Δ -1.32 SDA" in daily and "Σ +4.93" in daily
     assert "Green days" in daily and "Red days" in daily and "7D PnL" in daily
-    assert "📆 WEEKLY PNL" in weekly and "2026-W46  +2.93 SDA" in weekly and "Win rate" in weekly
-    assert "🗓 MONTHLY PNL" in monthly and "Oct 2026  +2.00 SDA" in monthly
+    assert "📆 WEEKLY PNL" in weekly and "2026-W46  Δ +2.93 SDA" in weekly and "Σ +4.93" in weekly and "Win rate" in weekly
+    assert "🗓 MONTHLY PNL" in monthly and "Oct 2026  Δ +2.00 SDA" in monthly and "Σ +4.93" in monthly
     assert "Total realized BOT PnL +4.93 SDA" in monthly
 
 
