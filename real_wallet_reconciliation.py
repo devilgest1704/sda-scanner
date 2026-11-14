@@ -54,6 +54,19 @@ def snapshot_health(snapshot, now=None, max_age=MAX_SNAPSHOT_AGE_SECONDS):
         return False, "blockchain reconciliation incomplete"
     if snapshot.get("bot_unresolved_transactions"):
         return False, "unresolved blockchain transactions remain"
+    validation = snapshot.get("validation")
+    if not isinstance(validation, dict):
+        return False, "blockchain accounting validation missing"
+    if validation.get("all_pagination_exhausted") is not True:
+        return False, "blockchain history pagination incomplete"
+    if validation.get("detail_fetch_errors"):
+        return False, "blockchain transaction detail fetch errors"
+    if validation.get("cash_reconciliation_zero") is not True:
+        return False, "wallet cash reconciliation mismatch"
+    if validation.get("ledger_loaded") is not True:
+        return False, "REAL accounting ledger not loaded"
+    if validation.get("open_positions_valued") is not True:
+        return False, "one or more REAL open positions lack safe price data"
     if not isinstance(snapshot.get("open_positions"), list):
         return False, "blockchain open positions missing"
     if not isinstance(snapshot.get("buy_transactions"), list):
