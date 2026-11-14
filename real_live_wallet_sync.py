@@ -166,14 +166,15 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                         elif sender == wallet and recipient != wallet:
                             outgoing.append((token, amount_raw, log))
 
-                    # A confirmed swap BUY is a wallet-originated transaction
-                    # receiving a non-WSDA token while spending native SDA or WSDA.
+                    # Only the configured PinetSwap router is trusted as a
+                    # swap source; ordinary transfers must never become BUY lots.
+                    router_tx = str(tx.get("to") or "").lower() == str(cfg.ROUTER_ADDRESS).lower()
                     native_spend = Decimal(_hexint(tx.get("value"))) / Decimal(10**18)
                     wsda_spend = sum(Decimal(q) for token, q, _ in outgoing
                                      if token == cfg.WSDA_ADDRESS.lower()) / Decimal(10**18)
                     spend = native_spend if native_spend > 0 else wsda_spend
                     for token, raw_amount, log in incoming:
-                        if token == cfg.WSDA_ADDRESS.lower() or raw_amount <= 0 or spend <= 0:
+                        if not router_tx or token == cfg.WSDA_ADDRESS.lower() or raw_amount <= 0 or spend <= 0:
                             continue
                         identity = _event_identity(tx_hash, log.get("logIndex"), token)
                         if identity in seen:
@@ -262,7 +263,7 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                             "at": _iso(block_time), "direction": "OUT",
                         })
                         position = staged["positions"].get(token)
-                        if pending_auto_sell or not isinstance(position, dict):
+                        if not router_tx or pending_auto_sell or not isinstance(position, dict):
                             continue
                         recorded = int(position.get("remaining_quantity",
                                                    position.get("token_amount_raw", 0)) or 0)
