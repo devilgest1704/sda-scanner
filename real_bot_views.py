@@ -465,13 +465,13 @@ def _buy_text(data):
     return "\n".join(lines)
 
 def _sell_text(data):
-    lines=["🔴 MATCHED BOT SELL HISTORY"]
+    lines=["🔴 MATCHED REAL SELL HISTORY"]
     for item in (data.get("sell_records") or []):
         date=_date_short(item.get("at"));prefix=f"{date} " if date else ""
         pnl=item.get("pnl_sda")
         icon="✅" if pnl is not None and pnl>0 else ("❌" if pnl is not None and pnl<0 else "⚪")
         lines.append(f"{icon} {prefix}{item['symbol']} {_fmt(pnl,signed=True)} SDA")
-    lines += ["",f"Confirmed matched bot SELL transactions: {data.get('sell_count',0)}",
+    lines += ["",f"Confirmed matched REAL SELL transactions: {data.get('sell_count',0)}",
         f"Wins: {data.get('wins',0)}  Losses: {data.get('losses',0)}",
         f"Realized PnL: {_fmt(data.get('realized_pnl'),signed=True)} SDA"]
     if data.get("unverified_sell_count"):lines.append(f"⚠ {data['unverified_sell_count']} unverified SELL excluded")
@@ -484,8 +484,8 @@ def _stats_text(data):
     if data.get("open_pnl") is not None and not data.get("open_complete"):open_pnl+=" (partial)"
     lines=["📈 REAL STATISTICS","","Trades",
         f"Open positions {len(data.get('positions') or [])}",
-        f"Confirmed bot BUY {data.get('buy_count',0)}",
-        f"Confirmed matched bot SELL {data.get('sell_count',0)}",
+        f"Confirmed REAL BUY {data.get('buy_count',0)}",
+        f"Confirmed matched REAL SELL {data.get('sell_count',0)}",
         f"Closed trades {data.get('closed_count',0)}","","Results",f"Wins {data.get('wins',0)}",
         f"Losses {data.get('losses',0)}",
         f"Win rate {data['win_rate']:.1f}%" if data.get("win_rate") is not None else "Win rate N/A",
