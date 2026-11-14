@@ -181,13 +181,24 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                         # exists, record the lot identity and leave explicit
                         # multi-lot aggregation to the accounting layer.
                         if token not in staged["positions"]:
+                            pending_intent = (staged.get("pending_buys") or {}).get(token)
+                            known_bot_tx = any(
+                                isinstance(item, dict)
+                                and str(item.get("tx") or item.get("tx_hash") or "").lower() == tx_hash
+                                and str(item.get("action") or "").upper() in {"BUY", "BUY_RECONCILED"}
+                                for item in staged["trades"]
+                            )
+                            bot_buy = (known_bot_tx or
+                                       (isinstance(pending_intent, dict)
+                                        and str(pending_intent.get("tx_hash") or "").lower() == tx_hash))
+                            source = "BOT" if bot_buy else "MANUAL"
                             gas_fee = Decimal(
                                 _hexint(receipt.get("gasUsed")) *
                                 _hexint(receipt.get("effectiveGasPrice") or tx.get("gasPrice"))
                             ) / Decimal(10**18)
                             position = {
                                 "symbol": token[:10], "token": token, "status": "OPEN",
-                                "source": "MANUAL", "manual_imported": True,
+                                "source": source, "manual_imported": source == "MANUAL",
                                 "sellManagementEnabled": True,
                                 "amount_sda": float(spend), "initial_cost_basis": str(spend),
                                 "remaining_cost_basis": str(spend), "sold_cost_basis": "0",
@@ -203,7 +214,7 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                             }
                             staged["positions"][token] = position
                             staged["trades"].append({
-                                "action": "MANUAL_BUY", "source": "MANUAL", "status": "OPEN",
+                                "action": "MANUAL_BUY" if source == "MANUAL" else "BUY_RECONCILED", "source": source, "status": "OPEN",
                                 "token": token, "symbol": position["symbol"], "tx": tx_hash,
                                 "instruction_index": _hexint(log.get("logIndex")),
                                 "quantity": str(quantity), "quantity_raw": raw_amount,
@@ -214,10 +225,13 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                                 "accounting_identity": identity,
                                 "sellManagementEnabled": True, "at": _iso(block_time),
                             })
-                            staged["manual_imports"].append({
-                                "tx": tx_hash, "token": token, "event_id": identity,
-                                "at": _iso(block_time), "accounting_identity": identity,
-                            })
+                            if source == "MANUAL":
+                                staged["manual_imports"].append({
+                                    "tx": tx_hash, "token": token, "event_id": identity,
+                                    "at": _iso(block_time), "accounting_identity": identity,
+                                })
+                            if isinstance(pending_intent, dict):
+                                staged.setdefault("pending_buys", {}).pop(token, None)
                             discovered.append({"tx": tx_hash, "token": token,
                                                "quantity_raw": raw_amount, "cost_basis_sda": str(spend)})
                         seen.add(identity)
