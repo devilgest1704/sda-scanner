@@ -272,9 +272,7 @@ def reconcile():
             # Never create a baseline from an unknown PAPER state.
             actions.append({"action": "PAPER_STATE_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
                             "reason": paper_error, "at": _now()})
-            state["wallet_sync"] = _wallet_sync_summary(wallet_sync, real_trader)
-            state["last_run"] = _now()
-            _save(STATE_FILE, state)
+            # Keep the bridge baseline absent until a valid PAPER snapshot exists.
             _persist_events(actions[pre_paper_action_count:])
             return {"status": "paper_state_unavailable", "paper_state_error": paper_error,
                     "actions": actions}
