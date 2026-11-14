@@ -84,7 +84,7 @@ def _token_decimals(real_trader, token):
         try:
             result = real_trader.rpc("eth_call", [{"to": token, "data": "0x313ce567"}, "latest"])
             value = _hexint(result)
-        except Exception as rpc_error:  # noqa: BLE001 - no safe quantity without decimals
+        except Exception as rpc_error:
             raise RuntimeError(
                 f"token decimals unavailable for {token}: {metadata_error}; RPC fallback: {rpc_error}"
             ) from rpc_error
