@@ -8,11 +8,15 @@ from __future__ import annotations
 
 import fcntl
 import json
+import time
+
+import requests
 from datetime import UTC, datetime
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
 ACCOUNTING_FILE = Path("real_accounting_state.json")
+ACCOUNTING_URL = "https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/real_accounting_state.json"
 LOCK_FILE = Path("/tmp/sda-real-wallet-reconciliation.lock")
 MAX_SNAPSHOT_AGE_SECONDS = 20 * 60
 CHAIN_ID = 97453
@@ -68,7 +72,7 @@ def _quantity_raw(quantity, decimals):
     return int(integral)
 
 
-def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
+def reconcile_manual_buys(real_trader, *, snapshot_path=None,
                           now=None, max_age=MAX_SNAPSHOT_AGE_SECONDS):
     """Import missing confirmed BUY lots; return a fail-closed health record."""
     now = now or datetime.now(UTC)
@@ -88,10 +92,22 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                     "lastSyncAttemptAt": attempted, "imported": []}
         try:
             try:
-                snapshot = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
-            except Exception as exc:  # noqa: BLE001 - surface unexpected snapshot/RPC failures to the health state
+                if snapshot_path is not None:
+                    snapshot = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
+                    snapshot_source = str(snapshot_path)
+                else:
+                    response = requests.get(
+                        ACCOUNTING_URL,
+                        params={"_": str(int(time.time() * 1000))},
+                        headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+                        timeout=15,
+                    )
+                    response.raise_for_status()
+                    snapshot = response.json()
+                    snapshot_source = ACCOUNTING_URL
+            except Exception as exc:  # noqa: BLE001 - surface provider/network failures to the health state
                 return {"ok": False, "syncStatus": "FAILED",
-                        "syncError": f"snapshot read failed: {type(exc).__name__}: {exc}",
+                        "syncError": f"blockchain snapshot fetch failed: {type(exc).__name__}: {exc}",
                         "lastSyncAttemptAt": attempted, "imported": []}
             healthy, reason = snapshot_health(snapshot, now=now, max_age=max_age)
             if not healthy:
@@ -252,7 +268,7 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
             state["lastSuccessfulReconciliation"] = attempted if not skipped else state.get("lastSuccessfulReconciliation")
             state["syncStatus"] = "FRESH" if not skipped else "DEGRADED"
             state["lastSyncError"] = "; ".join(item["reason"] for item in skipped) if skipped else None
-            state["walletSyncSource"] = "real_accounting_state.json"
+            state["walletSyncSource"] = snapshot_source
             real_trader.save_state(state)
             return {"ok": not skipped, "syncStatus": state["syncStatus"],
                     "syncError": state["lastSyncError"], "lastSyncAttemptAt": attempted,
