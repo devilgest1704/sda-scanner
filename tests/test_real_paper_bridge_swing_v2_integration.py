@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 import real_market_price as market_prices
 import real_paper_bridge as bridge
+import real_wallet_reconciliation
 import real_swing_sell_executor as executor
 import real_trader
 import real_trading_config as cfg
@@ -74,6 +75,10 @@ def _run_case(price=None, unavailable=False, buy_data_available=True, paper_open
             stack.enter_context(patch.object(bridge, "PAPER_FILE", paper_file))
             stack.enter_context(patch.object(bridge, "STATE_FILE", bridge_state_file))
             stack.enter_context(patch.object(bridge, "EVENTS_FILE", events_file))
+            stack.enter_context(patch.object(real_wallet_reconciliation, "reconcile_manual_buys",
+                return_value={"ok": True, "syncStatus": "FRESH", "imported": [],
+                              "lastSuccessfulWalletSync": datetime.now(timezone.utc).isoformat(),
+                              "lastSuccessfulReconciliation": datetime.now(timezone.utc).isoformat()}))
             stack.enter_context(patch.object(market_prices, "load_market_snapshot", return_value=snapshot))
             stack.enter_context(patch.object(market_prices, "load_token_metadata", return_value={}))
             stack.enter_context(patch.object(market_prices, "newest_supabase_price", return_value=None))
