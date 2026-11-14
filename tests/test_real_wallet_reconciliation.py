@@ -74,7 +74,7 @@ def test_manual_buy_discovery_and_cost_basis(tmp_path, monkeypatch):
     source = snapshot()
     (tmp_path / "real_accounting_state.json").write_text(json.dumps(source))
     trader = FakeTrader()
-    result = reconciliation.reconcile_manual_buys(trader)
+    result = reconciliation.reconcile_manual_buys(trader, snapshot_path=tmp_path / "real_accounting_state.json")
     assert result["ok"] is True
     assert len(result["imported"]) == 1
     position = trader.state["positions"][TOKEN]
@@ -92,8 +92,8 @@ def test_repeated_reconciliation_is_idempotent(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "real_accounting_state.json").write_text(json.dumps(snapshot()))
     trader = FakeTrader()
-    first = reconciliation.reconcile_manual_buys(trader)
-    second = reconciliation.reconcile_manual_buys(trader)
+    first = reconciliation.reconcile_manual_buys(trader, snapshot_path=tmp_path / "real_accounting_state.json")
+    second = reconciliation.reconcile_manual_buys(trader, snapshot_path=tmp_path / "real_accounting_state.json")
     assert len(first["imported"]) == 1
     assert second["imported"] == []
     assert len(trader.state["positions"]) == 1
@@ -105,7 +105,7 @@ def test_stale_snapshot_blocks_import_and_reports_error(tmp_path, monkeypatch):
     old = datetime.now(timezone.utc) - timedelta(minutes=30)
     (tmp_path / "real_accounting_state.json").write_text(json.dumps(snapshot(old)))
     trader = FakeTrader()
-    result = reconciliation.reconcile_manual_buys(trader)
+    result = reconciliation.reconcile_manual_buys(trader, snapshot_path=tmp_path / "real_accounting_state.json")
     assert result["ok"] is False
     assert result["syncStatus"] == "STALE"
     assert "stale blockchain snapshot" in result["syncError"]
@@ -117,7 +117,7 @@ def test_incomplete_pagination_fails_closed(tmp_path, monkeypatch):
     data = snapshot()
     data["pagination_exhausted"] = False
     (tmp_path / "real_accounting_state.json").write_text(json.dumps(data))
-    result = reconciliation.reconcile_manual_buys(FakeTrader())
+    result = reconciliation.reconcile_manual_buys(FakeTrader(), snapshot_path=tmp_path / "real_accounting_state.json")
     assert result["ok"] is False
     assert "pagination incomplete" in result["syncError"]
 
@@ -127,7 +127,7 @@ def test_wallet_balance_must_cover_snapshot_open_lot(tmp_path, monkeypatch):
     (tmp_path / "real_accounting_state.json").write_text(json.dumps(snapshot()))
     trader = FakeTrader()
     trader.token_balance = lambda *_: 1
-    result = reconciliation.reconcile_manual_buys(trader)
+    result = reconciliation.reconcile_manual_buys(trader, snapshot_path=tmp_path / "real_accounting_state.json")
     assert result["ok"] is False
     assert "wallet balance below" in result["syncError"]
     assert trader.state["positions"] == {}
@@ -153,7 +153,7 @@ def test_parallel_wallet_sync_is_rejected_by_lock(tmp_path, monkeypatch):
     (tmp_path / "real_accounting_state.json").write_text(json.dumps(snapshot()))
     with (tmp_path / ".real_wallet_reconciliation.lock").open("a+") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        result = reconciliation.reconcile_manual_buys(FakeTrader())
+        result = reconciliation.reconcile_manual_buys(FakeTrader(), snapshot_path=tmp_path / "real_accounting_state.json")
         assert result["ok"] is False
         assert result["syncStatus"] == "IN_PROGRESS"
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
@@ -168,7 +168,7 @@ def test_missing_runtime_position_for_known_auto_buy_stays_bot_source(tmp_path, 
         "action": "BUY", "source": "BOT", "token": TOKEN, "tx": TX,
         "amount_sda": 20,
     }]
-    result = reconciliation.reconcile_manual_buys(trader)
+    result = reconciliation.reconcile_manual_buys(trader, snapshot_path=tmp_path / "real_accounting_state.json")
     assert result["ok"] is True
     assert trader.state["positions"][TOKEN]["source"] == "BOT"
     assert trader.state["positions"][TOKEN]["sellManagementEnabled"] is True
@@ -181,8 +181,31 @@ def test_confirmed_pending_auto_buy_is_recovered_and_pending_intent_cleared(tmp_
     (tmp_path / "real_accounting_state.json").write_text(json.dumps(snapshot()))
     trader = FakeTrader()
     trader.state["pending_buys"][TOKEN] = {"tx_hash": TX, "stage": "broadcasting"}
-    result = reconciliation.reconcile_manual_buys(trader)
+    result = reconciliation.reconcile_manual_buys(trader, snapshot_path=tmp_path / "real_accounting_state.json")
     assert result["ok"] is True
     assert trader.state["positions"][TOKEN]["source"] == "BOT"
     assert TOKEN not in trader.state["pending_buys"]
     assert trader.state["trades"][0]["action"] == "BUY_RECONCILED"
+
+
+
+def test_default_snapshot_fetch_reads_latest_github_state(monkeypatch):
+    source = snapshot()
+    seen = {}
+    class Response:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return source
+    def get(url, **kwargs):
+        seen["url"] = url
+        seen["kwargs"] = kwargs
+        return Response()
+    monkeypatch.setattr(reconciliation.requests, "get", get)
+    monkeypatch.setattr(reconciliation, "LOCK_FILE", __import__("pathlib").Path("/tmp/test-real-wallet-reconciliation-remote.lock"))
+    trader = FakeTrader()
+    result = reconciliation.reconcile_manual_buys(trader)
+    assert result["ok"] is True
+    assert seen["url"] == reconciliation.ACCOUNTING_URL
+    assert seen["kwargs"]["headers"]["Cache-Control"] == "no-cache"
+    assert len(trader.state["positions"]) == 1
