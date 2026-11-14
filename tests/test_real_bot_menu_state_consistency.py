@@ -46,7 +46,7 @@ def test_ledger_staleness_is_independent_of_worker_heartbeat():
 
 def test_worker_status_is_live_dry_run_disabled_or_unknown():
     now = datetime.now(timezone.utc).isoformat()
-    assert real_bot_menu._status({"enabled": True, "dry_run": False, "updated_at": now}) == "🟢 LIVE"
+    assert real_bot_menu._status({"enabled": True, "dry_run": False, "syncStatus": "FRESH", "updated_at": now}) == "🟢 LIVE"
     assert real_bot_menu._status({"enabled": True, "dry_run": True, "updated_at": now}) == "🟡 DRY RUN"
     assert real_bot_menu._status({"enabled": False, "dry_run": False, "updated_at": now}) == "🔴 REAL TRADING DISABLED"
     assert real_bot_menu._status(None) == "⚪ STATUS UNKNOWN — worker status unavailable"
@@ -56,7 +56,7 @@ def test_worker_status_is_live_dry_run_disabled_or_unknown():
 def test_worker_status_distinguishes_live_buy_data_degradation():
     now = datetime.now(timezone.utc).isoformat()
     status = {"enabled": True, "dry_run": False, "updated_at": now,
-              "worker_health": "BUY_DATA_DEGRADED",
+              "syncStatus": "FRESH", "worker_health": "BUY_DATA_DEGRADED",
               "whale_source_health": "SOURCE_UNAVAILABLE"}
     assert real_bot_menu._status(status) == (
         "🟠 LIVE — BUY DATA DEGRADED — WHALE SOURCE UNAVAILABLE")
