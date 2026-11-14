@@ -13,7 +13,7 @@ from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
 ACCOUNTING_FILE = Path("real_accounting_state.json")
-LOCK_FILE = Path(".real_wallet_reconciliation.lock")
+LOCK_FILE = Path("/tmp/sda-real-wallet-reconciliation.lock")
 MAX_SNAPSHOT_AGE_SECONDS = 20 * 60
 CHAIN_ID = 97453
 
