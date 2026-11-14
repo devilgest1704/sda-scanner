@@ -62,7 +62,7 @@ def snapshot(at=None):
         }],
         "open_positions": [{
             "token": TOKEN, "symbol": "RIDE", "buy_tx": TX,
-            "at": at.isoformat(), "quantity": "1000",
+            "at": at.isoformat(), "quantity": "1000", "decimals": 18,
             "cost_basis_sda": "20.00087134388836",
             "value_sda": "19.0",
         }],
