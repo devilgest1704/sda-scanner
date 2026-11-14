@@ -45,6 +45,7 @@ def real_data(monkeypatch):
     monkeypatch.setattr(rb, "_load_worker_status", lambda _d: {
         "enabled": True, "dry_run": False, "syncStatus": "FRESH",
         "lastSuccessfulWalletSync": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
         "real_max_open_positions": 10})
     monkeypatch.setattr(rb, "_status", lambda _w: "🟢 LIVE")
     snapshot = {"native_sda": 100.0, "wallet_address": rb.BOT_WALLET_ADDRESS, "token_balances_loaded": True,
