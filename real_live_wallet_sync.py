@@ -342,6 +342,7 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
             staged["ledgerUpdatedAt"] = attempted
             staged["walletSyncSource"] = "sidra_rpc_incremental_blocks"
             staged["walletSyncFailures"] = 0
+            staged.pop("walletSyncRetryAfterSeconds", None)
             staged["lastSyncError"] = None
             staged["syncStatus"] = "FRESH" if cursor_complete else "DEGRADED"
             staged["walletSyncHealth"] = staged["syncStatus"]
