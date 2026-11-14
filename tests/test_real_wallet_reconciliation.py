@@ -149,6 +149,7 @@ def test_stale_snapshot_recovers_without_restart(tmp_path, monkeypatch):
 
 def test_parallel_wallet_sync_is_rejected_by_lock(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(reconciliation, "LOCK_FILE", tmp_path / ".real_wallet_reconciliation.lock")
     (tmp_path / "real_accounting_state.json").write_text(json.dumps(snapshot()))
     with (tmp_path / ".real_wallet_reconciliation.lock").open("a+") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
