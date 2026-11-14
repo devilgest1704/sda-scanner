@@ -54,6 +54,9 @@ def snapshot(at=None):
         "pagination_exhausted": True,
         "bot_reconciliation_status": "COMPLETE",
         "bot_unresolved_transactions": [],
+        "validation": {"all_pagination_exhausted": True, "detail_fetch_errors": {},
+                       "cash_reconciliation_zero": True, "ledger_loaded": True,
+                       "open_positions_valued": True},
         "blockchain_range": {"latest_timestamp": at.isoformat()},
         "buy_transactions": [{
             "tx": TX, "contract": TOKEN, "symbol": "RIDE",
