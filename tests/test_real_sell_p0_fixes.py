@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import real_market_price as market_prices
 import real_paper_bridge as bridge
+import real_wallet_reconciliation
 import real_swing_sell_executor as executor
 import real_trader
 import real_trading_config as cfg
@@ -59,6 +60,10 @@ class FakeChain:
         self.tmp = tempfile.TemporaryDirectory()
         test.addCleanup(self.tmp.cleanup)
         self.patches = [
+            patch.object(real_wallet_reconciliation, "reconcile_manual_buys",
+                         return_value={"ok": True, "syncStatus": "FRESH", "imported": [],
+                                       "lastSuccessfulWalletSync": "2026-11-10T12:00:00+00:00",
+                                       "lastSuccessfulReconciliation": "2026-11-10T12:00:00+00:00"}),
             patch.object(real_trader, "load_state", side_effect=lambda: copy.deepcopy(self.state)),
             patch.object(real_trader, "save_state", side_effect=self._save),
             patch.object(real_trader, "now", side_effect=lambda: self.clock.isoformat()),
