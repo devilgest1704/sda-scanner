@@ -230,6 +230,7 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=None,
                     position = {
                         "symbol": str(row.get("symbol") or buy.get("symbol") or token[:8]),
                         "token": token,
+                        "status": "OPEN",
                         "amount_sda": float(cost),
                         "quoted_out_raw": raw_quantity,
                         "minimum_out_raw": raw_quantity,
