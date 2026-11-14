@@ -161,7 +161,8 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=None,
                                     "reason": "token already has a different REAL position"})
                     continue
                 try:
-                    decimals = int(real_trader.token_decimals(token))
+                    decimals = int(row.get("decimals") if row.get("decimals") is not None
+                                   else real_trader.token_decimals(token))
                     raw_quantity = _quantity_raw(row.get("quantity"), decimals)
                     wallet_quantity = int(real_trader.token_balance(token, wallet))
                     if wallet_quantity < raw_quantity:
