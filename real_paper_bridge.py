@@ -229,12 +229,35 @@ def reconcile():
             # Never create a baseline from an unknown PAPER state.
             actions.append({"action": "PAPER_STATE_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
                             "reason": paper_error, "at": _now()})
+            state["wallet_sync"] = {
+                "syncStatus": wallet_sync.get("syncStatus"),
+                "lastSyncAttemptAt": wallet_sync.get("lastSyncAttemptAt"),
+                "lastSuccessfulWalletSync": wallet_sync.get("lastSuccessfulWalletSync"),
+                "lastSuccessfulReconciliation": wallet_sync.get("lastSuccessfulReconciliation"),
+                "lastBlockchainDataAt": wallet_sync.get("lastBlockchainDataAt"),
+                "ledgerUpdatedAt": wallet_sync.get("ledgerUpdatedAt"),
+                "lastSyncError": wallet_sync.get("syncError"),
+                "imported_count": len(wallet_sync.get("imported", [])),
+            }
+            state["last_run"] = _now()
+            _save(STATE_FILE, state)
             _persist_events(actions[pre_paper_action_count:])
             return {"status": "paper_state_unavailable", "paper_state_error": paper_error,
                     "actions": actions}
         state = {"initialized": True, "paper_positions": sorted(current),
-                 "initialized_at": _now(), "last_run": _now()}
+                 "initialized_at": _now(), "last_run": _now(),
+                 "wallet_sync": {
+                     "syncStatus": wallet_sync.get("syncStatus"),
+                     "lastSyncAttemptAt": wallet_sync.get("lastSyncAttemptAt"),
+                     "lastSuccessfulWalletSync": wallet_sync.get("lastSuccessfulWalletSync"),
+                     "lastSuccessfulReconciliation": wallet_sync.get("lastSuccessfulReconciliation"),
+                     "lastBlockchainDataAt": wallet_sync.get("lastBlockchainDataAt"),
+                     "ledgerUpdatedAt": wallet_sync.get("ledgerUpdatedAt"),
+                     "lastSyncError": wallet_sync.get("syncError"),
+                     "imported_count": len(wallet_sync.get("imported", [])),
+                 }}
         _save(STATE_FILE, state)
+        _persist_events(actions[pre_paper_action_count:])
         return {"status": "baseline_initialized", "actions": actions}
 
     previous = set(state.get("paper_positions", []))
