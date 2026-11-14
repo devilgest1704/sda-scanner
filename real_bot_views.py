@@ -212,10 +212,19 @@ def _tracked_wallet_snapshot(accounting, dashboard=None):
     present = {str(item.get("address") or "").lower() for item in holdings}
     missing = sorted(expected - present)
     valued = sum(item.get("market_value_sda") is not None for item in holdings)
-    sync_fresh = (isinstance(runtime_state, dict)
-                  and runtime_state.get("syncStatus") == "FRESH"
-                  and runtime_state.get("walletSyncHealthy") is True
-                  and runtime_state.get("reconciliationHealthy") is True)
+    sync_fresh = False
+    if isinstance(runtime_state, dict):
+        sync_stamp = (runtime_state.get("lastSuccessfulWalletSyncAt")
+                      or runtime_state.get("lastSuccessfulWalletSync"))
+        try:
+            parsed_sync_stamp = datetime.fromisoformat(str(sync_stamp).replace("Z", "+00:00"))
+            sync_age = (datetime.now(timezone.utc) - parsed_sync_stamp.astimezone(timezone.utc)).total_seconds()
+            sync_fresh = (parsed_sync_stamp.tzinfo is not None and 0 <= sync_age <= 120
+                          and runtime_state.get("syncStatus") == "FRESH"
+                          and runtime_state.get("walletSyncHealthy") is True
+                          and runtime_state.get("reconciliationHealthy") is True)
+        except (TypeError, ValueError):
+            sync_fresh = False
     snapshot = {
         "wallet_address": wallet, "native_sda": native_sda, "holdings": holdings,
         "token_balances_loaded": bool(sync_fresh and native_raw is not None and not errors),
