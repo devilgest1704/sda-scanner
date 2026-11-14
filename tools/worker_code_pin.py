@@ -259,8 +259,7 @@ def write_status(cwd=None, output=STATUS_FILE):
     wallet_sync = bridge.get("wallet_sync") if isinstance(bridge.get("wallet_sync"), dict) else {}
     status["lastSyncAttemptAt"] = wallet_sync.get("lastSyncAttemptAt") or ledger.get("lastSyncAttemptAt")
     status["lastSuccessfulWalletSync"] = (wallet_sync.get("lastSuccessfulWalletSync")
-                                           or ledger.get("lastSuccessfulWalletSync")
-                                           or accounting.get("generated_at"))
+                                           or ledger.get("lastSuccessfulWalletSync"))
     status["lastSuccessfulReconciliation"] = wallet_sync.get("lastSuccessfulReconciliation") or ledger.get("lastSuccessfulReconciliation")
     status["lastBlockchainDataAt"] = (wallet_sync.get("lastBlockchainDataAt")
                                        or ledger.get("lastBlockchainDataAt")
