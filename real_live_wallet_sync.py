@@ -125,6 +125,10 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
             staged["positions"] = dict(state.get("positions") or {})
             staged["trades"] = list(state.get("trades") or [])
             staged["manual_imports"] = list(state.get("manual_imports") or [])
+            today_utc = now.date().isoformat()
+            if staged.get("daily_pnl_date") != today_utc:
+                staged["daily_pnl_date"] = today_utc
+                staged["daily_realized_pnl_sda"] = 0.0
             seen = set(state.get("processedBlockchainEvents") or [])
             known = _known_tokens(staged)
             discovered = []
@@ -285,6 +289,10 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                                                          if proceeds is not None else position.get("realized_proceeds"))
                         position["realized_pnl"] = (str(Decimal(str(position.get("realized_pnl") or 0)) + net_pnl)
                                                     if net_pnl is not None else position.get("realized_pnl"))
+                        if net_pnl is not None and block_time.date().isoformat() == today_utc:
+                            staged["daily_realized_pnl_sda"] = (
+                                float(staged.get("daily_realized_pnl_sda") or 0) + float(net_pnl)
+                            )
                         position["wallet_available_quantity"] = remaining
                         if remaining <= 0:
                             staged["positions"].pop(token, None)
