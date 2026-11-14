@@ -260,6 +260,8 @@ def write_status(cwd=None, output=STATUS_FILE):
     status["lastSyncAttemptAt"] = wallet_sync.get("lastSyncAttemptAt") or ledger.get("lastSyncAttemptAt")
     status["lastSuccessfulWalletSync"] = (wallet_sync.get("lastSuccessfulWalletSync")
                                            or ledger.get("lastSuccessfulWalletSync"))
+    status["lastBlockchainSnapshotGeneratedAt"] = (wallet_sync.get("lastBlockchainSnapshotGeneratedAt")
+                                                    or ledger.get("lastBlockchainSnapshotGeneratedAt"))
     status["lastSuccessfulReconciliation"] = wallet_sync.get("lastSuccessfulReconciliation") or ledger.get("lastSuccessfulReconciliation")
     status["lastBlockchainDataAt"] = (wallet_sync.get("lastBlockchainDataAt")
                                        or ledger.get("lastBlockchainDataAt")
@@ -319,6 +321,7 @@ def write_status(cwd=None, output=STATUS_FILE):
         "last_real_reconciliation_at": reconciliation_stamp,
         "lastSyncAttemptAt": status.get("lastSyncAttemptAt"),
         "lastSuccessfulWalletSync": status.get("lastSuccessfulWalletSync"),
+        "lastBlockchainSnapshotGeneratedAt": status.get("lastBlockchainSnapshotGeneratedAt"),
         "lastSuccessfulReconciliation": reconciliation_stamp,
         "lastBlockchainDataAt": status.get("lastBlockchainDataAt"),
         "ledgerUpdatedAt": status.get("ledgerUpdatedAt"),
