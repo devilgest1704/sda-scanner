@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 import real_live_wallet_sync as live
+import real_pnl_stats
+import real_bot_views
 
 
 WALLET = "0x" + "a" * 40
@@ -154,6 +156,34 @@ class LiveWalletSyncTests(unittest.TestCase):
         self.assertEqual(len(sell), 1)
         self.assertEqual(sell[0]["proceeds_sda"], "12")
         self.assertGreater(float(sell[0]["net_pnl_sda"]), 1.99)
+
+
+    def test_receipt_verified_manual_sell_flows_into_realized_pnl(self):
+        accounting = {"sell_transactions": [], "buy_transactions": [],
+                      "excluded_external_activity": {}, "bot_unresolved_transactions": []}
+        runtime = {"trades": [
+            {"action": "MANUAL_BUY", "source": "MANUAL", "tx": "0xbuy", "at": "2026-11-14T10:00:00+00:00"},
+            {"action": "MANUAL_SELL", "source": "MANUAL", "tx": "0xsell", "buy_tx": "0xbuy",
+             "contract": TOKEN, "token": TOKEN, "at": "2026-11-14T11:00:00+00:00",
+             "cost_basis_sda": "10", "proceeds_sda": "12", "net_pnl_sda": "1.99"},
+        ]}
+        model = real_pnl_stats.build_pnl_model(accounting, runtime, 0, True)
+        self.assertEqual(len(model["events"]), 1)
+        self.assertAlmostEqual(float(model["realized"]), 1.99, places=8)
+
+    def test_telegram_cache_invalidates_when_live_state_version_changes(self):
+        state = {"updated_at": "v1"}
+        dashboard = type("Dashboard", (), {"load": lambda _self, _path, _default: dict(state)})()
+        calls = []
+        with patch.object(real_bot_views, "_build_dashboard_data",
+                          side_effect=lambda _dashboard: calls.append(len(calls)) or {"generation": len(calls)}):
+            real_bot_views.clear_cache()
+            first = real_bot_views._get_data(dashboard)
+            state["updated_at"] = "v2"
+            second = real_bot_views._get_data(dashboard)
+        self.assertEqual(first["generation"], 1)
+        self.assertEqual(second["generation"], 2)
+        real_bot_views.clear_cache()
 
     def test_freshness_thresholds(self):
         now = datetime(2026, 11, 15, tzinfo=timezone.utc)
