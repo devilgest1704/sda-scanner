@@ -999,6 +999,8 @@ def evaluate_position(token, symbol, market_price, price_timestamp=None, wallet_
         position = state.get("positions", {}).get(token)
         if not isinstance(position, dict):
             return {"action": "HOLD", "status": "NO_POSITION", "token": token}
+        if position.get("sellManagementEnabled") is False:
+            return {"action": "HOLD", "status": "SELL_MANAGEMENT_DISABLED", "token": token}
         if migrated:
             return {"action": "HOLD", "status": "MIGRATION_BASELINE", "token": token}
         price = Decimal(str(market_price))
