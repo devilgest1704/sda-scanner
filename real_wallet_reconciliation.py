@@ -1,0 +1,235 @@
+"""Idempotent import of blockchain-confirmed manual REAL BUYs.
+
+The accounting snapshot is read-only evidence. This module never signs or sends
+transactions; it verifies the wallet, chain, snapshot freshness, transaction
+receipt and current token balance before adding a missing position.
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+from datetime import datetime, timezone
+from decimal import Decimal, ROUND_DOWN
+from pathlib import Path
+
+ACCOUNTING_FILE = Path("real_accounting_state.json")
+LOCK_FILE = Path(".real_wallet_reconciliation.lock")
+MAX_SNAPSHOT_AGE_SECONDS = 20 * 60
+CHAIN_ID = 97453
+
+
+def _stamp(value):
+    try:
+        result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if result.tzinfo is None:
+            return None
+        return result.astimezone(timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def snapshot_health(snapshot, now=None, max_age=MAX_SNAPSHOT_AGE_SECONDS):
+    now = now or datetime.now(timezone.utc)
+    if not isinstance(snapshot, dict) or snapshot.get("schema_version") != 1:
+        return False, "accounting snapshot missing or unsupported"
+    generated = _stamp(snapshot.get("generated_at"))
+    if generated is None:
+        return False, "accounting snapshot generated_at missing or invalid"
+    age = (now - generated).total_seconds()
+    if age < 0:
+        return False, "accounting snapshot timestamp is in the future"
+    if age > max_age:
+        return False, f"stale blockchain snapshot ({int(age)}s old)"
+    if int(snapshot.get("chain_id") or 0) != CHAIN_ID:
+        return False, "accounting snapshot chain mismatch"
+    if not snapshot.get("wallet"):
+        return False, "accounting snapshot wallet missing"
+    if snapshot.get("pagination_exhausted") is not True:
+        return False, "blockchain history pagination incomplete"
+    if str(snapshot.get("bot_reconciliation_status") or "").upper() != "COMPLETE":
+        return False, "blockchain reconciliation incomplete"
+    if snapshot.get("bot_unresolved_transactions"):
+        return False, "unresolved blockchain transactions remain"
+    if not isinstance(snapshot.get("open_positions"), list):
+        return False, "blockchain open positions missing"
+    if not isinstance(snapshot.get("buy_transactions"), list):
+        return False, "confirmed BUY transaction list missing"
+    return True, None
+
+
+def _quantity_raw(quantity, decimals):
+    value = Decimal(str(quantity))
+    if not value.is_finite() or value <= 0 or decimals < 0 or decimals > 36:
+        raise ValueError("invalid token quantity or decimals")
+    raw = value * (Decimal(10) ** decimals)
+    integral = raw.to_integral_value(rounding=ROUND_DOWN)
+    if raw != integral:
+        raise ValueError("token quantity exceeds supported decimals")
+    return int(integral)
+
+
+def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
+                          now=None, max_age=MAX_SNAPSHOT_AGE_SECONDS):
+    """Import missing confirmed BUY lots; return a fail-closed health record."""
+    now = now or datetime.now(timezone.utc)
+    attempted = now.astimezone(timezone.utc).isoformat()
+    try:
+        lock_handle = LOCK_FILE.open("a+", encoding="utf-8")
+    except OSError as exc:
+        return {"ok": False, "syncStatus": "FAILED", "syncError": f"lock open failed: {exc}",
+                "lastSyncAttemptAt": attempted, "imported": []}
+    with lock_handle:
+        try:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            lock_handle.close()
+            return {"ok": False, "syncStatus": "IN_PROGRESS",
+                    "syncError": "wallet reconciliation already running",
+                    "lastSyncAttemptAt": attempted, "imported": []}
+        try:
+            try:
+                snapshot = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
+            except Exception as exc:
+                return {"ok": False, "syncStatus": "FAILED",
+                        "syncError": f"snapshot read failed: {type(exc).__name__}: {exc}",
+                        "lastSyncAttemptAt": attempted, "imported": []}
+            healthy, reason = snapshot_health(snapshot, now=now, max_age=max_age)
+            if not healthy:
+                return {"ok": False, "syncStatus": "STALE" if reason and "stale" in reason else "FAILED",
+                        "syncError": reason, "lastSyncAttemptAt": attempted, "imported": []}
+
+            wallet = str(real_trader.wallet_address() or "").lower()
+            snapshot_wallet = str(snapshot.get("wallet") or "").lower()
+            if not wallet or wallet != snapshot_wallet:
+                return {"ok": False, "syncStatus": "FAILED",
+                        "syncError": "REAL wallet does not match blockchain snapshot",
+                        "lastSyncAttemptAt": attempted, "imported": []}
+            if int(real_trader.chain_id()) != CHAIN_ID:
+                return {"ok": False, "syncStatus": "FAILED", "syncError": "REAL chain ID mismatch",
+                        "lastSyncAttemptAt": attempted, "imported": []}
+
+            buys = {}
+            for row in snapshot.get("buy_transactions", []):
+                if not isinstance(row, dict):
+                    continue
+                tx = str(row.get("tx") or "").lower()
+                token = str(row.get("contract") or "").lower()
+                if tx.startswith("0x") and token.startswith("0x"):
+                    buys[(tx, token)] = row
+
+            state = real_trader.load_state()
+            positions = state.setdefault("positions", {})
+            trades = state.setdefault("trades", [])
+            imports = state.setdefault("manual_imports", [])
+            imported = []
+            skipped = []
+            for row in snapshot.get("open_positions", []):
+                if not isinstance(row, dict):
+                    continue
+                token = str(row.get("token") or "").lower()
+                tx = str(row.get("buy_tx") or "").lower()
+                buy = buys.get((tx, token))
+                if not buy:
+                    continue
+                if any(str(p.get("buy_tx") or "").lower() == tx
+                       for p in positions.values() if isinstance(p, dict)):
+                    continue
+                if any(str(item.get("tx") or "").lower() == tx and
+                       str(item.get("token") or "").lower() == token
+                       for item in imports if isinstance(item, dict)):
+                    continue
+                if token in positions and isinstance(positions[token], dict):
+                    # Do not merge distinct lots into an existing position with a
+                    # different cost basis. Leave it for explicit multi-lot handling.
+                    skipped.append({"token": token, "tx": tx,
+                                    "reason": "token already has a different REAL position"})
+                    continue
+                try:
+                    decimals = int(real_trader.token_decimals(token))
+                    raw_quantity = _quantity_raw(row.get("quantity"), decimals)
+                    wallet_quantity = int(real_trader.token_balance(token, wallet))
+                    if wallet_quantity < raw_quantity:
+                        raise ValueError("wallet balance below blockchain open-lot quantity")
+                    receipt = real_trader.rpc("eth_getTransactionReceipt", [tx])
+                    if not isinstance(receipt, dict) or int(receipt.get("status", "0x0"), 16) != 1:
+                        raise ValueError("BUY transaction receipt missing or unsuccessful")
+                    cost = Decimal(str(row.get("cost_basis_sda") or buy.get("invested_sda")))
+                    invested = Decimal(str(buy.get("invested_sda") or cost))
+                    if not cost.is_finite() or cost <= 0 or invested <= 0:
+                        raise ValueError("invalid blockchain cost basis")
+                    opened = row.get("at") or buy.get("at")
+                    price = invested / Decimal(str(row.get("quantity")))
+                    position = {
+                        "symbol": str(row.get("symbol") or buy.get("symbol") or token[:8]),
+                        "token": token,
+                        "amount_sda": float(cost),
+                        "quoted_out_raw": raw_quantity,
+                        "minimum_out_raw": raw_quantity,
+                        "token_amount_raw": raw_quantity,
+                        "opened_at": opened,
+                        "buy_tx": tx,
+                        "position_id": tx,
+                        "initial_quantity": raw_quantity,
+                        "remaining_quantity": raw_quantity,
+                        "confirmed_sold_quantity": 0,
+                        "initial_cost_basis": str(cost),
+                        "remaining_cost_basis": str(cost),
+                        "sold_cost_basis": "0",
+                        "realized_proceeds": "0",
+                        "realized_pnl": "0",
+                        "wallet_available_quantity": wallet_quantity,
+                        "source": "MANUAL",
+                        "sellManagementEnabled": True,
+                        "manual_imported": True,
+                        "manual_imported_at": attempted,
+                        "accounting_identity": f"{CHAIN_ID}:{wallet}:{tx}:{token}",
+                        "execution_price_sda": str(price),
+                        "last_market_price": str(Decimal(str(row.get("value_sda") or invested)) /
+                                                 Decimal(str(row.get("quantity")))),
+                        "profit_partial_done": False,
+                        "trailing_armed": False,
+                    }
+                    positions[token] = position
+                    record = {
+                        "action": "MANUAL_BUY", "source": "MANUAL", "status": "OPEN",
+                        "token": token, "symbol": position["symbol"], "tx": tx,
+                        "at": opened, "quantity": str(row.get("quantity")),
+                        "quantity_raw": raw_quantity, "decimals": decimals,
+                        "invested_sda": str(invested), "cost_basis_sda": str(cost),
+                        "execution_price_sda": str(price),
+                        "accounting_identity": position["accounting_identity"],
+                        "sellManagementEnabled": True,
+                    }
+                    trades.append(record)
+                    imports.append({"tx": tx, "token": token, "at": opened,
+                                    "accounting_identity": position["accounting_identity"]})
+                    imported.append({"token": token, "symbol": position["symbol"], "tx": tx,
+                                     "quantity_raw": raw_quantity, "cost_basis_sda": str(cost)})
+                except Exception as exc:
+                    skipped.append({"token": token, "tx": tx,
+                                    "reason": f"{type(exc).__name__}: {str(exc)[:240]}"})
+
+            state["updated_at"] = attempted
+            state["lastSyncAttemptAt"] = attempted
+            state["lastSuccessfulWalletSync"] = snapshot.get("generated_at")
+            state["lastBlockchainDataAt"] = (snapshot.get("blockchain_range") or {}).get("latest_timestamp")
+            state["ledgerUpdatedAt"] = attempted if imported else state.get("ledgerUpdatedAt")
+            state["lastSuccessfulReconciliation"] = attempted if not skipped else state.get("lastSuccessfulReconciliation")
+            state["syncStatus"] = "FRESH" if not skipped else "DEGRADED"
+            state["lastSyncError"] = "; ".join(item["reason"] for item in skipped) if skipped else None
+            state["walletSyncSource"] = "real_accounting_state.json"
+            if imported:
+                real_trader.save_state(state)
+            return {"ok": not skipped, "syncStatus": state["syncStatus"],
+                    "syncError": state["lastSyncError"], "lastSyncAttemptAt": attempted,
+                    "lastSuccessfulWalletSync": state["lastSuccessfulWalletSync"],
+                    "lastSuccessfulReconciliation": state["lastSuccessfulReconciliation"],
+                    "lastBlockchainDataAt": state["lastBlockchainDataAt"],
+                    "ledgerUpdatedAt": state["ledgerUpdatedAt"],
+                    "imported": imported, "skipped": skipped}
+        finally:
+            try:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                lock_handle.close()
