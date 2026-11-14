@@ -9,6 +9,7 @@ from decimal import Decimal
 import real_bot_menu as rb
 import real_bot_views
 import real_trading_config as cfg
+import real_wallet_reconciliation as wallet_reconciliation
 import v30_dashboard_patch as v30_view
 
 SCANNER_LIMIT = 5
@@ -110,7 +111,7 @@ def real_capacity(dashboard):
     sync_stamp = worker.get("lastSuccessfulWalletSync") or accounting.get("generated_at")
     try:
         stamp = datetime.fromisoformat(str(sync_stamp).replace("Z", "+00:00"))
-        if stamp.tzinfo is None or (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds() > 20 * 60:
+        if stamp.tzinfo is None or (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds() > wallet_reconciliation.MAX_SNAPSHOT_AGE_SECONDS:
             return None
     except (TypeError, ValueError):
         return None
