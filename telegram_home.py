@@ -114,7 +114,7 @@ def real_capacity(dashboard):
             return None
     except (TypeError, ValueError):
         return None
-    if worker.get("syncStatus") != "FRESH":
+    if worker.get("syncStatus") != "FRESH" or "STATUS UNKNOWN" in rb._status(worker):
         return None
     state = rb._state(dashboard)
     try:
@@ -231,7 +231,9 @@ def _scanner_inputs(dashboard):
                     and (market_state.get("source_health") == "SOURCE_UNAVAILABLE"
                          or (market_stamp is not None and _scanner_stale(market_rows))))
     market_stale = market_stale or source_health in ("STALE", "SOURCE_UNAVAILABLE")
-    wallet_sync_stale = worker.get("syncStatus") != "FRESH"
+    wallet_sync_stale = (worker.get("syncStatus") != "FRESH"
+                         or "STATUS UNKNOWN" in rb._status(worker)
+                         or "CRITICAL FAILURE" in str(worker.get("worker_health") or ""))
     return rows, real, _scanner_stale(rows) or whale_stale or market_stale or wallet_sync_stale
 
 
@@ -241,8 +243,8 @@ def _home_scanner_lines(dashboard):
     lines = ["", "🔥 REAL BUY SCANNER"]
     if stale:
         lines.append("⚪ Data stale")
-        if worker.get("syncStatus") != "FRESH":
-            detail = worker.get("lastSyncError") or f"wallet sync {worker.get('syncStatus') or 'UNKNOWN'}"
+        if worker.get("syncStatus") != "FRESH" or "STATUS UNKNOWN" in rb._status(worker):
+            detail = worker.get("lastSyncError") or rb._status(worker)
             lines.append(f"⚠ {detail}")
             last_sync = worker.get("lastSuccessfulWalletSync")
             if last_sync:
