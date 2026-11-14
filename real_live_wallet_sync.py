@@ -252,6 +252,10 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                         sold_cost = cost_before * Decimal(sold) / Decimal(recorded)
                         remaining = recorded - sold
                         proceeds = incoming_wsda if incoming_wsda > 0 else None
+                        # A bare wallet transfer is not a SELL. Do not reduce
+                        # BOT quantity or invent realized PnL without swap proceeds.
+                        if proceeds is None:
+                            continue
                         gas_fee = Decimal(
                             _hexint(receipt.get("gasUsed")) *
                             _hexint(receipt.get("effectiveGasPrice") or tx.get("gasPrice"))
