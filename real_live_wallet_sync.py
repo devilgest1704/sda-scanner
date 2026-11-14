@@ -77,6 +77,22 @@ def _transfer_amount(log):
     return _hexint(data)
 
 
+def _token_decimals(real_trader, token):
+    try:
+        value = int(real_trader.token_decimals(token))
+    except Exception as metadata_error:  # noqa: BLE001 - fallback to read-only ERC-20 metadata
+        try:
+            result = real_trader.rpc("eth_call", [{"to": token, "data": "0x313ce567"}, "latest"])
+            value = _hexint(result)
+        except Exception as rpc_error:  # noqa: BLE001 - no safe quantity without decimals
+            raise RuntimeError(
+                f"token decimals unavailable for {token}: {metadata_error}; RPC fallback: {rpc_error}"
+            ) from rpc_error
+    if value < 0 or value > 36:
+        raise RuntimeError(f"invalid ERC-20 decimals {value} for {token}")
+    return value
+
+
 def _known_tokens(state):
     tokens = set()
     for token in (state.get("positions") or {}):
@@ -179,7 +195,7 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                         identity = _event_identity(tx_hash, log.get("logIndex"), token)
                         if identity in seen:
                             continue
-                        decimals = int(real_trader.token_decimals(token))
+                        decimals = _token_decimals(real_trader, token)
                         quantity = Decimal(raw_amount) / (Decimal(10) ** decimals)
                         if quantity <= 0:
                             continue
