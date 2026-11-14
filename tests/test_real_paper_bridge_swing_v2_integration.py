@@ -28,7 +28,7 @@ def _snapshot(price):
 
 
 def _run_case(price=None, unavailable=False, buy_data_available=True, paper_open=False,
-              paper_unavailable=False):
+              paper_unavailable=False, wallet_sync_exception=False):
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         paper_file = root / "positions.json"
@@ -72,14 +72,17 @@ def _run_case(price=None, unavailable=False, buy_data_available=True, paper_open
         send_transaction = Mock(side_effect=AssertionError("transaction broadcast attempted"))
         execute_buy = Mock(side_effect=AssertionError("REAL BUY attempted with unavailable data"))
         wallet_reconcile = Mock(return_value={"status": "UNCHANGED"})
+        wallet_sync = Mock(return_value={"ok": True, "syncStatus": "FRESH", "imported": [],
+                                           "lastSuccessfulWalletSync": datetime.now(timezone.utc).isoformat(),
+                                           "lastSuccessfulReconciliation": datetime.now(timezone.utc).isoformat()})
+        if wallet_sync_exception:
+            wallet_sync.side_effect = RuntimeError("wallet snapshot persistence failed")
         with ExitStack() as stack:
             stack.enter_context(patch.object(bridge, "PAPER_FILE", paper_file))
             stack.enter_context(patch.object(bridge, "STATE_FILE", bridge_state_file))
             stack.enter_context(patch.object(bridge, "EVENTS_FILE", events_file))
             stack.enter_context(patch.object(real_wallet_reconciliation, "reconcile_manual_buys",
-                return_value={"ok": True, "syncStatus": "FRESH", "imported": [],
-                              "lastSuccessfulWalletSync": datetime.now(timezone.utc).isoformat(),
-                              "lastSuccessfulReconciliation": datetime.now(timezone.utc).isoformat()}))
+                side_effect=wallet_sync))
             stack.enter_context(patch.object(market_prices, "load_market_snapshot", return_value=snapshot))
             stack.enter_context(patch.object(market_prices, "load_token_metadata", return_value={}))
             stack.enter_context(patch.object(market_prices, "newest_supabase_price", return_value=None))
@@ -195,4 +198,14 @@ def test_paper_ledger_failure_keeps_real_sell_and_wallet_reconciliation():
     assert evaluate_calls == 1
     assert decide_calls == 1
     assert wallet_calls == 2
+    assert buy_calls == 0
+
+
+
+def test_wallet_sync_storage_failure_does_not_block_existing_position_sell_evaluation():
+    row, _state, evaluate_calls, decide_calls, _wallet_calls, buy_calls = _run_case(
+        "0.0202", wallet_sync_exception=True)
+    assert row["decision_action"] == "HOLD"
+    assert evaluate_calls == 1
+    assert decide_calls == 1
     assert buy_calls == 0
