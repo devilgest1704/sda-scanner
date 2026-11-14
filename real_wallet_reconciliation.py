@@ -280,7 +280,8 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=None,
             state["lastBlockchainSnapshotGeneratedAt"] = snapshot.get("generated_at")
             state["lastBlockchainDataAt"] = (snapshot.get("blockchain_range") or {}).get("latest_timestamp")
             state["ledgerUpdatedAt"] = attempted if imported else state.get("ledgerUpdatedAt")
-            state["lastSuccessfulReconciliation"] = attempted if not skipped else state.get("lastSuccessfulReconciliation")
+            # The outer REAL bridge records reconciliation success only after
+            # its wallet-position reconciliation phase also completes.
             state["syncStatus"] = "FRESH" if not skipped else "DEGRADED"
             state["lastSyncError"] = "; ".join(item["reason"] for item in skipped) if skipped else None
             state["walletSyncSource"] = snapshot_source
