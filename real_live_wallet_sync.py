@@ -210,6 +210,7 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                                 "realized_proceeds": "0", "realized_pnl": "0",
                                 "token_amount_raw": raw_amount, "initial_quantity": raw_amount,
                                 "remaining_quantity": raw_amount, "confirmed_sold_quantity": 0,
+                                "decimals": decimals,
                                 "opened_at": _iso(block_time), "buy_tx": tx_hash,
                                 "position_id": identity, "accounting_identity": identity,
                                 "network_fee_sda": str(gas_fee),
