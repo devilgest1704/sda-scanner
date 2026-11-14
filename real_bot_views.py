@@ -276,11 +276,15 @@ def _build_dashboard_data(dashboard):
                rb._finite_number(holding.get("market_value_sda")) if holding and not is_runtime else None)
         pnl=value-cost if value is not None and cost is not None else None
         pnl_pct=pnl/cost*100 if pnl is not None and cost and cost>0 else None
+        runtime_position = (runtime_state.get("positions", {}).get(token, {})
+                            if isinstance(runtime_state, dict) else {})
         positions.append({"token":token,"symbol":symbol,"amount":str(quantity),
             "value_sda":value,"cost_sda":cost,"pnl_sda":pnl,"pnl_pct":pnl_pct,
             "price_sda":price,"price_timestamp":holding.get("price_timestamp") if holding else None,
             "price_age_seconds":holding.get("price_age_seconds") if holding else None,
             "price_source":holding.get("price_source") if holding else None,
+            "source":runtime_position.get("source") or "BOT",
+            "sell_management_enabled":runtime_position.get("sellManagementEnabled", True),
             "valued":value is not None,"balance_matches":True,"buy_verified":True})
     market_count=sum(item.get("market_value_sda") is not None for item in holdings)
     token_total=sum((float(item["market_value_sda"]) for item in holdings
@@ -431,7 +435,8 @@ def _portfolio_text(data):
         icon="🟢" if pnl>=0 else "🔴"
         pct=f" ({p['pnl_pct']:+.1f}%)" if p.get("pnl_pct") is not None else ""
         price=f" @ {p['price_sda']:.6g}" if p.get("price_sda") is not None else ""
-        lines.append(f"{icon} {p['symbol']} {value:.2f} SDA {pnl:+.2f}{pct}{price}")
+        source=f" [{p['source']}]" if p.get("source") == "MANUAL" else ""
+        lines.append(f"{icon} {p['symbol']}{source} {value:.2f} SDA {pnl:+.2f}{pct}{price}")
     if not data.get("positions"):lines.append("No open REAL positions")
     if not data.get("open_complete"):
         valued=sum(p.get("value_sda") is not None for p in data.get("positions") or [])
@@ -447,7 +452,7 @@ def _buy_text(data):
     for item in (data.get("buy_records") or []):
         date=_date_short(item.get("at"));prefix=f"{date} " if date else ""
         lines.append(f"{prefix}{item['symbol']} {_fmt(item.get('invested_sda'))} SDA")
-    lines += ["",f"Confirmed bot BUY transactions: {data.get('buy_count',0)}",
+    lines += ["",f"Confirmed REAL BUY transactions: {data.get('buy_count',0)}",
         f"Total invested: {_fmt(data.get('total_invested'))} SDA"]
     if data.get("unverified_buy_count"):lines.append(f"⚠ {data['unverified_buy_count']} unverified BUY excluded")
     return "\n".join(lines)
