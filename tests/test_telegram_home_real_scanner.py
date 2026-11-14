@@ -273,3 +273,13 @@ def test_trading_strategy_modules_unchanged_by_presentation():
     source = (ROOT / "telegram_home.py").read_text(encoding="utf-8")
     for forbidden in ("execute_buy", "send_transaction", "evaluate_position", "paper_champion_config"):
         assert forbidden not in source
+
+
+
+def test_stale_worker_heartbeat_blocks_buy_even_with_fresh_wallet_snapshot(env):
+    env.worker["updated_at"] = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
+    _set_state(env, _state(count=8))
+    _rows, real, stale = telegram_home._scanner_inputs(env.dashboard)
+    assert stale is True
+    assert real is None
+    assert telegram_home.real_capacity(env.dashboard) is None
