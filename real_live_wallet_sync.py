@@ -16,6 +16,8 @@ import real_trading_config as cfg
 
 LOCK_FILE = Path("/tmp/sda-real-live-wallet-sync.lock")
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+# The worker loop runs on a one-minute cadence; the module interval prevents
+# redundant RPC polling while allowing independent retries after provider faults.
 SYNC_INTERVAL_SECONDS = int(__import__("os").getenv("REAL_WALLET_SYNC_INTERVAL_SECONDS", "45"))
 FRESH_SECONDS = int(__import__("os").getenv("REAL_WALLET_FRESH_SECONDS", "120"))
 DEGRADED_SECONDS = int(__import__("os").getenv("REAL_WALLET_DEGRADED_SECONDS", "300"))
