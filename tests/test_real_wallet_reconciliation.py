@@ -280,3 +280,22 @@ def test_missing_open_position_price_data_fails_closed(tmp_path, monkeypatch):
     result = reconciliation.reconcile_manual_buys(FakeTrader(), snapshot_path=path)
     assert result["ok"] is False
     assert "lack safe price data" in result["syncError"]
+
+
+
+def test_transaction_sender_must_match_real_wallet(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "real_accounting_state.json"
+    path.write_text(json.dumps(snapshot()))
+    trader = FakeTrader()
+    original_rpc = trader.rpc
+    def wrong_sender(method, params):
+        result = original_rpc(method, params)
+        if method == "eth_getTransactionByHash":
+            result["from"] = "0x" + "f" * 40
+        return result
+    trader.rpc = wrong_sender
+    result = reconciliation.reconcile_manual_buys(trader, snapshot_path=path)
+    assert result["ok"] is False
+    assert "sender does not match" in result["syncError"]
+    assert trader.state["positions"] == {}
