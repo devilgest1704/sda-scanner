@@ -127,8 +127,12 @@ def _ledger_freshness_warning(state, worker_state, now=None):
     # The worker heartbeat proves the process is alive; it does not prove the
     # position ledger itself was checkpointed recently. Check ledger time
     # independently so a fresh heartbeat cannot mask stale positions/P&L.
-    stamp = (_parse_timestamp((state or {}).get("updated_at"))
-             or _parse_timestamp((worker_state or {}).get("ledger_updated_at")))
+    # Worker heartbeat is intentionally not a ledger timestamp. Wallet
+    # snapshot freshness is measured by its successful retrieval time.
+    stamp = (_parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSync"))
+             or _parse_timestamp((state or {}).get("lastSuccessfulWalletSync"))
+             or _parse_timestamp((worker_state or {}).get("ledger_updated_at"))
+             or _parse_timestamp((state or {}).get("ledgerUpdatedAt")))
     if stamp is None:
         return "⚠ REAL ledger freshness unavailable (no valid ledger timestamp)"
     age = (now - stamp).total_seconds()
