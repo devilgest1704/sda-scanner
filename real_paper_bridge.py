@@ -206,16 +206,22 @@ def reconcile():
                                if a.get("action") in {"MANUAL_SELL_RECONCILIATION",
                                                      "WALLET_RECONCILIATION"}
                                and a.get("status") in {"ERROR", "FAILED", "STALE", "DEGRADED"}]
-    wallet_sync["ok"] = bool(wallet_sync.get("ok")) and not wallet_reconcile_errors
+    snapshot_sync_ok = bool(wallet_sync.get("ok"))
+    wallet_sync["ok"] = snapshot_sync_ok and not wallet_reconcile_errors
+    real_state = real_trader.load_state()
     if wallet_sync["ok"]:
-        real_state = real_trader.load_state()
         real_state["lastSuccessfulReconciliation"] = _now()
         real_state["syncStatus"] = "FRESH"
         real_state["lastSyncError"] = None
         real_trader.save_state(real_state)
         wallet_sync["lastSuccessfulReconciliation"] = real_state["lastSuccessfulReconciliation"]
     else:
-        real_state = real_trader.load_state()
+        if snapshot_sync_ok:
+            wallet_sync["syncStatus"] = "DEGRADED"
+            wallet_sync["syncError"] = "; ".join(
+                str(a.get("error") or a.get("status") or "wallet position reconciliation failed")
+                for a in wallet_reconcile_errors
+            ) or "wallet position reconciliation failed"
         real_state["syncStatus"] = wallet_sync.get("syncStatus") or "DEGRADED"
         real_state["lastSyncAttemptAt"] = wallet_sync.get("lastSyncAttemptAt") or real_state.get("lastSyncAttemptAt")
         real_state["lastSyncError"] = wallet_sync.get("syncError") or "wallet reconciliation failed"
