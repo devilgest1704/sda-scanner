@@ -53,6 +53,7 @@ def _run_case(price=None, unavailable=False, buy_data_available=True, paper_open
                 "token_amount_raw": 1000, "remaining_quantity": 1000,
                 "amount_sda": 20, "remaining_cost_basis": "20",
                 "wallet_available_quantity": 1000,
+                "source": "MANUAL", "sellManagementEnabled": True,
             }},
             "pending_buys": {}, "pending_sells": {},
             "sell_intents": {}, "sell_intent_counters": {}, "trades": [],
