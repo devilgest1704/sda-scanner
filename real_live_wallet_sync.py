@@ -55,9 +55,10 @@ def _age(value, now=None):
 
 def freshness(state, now=None):
     age = _age(state.get("lastSuccessfulWalletSyncAt"), now)
-    if age is None or age > DEGRADED_SECONDS:
+    status = str(state.get("syncStatus") or "").upper()
+    if age is None or age > DEGRADED_SECONDS or status in {"FAILED", "STALE"}:
         return "STALE", age
-    if age > FRESH_SECONDS:
+    if age > FRESH_SECONDS or status == "DEGRADED":
         return "DEGRADED", age
     return "FRESH", age
 
