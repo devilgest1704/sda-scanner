@@ -216,7 +216,7 @@ def test_period_screens_render_actual_values(monkeypatch):
     assert "📅 DAILY PNL" in daily and "09.11  Δ -1.32 SDA" in daily and "Σ +4.93" in daily
     assert "Green days" in daily and "Red days" in daily and "7D PnL" in daily
     assert "📆 WEEKLY PNL" in weekly and "2026-W46  Δ +2.93 SDA" in weekly and "Σ +4.93" in weekly and "Win rate" in weekly
-    assert "🗓 MONTHLY PNL" in monthly and "Oct 2026  Δ +2.00 SDA" in monthly and "Σ +4.93" in monthly
+    assert "🗓 MONTHLY PNL" in monthly and "Oct 2026  Δ +2.00 SDA" in monthly and "Σ +2.00" in monthly and "Σ +4.93" in monthly
     assert "Total realized BOT PnL +4.93 SDA" in monthly
 
 
