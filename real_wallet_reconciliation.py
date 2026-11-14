@@ -9,11 +9,11 @@ from __future__ import annotations
 import fcntl
 import json
 import time
-
-import requests
 from datetime import UTC, datetime
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
+
+import requests
 
 ACCOUNTING_FILE = Path("real_accounting_state.json")
 ACCOUNTING_URL = "https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/real_accounting_state.json"
