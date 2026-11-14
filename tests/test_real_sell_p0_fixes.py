@@ -48,6 +48,8 @@ class FakeChain:
             }},
             "pending_buys": {}, "pending_sells": {}, "sell_intents": {},
             "sell_intent_counters": {}, "trades": [], "daily_realized_pnl_sda": 0.0,
+            "syncStatus": "FRESH", "walletSyncHealthy": True,
+            "reconciliationHealthy": True, "buyDataHealthy": True,
         }
         self.balances = {TOKEN: quantity, WSDA: 0}
         self.receipts = {}
