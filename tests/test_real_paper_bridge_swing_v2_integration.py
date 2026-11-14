@@ -70,6 +70,13 @@ def _run_case(price=None, unavailable=False, buy_data_available=True, paper_open
             real_state.clear()
             real_state.update(saved)
 
+        write_failed = {"value": False}
+        def save_state_with_optional_failure(value):
+            if ledger_write_exception and not write_failed["value"]:
+                write_failed["value"] = True
+                raise RuntimeError("REAL ledger write failed")
+            return save_state(value)
+
         send_transaction = Mock(side_effect=AssertionError("transaction broadcast attempted"))
         execute_buy = Mock(side_effect=AssertionError("REAL BUY attempted with unavailable data"))
         wallet_reconcile = Mock(return_value={"status": "UNCHANGED"})
@@ -88,11 +95,8 @@ def _run_case(price=None, unavailable=False, buy_data_available=True, paper_open
             stack.enter_context(patch.object(market_prices, "load_token_metadata", return_value={}))
             stack.enter_context(patch.object(market_prices, "newest_supabase_price", return_value=None))
             stack.enter_context(patch.object(real_trader, "load_state", side_effect=load_state))
-            save_state_effect = (RuntimeError("REAL ledger write failed")
-                                 if ledger_write_exception else None)
             stack.enter_context(patch.object(
-                real_trader, "save_state",
-                side_effect=save_state_effect if save_state_effect else save_state))
+                real_trader, "save_state", side_effect=save_state_with_optional_failure))
             stack.enter_context(patch.object(real_trader, "execute_buy", execute_buy))
             stack.enter_context(patch.object(real_trader, "token_decimals", return_value=0))
             stack.enter_context(patch.object(real_trader, "wallet_address", return_value=WALLET))
