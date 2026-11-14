@@ -224,14 +224,62 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                     # Record outgoing token transfers as processed evidence. The
                     # Swing executor's wallet-balance reconciliation applies
                     # manual full/partial disposals to the existing REAL position.
-                    for token, _, log in outgoing:
+                    pending_auto_sell = any(
+                        isinstance(item, dict) and str(item.get("tx_hash") or "").lower() == tx_hash
+                        for item in (staged.get("pending_sells") or {}).values()
+                    )
+                    incoming_wsda = sum(Decimal(q) for token, q, _ in incoming
+                                        if token == cfg.WSDA_ADDRESS.lower()) / Decimal(10**18)
+                    for token, sold_raw, log in outgoing:
                         identity = _event_identity(tx_hash, log.get("logIndex"), token)
-                        if identity not in seen:
-                            seen.add(identity)
-                            staged.setdefault("manualTransferEvents", []).append({
-                                "event_id": identity, "tx": tx_hash, "token": token,
-                                "at": _iso(block_time), "direction": "OUT",
-                            })
+                        if identity in seen:
+                            continue
+                        seen.add(identity)
+                        staged.setdefault("manualTransferEvents", []).append({
+                            "event_id": identity, "tx": tx_hash, "token": token,
+                            "at": _iso(block_time), "direction": "OUT",
+                        })
+                        position = staged["positions"].get(token)
+                        if pending_auto_sell or not isinstance(position, dict):
+                            continue
+                        recorded = int(position.get("remaining_quantity",
+                                                   position.get("token_amount_raw", 0)) or 0)
+                        sold = min(recorded, sold_raw)
+                        if recorded <= 0 or sold <= 0:
+                            continue
+                        cost_before = Decimal(str(position.get("remaining_cost_basis",
+                                                              position.get("amount_sda", 0)) or 0))
+                        sold_cost = cost_before * Decimal(sold) / Decimal(recorded)
+                        remaining = recorded - sold
+                        proceeds = incoming_wsda if incoming_wsda > 0 else None
+                        gas_fee = Decimal(
+                            _hexint(receipt.get("gasUsed")) *
+                            _hexint(receipt.get("effectiveGasPrice") or tx.get("gasPrice"))
+                        ) / Decimal(10**18)
+                        net_pnl = proceeds - sold_cost - gas_fee if proceeds is not None else None
+                        position["remaining_quantity"] = remaining
+                        position["confirmed_sold_quantity"] = int(position.get("confirmed_sold_quantity") or 0) + sold
+                        position["remaining_cost_basis"] = str(max(Decimal(0), cost_before - sold_cost))
+                        position["sold_cost_basis"] = str(Decimal(str(position.get("sold_cost_basis") or 0)) + sold_cost)
+                        position["realized_proceeds"] = (str(Decimal(str(position.get("realized_proceeds") or 0)) + proceeds)
+                                                         if proceeds is not None else position.get("realized_proceeds"))
+                        position["realized_pnl"] = (str(Decimal(str(position.get("realized_pnl") or 0)) + net_pnl)
+                                                    if net_pnl is not None else position.get("realized_pnl"))
+                        position["wallet_available_quantity"] = remaining
+                        if remaining <= 0:
+                            staged["positions"].pop(token, None)
+                        staged["trades"].append({
+                            "action": "MANUAL_SELL", "source": "MANUAL", "status": "CONFIRMED",
+                            "token": token, "contract": token, "symbol": position.get("symbol"),
+                            "tx": tx_hash, "buy_tx": position.get("buy_tx"),
+                            "instruction_index": _hexint(log.get("logIndex")),
+                            "sold_quantity_raw": sold, "cost_basis_sda": str(sold_cost),
+                            "proceeds_sda": str(proceeds) if proceeds is not None else None,
+                            "network_fee_sda": str(gas_fee),
+                            "net_pnl_sda": str(net_pnl) if net_pnl is not None else None,
+                            "at": _iso(block_time),
+                            "accounting_identity": identity,
+                        })
 
             # Current balances are read only and validated before the cursor commit.
             native = real_trader.native_balance(wallet)
