@@ -198,6 +198,10 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                         receipt_fee = str(Decimal(gas_used * gas_price) / Decimal(10 ** 18))
                     except (TypeError, ValueError):
                         pass
+                    position["network_fee_sda"] = receipt_fee
+                    position["swap_fee_sda"] = None
+                    position["swap_fee_status"] = "embedded_in_swap_execution; not separately itemized"
+                    position["all_in_cost_price_sda"] = str(cost / Decimal(str(row.get("quantity"))))
                     record = {
                         "action": "MANUAL_BUY", "source": "MANUAL", "status": "OPEN",
                         "token": token, "symbol": position["symbol"], "tx": tx,
@@ -208,6 +212,7 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                         "network_fee_sda": receipt_fee,
                         "swap_fee_sda": None,
                         "swap_fee_included_in_execution_price": True,
+                        "all_in_cost_price_sda": str(cost / Decimal(str(row.get("quantity")))),
                         "accounting_identity": position["accounting_identity"],
                         "sellManagementEnabled": True,
                     }
