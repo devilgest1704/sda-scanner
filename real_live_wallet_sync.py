@@ -47,7 +47,7 @@ def _age(value, now=None):
         stamp = datetime.fromisoformat(str(value))
         if stamp.tzinfo is None:
             return None
-        return max(0.0, ((now or _now()) - stamp.astimezone(timezone.utc)).total_seconds())
+        return max(0.0, ((now or _now()) - stamp.astimezone(UTC)).total_seconds())
     except (TypeError, ValueError, OverflowError):
         return None
 
