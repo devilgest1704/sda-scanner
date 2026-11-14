@@ -107,7 +107,14 @@ def _accounting_state():
 @pytest.fixture
 def built_data(monkeypatch):
     state = _accounting_state()
-    dashboard = SimpleNamespace(load=lambda path, default: state if path == "real_accounting_state.json" else default)
+    runtime = {
+        "positions": {p["token"]: {"source": "BOT"} for p in state["open_positions"]},
+        "trades": [{"action": "BUY", "tx": p["buy_tx"], "token": p["token"]}
+                   for p in state["open_positions"]],
+    }
+    dashboard = SimpleNamespace(load=lambda path, default: (
+        state if path == "real_accounting_state.json" else
+        runtime if path == "real_trade_state.json" else default))
     monkeypatch.setattr(rb, "_load_worker_status", lambda _d: {"enabled": True, "dry_run": False})
     monkeypatch.setattr(rb, "_status", lambda _w: "🟢 LIVE")
     tracked_snapshot = {
