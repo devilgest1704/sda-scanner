@@ -214,6 +214,8 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                                 "opened_at": _iso(block_time), "buy_tx": tx_hash,
                                 "position_id": identity, "accounting_identity": identity,
                                 "network_fee_sda": str(gas_fee),
+                                "entry_gas_sda": str(gas_fee),
+                                "entry_gas_remaining_sda": str(gas_fee),
                                 "execution_price_sda": str(spend / quantity),
                                 "all_in_cost_price_sda": str(spend / quantity),
                                 "profit_partial_done": False, "trailing_armed": False,
@@ -280,7 +282,11 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                             _hexint(receipt.get("gasUsed")) *
                             _hexint(receipt.get("effectiveGasPrice") or tx.get("gasPrice"))
                         ) / Decimal(10**18)
-                        net_pnl = proceeds - sold_cost - gas_fee if proceeds is not None else None
+                        entry_gas_remaining = Decimal(str(position.get("entry_gas_remaining_sda",
+                                                                        position.get("network_fee_sda", 0)) or 0))
+                        entry_gas_sold = entry_gas_remaining * Decimal(sold) / Decimal(recorded)
+                        position["entry_gas_remaining_sda"] = str(max(Decimal(0), entry_gas_remaining - entry_gas_sold))
+                        net_pnl = proceeds - sold_cost - gas_fee - entry_gas_sold if proceeds is not None else None
                         position["remaining_quantity"] = remaining
                         position["confirmed_sold_quantity"] = int(position.get("confirmed_sold_quantity") or 0) + sold
                         position["remaining_cost_basis"] = str(max(Decimal(0), cost_before - sold_cost))
@@ -304,6 +310,7 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                             "sold_quantity_raw": sold, "cost_basis_sda": str(sold_cost),
                             "proceeds_sda": str(proceeds) if proceeds is not None else None,
                             "network_fee_sda": str(gas_fee),
+                            "entry_network_fee_sda": str(entry_gas_sold),
                             "net_pnl_sda": str(net_pnl) if net_pnl is not None else None,
                             "at": _iso(block_time),
                             "accounting_identity": identity,
