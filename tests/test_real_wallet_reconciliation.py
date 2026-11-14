@@ -256,3 +256,15 @@ def test_restart_reloads_manual_buy_without_duplicate(tmp_path, monkeypatch):
     assert second["imported"] == []
     assert len(restarted_worker.state["positions"]) == 1
     assert len(restarted_worker.state["trades"]) == 1
+
+
+
+def test_missing_open_position_price_data_fails_closed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    data = snapshot()
+    data["validation"]["open_positions_valued"] = False
+    path = tmp_path / "real_accounting_state.json"
+    path.write_text(json.dumps(data))
+    result = reconciliation.reconcile_manual_buys(FakeTrader(), snapshot_path=path)
+    assert result["ok"] is False
+    assert "lack safe price data" in result["syncError"]
