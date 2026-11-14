@@ -8,12 +8,12 @@ set -euo pipefail
 #
 # SCANNER_CONTINUOUS=true  -> keep scanning until the job is stopped.
 # SCANNER_INTERVAL_SECONDS -> target cadence between scan starts (default 60).
-# SCANNER_STATE_CHECKPOINT_SECONDS -> push runtime state periodically (default 300).
+# SCANNER_STATE_CHECKPOINT_SECONDS -> publish runtime state for Telegram (default 60).
 #
 # The scanner is paper-only. No source code is rewritten at runtime.
 
 INTERVAL="${SCANNER_INTERVAL_SECONDS:-60}"
-CHECKPOINT="${SCANNER_STATE_CHECKPOINT_SECONDS:-300}"
+CHECKPOINT="${SCANNER_STATE_CHECKPOINT_SECONDS:-60}"
 CONTINUOUS="${SCANNER_CONTINUOUS:-true}"
 OPTIMIZER_INTERVAL="${SCANNER_OPTIMIZER_INTERVAL_SECONDS:-3600}"
 
