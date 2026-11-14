@@ -193,7 +193,6 @@ def real_buy_status(rows, real, stale):
 def _real_lines(real, labelled=True):
     if real is None:
         return ["⚪ REAL capacity unavailable"]
-    capacity = f"{real['positions']}/{real['max_positions']}"
     if labelled:
         return [_line("💰 Available", _sda(real["available"])),
                 _line("💵 Next BUY", _sda(real["next_buy"]))]
