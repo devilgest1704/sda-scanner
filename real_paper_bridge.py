@@ -180,9 +180,9 @@ def reconcile():
     wallet_sync = real_wallet_reconciliation.reconcile_manual_buys(real_trader)
     actions = []
     for imported in wallet_sync.get("imported", []):
-        actions.append({"action": "MANUAL_BUY_IMPORT", "status": "OPEN",
-                        **imported, "source": "MANUAL", "sellManagementEnabled": True,
-                        "at": _now()})
+        actions.append({"action": "MANUAL_BUY_IMPORT" if imported.get("source") == "MANUAL" else "BUY_RECONCILED",
+                        "status": "OPEN", **imported,
+                        "sellManagementEnabled": True, "at": _now()})
     if not wallet_sync.get("ok"):
         actions.append({"action": "WALLET_RECONCILIATION", "status": wallet_sync.get("syncStatus", "FAILED"),
                         "error": wallet_sync.get("syncError"), "at": _now()})
