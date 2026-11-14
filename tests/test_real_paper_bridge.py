@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import real_paper_bridge as bridge
+import real_wallet_reconciliation
 
 
 TOKEN = "0x" + "a" * 40
@@ -59,6 +60,13 @@ class BridgeTests(unittest.TestCase):
         })
         self.modules.start()
         self.addCleanup(self.modules.stop)
+        self.wallet_sync_patch = patch.object(
+            real_wallet_reconciliation, "reconcile_manual_buys",
+            return_value={"ok": True, "syncStatus": "FRESH", "imported": [],
+                          "lastSuccessfulWalletSync": "2026-11-14T08:00:00+00:00",
+                          "lastSuccessfulReconciliation": "2026-11-14T08:00:00+00:00"})
+        self.wallet_sync_patch.start()
+        self.addCleanup(self.wallet_sync_patch.stop)
 
     def write_paper(self, positions):
         self.paper.write_text(json.dumps({"positions": positions}), encoding="utf-8")
