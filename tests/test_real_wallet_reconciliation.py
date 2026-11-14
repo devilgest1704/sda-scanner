@@ -299,3 +299,23 @@ def test_transaction_sender_must_match_real_wallet(tmp_path, monkeypatch):
     assert result["ok"] is False
     assert "sender does not match" in result["syncError"]
     assert trader.state["positions"] == {}
+
+
+
+def test_wallet_transfer_without_router_open_lot_is_not_imported_as_buy(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    data = snapshot()
+    data["open_positions"] = []
+    data["buy_transactions"] = []
+    data["wallet_transfers"] = [{
+        "token": TOKEN, "symbol": "RIDE", "quantity": "1000",
+        "tx": TX, "direction": "IN",
+    }]
+    path = tmp_path / "real_accounting_state.json"
+    path.write_text(json.dumps(data))
+    trader = FakeTrader()
+    result = reconciliation.reconcile_manual_buys(trader, snapshot_path=path)
+    assert result["ok"] is True
+    assert result["imported"] == []
+    assert trader.state["positions"] == {}
+    assert trader.state["trades"] == []
