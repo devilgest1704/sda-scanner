@@ -186,7 +186,11 @@ def build_pnl_model(accounting, runtime_state=None, open_pnl=None, open_complete
     def period(rows, key):
         item = rows.get(key)
         delta = item["period_delta"] if item else Decimal(0)
-        cumulative_sum = item["cumulative_sum"] if item else Decimal(0)
+        if item:
+            cumulative_sum = item["cumulative_sum"]
+        else:
+            prior = [row for row_key, row in rows.items() if row_key < key]
+            cumulative_sum = max(prior, key=lambda row: row["key"])["cumulative_sum"] if prior else Decimal(0)
         return {"pnl": delta, "period_delta": delta, "cumulative_sum": cumulative_sum,
                 "partial": bool(item and item["partial"])}
 
