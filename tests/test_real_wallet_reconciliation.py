@@ -38,10 +38,15 @@ class FakeTrader:
         return 1_250 * 10**18
 
     def rpc(self, method, params):
-        assert method == "eth_getTransactionReceipt"
         assert params == [TX]
-        return {"status": "0x1", "gasUsed": "0x5208",
-                "effectiveGasPrice": "0x3b9aca00"}
+        if method == "eth_getTransactionReceipt":
+            return {"status": "0x1", "gasUsed": "0x5208",
+                    "effectiveGasPrice": "0x3b9aca00"}
+        if method == "eth_getTransactionByHash":
+            token_in = "0" * 24 + "e4095a910209d7be03b55d02f40d4554b1666182"
+            token_out = "0" * 24 + TOKEN[2:]
+            return {"input": "0x414bf389" + token_in + token_out + f"{10000:064x}"}
+        raise AssertionError(method)
 
 
 def snapshot(at=None):
@@ -83,11 +88,14 @@ def test_manual_buy_discovery_and_cost_basis(tmp_path, monkeypatch):
     position = trader.state["positions"][TOKEN]
     assert position["source"] == "MANUAL"
     assert position["sellManagementEnabled"] is True
+    assert position["swap_fee_tier"] == 10000
+    assert position["swap_fee_rate_pct"] == "1"
     assert position["buy_tx"] == TX
     assert position["remaining_quantity"] == 1000 * 10**18
     assert Decimal(position["remaining_cost_basis"]) == Decimal("20.00087134388836")
     assert trader.state["trades"][0]["action"] == "MANUAL_BUY"
     assert trader.state["trades"][0]["network_fee_sda"] == "0.000021"
+    assert trader.state["trades"][0]["swap_fee_tier"] == 10000
     assert trader.saved == 1
 
 
