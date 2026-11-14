@@ -258,9 +258,13 @@ def write_status(cwd=None, output=STATUS_FILE):
     bridge = _read_json(root, "real_paper_bridge_state.json")
     wallet_sync = bridge.get("wallet_sync") if isinstance(bridge.get("wallet_sync"), dict) else {}
     status["lastSyncAttemptAt"] = wallet_sync.get("lastSyncAttemptAt") or ledger.get("lastSyncAttemptAt")
-    status["lastSuccessfulWalletSync"] = wallet_sync.get("lastSuccessfulWalletSync") or ledger.get("lastSuccessfulWalletSync")
+    status["lastSuccessfulWalletSync"] = (wallet_sync.get("lastSuccessfulWalletSync")
+                                           or ledger.get("lastSuccessfulWalletSync")
+                                           or accounting.get("generated_at"))
     status["lastSuccessfulReconciliation"] = wallet_sync.get("lastSuccessfulReconciliation") or ledger.get("lastSuccessfulReconciliation")
-    status["lastBlockchainDataAt"] = wallet_sync.get("lastBlockchainDataAt") or ledger.get("lastBlockchainDataAt")
+    status["lastBlockchainDataAt"] = (wallet_sync.get("lastBlockchainDataAt")
+                                       or ledger.get("lastBlockchainDataAt")
+                                       or (accounting.get("blockchain_range") or {}).get("latest_timestamp"))
     status["ledgerUpdatedAt"] = wallet_sync.get("ledgerUpdatedAt") or ledger.get("ledgerUpdatedAt") or ledger.get("updated_at")
     status["lastSyncError"] = wallet_sync.get("lastSyncError") or ledger.get("lastSyncError")
     status["syncStatus"] = wallet_sync.get("syncStatus") or ledger.get("syncStatus") or "UNKNOWN"
