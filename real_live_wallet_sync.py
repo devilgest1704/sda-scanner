@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import fcntl
 import random
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -24,11 +23,11 @@ BACKOFF_SECONDS = (5, 15, 30, 60)
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _iso(value=None):
-    return (value or _now()).astimezone(timezone.utc).isoformat()
+    return (value or _now()).astimezone(UTC).isoformat()
 
 
 def _hexint(value):
@@ -45,7 +44,7 @@ def _log_address(value):
 
 def _age(value, now=None):
     try:
-        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        stamp = datetime.fromisoformat(str(value))
         if stamp.tzinfo is None:
             return None
         return max(0.0, ((now or _now()) - stamp.astimezone(timezone.utc)).total_seconds())
@@ -137,8 +136,8 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
             for number in range(start, end + 1):
                 block = real_trader.rpc("eth_getBlockByNumber", [hex(number), True])
                 if not isinstance(block, dict):
-                    raise RuntimeError(f"RPC returned no block for {number}")
-                block_time = datetime.fromtimestamp(_hexint(block.get("timestamp")), timezone.utc)
+                    raise TypeError(f"RPC returned no block for {number}")
+                block_time = datetime.fromtimestamp(_hexint(block.get("timestamp")), UTC)
                 latest_block_timestamp = _iso(block_time)
                 for tx in block.get("transactions") or []:
                     if not isinstance(tx, dict) or str(tx.get("from") or "").lower() != wallet:
@@ -148,7 +147,7 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                         raise RuntimeError(f"transaction hash missing in block {number}")
                     receipt = real_trader.rpc("eth_getTransactionReceipt", [tx_hash])
                     if not isinstance(receipt, dict):
-                        raise RuntimeError(f"receipt unavailable for {tx_hash}")
+                        raise TypeError(f"receipt unavailable for {tx_hash}")
                     if _hexint(receipt.get("status")) != 1:
                         continue
                     logs = receipt.get("logs") or []
@@ -361,7 +360,7 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                     "syncError": None if cursor_complete else
                         f"incremental blockchain catch-up: cursor {end} of {latest}",
                     "walletBalances": staged["walletBalances"]}
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - RPC/provider errors must fail closed
             try:
                 failed = real_trader.load_state()
                 failures = int(failed.get("walletSyncFailures") or 0) + 1
@@ -374,8 +373,8 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                 failed["reconciliationHealthy"] = False
                 failed["walletSyncRetryAfterSeconds"] = _backoff(failed)
                 real_trader.save_state(failed)
-            except Exception:
-                pass
+            except Exception as persist_exc:  # noqa: BLE001 - preserve the original RPC failure
+                print(f"REAL wallet sync failure state could not be persisted: {persist_exc}")
             return {"ok": False, "syncStatus": "FAILED",
                     "syncError": f"{type(exc).__name__}: {str(exc)[:300]}",
                     "lastSyncAttemptAt": attempted}
