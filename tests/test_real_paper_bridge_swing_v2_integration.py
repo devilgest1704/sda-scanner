@@ -28,7 +28,8 @@ def _snapshot(price):
 
 
 def _run_case(price=None, unavailable=False, buy_data_available=True, paper_open=False,
-              paper_unavailable=False, wallet_sync_exception=False):
+              paper_unavailable=False, wallet_sync_exception=False,
+              ledger_write_exception=False):
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         paper_file = root / "positions.json"
@@ -87,7 +88,11 @@ def _run_case(price=None, unavailable=False, buy_data_available=True, paper_open
             stack.enter_context(patch.object(market_prices, "load_token_metadata", return_value={}))
             stack.enter_context(patch.object(market_prices, "newest_supabase_price", return_value=None))
             stack.enter_context(patch.object(real_trader, "load_state", side_effect=load_state))
-            stack.enter_context(patch.object(real_trader, "save_state", side_effect=save_state))
+            save_state_effect = (RuntimeError("REAL ledger write failed")
+                                 if ledger_write_exception else None)
+            stack.enter_context(patch.object(
+                real_trader, "save_state",
+                side_effect=save_state_effect if save_state_effect else save_state))
             stack.enter_context(patch.object(real_trader, "execute_buy", execute_buy))
             stack.enter_context(patch.object(real_trader, "token_decimals", return_value=0))
             stack.enter_context(patch.object(real_trader, "wallet_address", return_value=WALLET))
@@ -205,6 +210,16 @@ def test_paper_ledger_failure_keeps_real_sell_and_wallet_reconciliation():
 def test_wallet_sync_storage_failure_does_not_block_existing_position_sell_evaluation():
     row, _state, evaluate_calls, decide_calls, _wallet_calls, buy_calls = _run_case(
         "0.0202", wallet_sync_exception=True)
+    assert row["decision_action"] == "HOLD"
+    assert evaluate_calls == 1
+    assert decide_calls == 1
+    assert buy_calls == 0
+
+
+
+def test_real_ledger_write_failure_does_not_block_existing_position_sell_evaluation():
+    row, _state, evaluate_calls, decide_calls, _wallet_calls, buy_calls = _run_case(
+        "0.0202", ledger_write_exception=True)
     assert row["decision_action"] == "HOLD"
     assert evaluate_calls == 1
     assert decide_calls == 1
