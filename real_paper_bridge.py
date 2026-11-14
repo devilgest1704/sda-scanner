@@ -66,8 +66,24 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _safe_save_real_state(real_trader, state, wallet_sync, actions):
+    try:
+        real_trader.save_state(state)
+        return True
+    except Exception as exc:  # noqa: BLE001 - keep existing-position SELL management alive
+        wallet_sync["ok"] = False
+        wallet_sync["syncStatus"] = "DEGRADED"
+        wallet_sync["syncError"] = f"REAL ledger write failed: {type(exc).__name__}: {str(exc)[:240]}"
+        actions.append({"action": "WALLET_RECONCILIATION", "status": "FAILED",
+                        "error": wallet_sync["syncError"], "at": _now()})
+        return False
+
+
 def _wallet_sync_summary(sync_result, real_trader):
-    persisted = real_trader.load_state()
+    try:
+        persisted = real_trader.load_state()
+    except Exception:  # noqa: BLE001 - diagnostics must not stop independent SELL processing
+        persisted = {}
     return {
         "syncStatus": sync_result.get("syncStatus") or persisted.get("syncStatus") or "UNKNOWN",
         "lastSyncAttemptAt": sync_result.get("lastSyncAttemptAt") or persisted.get("lastSyncAttemptAt"),
@@ -218,8 +234,8 @@ def reconcile():
         real_state["lastSuccessfulReconciliation"] = _now()
         real_state["syncStatus"] = "FRESH"
         real_state["lastSyncError"] = None
-        real_trader.save_state(real_state)
-        wallet_sync["lastSuccessfulReconciliation"] = real_state["lastSuccessfulReconciliation"]
+        if _safe_save_real_state(real_trader, real_state, wallet_sync, actions):
+            wallet_sync["lastSuccessfulReconciliation"] = real_state["lastSuccessfulReconciliation"]
     else:
         if snapshot_sync_ok:
             wallet_sync["syncStatus"] = "DEGRADED"
@@ -230,7 +246,7 @@ def reconcile():
         real_state["syncStatus"] = wallet_sync.get("syncStatus") or "DEGRADED"
         real_state["lastSyncAttemptAt"] = wallet_sync.get("lastSyncAttemptAt") or real_state.get("lastSyncAttemptAt")
         real_state["lastSyncError"] = wallet_sync.get("syncError") or "wallet reconciliation failed"
-        real_trader.save_state(real_state)
+        _safe_save_real_state(real_trader, real_state, wallet_sync, actions)
     pre_paper_action_count = len(actions)
     _persist_events(actions)
 
