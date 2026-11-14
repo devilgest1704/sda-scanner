@@ -45,7 +45,8 @@ class FakeTrader:
         if method == "eth_getTransactionByHash":
             token_in = "0" * 24 + "e4095a910209d7be03b55d02f40d4554b1666182"
             token_out = "0" * 24 + TOKEN[2:]
-            return {"input": "0x414bf389" + token_in + token_out + f"{10000:064x}"}
+            return {"from": WALLET,
+                    "input": "0x414bf389" + token_in + token_out + f"{10000:064x}"}
         raise AssertionError(method)
 
 
@@ -233,8 +234,11 @@ def test_rpc_timeout_fails_closed_and_retries_on_next_worker_cycle(tmp_path, mon
     assert failed["ok"] is False
     assert "RPC timeout" in failed["syncError"]
     assert trader.state["positions"] == {}
-    trader.rpc = lambda *_: {"status": "0x1", "gasUsed": "0x5208",
-                             "effectiveGasPrice": "0x3b9aca00"}
+    trader.rpc = lambda method, *_: (
+        {"status": "0x1", "gasUsed": "0x5208", "effectiveGasPrice": "0x3b9aca00"}
+        if method == "eth_getTransactionReceipt" else
+        {"from": WALLET, "input": "0x414bf389" + ("0" * 24 + "e4095a910209d7be03b55d02f40d4554b1666182")
+         + ("0" * 24 + TOKEN[2:]) + f"{10000:064x}"})
     recovered = reconciliation.reconcile_manual_buys(trader, snapshot_path=path)
     assert recovered["ok"] is True
     assert len(trader.state["positions"]) == 1
