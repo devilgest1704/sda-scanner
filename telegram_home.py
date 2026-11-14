@@ -233,7 +233,10 @@ def _scanner_inputs(dashboard):
                     and (market_state.get("source_health") == "SOURCE_UNAVAILABLE"
                          or (market_stamp is not None and _scanner_stale(market_rows))))
     market_stale = market_stale or source_health in ("STALE", "SOURCE_UNAVAILABLE")
+    wallet_sync_age = _timestamp_age(worker.get("lastSuccessfulWalletSyncAt")
+                                       or worker.get("lastSuccessfulWalletSync"))
     wallet_sync_stale = (worker.get("syncStatus") != "FRESH"
+                         or wallet_sync_age is None or wallet_sync_age > 120
                          or "STATUS UNKNOWN" in rb._status(worker)
                          or "CRITICAL FAILURE" in str(worker.get("worker_health") or ""))
     return rows, real, _scanner_stale(rows) or whale_stale or market_stale or wallet_sync_stale
@@ -255,11 +258,13 @@ def _wallet_diagnostics(worker):
     reconcile_stamp = worker.get("lastSuccessfulReconciliationAt") or worker.get("lastSuccessfulReconciliation")
     sync_age = _timestamp_age(sync_stamp)
     reconcile_age = _timestamp_age(reconcile_stamp)
-    sync_icon = "🟢" if sync_age is not None and sync_age <= 120 else (
-        "🟠" if sync_age is not None and sync_age <= 300 else "🔴")
-    reconcile_icon = "🟢" if reconcile_age is not None and reconcile_age <= 120 else (
+    sync_status = str(worker.get("syncStatus") or "UNKNOWN").upper()
+    sync_icon = "🟢" if sync_age is not None and sync_age <= 120 and sync_status == "FRESH" else (
+        "🟠" if sync_age is not None and sync_age <= 300 and sync_status == "DEGRADED" else "🔴")
+    reconcile_ok = worker.get("reconciliationHealthy") is True
+    reconcile_icon = "🟢" if reconcile_age is not None and reconcile_age <= 120 and reconcile_ok else (
         "🟠" if reconcile_age is not None and reconcile_age <= 300 else "🔴")
-    wallet_ok = worker.get("walletSyncHealthy") is True
+    wallet_ok = worker.get("walletSyncHealthy") is True and sync_status == "FRESH"
     lines = [
         f"{sync_icon} Blockchain sync {sync_age}s ago" if sync_age is not None else "🔴 Blockchain sync unavailable",
         f"{reconcile_icon} Reconciliation {reconcile_age}s ago" if reconcile_age is not None else "🔴 Reconciliation unavailable",
