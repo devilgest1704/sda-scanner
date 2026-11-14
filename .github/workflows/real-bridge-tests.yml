@@ -39,10 +39,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install test dependencies
-        run: python -m pip install -r requirements.txt pytest httpx
+      - name: Install test and static-analysis dependencies
+        run: python -m pip install -r requirements.txt pytest httpx ruff mypy
       - name: Static Python syntax validation
-        run: python -m compileall -q real_trader.py real_paper_bridge.py real_swing_sell_executor.py real_swing_sell_report.py real_market_price.py swing_sell_v2.py
+        run: python -m compileall -q real_trader.py real_paper_bridge.py real_wallet_reconciliation.py real_swing_sell_executor.py real_swing_sell_report.py real_market_price.py real_bot_menu.py real_bot_views.py real_pnl_stats.py telegram_home.py tools/worker_code_pin.py swing_sell_v2.py
+      - name: Lint new wallet reconciliation module
+        run: python -m ruff check real_wallet_reconciliation.py
+      - name: Typecheck wallet reconciliation module
+        run: python -m mypy --ignore-missing-imports real_wallet_reconciliation.py
       - name: Run worker code pinning and state-only checkpoint gate tests
         run: python -m pytest -q tests/test_worker_code_pin.py tests/test_state_checkpoint.py tests/test_ci_production_gate.py
       - name: Run full repository test suite (blocking, one process per module)
