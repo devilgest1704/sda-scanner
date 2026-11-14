@@ -95,8 +95,8 @@ def build_pnl_model(accounting, runtime_state=None, open_pnl=None, open_complete
     bot_buys.update(
         str(x.get("tx") or "").lower()
         for x in runtime_state.get("trades") or []
-        if isinstance(x, dict) and x.get("tx")
-        and str(x.get("action") or "").upper() in {"BUY", "MANUAL_BUY", "BUY_RECONCILED"}
+        if isinstance(x, dict) and x.get("tx") and x.get("accounting_identity")
+        and str(x.get("action") or "").upper() in {"MANUAL_BUY", "BUY_RECONCILED"}
     )
 
     events, excluded, seen = [], [], set()
@@ -126,7 +126,10 @@ def build_pnl_model(accounting, runtime_state=None, open_pnl=None, open_complete
     # runtime reconciler. Include them without waiting for the independent
     # historical accounting workflow; deduplicate against snapshot SELLs.
     for sell in runtime_state.get("trades") or []:
-        if not isinstance(sell, dict) or str(sell.get("action") or "").upper() not in {"SELL", "MANUAL_SELL"}:
+        if (not isinstance(sell, dict)
+                or str(sell.get("action") or "").upper() != "MANUAL_SELL"
+                or str(sell.get("status") or "").upper() != "CONFIRMED"
+                or not sell.get("accounting_identity")):
             continue
         tx = str(sell.get("tx") or "").lower()
         if not tx or tx in seen:
