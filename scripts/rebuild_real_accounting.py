@@ -548,6 +548,7 @@ def main():
         value=Decimal(str(p.get("current_value_sda"))) if p.get("current_value_sda") is not None else None
         cost=Decimal(str(p.get("total_cost_basis_sda") or "0"))
         bot_open_positions.append({"token":contract,"symbol":p.get("token") or "UNKNOWN","quantity":str(quantity),
+            "decimals":int(token_meta.get(contract,{}).get("decimals") or 0),
             "value_sda":str(value) if value is not None else None,"cost_basis_sda":str(cost),
             "open_pnl_sda":str(pnl),"pnl_pct":str(pnl/cost*100) if cost>0 else None,
             "buy_tx":p.get("buy_tx"),"at":p.get("timestamp")})
