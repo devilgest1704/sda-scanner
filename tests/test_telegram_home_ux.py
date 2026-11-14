@@ -143,7 +143,7 @@ def test_interactive_home_is_concise(ui):
     assert "🟢 REAL Trading LIVE" in text
     for expected in ("💰 Portfolio", "📈 Bot PnL", "+5.75 SDA", "📊 Open PnL", "+1.50 SDA",
                      "💵 Realized", "+4.25 SDA", "📦 Positions", "🔥 REAL BUY SCANNER",
-                     "🟢 BUY-ready   0", "🟡 WATCH       2", "📦 Positions    8/10",
+                     "🟢 BUY-ready   0", "🟡 WATCH       2", "📦 Positions   8/10",
                      "💰 Available   140 SDA", "💵 Next BUY    30 SDA", "🟡 REAL BUY: NO SIGNAL"):
         assert expected in text
     assert "🧪 PAPER" not in text
