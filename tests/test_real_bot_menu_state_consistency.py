@@ -60,3 +60,19 @@ def test_worker_status_distinguishes_live_buy_data_degradation():
               "whale_source_health": "SOURCE_UNAVAILABLE"}
     assert real_bot_menu._status(status) == (
         "🟠 LIVE — BUY DATA DEGRADED — WHALE SOURCE UNAVAILABLE")
+
+
+
+def test_wallet_sync_failure_overrides_fresh_worker_heartbeat():
+    now = datetime.now(timezone.utc)
+    worker = {
+        "updated_at": now.isoformat(),
+        "lastWorkerHeartbeat": now.isoformat(),
+        "lastSuccessfulWalletSync": now.isoformat(),
+        "lastBlockchainSnapshotGeneratedAt": now.isoformat(),
+        "syncStatus": "FAILED",
+        "lastSyncError": "RPC timeout",
+    }
+    warning = real_bot_menu._ledger_freshness_warning({}, worker, now=now)
+    assert "reconciliation FAILED" in warning
+    assert "RPC timeout" in warning
