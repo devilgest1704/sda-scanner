@@ -147,14 +147,15 @@ def _ledger_freshness_warning(state, worker_state, now=None):
     if stamp is None:
         reason = ((worker_state or {}).get("lastSyncError")
                   or (state or {}).get("lastSyncError") or "no successful live wallet sync recorded")
-        return f"⚠ REAL wallet sync unavailable: {reason}"
+        return f"⚠ REAL ledger stale — live wallet sync unavailable: {reason}"
     age = (now - stamp).total_seconds()
     if age < 0:
         return f"⚠ REAL wallet sync timestamp is in the future: {stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
     error = ((worker_state or {}).get("lastSyncError")
              or (state or {}).get("lastSyncError"))
     if age > 300 or sync_status in {"STALE", "FAILED"}:
-        reason = error or f"last successful blockchain sync {int(age)}s ago"
+        reason = (f"reconciliation {sync_status}: {error}" if error and sync_status in {"STALE", "FAILED"}
+                  else error or f"last successful blockchain sync {int(age)}s ago")
         return f"🔴 REAL wallet sync STALE ({int(age)}s): {reason}"
     if age > 120 or sync_status != "FRESH":
         reason = error or f"wallet sync age {int(age)}s"
