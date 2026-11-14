@@ -101,6 +101,14 @@ class LiveWalletSyncTests(unittest.TestCase):
         self.assertEqual(trader.state["lastProcessedBlock"], original_cursor)
         self.assertFalse(trader.state["buyDataHealthy"])
 
+    def test_successful_rpc_recovery_resets_retry_backoff(self):
+        trader = FakeTrader({"positions": {}, "trades": [], "walletSyncFailures": 3,
+                             "walletSyncRetryAfterSeconds": 60})
+        result = live.sync_once(trader)
+        self.assertTrue(result["ok"])
+        self.assertEqual(trader.state["walletSyncFailures"], 0)
+        self.assertNotIn("walletSyncRetryAfterSeconds", trader.state)
+
     def test_rpc_timeout_records_retry_without_cursor_advance(self):
         class TimeoutTrader(FakeTrader):
             def rpc(self, method, params):
