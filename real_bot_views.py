@@ -347,7 +347,8 @@ def _build_dashboard_data(dashboard):
         "portfolio_missing_contracts":snapshot.get("tracked_missing_contracts") or [],
         "native_sda":native,"holdings":holdings,
         "bot_reconciliation_status":accounting.get("bot_reconciliation_status"),
-        "bot_unresolved_transactions":unresolved,"pnl_model":pnl_model}
+        "bot_unresolved_transactions":unresolved,"pnl_model":pnl_model,
+        "max_positions":int((worker or {}).get("real_max_open_positions") or 10)}
 
 def _get_data(dashboard,refresh=False,cache_only=False):
     now=time.monotonic()
@@ -413,7 +414,7 @@ def _main_text(data):
         f"📈 Bot PnL {total}" if data.get("total_pnl") is not None else "📈 Bot PnL N/A",
         f"📊 Open PnL {open_pnl}",
         f"💵 Realized {realized}" if data.get("realized_pnl") is not None else "💵 Realized N/A",
-        f"📦 Positions {len(data.get('positions') or [])}"])
+        f"📦 Positions {len(data.get('positions') or [])}/{int(data.get('max_positions') or 10)}"])
 
 def _portfolio_text(data):
     lines=["📊 PORTFOLIO"]
@@ -422,7 +423,7 @@ def _portfolio_text(data):
     else: lines.append(f"💰 Tracked wallet total {total:.4f} SDA" + ("" if data.get("portfolio_complete") else " (partial)"))
     native=data.get("native_sda")
     lines.append(f"💵 Native SDA {native:.4f} SDA" if native is not None else "💵 Native SDA unavailable")
-    lines += ["","Verified open BOT positions"]
+    lines += ["","Verified open REAL positions"]
     for p in data.get("positions") or []:
         value,pnl=p.get("value_sda"),p.get("pnl_sda")
         if value is None:lines.append(f"⚪ {p['symbol']} unavailable");continue
@@ -442,7 +443,7 @@ def _date_short(value):
     return stamp.strftime("%d.%m") if stamp else ""
 
 def _buy_text(data):
-    lines=["🟢 CONFIRMED BOT BUY HISTORY"]
+    lines=["🟢 CONFIRMED REAL BUY HISTORY"]
     for item in (data.get("buy_records") or []):
         date=_date_short(item.get("at"));prefix=f"{date} " if date else ""
         lines.append(f"{prefix}{item['symbol']} {_fmt(item.get('invested_sda'))} SDA")
