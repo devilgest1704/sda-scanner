@@ -110,12 +110,13 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
                 raise RuntimeError("RPC chain ID mismatch")
             latest = _hexint(real_trader.rpc("eth_blockNumber", []))
             saved_cursor = state.get("lastProcessedBlock")
-            start = int(saved_cursor) + 1 if saved_cursor is not None else max(0, latest - 2)
-            if latest - start + 1 > max_blocks_per_cycle:
-                raise RuntimeError(
-                    f"incremental block backlog too large ({latest - start + 1}); "
-                    "cursor retained for bounded catch-up"
-                )
+            initial_lookback = int(__import__("os").getenv("REAL_WALLET_SYNC_INITIAL_LOOKBACK_BLOCKS", "2000"))
+            start = (int(saved_cursor) + 1 if saved_cursor is not None
+                     else max(0, latest - max(1, initial_lookback) + 1))
+            if saved_cursor is not None and latest < int(saved_cursor):
+                raise RuntimeError("RPC latest block is behind persisted wallet cursor")
+            end = min(latest, start + max(1, max_blocks_per_cycle) - 1)
+            cursor_complete = end >= latest
 
             # Stage all changes in memory. Cursor is advanced only in the final
             # atomic save after every block, receipt and balance query succeeds.
@@ -128,7 +129,7 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
             discovered = []
             latest_block_timestamp = None
 
-            for number in range(start, latest + 1):
+            for number in range(start, end + 1):
                 block = real_trader.rpc("eth_getBlockByNumber", [hex(number), True])
                 if not isinstance(block, dict):
                     raise RuntimeError(f"RPC returned no block for {number}")
@@ -308,10 +309,10 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
             staged["walletBalances"] = {"native_sda_wei": str(native),
                                         "tokens_raw": balances, "wallet": wallet,
                                         "chain_id": cfg.CHAIN_ID, "checked_at": attempted}
-            staged["lastProcessedBlock"] = latest
+            staged["lastProcessedBlock"] = end
             staged["lastProcessedSignature"] = (
                 str((block.get("transactions") or [])[-1].get("hash"))
-                if latest >= start and (block.get("transactions") or []) else
+                if end >= start and (block.get("transactions") or []) else
                 state.get("lastProcessedSignature")
             )
             staged["lastBlockchainDataAt"] = latest_block_timestamp or attempted
@@ -324,20 +325,20 @@ def sync_once(real_trader, *, now=None, max_blocks_per_cycle=250):
             staged["walletSyncSource"] = "sidra_rpc_incremental_blocks"
             staged["walletSyncFailures"] = 0
             staged["lastSyncError"] = None
-            staged["syncStatus"] = "FRESH"
-            staged["walletSyncHealth"] = "FRESH"
-            staged["buyDataHealthy"] = True
-            staged["walletSyncHealthy"] = True
-            staged["reconciliationHealthy"] = True
+            staged["syncStatus"] = "FRESH" if cursor_complete else "DEGRADED"
+            staged["walletSyncHealth"] = staged["syncStatus"]
+            staged["buyDataHealthy"] = cursor_complete
+            staged["walletSyncHealthy"] = cursor_complete
+            staged["reconciliationHealthy"] = cursor_complete
             staged["sellDataHealthy"] = bool(staged["positions"])
             staged["processedBlockchainEvents"] = sorted(seen)[-50000:]
             staged["updated_at"] = attempted
             real_trader.save_state(staged)
-            return {"ok": True, "syncStatus": "FRESH", "lastSyncAttemptAt": attempted,
+            return {"ok": cursor_complete, "syncStatus": staged["syncStatus"], "lastSyncAttemptAt": attempted,
                     "lastSuccessfulWalletSyncAt": attempted,
                     "lastSuccessfulReconciliationAt": attempted,
                     "lastBlockchainDataAt": staged["lastBlockchainDataAt"],
-                    "imported": discovered, "processed_blocks": max(0, latest - start + 1),
+                    "imported": discovered, "processed_blocks": max(0, end - start + 1),
                     "walletBalances": staged["walletBalances"]}
         except Exception as exc:
             try:
