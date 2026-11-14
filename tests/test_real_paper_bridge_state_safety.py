@@ -34,6 +34,7 @@ class PaperStateSafetyTests(unittest.TestCase):
             execute_buy=Mock(side_effect=self._buy),
             execute_sell=Mock(side_effect=AssertionError("REAL SELL from PAPER")),
             load_state=lambda: self.real,
+            save_state=lambda state: self.real.update(state),
             wallet_address=lambda: "0x" + "9" * 40,
         )
         self.swing = SimpleNamespace(
