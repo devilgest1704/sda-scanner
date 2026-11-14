@@ -251,9 +251,18 @@ def _build_dashboard_data(dashboard):
     for item in holdings:
         if isinstance(item,dict):
             holdings_by_address[str(item.get("address") or "").lower()]=item
-    position_source=[(str(p.get("token") or "").lower(),p,False)
+    # Live REAL runtime positions are authoritative. Preserve historical
+    # accounting-only rows during migration, but never hide a newly reconciled
+    # wallet position merely because the audit snapshot has not been rebuilt.
+    runtime_positions = (runtime_state.get("positions") or {}) if isinstance(runtime_state,dict) else {}
+    position_source=[(str(p.get("token") or token).lower(),p,True)
+        for token,p in runtime_positions.items()
+        if isinstance(p,dict) and p.get("token",token)]
+    runtime_tokens={token for token,_,_ in position_source}
+    position_source.extend((str(p.get("token") or "").lower(),p,False)
         for p in (accounting.get("open_positions") or [])
-        if isinstance(p,dict) and p.get("token")]
+        if isinstance(p,dict) and p.get("token")
+        and str(p.get("token") or "").lower() not in runtime_tokens)
     positions=[]
     for token,position,is_runtime in position_source:
         if not token: continue
@@ -314,7 +323,9 @@ def _build_dashboard_data(dashboard):
     live_open_pnl=sum(x["pnl_sda"] for x in positions if x["pnl_sda"] is not None) if positions and all(x["pnl_sda"] is not None for x in positions) else None
     live_open_value=sum(open_values) if open_values else 0.0
     live_open_cost=sum(open_costs) if open_costs else 0.0
-    live_open_complete=complete and len(positions)>0 and all(x["value_sda"] is not None and x["pnl_sda"] is not None for x in positions)
+    live_open_complete=(bool(positions) and bool(snapshot.get("token_balances_loaded"))
+                        and not snapshot.get("tracked_missing_contracts")
+                        and all(x["value_sda"] is not None and x["pnl_sda"] is not None for x in positions))
     # One realized/open/total source for main, SELL history and PnL statistics.
     pnl_model=real_pnl_stats.build_pnl_model(accounting,runtime_state if isinstance(runtime_state,dict) else {},
         live_open_pnl,live_open_complete)
@@ -362,13 +373,25 @@ def _build_dashboard_data(dashboard):
 
 def _get_data(dashboard,refresh=False,cache_only=False):
     now=time.monotonic()
+    # The REAL worker publishes an atomic state version. Detect it before
+    # serving the Telegram cache so a reconciled position/PnL cannot remain
+    # hidden behind an otherwise-valid 60-second menu cache.
+    try:
+        live_state=dashboard.load("real_trade_state.json",{})
+        live_version=(live_state.get("lastSuccessfulWalletSyncAt")
+                      or live_state.get("updated_at")) if isinstance(live_state,dict) else None
+    except Exception:
+        live_version=None
+    cached_version=_CACHE.get("live_state_version")
+    if live_version and cached_version and live_version!=cached_version:
+        clear_cache()
     if not refresh and _CACHE.get("data") is not None:
         if now-float(_CACHE.get("at") or 0)<=_CACHE_TTL:
             return _CACHE["data"]
     if cache_only:
         return None
     data=_build_dashboard_data(dashboard)
-    _CACHE.update({"at":time.monotonic(),"data":data})
+    _CACHE.update({"at":time.monotonic(),"data":data,"live_state_version":live_version})
     return data
 
 def _main_keyboard():
