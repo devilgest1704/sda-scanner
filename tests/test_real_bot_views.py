@@ -164,7 +164,7 @@ def test_buy_history_uses_only_confirmed_bot_buys(built_data):
 
 def test_sell_history_contains_only_fifo_matched_bot_sells(built_data):
     text = views._sell_text(built_data)
-    assert "Confirmed matched bot SELL transactions: 14" in text
+    assert "Confirmed matched REAL SELL transactions: 14" in text
     assert "PINE" not in text
     assert "JSFT" in text and "HAQ" in text
 
@@ -182,7 +182,7 @@ def test_statistics_reconcile_exactly_with_main_portfolio_and_history(built_data
     assert built_data["worst_trade_label"] == "SDS"
     text = views._stats_text(built_data)
     for expected in [
-        "Open positions 9", "Confirmed bot BUY 21", "Confirmed matched bot SELL 14",
+        "Open positions 9", "Confirmed REAL BUY 21", "Confirmed matched REAL SELL 14",
         "Wins 6", "Losses 8", "Win rate 42.9%", "Average trade +2.33 SDA",
         "Best JSFT +18.02 SDA", "Worst SDS -1.39 SDA",
         "Realized +32.56 SDA", "Open -4.21 SDA", "Total +28.35 SDA",
