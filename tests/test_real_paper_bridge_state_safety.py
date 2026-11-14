@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import real_paper_bridge as bridge
+import real_wallet_reconciliation
 
 TOKEN_A = "0x" + "a" * 40
 TOKEN_B = "0x" + "b" * 40
@@ -33,6 +34,7 @@ class PaperStateSafetyTests(unittest.TestCase):
             execute_buy=Mock(side_effect=self._buy),
             execute_sell=Mock(side_effect=AssertionError("REAL SELL from PAPER")),
             load_state=lambda: self.real,
+            save_state=lambda state: self.real.update(state),
             wallet_address=lambda: "0x" + "9" * 40,
         )
         self.swing = SimpleNamespace(
@@ -48,6 +50,13 @@ class PaperStateSafetyTests(unittest.TestCase):
             load_market_snapshot=lambda: {}, load_token_metadata=lambda: {}, newest_supabase_price=None,
             resolve_market_price=lambda *a, **k: {"price_sda": 1.0, "timestamp": _stamp(), "age_seconds": 0,
                                                   "source": "mock"})
+        self.wallet_sync_patch = patch.object(
+            real_wallet_reconciliation, "reconcile_manual_buys",
+            return_value={"ok": True, "syncStatus": "FRESH", "imported": [],
+                          "lastSuccessfulWalletSync": _stamp(),
+                          "lastSuccessfulReconciliation": _stamp()})
+        self.wallet_sync_patch.start()
+        self.addCleanup(self.wallet_sync_patch.stop)
         for item in (
             patch.object(bridge, "PAPER_FILE", self.paper),
             patch.object(bridge, "STATE_FILE", self.state_file),

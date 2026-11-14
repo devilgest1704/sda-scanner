@@ -107,7 +107,14 @@ def _accounting_state():
 @pytest.fixture
 def built_data(monkeypatch):
     state = _accounting_state()
-    dashboard = SimpleNamespace(load=lambda path, default: state if path == "real_accounting_state.json" else default)
+    runtime = {
+        "positions": {p["token"]: {"source": "BOT"} for p in state["open_positions"]},
+        "trades": [{"action": "BUY", "tx": p["buy_tx"], "token": p["token"]}
+                   for p in state["open_positions"]],
+    }
+    dashboard = SimpleNamespace(load=lambda path, default: (
+        state if path == "real_accounting_state.json" else
+        runtime if path == "real_trade_state.json" else default))
     monkeypatch.setattr(rb, "_load_worker_status", lambda _d: {"enabled": True, "dry_run": False})
     monkeypatch.setattr(rb, "_status", lambda _w: "🟢 LIVE")
     tracked_snapshot = {
@@ -133,7 +140,7 @@ def test_main_menu_uses_bot_pnl_and_wallet_total_separately(built_data):
     assert "Bot PnL +28.35 SDA" in text
     assert "Open PnL -4.21 SDA" in text
     assert "Realized +32.56 SDA" in text
-    assert "Positions 9" in text
+    assert "Positions 9/10" in text
     assert "(partial)" not in text
 
 
@@ -150,14 +157,14 @@ def test_portfolio_contains_only_nine_blockchain_fifo_positions(built_data):
 
 def test_buy_history_uses_only_confirmed_bot_buys(built_data):
     text = views._buy_text(built_data)
-    assert "Confirmed bot BUY transactions: 21" in text
+    assert "Confirmed REAL BUY transactions: 21" in text
     assert "Total invested: 436.59 SDA" in text
     assert "PINE" not in text
 
 
 def test_sell_history_contains_only_fifo_matched_bot_sells(built_data):
     text = views._sell_text(built_data)
-    assert "Confirmed matched bot SELL transactions: 14" in text
+    assert "Confirmed matched REAL SELL transactions: 14" in text
     assert "PINE" not in text
     assert "JSFT" in text and "HAQ" in text
 
@@ -175,7 +182,7 @@ def test_statistics_reconcile_exactly_with_main_portfolio_and_history(built_data
     assert built_data["worst_trade_label"] == "SDS"
     text = views._stats_text(built_data)
     for expected in [
-        "Open positions 9", "Confirmed bot BUY 21", "Confirmed matched bot SELL 14",
+        "Open positions 9", "Confirmed REAL BUY 21", "Confirmed matched REAL SELL 14",
         "Wins 6", "Losses 8", "Win rate 42.9%", "Average trade +2.33 SDA",
         "Best JSFT +18.02 SDA", "Worst SDS -1.39 SDA",
         "Realized +32.56 SDA", "Open -4.21 SDA", "Total +28.35 SDA",

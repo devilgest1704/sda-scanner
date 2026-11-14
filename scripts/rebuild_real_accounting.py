@@ -337,7 +337,8 @@ def main():
         pnl=Decimal(str(current))-cost if current is not None else None
         if current is not None: open_value+=Decimal(str(current))
         open_cost+=cost
-        open_positions.append({**lot,"current_value_sda":current,"open_pnl_sda":str(pnl) if pnl is not None else None,
+        open_positions.append({**lot,"decimals":int(token_meta.get(c,{}).get("decimals") or 0),
+            "current_value_sda":current,"open_pnl_sda":str(pnl) if pnl is not None else None,
             "value_method":"full-balance PinetSwap sell eth_call" if h and h.get("exit_quote_sda") is not None else "1 SDA buy mark",
             "valuation_error":err})
     realized_gross=sum((Decimal(x["gross_pnl_sda"]) for x in closed),Decimal(0))
@@ -547,6 +548,7 @@ def main():
         value=Decimal(str(p.get("current_value_sda"))) if p.get("current_value_sda") is not None else None
         cost=Decimal(str(p.get("total_cost_basis_sda") or "0"))
         bot_open_positions.append({"token":contract,"symbol":p.get("token") or "UNKNOWN","quantity":str(quantity),
+            "decimals":int(token_meta.get(contract,{}).get("decimals") or 0),
             "value_sda":str(value) if value is not None else None,"cost_basis_sda":str(cost),
             "open_pnl_sda":str(pnl),"pnl_pct":str(pnl/cost*100) if cost>0 else None,
             "buy_tx":p.get("buy_tx"),"at":p.get("timestamp")})

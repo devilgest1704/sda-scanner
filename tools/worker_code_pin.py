@@ -252,13 +252,28 @@ def write_status(cwd=None, output=STATUS_FILE):
               "enabled": _flag("REAL_TRADING_ENABLED"), "dry_run": _flag("REAL_TRADING_DRY_RUN"),
               "updated_at": _now()}
     ledger = _read_json(root, "real_trade_state.json")
-    status["ledger_updated_at"] = ledger.get("updated_at")
+    accounting = _read_json(root, "real_accounting_state.json")
+    status["lastWorkerHeartbeat"] = status["updated_at"]
+    status["ledger_updated_at"] = ledger.get("ledgerUpdatedAt") or ledger.get("updated_at")
+    bridge = _read_json(root, "real_paper_bridge_state.json")
+    wallet_sync = bridge.get("wallet_sync") if isinstance(bridge.get("wallet_sync"), dict) else {}
+    status["lastSyncAttemptAt"] = wallet_sync.get("lastSyncAttemptAt") or ledger.get("lastSyncAttemptAt")
+    status["lastSuccessfulWalletSync"] = (wallet_sync.get("lastSuccessfulWalletSync")
+                                           or ledger.get("lastSuccessfulWalletSync"))
+    status["lastBlockchainSnapshotGeneratedAt"] = (wallet_sync.get("lastBlockchainSnapshotGeneratedAt")
+                                                    or ledger.get("lastBlockchainSnapshotGeneratedAt"))
+    status["lastSuccessfulReconciliation"] = wallet_sync.get("lastSuccessfulReconciliation") or ledger.get("lastSuccessfulReconciliation")
+    status["lastBlockchainDataAt"] = (wallet_sync.get("lastBlockchainDataAt")
+                                       or ledger.get("lastBlockchainDataAt")
+                                       or (accounting.get("blockchain_range") or {}).get("latest_timestamp"))
+    status["ledgerUpdatedAt"] = wallet_sync.get("ledgerUpdatedAt") or ledger.get("ledgerUpdatedAt") or ledger.get("updated_at")
+    status["lastSyncError"] = wallet_sync.get("lastSyncError") or ledger.get("lastSyncError")
+    status["syncStatus"] = wallet_sync.get("syncStatus") or ledger.get("syncStatus") or "UNKNOWN"
     whale = _read_json(root, "whale_state.json")
     market_data = _read_json(root, "market_data.json")
     market_source = _read_json(root, "market_source_state.json")
     market = _read_json(root, "market_analysis.json")
     paper = _read_json(root, "paper_stats.json")
-    bridge = _read_json(root, "real_paper_bridge_state.json")
     bridge_health = bridge.get("sell_health") if isinstance(bridge.get("sell_health"), dict) else {}
     lane = _read_json(root, "strategy_lab/lane_research_state.json")
 
@@ -282,8 +297,19 @@ def write_status(cwd=None, output=STATUS_FILE):
     sell_failed = bridge_health.get("health") == "SELL_ERROR"
     sell_protection = ("ACTIVE" if sell_recent and not sell_failed and sell_evaluated >= sell_total
                        else "FAILING" if sell_recent and sell_failed else "UNKNOWN")
-    reconciliation_stamp = bridge.get("last_real_reconciliation_at") or bridge.get("last_run")
-    reconciliation_health = "ACTIVE" if _freshness(reconciliation_stamp) else "UNKNOWN"
+    reconciliation_stamp = (wallet_sync.get("lastSuccessfulReconciliation")
+                             or ledger.get("lastSuccessfulReconciliation")
+                             or bridge.get("last_real_reconciliation_at"))
+    sync_status = wallet_sync.get("syncStatus") or ledger.get("syncStatus")
+    if sync_status == "FRESH":
+        reconciliation_health = "ACTIVE" if _freshness(reconciliation_stamp) else "FAILING"
+    elif sync_status in {"STALE", "FAILED", "DEGRADED", "IN_PROGRESS"}:
+        reconciliation_health = "FAILING"
+    else:
+        # Legacy workers have no snapshot health object. Preserve the old
+        # reconciliation timestamp for diagnostics, but BUY admission still
+        # requires syncStatus=FRESH in the scanner.
+        reconciliation_health = "ACTIVE" if _freshness(reconciliation_stamp) else "UNKNOWN"
 
     status.update({
         "last_successful_scan_at": paper.get("updated_at"),
@@ -293,6 +319,14 @@ def write_status(cwd=None, output=STATUS_FILE):
         "last_successful_market_analysis_at": market_analysis_stamp,
         "last_real_sell_evaluation_at": sell_stamp,
         "last_real_reconciliation_at": reconciliation_stamp,
+        "lastSyncAttemptAt": status.get("lastSyncAttemptAt"),
+        "lastSuccessfulWalletSync": status.get("lastSuccessfulWalletSync"),
+        "lastBlockchainSnapshotGeneratedAt": status.get("lastBlockchainSnapshotGeneratedAt"),
+        "lastSuccessfulReconciliation": reconciliation_stamp,
+        "lastBlockchainDataAt": status.get("lastBlockchainDataAt"),
+        "ledgerUpdatedAt": status.get("ledgerUpdatedAt"),
+        "lastSyncError": status.get("lastSyncError"),
+        "syncStatus": status.get("syncStatus"),
         "last_lane_research_update_at": lane.get("updated_at") or lane.get("last_run_at"),
         "data_source_health": {"market": market_health, "whale": whale_health},
         "market_source_health": market_health,
@@ -315,10 +349,10 @@ def write_status(cwd=None, output=STATUS_FILE):
         status[key] = record.get(key)
     status.update(verify(root))
     status["health"] = "CODE_SHA_DRIFT" if status["code_integrity"] == "CODE_SHA_DRIFT" else "OK"
-    if (status["health"] == "CODE_SHA_DRIFT" or sell_protection != "ACTIVE"
-            or reconciliation_health != "ACTIVE"):
+    if status["health"] == "CODE_SHA_DRIFT" or sell_protection != "ACTIVE":
         status["worker_health"] = "CRITICAL_FAILURE"
-    elif whale_health != "HEALTHY" or market_health != "HEALTHY":
+    elif (reconciliation_health != "ACTIVE" or whale_health != "HEALTHY"
+          or market_health != "HEALTHY"):
         status["worker_health"] = "BUY_DATA_DEGRADED"
     else:
         status["worker_health"] = "HEALTHY"

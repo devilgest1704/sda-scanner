@@ -66,6 +66,37 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _safe_save_real_state(real_trader, state, wallet_sync, actions):
+    try:
+        real_trader.save_state(state)
+        return True
+    except Exception as exc:  # noqa: BLE001 - keep existing-position SELL management alive
+        wallet_sync["ok"] = False
+        wallet_sync["syncStatus"] = "DEGRADED"
+        wallet_sync["syncError"] = f"REAL ledger write failed: {type(exc).__name__}: {str(exc)[:240]}"
+        actions.append({"action": "WALLET_RECONCILIATION", "status": "FAILED",
+                        "error": wallet_sync["syncError"], "at": _now()})
+        return False
+
+
+def _wallet_sync_summary(sync_result, real_trader):
+    try:
+        persisted = real_trader.load_state()
+    except Exception:  # noqa: BLE001 - diagnostics must not stop independent SELL processing
+        persisted = {}
+    return {
+        "syncStatus": sync_result.get("syncStatus") or persisted.get("syncStatus") or "UNKNOWN",
+        "lastSyncAttemptAt": sync_result.get("lastSyncAttemptAt") or persisted.get("lastSyncAttemptAt"),
+        "lastSuccessfulWalletSync": sync_result.get("lastSuccessfulWalletSync") or persisted.get("lastSuccessfulWalletSync"),
+        "lastBlockchainSnapshotGeneratedAt": sync_result.get("lastBlockchainSnapshotGeneratedAt") or persisted.get("lastBlockchainSnapshotGeneratedAt"),
+        "lastSuccessfulReconciliation": sync_result.get("lastSuccessfulReconciliation") or persisted.get("lastSuccessfulReconciliation"),
+        "lastBlockchainDataAt": sync_result.get("lastBlockchainDataAt") or persisted.get("lastBlockchainDataAt"),
+        "ledgerUpdatedAt": sync_result.get("ledgerUpdatedAt") or persisted.get("ledgerUpdatedAt"),
+        "lastSyncError": sync_result.get("syncError") or persisted.get("lastSyncError"),
+        "imported_count": len(sync_result.get("imported", [])),
+    }
+
+
 def _load(path, default):
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -173,8 +204,49 @@ def reconcile():
     import real_swing_sell_executor as swing_executor
 
     # Wallet reconciliation is REAL-state work, not PAPER signal processing.
+    # The read-only blockchain accounting snapshot is the import authority for
+    # newly discovered manual BUY lots. This path never signs or broadcasts.
     migrated = swing_executor.migrate_if_needed()
-    actions = _reconcile_real_wallets(real_trader, swing_executor)
+    import real_wallet_reconciliation
+    try:
+        wallet_sync = real_wallet_reconciliation.reconcile_manual_buys(real_trader)
+    except Exception as exc:  # noqa: BLE001 - keep independent SELL reconciliation alive
+        wallet_sync = {"ok": False, "syncStatus": "FAILED",
+                       "syncError": f"wallet reconciliation exception: {type(exc).__name__}: {str(exc)[:240]}",
+                       "lastSyncAttemptAt": _now(), "imported": []}
+    actions = []
+    for imported in wallet_sync.get("imported", []):
+        actions.append({"action": "MANUAL_BUY_IMPORT" if imported.get("source") == "MANUAL" else "BUY_RECONCILED",
+                        "status": "OPEN", **imported,
+                        "sellManagementEnabled": True, "at": _now()})
+    if not wallet_sync.get("ok"):
+        actions.append({"action": "WALLET_RECONCILIATION", "status": wallet_sync.get("syncStatus", "FAILED"),
+                        "error": wallet_sync.get("syncError"), "at": _now()})
+    actions.extend(_reconcile_real_wallets(real_trader, swing_executor))
+    wallet_reconcile_errors = [a for a in actions
+                               if a.get("action") in {"MANUAL_SELL_RECONCILIATION",
+                                                     "WALLET_RECONCILIATION"}
+                               and a.get("status") in {"ERROR", "FAILED", "STALE", "DEGRADED"}]
+    snapshot_sync_ok = bool(wallet_sync.get("ok"))
+    wallet_sync["ok"] = snapshot_sync_ok and not wallet_reconcile_errors
+    real_state = real_trader.load_state()
+    if wallet_sync["ok"]:
+        real_state["lastSuccessfulReconciliation"] = _now()
+        real_state["syncStatus"] = "FRESH"
+        real_state["lastSyncError"] = None
+        if _safe_save_real_state(real_trader, real_state, wallet_sync, actions):
+            wallet_sync["lastSuccessfulReconciliation"] = real_state["lastSuccessfulReconciliation"]
+    else:
+        if snapshot_sync_ok:
+            wallet_sync["syncStatus"] = "DEGRADED"
+            wallet_sync["syncError"] = "; ".join(
+                str(a.get("error") or a.get("status") or "wallet position reconciliation failed")
+                for a in wallet_reconcile_errors
+            ) or "wallet position reconciliation failed"
+        real_state["syncStatus"] = wallet_sync.get("syncStatus") or "DEGRADED"
+        real_state["lastSyncAttemptAt"] = wallet_sync.get("lastSyncAttemptAt") or real_state.get("lastSyncAttemptAt")
+        real_state["lastSyncError"] = wallet_sync.get("syncError") or "wallet reconciliation failed"
+        _safe_save_real_state(real_trader, real_state, wallet_sync, actions)
     pre_paper_action_count = len(actions)
     _persist_events(actions)
 
@@ -200,17 +272,21 @@ def reconcile():
             # Never create a baseline from an unknown PAPER state.
             actions.append({"action": "PAPER_STATE_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
                             "reason": paper_error, "at": _now()})
+            # Keep the bridge baseline absent until a valid PAPER snapshot exists.
             _persist_events(actions[pre_paper_action_count:])
             return {"status": "paper_state_unavailable", "paper_state_error": paper_error,
                     "actions": actions}
         state = {"initialized": True, "paper_positions": sorted(current),
-                 "initialized_at": _now(), "last_run": _now()}
+                 "initialized_at": _now(), "last_run": _now(),
+                 "wallet_sync": _wallet_sync_summary(wallet_sync, real_trader)}
         _save(STATE_FILE, state)
+        _persist_events(actions[pre_paper_action_count:])
         return {"status": "baseline_initialized", "actions": actions}
 
     previous = set(state.get("paper_positions", []))
     paper_valid = paper_error is None
-    buy_data_available = os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE", "true").strip().lower() == "true"
+    buy_data_available = (os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE", "true").strip().lower() == "true"
+                          and bool(wallet_sync.get("ok")))
     now_keys = set(current) if paper_valid else set(previous)
     legacy_bridge = state.setdefault("legacy_pending_sell", [])
     for token in list(state.get("pending_sell", [])):
@@ -411,6 +487,7 @@ def reconcile():
     health = sell_health(actions)
     state["last_real_reconciliation_at"] = state["last_run"]
     state["last_real_sell_evaluation_at"] = health["at"]
+    state["wallet_sync"] = _wallet_sync_summary(wallet_sync, real_trader)
     state["real_positions_evaluated"] = health["evaluated"]
     if migrated:
         health["note"] = "MIGRATION_BASELINE"

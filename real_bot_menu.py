@@ -75,13 +75,19 @@ def _load_real_state(dashboard):
 
 
 def _load_worker_status(dashboard):
-    try:
-        value = _remote_json(dashboard, REAL_WORKER_STATUS_FILE)
-        if not isinstance(value.get("enabled"), bool) or not isinstance(value.get("dry_run"), bool):
-            return None
-        return value
-    except Exception:
-        return None
+    last_error = None
+    for attempt in range(2):
+        try:
+            value = _remote_json(dashboard, REAL_WORKER_STATUS_FILE)
+            if not isinstance(value.get("enabled"), bool) or not isinstance(value.get("dry_run"), bool):
+                raise ValueError("worker status is missing enabled/dry_run flags")
+            value["status_read_error"] = None
+            return value
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {str(exc)[:160]}"
+            if attempt == 0:
+                time.sleep(0.25)
+    return {"status_read_error": last_error or "worker status unavailable"}
 
 
 def _state(dashboard):
@@ -91,20 +97,28 @@ def _state(dashboard):
 
 def _status(worker_state=None):
     if not isinstance(worker_state, dict):
-        return "⚪ STATUS UNKNOWN"
+        return "⚪ STATUS UNKNOWN — worker status unavailable"
+    if worker_state.get("status_read_error"):
+        return f"⚪ STATUS UNKNOWN — {worker_state['status_read_error']}"
     enabled, dry_run = worker_state.get("enabled"), worker_state.get("dry_run")
     if not isinstance(enabled, bool) or not isinstance(dry_run, bool):
-        return "⚪ STATUS UNKNOWN"
-    heartbeat = _parse_timestamp(worker_state.get("updated_at"))
+        return "⚪ STATUS UNKNOWN — enabled/dry_run flags missing"
+    heartbeat = _parse_timestamp(worker_state.get("lastWorkerHeartbeat") or worker_state.get("updated_at"))
     if heartbeat is None:
-        return "⚪ STATUS UNKNOWN"
+        return "⚪ STATUS UNKNOWN — worker heartbeat missing or invalid"
     heartbeat_age = (datetime.now(timezone.utc) - heartbeat).total_seconds()
-    if heartbeat_age < 0 or heartbeat_age > REAL_LEDGER_FRESHNESS_SECONDS:
-        return "⚪ STATUS UNKNOWN"
+    if heartbeat_age < 0:
+        return "⚪ STATUS UNKNOWN — worker heartbeat is in the future"
+    if heartbeat_age > REAL_LEDGER_FRESHNESS_SECONDS:
+        return f"⚪ STATUS UNKNOWN — worker heartbeat stale ({int(heartbeat_age)}s)"
     if not enabled:
         return "🔴 REAL TRADING DISABLED"
     if worker_state.get("worker_health") == "CRITICAL_FAILURE":
         return "🔴 CRITICAL FAILURE"
+    if enabled and not dry_run and worker_state.get("syncStatus") != "FRESH":
+        sync_status = worker_state.get("syncStatus") or "UNKNOWN"
+        reason = worker_state.get("lastSyncError") or f"wallet sync {sync_status.lower()}"
+        return f"🟠 LIVE — BUY DATA DEGRADED — {reason}"
     if worker_state.get("worker_health") == "BUY_DATA_DEGRADED":
         if worker_state.get("whale_source_health") == "SOURCE_UNAVAILABLE":
             return "🟠 LIVE — BUY DATA DEGRADED — WHALE SOURCE UNAVAILABLE"
@@ -124,11 +138,26 @@ def _parse_timestamp(value):
 
 def _ledger_freshness_warning(state, worker_state, now=None):
     now = now or datetime.now(timezone.utc)
-    # The worker heartbeat proves the process is alive; it does not prove the
-    # position ledger itself was checkpointed recently. Check ledger time
-    # independently so a fresh heartbeat cannot mask stale positions/P&L.
-    stamp = (_parse_timestamp((state or {}).get("updated_at"))
-             or _parse_timestamp((worker_state or {}).get("ledger_updated_at")))
+    # Heartbeat, successful snapshot fetch, blockchain snapshot generation,
+    # and ledger mutation are separate clocks. A live worker never overrides a
+    # failed/stale reconciliation state.
+    sync_status = (worker_state or {}).get("syncStatus") or (state or {}).get("syncStatus")
+    if sync_status and sync_status != "FRESH":
+        error = ((worker_state or {}).get("lastSyncError")
+                 or (state or {}).get("lastSyncError") or f"sync status {sync_status}")
+        last = _parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSync")
+                                or (state or {}).get("lastSuccessfulWalletSync"))
+        suffix = f"; last successful sync: {last.strftime('%Y-%m-%d %H:%M:%S UTC')}" if last else ""
+        return f"⚠ REAL wallet reconciliation {sync_status}: {error}{suffix}"
+    snapshot_stamp = _parse_timestamp((worker_state or {}).get("lastBlockchainSnapshotGeneratedAt")
+                                      or (state or {}).get("lastBlockchainSnapshotGeneratedAt"))
+    if snapshot_stamp is not None and (now - snapshot_stamp).total_seconds() > 20 * 60:
+        return f"⚠ REAL blockchain snapshot stale — generated: {snapshot_stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    stamp = (_parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSync"))
+             or _parse_timestamp((state or {}).get("lastSuccessfulWalletSync"))
+             or _parse_timestamp((worker_state or {}).get("ledger_updated_at"))
+             or _parse_timestamp((state or {}).get("ledgerUpdatedAt"))
+             or _parse_timestamp((state or {}).get("updated_at")))
     if stamp is None:
         return "⚠ REAL ledger freshness unavailable (no valid ledger timestamp)"
     age = (now - stamp).total_seconds()

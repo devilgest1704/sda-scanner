@@ -240,6 +240,11 @@ def _build_dashboard_data(dashboard):
         metadata=dashboard.load("token_metadata.json",{})
     except Exception:
         metadata={}
+    runtime_buy_txs = {
+        str(trade.get("tx") or trade.get("tx_hash") or "").lower()
+        for trade in (runtime_state.get("trades") or [])
+        if isinstance(trade,dict) and str(trade.get("action") or "").upper() in {"BUY","MANUAL_BUY"}
+    } if isinstance(runtime_state,dict) else set()
     holdings_by_address={}
     snapshot=_tracked_wallet_snapshot(accounting, dashboard)
     holdings=snapshot.get("holdings") if isinstance(snapshot.get("holdings"),list) else []
@@ -276,11 +281,16 @@ def _build_dashboard_data(dashboard):
                rb._finite_number(holding.get("market_value_sda")) if holding and not is_runtime else None)
         pnl=value-cost if value is not None and cost is not None else None
         pnl_pct=pnl/cost*100 if pnl is not None and cost and cost>0 else None
+        runtime_position = (runtime_state.get("positions", {}).get(token, {})
+                            if isinstance(runtime_state, dict) else {})
         positions.append({"token":token,"symbol":symbol,"amount":str(quantity),
             "value_sda":value,"cost_sda":cost,"pnl_sda":pnl,"pnl_pct":pnl_pct,
             "price_sda":price,"price_timestamp":holding.get("price_timestamp") if holding else None,
             "price_age_seconds":holding.get("price_age_seconds") if holding else None,
             "price_source":holding.get("price_source") if holding else None,
+            "source":(runtime_position.get("source") or
+                      ("MANUAL" if str(position.get("buy_tx") or "").lower() not in runtime_buy_txs else "BOT")),
+            "sell_management_enabled":runtime_position.get("sellManagementEnabled", True),
             "valued":value is not None,"balance_matches":True,"buy_verified":True})
     market_count=sum(item.get("market_value_sda") is not None for item in holdings)
     token_total=sum((float(item["market_value_sda"]) for item in holdings
@@ -347,7 +357,8 @@ def _build_dashboard_data(dashboard):
         "portfolio_missing_contracts":snapshot.get("tracked_missing_contracts") or [],
         "native_sda":native,"holdings":holdings,
         "bot_reconciliation_status":accounting.get("bot_reconciliation_status"),
-        "bot_unresolved_transactions":unresolved,"pnl_model":pnl_model}
+        "bot_unresolved_transactions":unresolved,"pnl_model":pnl_model,
+        "max_positions":int((worker or {}).get("real_max_open_positions") or 10)}
 
 def _get_data(dashboard,refresh=False,cache_only=False):
     now=time.monotonic()
@@ -399,7 +410,8 @@ def _fmt(value,signed=False):
 
 def _main_text(data):
     status=data.get("worker_status") or "⚪ UNKNOWN"
-    status_icon="🟢" if "LIVE" in status else ("🟡" if "DRY RUN" in status else "🔴")
+    status_icon=("🟠" if "BUY DATA DEGRADED" in status else
+                 "🟢" if "LIVE" in status else ("🟡" if "DRY RUN" in status else "🔴"))
     if data.get("portfolio_value") is None: portfolio="unavailable"
     elif data.get("portfolio_complete"): portfolio=f"{data['portfolio_value']:.2f} SDA"
     else: portfolio=f"≥{data['portfolio_value']:.2f} SDA ({data['portfolio_valued_count']}/{data['portfolio_total_count']})"
@@ -413,7 +425,7 @@ def _main_text(data):
         f"📈 Bot PnL {total}" if data.get("total_pnl") is not None else "📈 Bot PnL N/A",
         f"📊 Open PnL {open_pnl}",
         f"💵 Realized {realized}" if data.get("realized_pnl") is not None else "💵 Realized N/A",
-        f"📦 Positions {len(data.get('positions') or [])}"])
+        f"📦 Positions {len(data.get('positions') or [])}/{int(data.get('max_positions') or 10)}"])
 
 def _portfolio_text(data):
     lines=["📊 PORTFOLIO"]
@@ -422,7 +434,7 @@ def _portfolio_text(data):
     else: lines.append(f"💰 Tracked wallet total {total:.4f} SDA" + ("" if data.get("portfolio_complete") else " (partial)"))
     native=data.get("native_sda")
     lines.append(f"💵 Native SDA {native:.4f} SDA" if native is not None else "💵 Native SDA unavailable")
-    lines += ["","Verified open BOT positions"]
+    lines += ["","Verified open REAL positions"]
     for p in data.get("positions") or []:
         value,pnl=p.get("value_sda"),p.get("pnl_sda")
         if value is None:lines.append(f"⚪ {p['symbol']} unavailable");continue
@@ -430,7 +442,8 @@ def _portfolio_text(data):
         icon="🟢" if pnl>=0 else "🔴"
         pct=f" ({p['pnl_pct']:+.1f}%)" if p.get("pnl_pct") is not None else ""
         price=f" @ {p['price_sda']:.6g}" if p.get("price_sda") is not None else ""
-        lines.append(f"{icon} {p['symbol']} {value:.2f} SDA {pnl:+.2f}{pct}{price}")
+        source=f" [{p['source']}]" if p.get("source") == "MANUAL" else ""
+        lines.append(f"{icon} {p['symbol']}{source} {value:.2f} SDA {pnl:+.2f}{pct}{price}")
     if not data.get("positions"):lines.append("No open REAL positions")
     if not data.get("open_complete"):
         valued=sum(p.get("value_sda") is not None for p in data.get("positions") or [])
@@ -442,23 +455,23 @@ def _date_short(value):
     return stamp.strftime("%d.%m") if stamp else ""
 
 def _buy_text(data):
-    lines=["🟢 CONFIRMED BOT BUY HISTORY"]
+    lines=["🟢 CONFIRMED REAL BUY HISTORY"]
     for item in (data.get("buy_records") or []):
         date=_date_short(item.get("at"));prefix=f"{date} " if date else ""
         lines.append(f"{prefix}{item['symbol']} {_fmt(item.get('invested_sda'))} SDA")
-    lines += ["",f"Confirmed bot BUY transactions: {data.get('buy_count',0)}",
+    lines += ["",f"Confirmed REAL BUY transactions: {data.get('buy_count',0)}",
         f"Total invested: {_fmt(data.get('total_invested'))} SDA"]
     if data.get("unverified_buy_count"):lines.append(f"⚠ {data['unverified_buy_count']} unverified BUY excluded")
     return "\n".join(lines)
 
 def _sell_text(data):
-    lines=["🔴 MATCHED BOT SELL HISTORY"]
+    lines=["🔴 MATCHED REAL SELL HISTORY"]
     for item in (data.get("sell_records") or []):
         date=_date_short(item.get("at"));prefix=f"{date} " if date else ""
         pnl=item.get("pnl_sda")
         icon="✅" if pnl is not None and pnl>0 else ("❌" if pnl is not None and pnl<0 else "⚪")
         lines.append(f"{icon} {prefix}{item['symbol']} {_fmt(pnl,signed=True)} SDA")
-    lines += ["",f"Confirmed matched bot SELL transactions: {data.get('sell_count',0)}",
+    lines += ["",f"Confirmed matched REAL SELL transactions: {data.get('sell_count',0)}",
         f"Wins: {data.get('wins',0)}  Losses: {data.get('losses',0)}",
         f"Realized PnL: {_fmt(data.get('realized_pnl'),signed=True)} SDA"]
     if data.get("unverified_sell_count"):lines.append(f"⚠ {data['unverified_sell_count']} unverified SELL excluded")
@@ -471,8 +484,8 @@ def _stats_text(data):
     if data.get("open_pnl") is not None and not data.get("open_complete"):open_pnl+=" (partial)"
     lines=["📈 REAL STATISTICS","","Trades",
         f"Open positions {len(data.get('positions') or [])}",
-        f"Confirmed bot BUY {data.get('buy_count',0)}",
-        f"Confirmed matched bot SELL {data.get('sell_count',0)}",
+        f"Confirmed REAL BUY {data.get('buy_count',0)}",
+        f"Confirmed matched REAL SELL {data.get('sell_count',0)}",
         f"Closed trades {data.get('closed_count',0)}","","Results",f"Wins {data.get('wins',0)}",
         f"Losses {data.get('losses',0)}",
         f"Win rate {data['win_rate']:.1f}%" if data.get("win_rate") is not None else "Win rate N/A",
@@ -559,9 +572,9 @@ def _pnl_text(data):
     if not m:return "📈 REAL PNL\n\n⚪ Data temporarily unavailable"
     open_partial=data.get("open_pnl") is not None and not data.get("open_complete")
     return "\n".join(["📈 REAL PNL","",
-        f"Dnes          {_signed_sda(m['today']['pnl'])}{_partial(m['today']['partial'])}",
-        f"Tento týden   {_signed_sda(m['this_week']['pnl'])}{_partial(m['this_week']['partial'])}",
-        f"Tento měsíc   {_signed_sda(m['this_month']['pnl'])}{_partial(m['this_month']['partial'])}","",
+        f"Dnes Δ        {_signed_sda(m['today']['period_delta'])}  Σ {_signed_sda(m['today']['cumulative_sum'])}{_partial(m['today']['partial'])}",
+        f"Tento týden Δ {_signed_sda(m['this_week']['period_delta'])}  Σ {_signed_sda(m['this_week']['cumulative_sum'])}{_partial(m['this_week']['partial'])}",
+        f"Tento měsíc Δ {_signed_sda(m['this_month']['period_delta'])}  Σ {_signed_sda(m['this_month']['cumulative_sum'])}{_partial(m['this_month']['partial'])}","",
         f"Realized      {_signed_sda(data.get('realized_pnl'))}{_partial(data.get('realized_partial'))}",
         f"Open          {_signed_sda(data.get('open_pnl'))}{_partial(open_partial)}",
         f"Total         {_signed_sda(data.get('total_pnl'))}{_partial(data.get('total_pnl') is not None and data.get('total_partial'))}",
@@ -573,7 +586,7 @@ def _pnl_daily_text(data):
     daily=m["daily"];lines=["📅 DAILY PNL",""]
     for key in sorted(daily,reverse=True)[:14]:
         row=daily[key];day=datetime.fromisoformat(key)
-        lines.append(f"{day:%d.%m}  {float(row['pnl']):+.2f} SDA  Σ {float(row['cumulative']):+.2f} {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
+        lines.append(f"{day:%d.%m}  Δ {float(row['period_delta']):+.2f} SDA  Σ {float(row['cumulative_sum']):+.2f} {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
     if not daily:lines.append("No realized BOT SELL yet")
     window=[daily[k] for k in real_pnl_stats.recent_days(m,7) if k in daily]
     values=[row["pnl"] for row in window]
@@ -589,7 +602,7 @@ def _pnl_weekly_text(data):
     weekly=m["weekly"];lines=["📆 WEEKLY PNL",""]
     for key in sorted(weekly,reverse=True)[:8]:
         row=weekly[key]
-        lines.append(f"{key}  {float(row['pnl']):+.2f} SDA {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
+        lines.append(f"{key}  Δ {float(row['period_delta']):+.2f} SDA  Σ {float(row['cumulative_sum']):+.2f} {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
     if not weekly:lines.append("No realized BOT SELL yet")
     window=[weekly[k] for k in real_pnl_stats.recent_weeks(m,4) if k in weekly]
     values=[row["pnl"] for row in weekly.values()]
@@ -607,7 +620,7 @@ def _pnl_monthly_text(data):
     monthly=m["monthly"];lines=["🗓 MONTHLY PNL",""]
     for key in sorted(monthly,reverse=True):
         row=monthly[key];month=datetime.strptime(key,"%Y-%m")
-        lines.append(f"{month:%b %Y}  {float(row['pnl']):+.2f} SDA {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
+        lines.append(f"{month:%b %Y}  Δ {float(row['period_delta']):+.2f} SDA  Σ {float(row['cumulative_sum']):+.2f} {_pnl_icon(row['pnl'])}{_partial(row['partial'])}")
     if not monthly:lines.append("No realized BOT SELL yet")
     values=[row["pnl"] for row in monthly.values()]
     lines += ["",f"Best month   {_signed_sda(max(values)) if values else 'N/A'}",

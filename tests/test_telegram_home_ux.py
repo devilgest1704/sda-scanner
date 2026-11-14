@@ -42,7 +42,11 @@ def _accounting():
 def real_data(monkeypatch):
     accounting = _accounting()
     source = SimpleNamespace(load=lambda path, default: accounting if path == "real_accounting_state.json" else default)
-    monkeypatch.setattr(rb, "_load_worker_status", lambda _d: {"enabled": True, "dry_run": False})
+    monkeypatch.setattr(rb, "_load_worker_status", lambda _d: {
+        "enabled": True, "dry_run": False, "syncStatus": "FRESH",
+        "lastSuccessfulWalletSync": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "real_max_open_positions": 10})
     monkeypatch.setattr(rb, "_status", lambda _w: "🟢 LIVE")
     snapshot = {"native_sda": 100.0, "wallet_address": rb.BOT_WALLET_ADDRESS, "token_balances_loaded": True,
                 "holdings": [{"address": BOT_TOKEN, "symbol": "BOT", "market_value_sda": "21.5"}],
@@ -140,7 +144,7 @@ def test_interactive_home_is_concise(ui):
     assert "🟢 REAL Trading LIVE" in text
     for expected in ("💰 Portfolio", "📈 Bot PnL", "+5.75 SDA", "📊 Open PnL", "+1.50 SDA",
                      "💵 Realized", "+4.25 SDA", "📦 Positions", "🔥 REAL BUY SCANNER",
-                     "🟢 BUY-ready   0", "🟡 WATCH       2", "📦 Capacity    8/10",
+                     "🟢 BUY-ready   0", "🟡 WATCH       2", "📦 Positions   1/10",
                      "💰 Available   140 SDA", "💵 Next BUY    30 SDA", "🟡 REAL BUY: NO SIGNAL"):
         assert expected in text
     assert "🧪 PAPER" not in text
@@ -166,8 +170,8 @@ def test_real_trading_menu_and_all_submenus_with_back(ui):
     assert real["text"].startswith("🤖 REAL TRADING 🟢")
     assert callbacks(real) == ["REAL_BOT_PORTFOLIO", "REAL_BOT_SELL_V2", "REAL_BOT_BUY", "REAL_BOT_SELL",
                                "REAL_BOT_STATS", "REAL_BOT_PNL", "REAL_BOT_REFRESH", "MAIN"]
-    checks = {"REAL_BOT_PORTFOLIO": "📊 PORTFOLIO", "REAL_BOT_BUY": "🟢 CONFIRMED BOT BUY HISTORY",
-              "REAL_BOT_SELL": "🔴 MATCHED BOT SELL HISTORY", "REAL_BOT_STATS": "📈 REAL STATISTICS",
+    checks = {"REAL_BOT_PORTFOLIO": "📊 PORTFOLIO", "REAL_BOT_BUY": "🟢 CONFIRMED REAL BUY HISTORY",
+              "REAL_BOT_SELL": "🔴 MATCHED REAL SELL HISTORY", "REAL_BOT_STATS": "📈 REAL STATISTICS",
               "REAL_BOT_PNL": "📈 REAL PNL", "REAL_BOT_PNL_DAILY": "📅 DAILY PNL",
               "REAL_BOT_PNL_WEEKLY": "📆 WEEKLY PNL", "REAL_BOT_PNL_MONTHLY": "🗓 MONTHLY PNL"}
     for callback, title in checks.items():
@@ -198,7 +202,7 @@ def test_buy_scanner_short_list_detail_and_back(ui):
     text = screen["text"]
     assert text.startswith("🔥 REAL BUY SCANNER")
     assert "BUY-ready: 0" in text and "WATCH: 2" in text
-    for expected in ("SHARED SIGNAL", "REAL\nPositions: 8/10", "Available: 140 SDA", "Next BUY: 30 SDA",
+    for expected in ("SHARED SIGNAL", "REAL\nAvailable: 140 SDA", "Next BUY: 30 SDA",
                      "Status: NO SIGNAL", "Production admission: PAPER-coupled"):
         assert expected in text
     assert "1. ACV" in text and "89/100" in text and "15m +16.6% | Flow +1879 SDA" in text

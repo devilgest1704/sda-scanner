@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 import real_market_price as market_prices
 import real_paper_bridge as bridge
+import real_wallet_reconciliation
 import real_swing_sell_executor as executor
 import real_trader
 import real_trading_config as cfg
@@ -27,7 +28,8 @@ def _snapshot(price):
 
 
 def _run_case(price=None, unavailable=False, buy_data_available=True, paper_open=False,
-              paper_unavailable=False):
+              paper_unavailable=False, wallet_sync_exception=False,
+              ledger_write_exception=False):
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         paper_file = root / "positions.json"
@@ -52,6 +54,7 @@ def _run_case(price=None, unavailable=False, buy_data_available=True, paper_open
                 "token_amount_raw": 1000, "remaining_quantity": 1000,
                 "amount_sda": 20, "remaining_cost_basis": "20",
                 "wallet_available_quantity": 1000,
+                "source": "MANUAL", "sellManagementEnabled": True,
             }},
             "pending_buys": {}, "pending_sells": {},
             "sell_intents": {}, "sell_intent_counters": {}, "trades": [],
@@ -67,18 +70,33 @@ def _run_case(price=None, unavailable=False, buy_data_available=True, paper_open
             real_state.clear()
             real_state.update(saved)
 
+        write_failed = {"value": False}
+        def save_state_with_optional_failure(value):
+            if ledger_write_exception and not write_failed["value"]:
+                write_failed["value"] = True
+                raise RuntimeError("REAL ledger write failed")
+            return save_state(value)
+
         send_transaction = Mock(side_effect=AssertionError("transaction broadcast attempted"))
         execute_buy = Mock(side_effect=AssertionError("REAL BUY attempted with unavailable data"))
         wallet_reconcile = Mock(return_value={"status": "UNCHANGED"})
+        wallet_sync = Mock(return_value={"ok": True, "syncStatus": "FRESH", "imported": [],
+                                           "lastSuccessfulWalletSync": datetime.now(timezone.utc).isoformat(),
+                                           "lastSuccessfulReconciliation": datetime.now(timezone.utc).isoformat()})
+        if wallet_sync_exception:
+            wallet_sync.side_effect = RuntimeError("wallet snapshot persistence failed")
         with ExitStack() as stack:
             stack.enter_context(patch.object(bridge, "PAPER_FILE", paper_file))
             stack.enter_context(patch.object(bridge, "STATE_FILE", bridge_state_file))
             stack.enter_context(patch.object(bridge, "EVENTS_FILE", events_file))
+            stack.enter_context(patch.object(real_wallet_reconciliation, "reconcile_manual_buys",
+                side_effect=wallet_sync))
             stack.enter_context(patch.object(market_prices, "load_market_snapshot", return_value=snapshot))
             stack.enter_context(patch.object(market_prices, "load_token_metadata", return_value={}))
             stack.enter_context(patch.object(market_prices, "newest_supabase_price", return_value=None))
             stack.enter_context(patch.object(real_trader, "load_state", side_effect=load_state))
-            stack.enter_context(patch.object(real_trader, "save_state", side_effect=save_state))
+            stack.enter_context(patch.object(
+                real_trader, "save_state", side_effect=save_state_with_optional_failure))
             stack.enter_context(patch.object(real_trader, "execute_buy", execute_buy))
             stack.enter_context(patch.object(real_trader, "token_decimals", return_value=0))
             stack.enter_context(patch.object(real_trader, "wallet_address", return_value=WALLET))
@@ -189,4 +207,24 @@ def test_paper_ledger_failure_keeps_real_sell_and_wallet_reconciliation():
     assert evaluate_calls == 1
     assert decide_calls == 1
     assert wallet_calls == 2
+    assert buy_calls == 0
+
+
+
+def test_wallet_sync_storage_failure_does_not_block_existing_position_sell_evaluation():
+    row, _state, evaluate_calls, decide_calls, _wallet_calls, buy_calls = _run_case(
+        "0.0202", wallet_sync_exception=True)
+    assert row["decision_action"] == "HOLD"
+    assert evaluate_calls == 1
+    assert decide_calls == 1
+    assert buy_calls == 0
+
+
+
+def test_real_ledger_write_failure_does_not_block_existing_position_sell_evaluation():
+    row, _state, evaluate_calls, decide_calls, _wallet_calls, buy_calls = _run_case(
+        "0.0202", ledger_write_exception=True)
+    assert row["decision_action"] == "HOLD"
+    assert evaluate_calls == 1
+    assert decide_calls == 1
     assert buy_calls == 0

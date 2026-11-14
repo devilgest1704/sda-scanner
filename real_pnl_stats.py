@@ -163,10 +163,16 @@ def build_pnl_model(accounting, runtime_state=None, open_pnl=None, open_complete
         for rows, key in ((daily, _day), (weekly, week), (monthly, month)):
             rows.setdefault(key, {"key": key, "pnl": Decimal(0), "sells": 0, "wins": 0,
                                   "losses": 0, "partial": False})["partial"] = True
-    cumulative = Decimal(0)
-    for key in sorted(daily):
-        cumulative += daily[key]["pnl"]
-        daily[key]["cumulative"] = cumulative
+    # Every period exposes both its realized PnL delta and cumulative sum.
+    # The cumulative sequence is built independently at each calendar granularity.
+    for rows in (daily, weekly, monthly):
+        cumulative = Decimal(0)
+        for key in sorted(rows):
+            item = rows[key]
+            item["period_delta"] = item["pnl"]
+            cumulative += item["pnl"]
+            item["cumulative_sum"] = cumulative
+            item["cumulative"] = cumulative
 
     realized = sum((e["pnl"] for e in events), Decimal(0))
     accounting_realized = _dec(accounting.get("realized_pnl_sda"))
@@ -179,7 +185,14 @@ def build_pnl_model(accounting, runtime_state=None, open_pnl=None, open_complete
 
     def period(rows, key):
         item = rows.get(key)
-        return {"pnl": item["pnl"] if item else Decimal(0), "partial": bool(item and item["partial"])}
+        delta = item["period_delta"] if item else Decimal(0)
+        if item:
+            cumulative_sum = item["cumulative_sum"]
+        else:
+            prior = [row for row_key, row in rows.items() if row_key < key]
+            cumulative_sum = max(prior, key=lambda row: row["key"])["cumulative_sum"] if prior else Decimal(0)
+        return {"pnl": delta, "period_delta": delta, "cumulative_sum": cumulative_sum,
+                "partial": bool(item and item["partial"])}
 
     return {
         "events": events, "excluded": excluded,

@@ -9,6 +9,7 @@ from decimal import Decimal
 import real_bot_menu as rb
 import real_bot_views
 import real_trading_config as cfg
+import real_wallet_reconciliation as wallet_reconciliation
 import v30_dashboard_patch as v30_view
 
 SCANNER_LIMIT = 5
@@ -99,45 +100,62 @@ def _held_tokens(positions):
 
 
 def real_capacity(dashboard):
-    """Current REAL BOT admission inputs; production config comes from the running worker."""
-    import real_trader
+    """Single admission view from the latest blockchain accounting snapshot."""
     worker = rb._load_worker_status(dashboard) or {}
-    state = rb._state(dashboard)
-    if not isinstance(state.get("positions"), dict):
+    try:
+        accounting = dashboard.load("real_accounting_state.json", {})
+    except Exception:
         return None
+    if not isinstance(accounting, dict) or accounting.get("bot_reconciliation_status") != "COMPLETE":
+        return None
+    sync_stamp = worker.get("lastSuccessfulWalletSync") or accounting.get("generated_at")
+    try:
+        stamp = datetime.fromisoformat(str(sync_stamp).replace("Z", "+00:00"))
+        if stamp.tzinfo is None or (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds() > wallet_reconciliation.MAX_SNAPSHOT_AGE_SECONDS:
+            return None
+    except (TypeError, ValueError):
+        return None
+    if worker.get("syncStatus") != "FRESH" or "STATUS UNKNOWN" in rb._status(worker):
+        return None
+    state = rb._state(dashboard)
     try:
         metadata = dashboard.load("token_metadata.json", {})
     except Exception:
         metadata = {}
-    material = {}
-    for token, position in state["positions"].items():
-        if not isinstance(position, dict):
+    accounting_positions = {}
+    deployed = Decimal("0")
+    for item in accounting.get("open_positions") or []:
+        if not isinstance(item, dict) or not item.get("token"):
             continue
-        raw = position.get("remaining_quantity", position.get("token_amount_raw"))
+        token = str(item["token"]).lower()
         try:
-            has_quantity = Decimal(str(raw)) > 0
+            cost = Decimal(str(item.get("cost_basis_sda")))
+            quantity = Decimal(str(item.get("quantity")))
+            if cost <= 0 or quantity <= 0:
+                continue
         except Exception:
-            has_quantity = False
-        if has_quantity and not real_bot_views._runtime_dust(token, position, metadata):
-            material[token] = position
+            continue
+        accounting_positions[token] = item
+        deployed += cost
     pending = {k: v for k, v in (state.get("pending_buys") or {}).items() if isinstance(v, dict)}
-    cap = float(worker.get("real_capital_cap_sda") or cfg.TRADING_WALLET_CAPITAL_SDA)
-    deployed = float(real_trader.deployed_cost_basis({"positions": material, "pending_buys": pending}))
-    try:
-        paper = dashboard.load("positions.json", {})
-        paper_positions = paper.get("positions", {}) if isinstance(paper, dict) else {}
-    except Exception:
-        paper_positions = {}
+    pending_cost = sum((Decimal(str(v.get("position_sda") or 0)) for v in pending.values()), Decimal("0"))
+    deployed += pending_cost
+    cap = Decimal(str(worker.get("real_capital_cap_sda") or cfg.TRADING_WALLET_CAPITAL_SDA))
+    native = Decimal(str(accounting.get("native_balance_sda") or 0))
+    available = max(Decimal("0"), min(cap - deployed, native))
+    paper = dashboard.load("positions.json", {})
+    paper_positions = paper.get("positions", {}) if isinstance(paper, dict) else {}
     return {
-        "positions": len(material) + len(pending), "pending": len(pending),
+        "positions": len(accounting_positions), "reserved_positions": len(accounting_positions) + len(pending),
+        "pending": len(pending),
         "max_positions": int(worker.get("real_max_open_positions") or cfg.MAX_OPEN_POSITIONS),
-        "cap": cap, "deployed": deployed, "available": max(0.0, cap - deployed),
+        "cap": float(cap), "deployed": float(deployed), "available": float(available),
         "next_buy": float(worker.get("real_buy_size_sda") or cfg.position_sda()),
-        "held": _held_tokens(material) | _held_tokens(pending),
+        "held": set(accounting_positions) | _held_tokens(pending),
         "paper_held": _held_tokens(paper_positions if isinstance(paper_positions, dict) else {}),
         "paper_full": isinstance(paper_positions, dict) and len(paper_positions) >= int(v30_view.v30.MAX_OPEN),
+        "sync_status": worker.get("syncStatus"),
     }
-
 
 def real_gate(real, token=None):
     """(state, reason) for one BUY-ready signal under current REAL (PAPER-coupled) admission."""
@@ -148,7 +166,7 @@ def real_gate(real, token=None):
     token = str(token or "").lower()
     if token and (token in real["held"] or token in real["paper_held"]):
         return "BLOCKED", "Already held"
-    if real["positions"] >= real["max_positions"]:
+    if real["reserved_positions"] >= real["max_positions"]:
         return "BLOCKED", "Position limit"
     if real["deployed"] + real["next_buy"] > real["cap"] + 1e-9:
         return "BLOCKED", "Capital limit"
@@ -177,11 +195,10 @@ def real_buy_status(rows, real, stale):
 def _real_lines(real, labelled=True):
     if real is None:
         return ["⚪ REAL capacity unavailable"]
-    capacity = f"{real['positions']}/{real['max_positions']}"
     if labelled:
-        return [_line("📦 Capacity", capacity), _line("💰 Available", _sda(real["available"])),
+        return [_line("💰 Available", _sda(real["available"])),
                 _line("💵 Next BUY", _sda(real["next_buy"]))]
-    return [f"Positions: {capacity}", f"Available: {_sda(real['available'])}",
+    return [f"Available: {_sda(real['available'])}",
             f"Next BUY: {_sda(real['next_buy'])}"]
 
 
@@ -216,14 +233,31 @@ def _scanner_inputs(dashboard):
                     and (market_state.get("source_health") == "SOURCE_UNAVAILABLE"
                          or (market_stamp is not None and _scanner_stale(market_rows))))
     market_stale = market_stale or source_health in ("STALE", "SOURCE_UNAVAILABLE")
-    return rows, real, _scanner_stale(rows) or whale_stale or market_stale
+    wallet_sync_stale = (worker.get("syncStatus") != "FRESH"
+                         or "STATUS UNKNOWN" in rb._status(worker)
+                         or "CRITICAL FAILURE" in str(worker.get("worker_health") or ""))
+    return rows, real, _scanner_stale(rows) or whale_stale or market_stale or wallet_sync_stale
 
 
 def _home_scanner_lines(dashboard):
     rows, real, stale = _scanner_inputs(dashboard)
+    worker = rb._load_worker_status(dashboard) or {}
     lines = ["", "🔥 REAL BUY SCANNER"]
     if stale:
         lines.append("⚪ Data stale")
+        if _scanner_stale(rows):
+            lines.append("⚠ Scanner rows stale")
+        for key, label in (("whale_source_health", "Whale source"),
+                           ("market_source_health", "Market source")):
+            source_health = worker.get(key)
+            if source_health and source_health not in {"HEALTHY", "ACTIVE", "FRESH", "OK"}:
+                lines.append(f"⚠ {label}: {source_health}")
+        if worker.get("syncStatus") != "FRESH" or "STATUS UNKNOWN" in rb._status(worker):
+            detail = worker.get("lastSyncError") or rb._status(worker)
+            lines.append(f"⚠ {detail}")
+            last_sync = worker.get("lastSuccessfulWalletSync")
+            if last_sync:
+                lines.append(f"Last successful wallet sync: {last_sync}")
     else:
         ready, watch = _counts(rows)
         lines += [_line("🟢 BUY-ready", str(ready)), _line("🟡 WATCH", str(watch))]
@@ -276,7 +310,7 @@ def home_text(dashboard):
             _line("📈 Bot PnL", real_bot_views._signed_sda(data.get("total_pnl")) + partial),
             _line("📊 Open PnL", real_bot_views._signed_sda(data.get("open_pnl"))),
             _line("💵 Realized", real_bot_views._signed_sda(data.get("realized_pnl"))),
-            _line("📦 Positions", str(len(data.get("positions") or []))),
+            _line("📦 Positions", f"{len(data.get('positions') or [])}/{int(data.get('max_positions') or 10)}"),
         ]
     try:
         lines += _home_scanner_lines(dashboard)
