@@ -9,7 +9,7 @@ from __future__ import annotations
 import fcntl
 import json
 from datetime import UTC, datetime
-from decimal import Decimal, ROUND_DOWN
+from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
 ACCOUNTING_FILE = Path("real_accounting_state.json")
@@ -20,7 +20,7 @@ CHAIN_ID = 97453
 
 def _stamp(value):
     try:
-        result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        result = datetime.fromisoformat(str(value))
         if result.tzinfo is None:
             return None
         return result.astimezone(UTC)
@@ -220,7 +220,7 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=ACCOUNTING_FILE,
                                     "accounting_identity": position["accounting_identity"]})
                     imported.append({"token": token, "symbol": position["symbol"], "tx": tx,
                                      "quantity_raw": raw_quantity, "cost_basis_sda": str(cost)})
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - record unexpected per-position RPC failures
                     skipped.append({"token": token, "tx": tx,
                                     "reason": f"{type(exc).__name__}: {str(exc)[:240]}"})
 
