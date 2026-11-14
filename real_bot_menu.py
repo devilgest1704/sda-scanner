@@ -75,13 +75,19 @@ def _load_real_state(dashboard):
 
 
 def _load_worker_status(dashboard):
-    try:
-        value = _remote_json(dashboard, REAL_WORKER_STATUS_FILE)
-        if not isinstance(value.get("enabled"), bool) or not isinstance(value.get("dry_run"), bool):
-            return None
-        return value
-    except Exception:
-        return None
+    last_error = None
+    for attempt in range(2):
+        try:
+            value = _remote_json(dashboard, REAL_WORKER_STATUS_FILE)
+            if not isinstance(value.get("enabled"), bool) or not isinstance(value.get("dry_run"), bool):
+                raise ValueError("worker status is missing enabled/dry_run flags")
+            value["status_read_error"] = None
+            return value
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {str(exc)[:160]}"
+            if attempt == 0:
+                time.sleep(0.25)
+    return {"status_read_error": last_error or "worker status unavailable"}
 
 
 def _state(dashboard):
@@ -91,7 +97,9 @@ def _state(dashboard):
 
 def _status(worker_state=None):
     if not isinstance(worker_state, dict):
-        return "⚪ STATUS UNKNOWN"
+        return "⚪ STATUS UNKNOWN — worker status unavailable"
+    if worker_state.get("status_read_error"):
+        return f"⚪ STATUS UNKNOWN — {worker_state['status_read_error']}"
     enabled, dry_run = worker_state.get("enabled"), worker_state.get("dry_run")
     if not isinstance(enabled, bool) or not isinstance(dry_run, bool):
         return "⚪ STATUS UNKNOWN"
