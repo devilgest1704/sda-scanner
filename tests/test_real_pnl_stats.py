@@ -122,6 +122,7 @@ def test_phantom_manual_sell_is_not_double_counted_and_not_partial():
 def test_open_pnl_not_assigned_to_history_and_total_is_realized_plus_open():
     m = model([sell("0xa", "2026-11-09T08:00:00Z", 2)], open_pnl=5.5)
     assert m["today"]["pnl"] == Decimal(0)
+    assert m["today"]["cumulative_sum"] == Decimal("2")
     assert m["daily"]["2026-11-09"]["pnl"] == Decimal("2")
     assert "2026-11-10" not in m["daily"]
     assert m["total"] == m["realized"] + m["open"] == Decimal("7.5")
