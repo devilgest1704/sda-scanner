@@ -113,12 +113,12 @@ def _status(worker_state=None):
         return f"⚪ STATUS UNKNOWN — worker heartbeat stale ({int(heartbeat_age)}s)"
     if not enabled:
         return "🔴 REAL TRADING DISABLED"
+    if worker_state.get("worker_health") == "CRITICAL_FAILURE":
+        return "🔴 CRITICAL FAILURE"
     if enabled and not dry_run and worker_state.get("syncStatus") != "FRESH":
         sync_status = worker_state.get("syncStatus") or "UNKNOWN"
         reason = worker_state.get("lastSyncError") or f"wallet sync {sync_status.lower()}"
         return f"🟠 LIVE — BUY DATA DEGRADED — {reason}"
-    if worker_state.get("worker_health") == "CRITICAL_FAILURE":
-        return "🔴 CRITICAL FAILURE"
     if worker_state.get("worker_health") == "BUY_DATA_DEGRADED":
         if worker_state.get("whale_source_health") == "SOURCE_UNAVAILABLE":
             return "🟠 LIVE — BUY DATA DEGRADED — WHALE SOURCE UNAVAILABLE"
