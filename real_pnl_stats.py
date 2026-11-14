@@ -92,6 +92,12 @@ def build_pnl_model(accounting, runtime_state=None, open_pnl=None, open_complete
                     for x in external.get("unmatched_sells") or [] if isinstance(x, dict)}
     bot_buys = {str(x.get("tx") or "").lower()
                 for x in accounting.get("buy_transactions") or [] if isinstance(x, dict) and x.get("tx")}
+    bot_buys.update(
+        str(x.get("tx") or "").lower()
+        for x in runtime_state.get("trades") or []
+        if isinstance(x, dict) and x.get("tx")
+        and str(x.get("action") or "").upper() in {"BUY", "MANUAL_BUY", "BUY_RECONCILED"}
+    )
 
     events, excluded, seen = [], [], set()
     for sell in accounting.get("sell_transactions") or []:
@@ -116,6 +122,33 @@ def build_pnl_model(accounting, runtime_state=None, open_pnl=None, open_complete
                        "symbol": sell.get("symbol") or "UNKNOWN", "contract": sell.get("contract"),
                        "pnl": pnl, "proceeds": _dec(sell.get("proceeds_sda")),
                        "cost": _dec(sell.get("cost_basis_sda"))})
+    # Live incremental MANUAL SELLs are already receipt-verified by the
+    # runtime reconciler. Include them without waiting for the independent
+    # historical accounting workflow; deduplicate against snapshot SELLs.
+    for sell in runtime_state.get("trades") or []:
+        if not isinstance(sell, dict) or str(sell.get("action") or "").upper() not in {"SELL", "MANUAL_SELL"}:
+            continue
+        tx = str(sell.get("tx") or "").lower()
+        if not tx or tx in seen:
+            continue
+        stamp = _parse(sell.get("at"))
+        pnl = _dec(sell.get("net_pnl_sda", sell.get("realized_pnl_sda")))
+        reason = _excluded_sell(sell, excluded_contracts, excluded_txs, bot_buys)
+        if reason is None and (stamp is None or pnl is None):
+            reason = "INCOMPLETE_RECORD"
+        if reason:
+            excluded.append({"tx": sell.get("tx"), "symbol": sell.get("symbol"), "reason": reason})
+            continue
+        seen.add(tx)
+        local = to_prague(stamp)
+        day, week, month = _period_keys(local)
+        events.append({"tx": sell.get("tx"), "at": sell.get("at"), "at_utc": stamp.isoformat(),
+                       "local_date": day, "iso_week": week, "month": month,
+                       "symbol": sell.get("symbol") or "UNKNOWN",
+                       "contract": sell.get("contract") or sell.get("token"),
+                       "pnl": pnl, "proceeds": _dec(sell.get("proceeds_sda")),
+                       "cost": _dec(sell.get("cost_basis_sda"))})
+
     events.sort(key=lambda e: (e["at_utc"], str(e["tx"])))
 
     # Only unresolved BOT trading evidence makes a period partial.
