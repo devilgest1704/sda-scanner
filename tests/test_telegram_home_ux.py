@@ -143,7 +143,7 @@ def test_interactive_home_is_concise(ui):
     assert "🟢 REAL Trading LIVE" in text
     for expected in ("💰 Portfolio", "📈 Bot PnL", "+5.75 SDA", "📊 Open PnL", "+1.50 SDA",
                      "💵 Realized", "+4.25 SDA", "📦 Positions", "🔥 REAL BUY SCANNER",
-                     "🟢 BUY-ready   0", "🟡 WATCH       2", "📦 Positions   8/10",
+                     "🟢 BUY-ready   0", "🟡 WATCH       2", "📦 Positions   1/10",
                      "💰 Available   140 SDA", "💵 Next BUY    30 SDA", "🟡 REAL BUY: NO SIGNAL"):
         assert expected in text
     assert "🧪 PAPER" not in text
@@ -201,7 +201,7 @@ def test_buy_scanner_short_list_detail_and_back(ui):
     text = screen["text"]
     assert text.startswith("🔥 REAL BUY SCANNER")
     assert "BUY-ready: 0" in text and "WATCH: 2" in text
-    for expected in ("SHARED SIGNAL", "REAL\nPositions: 8/10", "Available: 140 SDA", "Next BUY: 30 SDA",
+    for expected in ("SHARED SIGNAL", "REAL\nAvailable: 140 SDA", "Next BUY: 30 SDA",
                      "Status: NO SIGNAL", "Production admission: PAPER-coupled"):
         assert expected in text
     assert "1. ACV" in text and "89/100" in text and "15m +16.6% | Flow +1879 SDA" in text
