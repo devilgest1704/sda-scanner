@@ -46,6 +46,7 @@ class BridgeTests(unittest.TestCase):
             load_state=unittest.mock.Mock(return_value={"positions": {
                 TOKEN: {"symbol": "TEST", "token_amount_raw": 123}
             }}),
+            save_state=unittest.mock.Mock(),
         )
         self.swing = SimpleNamespace(
             migrate_if_needed=unittest.mock.Mock(return_value=True),
