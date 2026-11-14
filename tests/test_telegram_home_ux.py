@@ -42,7 +42,10 @@ def _accounting():
 def real_data(monkeypatch):
     accounting = _accounting()
     source = SimpleNamespace(load=lambda path, default: accounting if path == "real_accounting_state.json" else default)
-    monkeypatch.setattr(rb, "_load_worker_status", lambda _d: {"enabled": True, "dry_run": False})
+    monkeypatch.setattr(rb, "_load_worker_status", lambda _d: {
+        "enabled": True, "dry_run": False, "syncStatus": "FRESH",
+        "lastSuccessfulWalletSync": datetime.now(timezone.utc).isoformat(),
+        "real_max_open_positions": 10})
     monkeypatch.setattr(rb, "_status", lambda _w: "🟢 LIVE")
     snapshot = {"native_sda": 100.0, "wallet_address": rb.BOT_WALLET_ADDRESS, "token_balances_loaded": True,
                 "holdings": [{"address": BOT_TOKEN, "symbol": "BOT", "market_value_sda": "21.5"}],
@@ -140,7 +143,7 @@ def test_interactive_home_is_concise(ui):
     assert "🟢 REAL Trading LIVE" in text
     for expected in ("💰 Portfolio", "📈 Bot PnL", "+5.75 SDA", "📊 Open PnL", "+1.50 SDA",
                      "💵 Realized", "+4.25 SDA", "📦 Positions", "🔥 REAL BUY SCANNER",
-                     "🟢 BUY-ready   0", "🟡 WATCH       2", "📦 Capacity    8/10",
+                     "🟢 BUY-ready   0", "🟡 WATCH       2", "📦 Positions    8/10",
                      "💰 Available   140 SDA", "💵 Next BUY    30 SDA", "🟡 REAL BUY: NO SIGNAL"):
         assert expected in text
     assert "🧪 PAPER" not in text
