@@ -134,11 +134,21 @@ def _parse_timestamp(value):
 
 def _ledger_freshness_warning(state, worker_state, now=None):
     now = now or datetime.now(timezone.utc)
-    # The worker heartbeat proves the process is alive; it does not prove the
-    # position ledger itself was checkpointed recently. Check ledger time
-    # independently so a fresh heartbeat cannot mask stale positions/P&L.
-    # Worker heartbeat is intentionally not a ledger timestamp. Wallet
-    # snapshot freshness is measured by its successful retrieval time.
+    # Heartbeat, successful snapshot fetch, blockchain snapshot generation,
+    # and ledger mutation are separate clocks. A live worker never overrides a
+    # failed/stale reconciliation state.
+    sync_status = (worker_state or {}).get("syncStatus") or (state or {}).get("syncStatus")
+    if sync_status and sync_status != "FRESH":
+        error = ((worker_state or {}).get("lastSyncError")
+                 or (state or {}).get("lastSyncError") or f"sync status {sync_status}")
+        last = _parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSync")
+                                or (state or {}).get("lastSuccessfulWalletSync"))
+        suffix = f"; last successful sync: {last.strftime('%Y-%m-%d %H:%M:%S UTC')}" if last else ""
+        return f"⚠ REAL wallet reconciliation {sync_status}: {error}{suffix}"
+    snapshot_stamp = _parse_timestamp((worker_state or {}).get("lastBlockchainSnapshotGeneratedAt")
+                                      or (state or {}).get("lastBlockchainSnapshotGeneratedAt"))
+    if snapshot_stamp is not None and (now - snapshot_stamp).total_seconds() > 20 * 60:
+        return f"⚠ REAL blockchain snapshot stale — generated: {snapshot_stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
     stamp = (_parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSync"))
              or _parse_timestamp((state or {}).get("lastSuccessfulWalletSync"))
              or _parse_timestamp((worker_state or {}).get("ledger_updated_at"))
