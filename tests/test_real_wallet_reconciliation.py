@@ -1,3 +1,4 @@
+import fcntl
 import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -130,3 +131,28 @@ def test_wallet_balance_must_cover_snapshot_open_lot(tmp_path, monkeypatch):
     assert result["ok"] is False
     assert "wallet balance below" in result["syncError"]
     assert trader.state["positions"] == {}
+
+
+def test_stale_snapshot_recovers_without_restart(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "real_accounting_state.json"
+    old = datetime.now(timezone.utc) - timedelta(minutes=30)
+    path.write_text(json.dumps(snapshot(old)))
+    trader = FakeTrader()
+    stale = reconciliation.reconcile_manual_buys(trader, snapshot_path=path)
+    assert stale["ok"] is False
+    path.write_text(json.dumps(snapshot()))
+    fresh = reconciliation.reconcile_manual_buys(trader, snapshot_path=path)
+    assert fresh["ok"] is True
+    assert len(trader.state["positions"]) == 1
+
+
+def test_parallel_wallet_sync_is_rejected_by_lock(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "real_accounting_state.json").write_text(json.dumps(snapshot()))
+    with (tmp_path / ".real_wallet_reconciliation.lock").open("a+") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = reconciliation.reconcile_manual_buys(FakeTrader())
+        assert result["ok"] is False
+        assert result["syncStatus"] == "IN_PROGRESS"
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
