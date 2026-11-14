@@ -157,3 +157,32 @@ def test_parallel_wallet_sync_is_rejected_by_lock(tmp_path, monkeypatch):
         assert result["ok"] is False
         assert result["syncStatus"] == "IN_PROGRESS"
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+
+def test_missing_runtime_position_for_known_auto_buy_stays_bot_source(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "real_accounting_state.json").write_text(json.dumps(snapshot()))
+    trader = FakeTrader()
+    trader.state["trades"] = [{
+        "action": "BUY", "source": "BOT", "token": TOKEN, "tx": TX,
+        "amount_sda": 20,
+    }]
+    result = reconciliation.reconcile_manual_buys(trader)
+    assert result["ok"] is True
+    assert trader.state["positions"][TOKEN]["source"] == "BOT"
+    assert trader.state["positions"][TOKEN]["sellManagementEnabled"] is True
+    assert len(trader.state["trades"]) == 1
+    assert trader.state["manual_imports"] == []
+
+
+def test_confirmed_pending_auto_buy_is_recovered_and_pending_intent_cleared(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "real_accounting_state.json").write_text(json.dumps(snapshot()))
+    trader = FakeTrader()
+    trader.state["pending_buys"][TOKEN] = {"tx_hash": TX, "stage": "broadcasting"}
+    result = reconciliation.reconcile_manual_buys(trader)
+    assert result["ok"] is True
+    assert trader.state["positions"][TOKEN]["source"] == "BOT"
+    assert TOKEN not in trader.state["pending_buys"]
+    assert trader.state["trades"][0]["action"] == "BUY_RECONCILED"
