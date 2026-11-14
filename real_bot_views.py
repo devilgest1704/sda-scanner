@@ -165,39 +165,109 @@ def _tracked_wallet_snapshot(accounting, dashboard=None):
                 has_quantity = False
             if has_quantity and not _runtime_dust(token, position, metadata):
                 expected.add(str(position.get("token") or token).lower())
+    # Wallet balances are read by the REAL worker's RPC sync and persisted
+    # atomically with its transaction cursor. Do not make Telegram dependent on
+    # the explorer or the historical GitHub accounting workflow.
+    runtime_state = {}
+    if dashboard is not None:
+        try:
+            runtime_state = dashboard.load("real_trade_state.json", {})
+        except Exception:
+            runtime_state = {}
+    wallet_balances = (runtime_state.get("walletBalances") or {}
+                       if isinstance(runtime_state, dict) else {})
+    raw_tokens = wallet_balances.get("tokens_raw") if isinstance(wallet_balances, dict) else {}
+    raw_tokens = raw_tokens if isinstance(raw_tokens, dict) else {}
+    if not raw_tokens:
+        # Migration-only display fallback for workers that have not yet run the
+        # new RPC sync. This path never grants BUY capacity; real_capacity()
+        # requires the persisted worker RPC balance record.
+        try:
+            snapshot = _ORIGINAL_FETCH_WALLET_SNAPSHOT(include_prices=False)
+        except Exception as exc:
+            return {"native_sda": None, "holdings": [], "token_balances_loaded": False,
+                    "tracked_expected_count": len(expected), "tracked_missing_contracts": sorted(expected),
+                    "market_complete": False, "errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
+        all_holdings = snapshot.get("holdings") if isinstance(snapshot, dict) else []
+        all_holdings = all_holdings if isinstance(all_holdings, list) else []
+        wsda_present = any(isinstance(item, dict)
+                           and str(item.get("address") or "").lower() == _WSDA
+                           for item in all_holdings)
+        tracked_addresses = set(expected)
+        if wsda_present:
+            tracked_addresses.add(_WSDA)
+        tracked = [item for item in all_holdings if isinstance(item, dict)
+                   and str(item.get("address") or "").lower() in tracked_addresses]
+        wallet = str(snapshot.get("wallet_address") or rb._wallet_address()).lower()
+        if tracked:
+            with ThreadPoolExecutor(max_workers=min(4, len(tracked))) as pool:
+                tracked = list(pool.map(lambda item: _price_holding(item, wallet, analysis), tracked))
+        present = {str(item.get("address") or "").lower() for item in tracked}
+        missing = sorted(expected - present)
+        valued = sum(item.get("market_value_sda") is not None for item in tracked)
+        return {**snapshot, "wallet_address": wallet, "holdings": tracked,
+                "tracked_expected_count": len(tracked_addresses),
+                "tracked_missing_contracts": missing, "market_valued_count": valued,
+                "market_complete": valued == len(tracked_addresses) and not missing,
+                "token_balances_loaded": bool(snapshot.get("token_balances_loaded")),
+                "market_price_method": "read-only wallet explorer migration fallback"}
+    tracked_addresses = set(expected) | {_WSDA}
+    wallet = str(wallet_balances.get("wallet") or rb._wallet_address()).lower()
+    holdings = []
+    errors = []
+    for token in sorted(tracked_addresses):
+        raw = raw_tokens.get(token)
+        if raw is None:
+            continue
+        meta = metadata.get(token, {}) if isinstance(metadata, dict) else {}
+        meta = meta if isinstance(meta, dict) else {}
+        position = runtime_positions.get(token, {}) if isinstance(runtime_positions, dict) else {}
+        decimals = meta.get("decimals", position.get("decimals", 18 if token == _WSDA else None))
+        if decimals is None:
+            errors.append(f"token decimals unavailable for {token}")
+            continue
+        try:
+            amount = Decimal(str(raw)) / (Decimal(10) ** int(decimals))
+        except Exception as exc:
+            errors.append(f"invalid wallet token balance for {token}: {exc}")
+            continue
+        holdings.append({"address": token, "symbol": meta.get("symbol") or position.get("symbol") or token[:10],
+                         "name": meta.get("name") or token[:10], "decimals": int(decimals),
+                         "amount": str(amount), "amount_raw": str(raw)})
+    native_raw = wallet_balances.get("native_sda_wei")
     try:
-        snapshot = _ORIGINAL_FETCH_WALLET_SNAPSHOT(include_prices=False)
-    except Exception as exc:
-        return {"native_sda": None, "holdings": [], "token_balances_loaded": False,
-                "tracked_expected_count": len(expected), "tracked_missing_contracts": sorted(expected),
-                "market_complete": False, "errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
-    if not isinstance(snapshot, dict):
-        snapshot = {}
-    all_holdings = snapshot.get("holdings")
-    if not isinstance(all_holdings, list):
-        all_holdings = []
-    wsda_present = any(isinstance(item, dict)
-                       and str(item.get("address") or "").lower() == _WSDA
-                       for item in all_holdings)
-    tracked_addresses = set(expected)
-    if wsda_present:
-        tracked_addresses.add(_WSDA)
-    tracked = [item for item in all_holdings if isinstance(item, dict)
-               and str(item.get("address") or "").lower() in tracked_addresses]
-    wallet = str(snapshot.get("wallet_address") or rb._wallet_address()).lower()
-    if tracked:
-        with ThreadPoolExecutor(max_workers=min(4, len(tracked))) as pool:
-            tracked = list(pool.map(lambda item: _price_holding(item, wallet, analysis), tracked))
-    present = {str(item.get("address") or "").lower() for item in tracked}
+        native_sda = float(Decimal(str(native_raw)) / Decimal(10**18)) if native_raw is not None else None
+    except Exception:
+        native_sda = None
+    if holdings:
+        with ThreadPoolExecutor(max_workers=min(4, len(holdings))) as pool:
+            holdings = list(pool.map(lambda item: _price_holding(item, wallet, analysis), holdings))
+    present = {str(item.get("address") or "").lower() for item in holdings}
     missing = sorted(expected - present)
-    valued = sum(item.get("market_value_sda") is not None for item in tracked)
-    snapshot["holdings"] = tracked
-    snapshot["tracked_expected_count"] = len(tracked_addresses)
-    snapshot["tracked_missing_contracts"] = missing
-    snapshot["market_valued_count"] = valued
-    snapshot["market_complete"] = valued == len(tracked_addresses) and not missing
-    snapshot["token_balances_loaded"] = bool(snapshot.get("token_balances_loaded"))
-    snapshot["market_price_method"] = "shared scanner/Supabase fresh trade; fallback PinetSwap 1 SDA BUY reference eth_call"
+    valued = sum(item.get("market_value_sda") is not None for item in holdings)
+    sync_fresh = False
+    if isinstance(runtime_state, dict):
+        sync_stamp = (runtime_state.get("lastSuccessfulWalletSyncAt")
+                      or runtime_state.get("lastSuccessfulWalletSync"))
+        try:
+            parsed_sync_stamp = datetime.fromisoformat(str(sync_stamp).replace("Z", "+00:00"))
+            sync_age = (datetime.now(timezone.utc) - parsed_sync_stamp.astimezone(timezone.utc)).total_seconds()
+            sync_fresh = (parsed_sync_stamp.tzinfo is not None and 0 <= sync_age <= 120
+                          and runtime_state.get("syncStatus") == "FRESH"
+                          and runtime_state.get("walletSyncHealthy") is True
+                          and runtime_state.get("reconciliationHealthy") is True)
+        except (TypeError, ValueError):
+            sync_fresh = False
+    snapshot = {
+        "wallet_address": wallet, "native_sda": native_sda, "holdings": holdings,
+        "token_balances_loaded": bool(sync_fresh and native_raw is not None and not errors),
+        "tracked_expected_count": len(tracked_addresses),
+        "tracked_missing_contracts": missing,
+        "market_valued_count": valued,
+        "market_complete": valued == len(tracked_addresses) and not missing,
+        "errors": errors,
+        "market_price_method": "shared scanner/Supabase fresh trade; fallback PinetSwap 1 SDA BUY reference eth_call",
+    }
     return snapshot
 
 
@@ -214,17 +284,16 @@ def _build_dashboard_data(dashboard):
     else:
         load_error=None
     if not isinstance(accounting,dict) or accounting.get("schema_version")!=1:
-        return {"source":"unavailable","load_error":load_error or "real_accounting_state.json missing or unsupported",
-            "worker":None,"worker_status":"⚪ UNKNOWN","state":{},"snapshot":{},
-            "positions":[],"buy_records":[],"sell_records":[],"buy_count":0,"sell_count":0,
-            "unverified_buy_count":0,"unverified_sell_count":0,"closed_count":0,"wins":0,"losses":0,
-            "win_rate":None,"average_win":None,"average_loss":None,"average_trade":None,
-            "best_trade":None,"worst_trade":None,"best_trade_label":None,"worst_trade_label":None,
-            "total_invested":None,"open_value":None,"open_cost":None,"open_pnl":None,
-            "open_complete":False,"realized_pnl":None,"realized_partial":True,"total_pnl":None,
-            "total_partial":True,"portfolio_value":None,"portfolio_complete":False,
-            "portfolio_valued_count":0,"portfolio_total_count":0,"native_sda":None,"holdings":[],
-            "bot_reconciliation_status":"INCOMPLETE","bot_unresolved_transactions":[]}
+        # The historical accounting workflow is an audit/recovery source, not
+        # a runtime dependency. Build the live dashboard from REAL worker state
+        # when that snapshot is missing or stale; realized history remains
+        # explicitly partial until a complete FIFO history is available.
+        accounting = {
+            "schema_version": 1, "bot_reconciliation_status": "INCOMPLETE",
+            "open_positions": [], "buy_transactions": [], "sell_transactions": [],
+            "statistics": {}, "excluded_external_activity": {},
+            "bot_unresolved_transactions": [],
+        }
     try:
         worker=rb._load_worker_status(dashboard)
     except Exception:
@@ -251,9 +320,28 @@ def _build_dashboard_data(dashboard):
     for item in holdings:
         if isinstance(item,dict):
             holdings_by_address[str(item.get("address") or "").lower()]=item
-    position_source=[(str(p.get("token") or "").lower(),p,False)
+    # Live REAL runtime positions are authoritative. Preserve historical
+    # accounting-only rows during migration, but never hide a newly reconciled
+    # wallet position merely because the audit snapshot has not been rebuilt.
+    runtime_positions = (runtime_state.get("positions") or {}) if isinstance(runtime_state,dict) else {}
+    position_source=[]
+    for token,position in runtime_positions.items():
+        if not isinstance(position,dict):
+            continue
+        quantity=position.get("remaining_quantity",position.get("token_amount_raw"))
+        cost=position.get("remaining_cost_basis",position.get("amount_sda",position.get("cost_sda")))
+        try:
+            valid_runtime_position=(Decimal(str(quantity or 0))>0 and cost is not None
+                                    and Decimal(str(cost))>=0)
+        except Exception:
+            valid_runtime_position=False
+        if valid_runtime_position:
+            position_source.append((str(position.get("token") or token).lower(),position,True))
+    runtime_tokens={token for token,_,_ in position_source}
+    position_source.extend((str(p.get("token") or "").lower(),p,False)
         for p in (accounting.get("open_positions") or [])
-        if isinstance(p,dict) and p.get("token")]
+        if isinstance(p,dict) and p.get("token")
+        and str(p.get("token") or "").lower() not in runtime_tokens)
     positions=[]
     for token,position,is_runtime in position_source:
         if not token: continue
@@ -306,6 +394,21 @@ def _build_dashboard_data(dashboard):
     buy_records=[{"symbol":x.get("symbol") or "UNKNOWN","at":x.get("at"),
         "invested_sda":rb._finite_number(x.get("invested_sda")),"tx":x.get("tx")}
         for x in (accounting.get("buy_transactions") or []) if isinstance(x,dict)]
+    seen_buy_txs={str(x.get("tx") or "").lower() for x in buy_records if x.get("tx")}
+    runtime_sync_fresh=(isinstance(runtime_state,dict)
+                        and runtime_state.get("syncStatus")=="FRESH"
+                        and runtime_state.get("walletSyncHealthy") is True)
+    for trade in (runtime_state.get("trades") or []) if runtime_sync_fresh else []:
+        if not isinstance(trade,dict) or str(trade.get("action") or "").upper() not in {"BUY","MANUAL_BUY","BUY_RECONCILED"}:
+            continue
+        tx=str(trade.get("tx") or trade.get("tx_hash") or "").lower()
+        if tx and tx in seen_buy_txs:
+            continue
+        buy_records.append({"symbol":trade.get("symbol") or "UNKNOWN","at":trade.get("at"),
+            "invested_sda":rb._finite_number(trade.get("invested_sda",trade.get("cost_basis_sda",trade.get("amount_sda")))),
+            "tx":trade.get("tx") or trade.get("tx_hash")})
+        if tx:
+            seen_buy_txs.add(tx)
     buy_records.sort(key=lambda x:str(x.get("at") or ""),reverse=True)
     unresolved=accounting.get("bot_unresolved_transactions") or []
     buy_values=[x["invested_sda"] for x in buy_records]
@@ -314,7 +417,9 @@ def _build_dashboard_data(dashboard):
     live_open_pnl=sum(x["pnl_sda"] for x in positions if x["pnl_sda"] is not None) if positions and all(x["pnl_sda"] is not None for x in positions) else None
     live_open_value=sum(open_values) if open_values else 0.0
     live_open_cost=sum(open_costs) if open_costs else 0.0
-    live_open_complete=complete and len(positions)>0 and all(x["value_sda"] is not None and x["pnl_sda"] is not None for x in positions)
+    live_open_complete=(bool(positions) and bool(snapshot.get("token_balances_loaded"))
+                        and not snapshot.get("tracked_missing_contracts")
+                        and all(x["value_sda"] is not None and x["pnl_sda"] is not None for x in positions))
     # One realized/open/total source for main, SELL history and PnL statistics.
     pnl_model=real_pnl_stats.build_pnl_model(accounting,runtime_state if isinstance(runtime_state,dict) else {},
         live_open_pnl,live_open_complete)
@@ -329,10 +434,10 @@ def _build_dashboard_data(dashboard):
     return {"source":"blockchain_fifo","load_error":None,"worker":worker,
         "worker_status":rb._status(worker),"state":accounting,"snapshot":snapshot,
         "positions":positions,"buy_records":buy_records,"sell_records":sell_records,
-        "buy_count":int(stats.get("confirmed_buys_count") or len(buy_records)),
-        "sell_count":int(stats.get("matched_sells_count") or len(sell_records)),
+        "buy_count":len(buy_records),
+        "sell_count":len(sell_records),
         "unverified_buy_count":0,"unverified_sell_count":len(unresolved),
-        "closed_count":int(stats.get("matched_sells_count") or len(sell_records)),
+        "closed_count":len(sell_records),
         "wins":int(stats.get("wins") or 0),"losses":int(stats.get("losses") or 0),
         "win_rate":rb._finite_number(stats.get("win_rate_pct")),
         "average_win":rb._finite_number(stats.get("average_win_sda")),
@@ -362,13 +467,25 @@ def _build_dashboard_data(dashboard):
 
 def _get_data(dashboard,refresh=False,cache_only=False):
     now=time.monotonic()
+    # The REAL worker publishes an atomic state version. Detect it before
+    # serving the Telegram cache so a reconciled position/PnL cannot remain
+    # hidden behind an otherwise-valid 60-second menu cache.
+    try:
+        live_state=dashboard.load("real_trade_state.json",{})
+        live_version=(live_state.get("lastSuccessfulWalletSyncAt")
+                      or live_state.get("updated_at")) if isinstance(live_state,dict) else None
+    except Exception:
+        live_version=None
+    cached_version=_CACHE.get("live_state_version")
+    if live_version and cached_version and live_version!=cached_version:
+        clear_cache()
     if not refresh and _CACHE.get("data") is not None:
         if now-float(_CACHE.get("at") or 0)<=_CACHE_TTL:
             return _CACHE["data"]
     if cache_only:
         return None
     data=_build_dashboard_data(dashboard)
-    _CACHE.update({"at":time.monotonic(),"data":data})
+    _CACHE.update({"at":time.monotonic(),"data":data,"live_state_version":live_version})
     return data
 
 def _main_keyboard():

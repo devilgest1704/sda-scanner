@@ -351,6 +351,15 @@ def deployed_cost_basis(state):
 
 def safety_check(position_sda, state):
     _reset_daily_pnl_if_needed(state)
+    # Live REAL BUYs require a completed wallet + ledger reconciliation.
+    # SELL execution/protection does not use this gate.
+    if cfg.REAL_TRADING_ENABLED and not cfg.REAL_TRADING_DRY_RUN:
+        if (str(state.get("syncStatus") or "").upper() != "FRESH"
+                or state.get("walletSyncHealthy") is not True
+                or state.get("reconciliationHealthy") is not True
+                or state.get("buyDataHealthy") is not True):
+            detail = state.get("lastSyncError") or "live wallet reconciliation has not reached FRESH"
+            raise RuntimeError(f"REAL BUY blocked: wallet/reconciliation health is not FRESH ({detail})")
     position_sda = float(position_sda)
     if position_sda < cfg.POSITION_MIN_SDA or position_sda > cfg.POSITION_MAX_SDA:
         raise ValueError(f"Real position must be between {cfg.POSITION_MIN_SDA:g} and {cfg.POSITION_MAX_SDA:g} SDA")

@@ -138,35 +138,35 @@ def _parse_timestamp(value):
 
 def _ledger_freshness_warning(state, worker_state, now=None):
     now = now or datetime.now(timezone.utc)
-    # Heartbeat, successful snapshot fetch, blockchain snapshot generation,
-    # and ledger mutation are separate clocks. A live worker never overrides a
-    # failed/stale reconciliation state.
-    sync_status = (worker_state or {}).get("syncStatus") or (state or {}).get("syncStatus")
-    if sync_status and sync_status != "FRESH":
-        error = ((worker_state or {}).get("lastSyncError")
-                 or (state or {}).get("lastSyncError") or f"sync status {sync_status}")
-        last = _parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSync")
-                                or (state or {}).get("lastSuccessfulWalletSync"))
-        suffix = f"; last successful sync: {last.strftime('%Y-%m-%d %H:%M:%S UTC')}" if last else ""
-        return f"⚠ REAL wallet reconciliation {sync_status}: {error}{suffix}"
-    snapshot_stamp = _parse_timestamp((worker_state or {}).get("lastBlockchainSnapshotGeneratedAt")
-                                      or (state or {}).get("lastBlockchainSnapshotGeneratedAt"))
-    if snapshot_stamp is not None and (now - snapshot_stamp).total_seconds() > 20 * 60:
-        return f"⚠ REAL blockchain snapshot stale — generated: {snapshot_stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
-    stamp = (_parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSync"))
-             or _parse_timestamp((state or {}).get("lastSuccessfulWalletSync"))
-             or _parse_timestamp((worker_state or {}).get("ledger_updated_at"))
-             or _parse_timestamp((state or {}).get("ledgerUpdatedAt"))
-             or _parse_timestamp((state or {}).get("updated_at")))
+    sync_status = str((worker_state or {}).get("syncStatus")
+                      or (state or {}).get("syncStatus") or "UNKNOWN").upper()
+    stamp = (_parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSyncAt"))
+             or _parse_timestamp((state or {}).get("lastSuccessfulWalletSyncAt"))
+             or _parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSync"))
+             or _parse_timestamp((state or {}).get("lastSuccessfulWalletSync")))
     if stamp is None:
-        return "⚠ REAL ledger freshness unavailable (no valid ledger timestamp)"
+        reason = ((worker_state or {}).get("lastSyncError")
+                  or (state or {}).get("lastSyncError") or "no successful live wallet sync recorded")
+        return f"⚠ REAL ledger stale — live wallet sync unavailable: {reason}"
     age = (now - stamp).total_seconds()
     if age < 0:
-        return f"⚠ REAL ledger timestamp is in the future: {stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
-    if age > REAL_LEDGER_FRESHNESS_SECONDS:
-        return f"⚠ REAL ledger stale — last checkpoint: {stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        return f"⚠ REAL wallet sync timestamp is in the future: {stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    error = ((worker_state or {}).get("lastSyncError")
+             or (state or {}).get("lastSyncError"))
+    if age > 300 or sync_status in {"STALE", "FAILED"}:
+        reason = (f"reconciliation {sync_status}: {error}" if error and sync_status in {"STALE", "FAILED"}
+                  else error or f"last successful blockchain sync {int(age)}s ago")
+        return f"🔴 REAL wallet sync STALE ({int(age)}s): {reason}"
+    if age > 120 or sync_status != "FRESH":
+        reason = error or f"wallet sync age {int(age)}s"
+        return f"🟠 REAL wallet sync DEGRADED ({int(age)}s): {reason}"
+    reconcile_stamp = (_parse_timestamp((worker_state or {}).get("lastSuccessfulReconciliationAt"))
+                       or _parse_timestamp((state or {}).get("lastSuccessfulReconciliationAt"))
+                       or _parse_timestamp((worker_state or {}).get("lastSuccessfulReconciliation"))
+                       or _parse_timestamp((state or {}).get("lastSuccessfulReconciliation")))
+    if reconcile_stamp is None or (now - reconcile_stamp).total_seconds() > 120:
+        return "⚠ REAL reconciliation is not FRESH"
     return None
-
 
 def _ledger_source_warning(source, state):
     if source == "last_known":

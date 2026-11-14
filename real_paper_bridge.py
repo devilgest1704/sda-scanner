@@ -88,11 +88,18 @@ def _wallet_sync_summary(sync_result, real_trader):
         "syncStatus": sync_result.get("syncStatus") or persisted.get("syncStatus") or "UNKNOWN",
         "lastSyncAttemptAt": sync_result.get("lastSyncAttemptAt") or persisted.get("lastSyncAttemptAt"),
         "lastSuccessfulWalletSync": sync_result.get("lastSuccessfulWalletSync") or persisted.get("lastSuccessfulWalletSync"),
+        "lastSuccessfulWalletSyncAt": sync_result.get("lastSuccessfulWalletSyncAt") or persisted.get("lastSuccessfulWalletSyncAt"),
+        "lastSuccessfulReconciliationAt": sync_result.get("lastSuccessfulReconciliationAt") or persisted.get("lastSuccessfulReconciliationAt"),
         "lastBlockchainSnapshotGeneratedAt": sync_result.get("lastBlockchainSnapshotGeneratedAt") or persisted.get("lastBlockchainSnapshotGeneratedAt"),
         "lastSuccessfulReconciliation": sync_result.get("lastSuccessfulReconciliation") or persisted.get("lastSuccessfulReconciliation"),
         "lastBlockchainDataAt": sync_result.get("lastBlockchainDataAt") or persisted.get("lastBlockchainDataAt"),
         "ledgerUpdatedAt": sync_result.get("ledgerUpdatedAt") or persisted.get("ledgerUpdatedAt"),
         "lastSyncError": sync_result.get("syncError") or persisted.get("lastSyncError"),
+        "walletSyncHealth": persisted.get("walletSyncHealth"),
+        "buyDataHealthy": persisted.get("buyDataHealthy"),
+        "walletSyncHealthy": persisted.get("walletSyncHealthy"),
+        "reconciliationHealthy": persisted.get("reconciliationHealthy"),
+        "sellDataHealthy": persisted.get("sellDataHealthy"),
         "imported_count": len(sync_result.get("imported", [])),
     }
 
@@ -207,12 +214,33 @@ def reconcile():
     # The read-only blockchain accounting snapshot is the import authority for
     # newly discovered manual BUY lots. This path never signs or broadcasts.
     migrated = swing_executor.migrate_if_needed()
-    import real_wallet_reconciliation
+    # LIVE wallet state is reconciled from the configured Sidra RPC inside
+    # this worker cycle. The historical GitHub accounting artifact is no longer
+    # a dependency of REAL trading health or manual BUY discovery.
+    import real_live_wallet_sync
     try:
-        wallet_sync = real_wallet_reconciliation.reconcile_manual_buys(real_trader)
-    except Exception as exc:  # noqa: BLE001 - keep independent SELL reconciliation alive
+        current_state = real_trader.load_state()
+        if (real_live_wallet_sync.due(current_state)
+                and real_live_wallet_sync.retry_due(current_state)):
+            wallet_sync = real_live_wallet_sync.sync_once(real_trader)
+        else:
+            sync_health, sync_age = real_live_wallet_sync.freshness(current_state)
+            wallet_sync = {
+                "ok": sync_health == "FRESH",
+                "syncStatus": sync_health,
+                "syncError": current_state.get("lastSyncError"),
+                "lastSyncAttemptAt": current_state.get("lastSyncAttemptAt"),
+                "lastSuccessfulWalletSyncAt": current_state.get("lastSuccessfulWalletSyncAt"),
+                "lastSuccessfulWalletSync": current_state.get("lastSuccessfulWalletSync"),
+                "lastSuccessfulReconciliationAt": current_state.get("lastSuccessfulReconciliationAt"),
+                "lastSuccessfulReconciliation": current_state.get("lastSuccessfulReconciliation"),
+                "lastBlockchainDataAt": current_state.get("lastBlockchainDataAt"),
+                "ledgerUpdatedAt": current_state.get("ledgerUpdatedAt"),
+                "imported": [], "age_seconds": sync_age,
+            }
+    except Exception as exc:  # noqa: BLE001 - preserve independent SELL processing
         wallet_sync = {"ok": False, "syncStatus": "FAILED",
-                       "syncError": f"wallet reconciliation exception: {type(exc).__name__}: {str(exc)[:240]}",
+                       "syncError": f"live wallet reconciliation exception: {type(exc).__name__}: {str(exc)[:240]}",
                        "lastSyncAttemptAt": _now(), "imported": []}
     actions = []
     for imported in wallet_sync.get("imported", []):
@@ -223,13 +251,23 @@ def reconcile():
         actions.append({"action": "WALLET_RECONCILIATION", "status": wallet_sync.get("syncStatus", "FAILED"),
                         "error": wallet_sync.get("syncError"), "at": _now()})
     actions.extend(_reconcile_real_wallets(real_trader, swing_executor))
+    sell_reconcile_errors = [a for a in actions
+                             if a.get("action") == "MANUAL_SELL_RECONCILIATION"
+                             and a.get("status") in {"ERROR", "FAILED", "STALE", "DEGRADED"}]
     wallet_reconcile_errors = [a for a in actions
-                               if a.get("action") in {"MANUAL_SELL_RECONCILIATION",
-                                                     "WALLET_RECONCILIATION"}
+                               if a.get("action") == "WALLET_RECONCILIATION"
                                and a.get("status") in {"ERROR", "FAILED", "STALE", "DEGRADED"}]
-    snapshot_sync_ok = bool(wallet_sync.get("ok"))
-    wallet_sync["ok"] = snapshot_sync_ok and not wallet_reconcile_errors
+    live_sync_ok = bool(wallet_sync.get("ok"))
+    # BUY readiness follows wallet + ledger reconciliation only. A SELL
+    # position-management diagnostic is tracked separately and never disables
+    # the SELL executor or contaminates the BUY freshness boolean.
+    wallet_sync["ok"] = live_sync_ok and not wallet_reconcile_errors
     real_state = real_trader.load_state()
+    real_state["buyDataHealthy"] = bool(wallet_sync["ok"])
+    real_state["walletSyncHealthy"] = bool(wallet_sync["ok"])
+    real_state["reconciliationHealthy"] = bool(wallet_sync["ok"])
+    real_state["sellDataHealthy"] = not sell_reconcile_errors
+    real_state["sellReconciliationErrors"] = sell_reconcile_errors[:20]
     if wallet_sync["ok"]:
         real_state["lastSuccessfulReconciliation"] = _now()
         real_state["syncStatus"] = "FRESH"

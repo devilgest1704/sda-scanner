@@ -260,9 +260,19 @@ def write_status(cwd=None, output=STATUS_FILE):
     status["lastSyncAttemptAt"] = wallet_sync.get("lastSyncAttemptAt") or ledger.get("lastSyncAttemptAt")
     status["lastSuccessfulWalletSync"] = (wallet_sync.get("lastSuccessfulWalletSync")
                                            or ledger.get("lastSuccessfulWalletSync"))
+    status["lastSuccessfulWalletSyncAt"] = (wallet_sync.get("lastSuccessfulWalletSyncAt")
+                                             or ledger.get("lastSuccessfulWalletSyncAt"))
+    status["lastSuccessfulReconciliationAt"] = (wallet_sync.get("lastSuccessfulReconciliationAt")
+                                                  or ledger.get("lastSuccessfulReconciliationAt"))
     status["lastBlockchainSnapshotGeneratedAt"] = (wallet_sync.get("lastBlockchainSnapshotGeneratedAt")
                                                     or ledger.get("lastBlockchainSnapshotGeneratedAt"))
     status["lastSuccessfulReconciliation"] = wallet_sync.get("lastSuccessfulReconciliation") or ledger.get("lastSuccessfulReconciliation")
+    for key in ("walletSyncHealth", "buyDataHealthy", "walletSyncHealthy",
+                "reconciliationHealthy", "sellDataHealthy", "lastSyncError"):
+        if wallet_sync.get(key) is not None:
+            status[key] = wallet_sync.get(key)
+        elif ledger.get(key) is not None:
+            status[key] = ledger.get(key)
     status["lastBlockchainDataAt"] = (wallet_sync.get("lastBlockchainDataAt")
                                        or ledger.get("lastBlockchainDataAt")
                                        or (accounting.get("blockchain_range") or {}).get("latest_timestamp"))
