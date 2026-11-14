@@ -209,3 +209,47 @@ def test_default_snapshot_fetch_reads_latest_github_state(monkeypatch):
     assert seen["url"] == reconciliation.ACCOUNTING_URL
     assert seen["kwargs"]["headers"]["Cache-Control"] == "no-cache"
     assert len(trader.state["positions"]) == 1
+
+
+
+def test_rpc_timeout_fails_closed_and_retries_on_next_worker_cycle(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "real_accounting_state.json"
+    path.write_text(json.dumps(snapshot()))
+    trader = FakeTrader()
+    trader.rpc = lambda *_: (_ for _ in ()).throw(TimeoutError("RPC timeout"))
+    failed = reconciliation.reconcile_manual_buys(trader, snapshot_path=path)
+    assert failed["ok"] is False
+    assert "RPC timeout" in failed["syncError"]
+    assert trader.state["positions"] == {}
+    trader.rpc = lambda *_: {"status": "0x1", "gasUsed": "0x5208",
+                             "effectiveGasPrice": "0x3b9aca00"}
+    recovered = reconciliation.reconcile_manual_buys(trader, snapshot_path=path)
+    assert recovered["ok"] is True
+    assert len(trader.state["positions"]) == 1
+
+
+def test_restart_reloads_manual_buy_without_duplicate(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "real_accounting_state.json"
+    state_path = tmp_path / "real_trade_state.json"
+    path.write_text(json.dumps(snapshot()))
+
+    class FileBackedTrader(FakeTrader):
+        def __init__(self):
+            super().__init__()
+            if state_path.exists():
+                self.state = json.loads(state_path.read_text())
+        def save_state(self, state):
+            self.state = state
+            state_path.write_text(json.dumps(state))
+            self.saved += 1
+
+    first_worker = FileBackedTrader()
+    first = reconciliation.reconcile_manual_buys(first_worker, snapshot_path=path)
+    restarted_worker = FileBackedTrader()
+    second = reconciliation.reconcile_manual_buys(restarted_worker, snapshot_path=path)
+    assert len(first["imported"]) == 1
+    assert second["imported"] == []
+    assert len(restarted_worker.state["positions"]) == 1
+    assert len(restarted_worker.state["trades"]) == 1
