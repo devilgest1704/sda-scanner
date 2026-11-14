@@ -42,6 +42,7 @@ class FakeChain:
             "sell_strategy_version": policy.STRATEGY_VERSION,
             "positions": {TOKEN: {
                 "token": TOKEN, "symbol": "TEST", "buy_tx": "0xbuy", "position_id": "0xbuy",
+                "source": "MANUAL", "sellManagementEnabled": True,
                 "token_amount_raw": quantity, "amount_sda": float(cost),
                 "opened_at": "2026-11-09T00:00:00+00:00",
             }},
