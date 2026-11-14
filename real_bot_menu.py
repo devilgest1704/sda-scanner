@@ -142,7 +142,8 @@ def _ledger_freshness_warning(state, worker_state, now=None):
     stamp = (_parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSync"))
              or _parse_timestamp((state or {}).get("lastSuccessfulWalletSync"))
              or _parse_timestamp((worker_state or {}).get("ledger_updated_at"))
-             or _parse_timestamp((state or {}).get("ledgerUpdatedAt")))
+             or _parse_timestamp((state or {}).get("ledgerUpdatedAt"))
+             or _parse_timestamp((state or {}).get("updated_at")))
     if stamp is None:
         return "⚠ REAL ledger freshness unavailable (no valid ledger timestamp)"
     age = (now - stamp).total_seconds()
