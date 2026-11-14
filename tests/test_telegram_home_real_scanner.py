@@ -175,7 +175,9 @@ def test_pending_buy_is_pending(env, monkeypatch):
     text = _home(env, monkeypatch, _rows(_row("IDM", "WATCH", 77)))
     assert "🟡 REAL BUY: PENDING" in text
     assert "💰 Available   110 SDA" in text
-    assert telegram_home.real_capacity(env.dashboard)["positions"] == 9
+    capacity = telegram_home.real_capacity(env.dashboard)
+    assert capacity["positions"] == 8
+    assert capacity["reserved_positions"] == 9
 
 
 def test_stale_scanner_shows_data_stale_without_counts_or_candidate(env, monkeypatch):
