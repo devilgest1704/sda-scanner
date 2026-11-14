@@ -74,6 +74,25 @@ def snapshot_health(snapshot, now=None, max_age=MAX_SNAPSHOT_AGE_SECONDS):
     return True, None
 
 
+def _pool_fee_tier(transaction):
+    """Read the Uniswap-V3 exactInputSingle fee tier from transaction calldata."""
+    if not isinstance(transaction, dict):
+        return None
+    data = str(transaction.get("input") or transaction.get("data") or "").lower()
+    selector = "0x414bf389"
+    offset = data.find(selector)
+    if offset < 0:
+        return None
+    start = offset + len(selector) + 64 * 2
+    raw_fee = data[start:start + 64]
+    if len(raw_fee) != 64:
+        return None
+    try:
+        return int(raw_fee, 16)
+    except ValueError:
+        return None
+
+
 def _quantity_raw(quantity, decimals):
     value = Decimal(str(quantity))
     if not value.is_finite() or value <= 0 or decimals < 0 or decimals > 36:
@@ -183,6 +202,11 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=None,
                     receipt = real_trader.rpc("eth_getTransactionReceipt", [tx])
                     if not isinstance(receipt, dict) or int(receipt.get("status", "0x0"), 16) != 1:
                         raise ValueError("BUY transaction receipt missing or unsuccessful")
+                    try:
+                        transaction = real_trader.rpc("eth_getTransactionByHash", [tx])
+                        pool_fee_tier = _pool_fee_tier(transaction)
+                    except Exception:  # noqa: BLE001 - fee tier is optional metadata; receipt remains authoritative
+                        pool_fee_tier = None
                     cost = Decimal(str(row.get("cost_basis_sda") or buy.get("invested_sda")))
                     invested = Decimal(str(buy.get("invested_sda") or cost))
                     if not cost.is_finite() or cost <= 0 or invested <= 0:
@@ -242,7 +266,12 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=None,
                         pass
                     position["network_fee_sda"] = receipt_fee
                     position["swap_fee_sda"] = None
-                    position["swap_fee_status"] = "embedded_in_swap_execution; not separately itemized"
+                    position["swap_fee_tier"] = pool_fee_tier
+                    position["swap_fee_rate_pct"] = (str(Decimal(pool_fee_tier) / Decimal(10000))
+                                                     if pool_fee_tier is not None else None)
+                    position["swap_fee_status"] = ("pool fee tier recorded; exact fee amount not separately itemized"
+                                                   if pool_fee_tier is not None else
+                                                   "embedded in swap execution; not separately itemized")
                     position["all_in_cost_price_sda"] = str(cost / Decimal(str(row.get("quantity"))))
                     record = {
                         "action": "MANUAL_BUY" if source == "MANUAL" else "BUY_RECONCILED",
@@ -254,6 +283,9 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=None,
                         "execution_price_sda": str(price),
                         "network_fee_sda": receipt_fee,
                         "swap_fee_sda": None,
+                        "swap_fee_tier": pool_fee_tier,
+                        "swap_fee_rate_pct": (str(Decimal(pool_fee_tier) / Decimal(10000))
+                                              if pool_fee_tier is not None else None),
                         "swap_fee_included_in_execution_price": True,
                         "all_in_cost_price_sda": str(cost / Decimal(str(row.get("quantity")))),
                         "accounting_identity": position["accounting_identity"],
