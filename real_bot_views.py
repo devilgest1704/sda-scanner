@@ -165,39 +165,67 @@ def _tracked_wallet_snapshot(accounting, dashboard=None):
                 has_quantity = False
             if has_quantity and not _runtime_dust(token, position, metadata):
                 expected.add(str(position.get("token") or token).lower())
+    # Wallet balances are read by the REAL worker's RPC sync and persisted
+    # atomically with its transaction cursor. Do not make Telegram dependent on
+    # the explorer or the historical GitHub accounting workflow.
+    runtime_state = {}
+    if dashboard is not None:
+        try:
+            runtime_state = dashboard.load("real_trade_state.json", {})
+        except Exception:
+            runtime_state = {}
+    wallet_balances = (runtime_state.get("walletBalances") or {}
+                       if isinstance(runtime_state, dict) else {})
+    raw_tokens = wallet_balances.get("tokens_raw") if isinstance(wallet_balances, dict) else {}
+    raw_tokens = raw_tokens if isinstance(raw_tokens, dict) else {}
+    tracked_addresses = set(expected) | {_WSDA}
+    wallet = str(wallet_balances.get("wallet") or rb._wallet_address()).lower()
+    holdings = []
+    errors = []
+    for token in sorted(tracked_addresses):
+        raw = raw_tokens.get(token)
+        if raw is None:
+            continue
+        meta = metadata.get(token, {}) if isinstance(metadata, dict) else {}
+        meta = meta if isinstance(meta, dict) else {}
+        position = runtime_positions.get(token, {}) if isinstance(runtime_positions, dict) else {}
+        decimals = meta.get("decimals", position.get("decimals", 18 if token == _WSDA else None))
+        if decimals is None:
+            errors.append(f"token decimals unavailable for {token}")
+            continue
+        try:
+            amount = Decimal(str(raw)) / (Decimal(10) ** int(decimals))
+        except Exception as exc:
+            errors.append(f"invalid wallet token balance for {token}: {exc}")
+            continue
+        holdings.append({"address": token, "symbol": meta.get("symbol") or position.get("symbol") or token[:10],
+                         "name": meta.get("name") or token[:10], "decimals": int(decimals),
+                         "amount": str(amount), "amount_raw": str(raw)})
+    native_raw = wallet_balances.get("native_sda_wei")
     try:
-        snapshot = _ORIGINAL_FETCH_WALLET_SNAPSHOT(include_prices=False)
-    except Exception as exc:
-        return {"native_sda": None, "holdings": [], "token_balances_loaded": False,
-                "tracked_expected_count": len(expected), "tracked_missing_contracts": sorted(expected),
-                "market_complete": False, "errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
-    if not isinstance(snapshot, dict):
-        snapshot = {}
-    all_holdings = snapshot.get("holdings")
-    if not isinstance(all_holdings, list):
-        all_holdings = []
-    wsda_present = any(isinstance(item, dict)
-                       and str(item.get("address") or "").lower() == _WSDA
-                       for item in all_holdings)
-    tracked_addresses = set(expected)
-    if wsda_present:
-        tracked_addresses.add(_WSDA)
-    tracked = [item for item in all_holdings if isinstance(item, dict)
-               and str(item.get("address") or "").lower() in tracked_addresses]
-    wallet = str(snapshot.get("wallet_address") or rb._wallet_address()).lower()
-    if tracked:
-        with ThreadPoolExecutor(max_workers=min(4, len(tracked))) as pool:
-            tracked = list(pool.map(lambda item: _price_holding(item, wallet, analysis), tracked))
-    present = {str(item.get("address") or "").lower() for item in tracked}
+        native_sda = float(Decimal(str(native_raw)) / Decimal(10**18)) if native_raw is not None else None
+    except Exception:
+        native_sda = None
+    if holdings:
+        with ThreadPoolExecutor(max_workers=min(4, len(holdings))) as pool:
+            holdings = list(pool.map(lambda item: _price_holding(item, wallet, analysis), holdings))
+    present = {str(item.get("address") or "").lower() for item in holdings}
     missing = sorted(expected - present)
-    valued = sum(item.get("market_value_sda") is not None for item in tracked)
-    snapshot["holdings"] = tracked
-    snapshot["tracked_expected_count"] = len(tracked_addresses)
-    snapshot["tracked_missing_contracts"] = missing
-    snapshot["market_valued_count"] = valued
-    snapshot["market_complete"] = valued == len(tracked_addresses) and not missing
-    snapshot["token_balances_loaded"] = bool(snapshot.get("token_balances_loaded"))
-    snapshot["market_price_method"] = "shared scanner/Supabase fresh trade; fallback PinetSwap 1 SDA BUY reference eth_call"
+    valued = sum(item.get("market_value_sda") is not None for item in holdings)
+    sync_fresh = (isinstance(runtime_state, dict)
+                  and runtime_state.get("syncStatus") == "FRESH"
+                  and runtime_state.get("walletSyncHealthy") is True
+                  and runtime_state.get("reconciliationHealthy") is True)
+    snapshot = {
+        "wallet_address": wallet, "native_sda": native_sda, "holdings": holdings,
+        "token_balances_loaded": bool(sync_fresh and native_raw is not None and not errors),
+        "tracked_expected_count": len(tracked_addresses),
+        "tracked_missing_contracts": missing,
+        "market_valued_count": valued,
+        "market_complete": valued == len(tracked_addresses) and not missing,
+        "errors": errors,
+        "market_price_method": "shared scanner/Supabase fresh trade; fallback PinetSwap 1 SDA BUY reference eth_call",
+    }
     return snapshot
 
 
