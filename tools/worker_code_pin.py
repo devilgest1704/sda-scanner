@@ -260,9 +260,16 @@ def write_status(cwd=None, output=STATUS_FILE):
     status["lastSyncAttemptAt"] = wallet_sync.get("lastSyncAttemptAt") or ledger.get("lastSyncAttemptAt")
     status["lastSuccessfulWalletSync"] = (wallet_sync.get("lastSuccessfulWalletSync")
                                            or ledger.get("lastSuccessfulWalletSync"))
-    status["lastBlockchainSnapshotGeneratedAt"] = (wallet_sync.get("lastBlockchainSnapshotGeneratedAt")
-                                                    or ledger.get("lastBlockchainSnapshotGeneratedAt"))
+    status["lastSuccessfulWalletSyncAt"] = (wallet_sync.get("lastSuccessfulWalletSyncAt")
+                                             or ledger.get("lastSuccessfulWalletSyncAt"))
     status["lastSuccessfulReconciliation"] = wallet_sync.get("lastSuccessfulReconciliation") or ledger.get("lastSuccessfulReconciliation")
+    status["lastSuccessfulReconciliationAt"] = (wallet_sync.get("lastSuccessfulReconciliationAt")
+                                                or ledger.get("lastSuccessfulReconciliationAt"))
+    status["lastProcessedSignature"] = wallet_sync.get("lastProcessedSignature") or ledger.get("lastProcessedSignature")
+    status["walletSyncHealthy"] = bool(ledger.get("walletSyncHealthy"))
+    status["reconciliationHealthy"] = bool(ledger.get("reconciliationHealthy"))
+    status["buyDataHealthy"] = bool(ledger.get("buyDataHealthy"))
+    status["sellDataHealthy"] = bool(ledger.get("sellDataHealthy"))
     status["lastBlockchainDataAt"] = (wallet_sync.get("lastBlockchainDataAt")
                                        or ledger.get("lastBlockchainDataAt")
                                        or (accounting.get("blockchain_range") or {}).get("latest_timestamp"))
@@ -321,8 +328,14 @@ def write_status(cwd=None, output=STATUS_FILE):
         "last_real_reconciliation_at": reconciliation_stamp,
         "lastSyncAttemptAt": status.get("lastSyncAttemptAt"),
         "lastSuccessfulWalletSync": status.get("lastSuccessfulWalletSync"),
-        "lastBlockchainSnapshotGeneratedAt": status.get("lastBlockchainSnapshotGeneratedAt"),
+        "lastSuccessfulWalletSyncAt": status.get("lastSuccessfulWalletSyncAt"),
         "lastSuccessfulReconciliation": reconciliation_stamp,
+        "lastSuccessfulReconciliationAt": status.get("lastSuccessfulReconciliationAt"),
+        "lastProcessedSignature": status.get("lastProcessedSignature"),
+        "walletSyncHealthy": status.get("walletSyncHealthy"),
+        "reconciliationHealthy": status.get("reconciliationHealthy"),
+        "buyDataHealthy": status.get("buyDataHealthy"),
+        "sellDataHealthy": status.get("sellDataHealthy"),
         "lastBlockchainDataAt": status.get("lastBlockchainDataAt"),
         "ledgerUpdatedAt": status.get("ledgerUpdatedAt"),
         "lastSyncError": status.get("lastSyncError"),
