@@ -240,6 +240,20 @@ class PaperStateSafetyTests(unittest.TestCase):
                 os.chdir(previous_cwd)
         reconcile.assert_called_once_with()
 
+    def test_sell_v2_still_evaluates_positions_when_live_buy_wallet_sync_is_stale(self):
+        self.swing.evaluate_position.reset_mock()
+        with patch.object(real_live_wallet_sync, "due", return_value=True), \
+                patch.object(real_live_wallet_sync, "retry_due", return_value=True), \
+                patch.object(real_live_wallet_sync, "sync_once", return_value={
+                    "ok": False, "syncStatus": "FAILED", "syncError": "RPC timeout",
+                    "lastSyncAttemptAt": _stamp(), "imported": [],
+                }):
+            result = self.run_bridge()
+        self.assertFalse(any(a.get("action") == "BUY" for a in result["actions"]))
+        self.assertEqual([call.args[0] for call in self.swing.evaluate_position.call_args_list], [HELD])
+        self.trader.execute_buy.assert_not_called()
+        self.trader.execute_sell.assert_not_called()
+
     def test_invalid_paper_never_initializes_a_baseline(self):
         self.state_file.unlink()
         self.paper.write_text("{", encoding="utf-8")
