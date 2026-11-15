@@ -267,7 +267,16 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
                         for t in state["trades"])
         source = "BOT" if known_bot or isinstance(pending, dict) else "MANUAL"
         if isinstance(position, dict):
-            # A second costed lot for the same token is safely aggregated.
+            # Legacy positions may predate transaction-level idempotence. Treat
+            # swaps at/before their recorded opening as already represented;
+            # only later confirmed buys may add a new lot.
+            opened_at = _parse_timestamp(position.get("opened_at"))
+            transaction_at = _parse_timestamp(timestamp)
+            if opened_at is None or transaction_at is None:
+                raise RuntimeError(f"cannot establish lot chronology for existing {token_out} position")
+            if transaction_at <= opened_at:
+                seen.add(identity)
+                return []
             position["remaining_quantity"] = int(position.get("remaining_quantity",
                                                               position.get("token_amount_raw", 0)) or 0) + raw_out
             position["token_amount_raw"] = int(position.get("token_amount_raw") or 0) + raw_out
