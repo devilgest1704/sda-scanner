@@ -321,8 +321,13 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
         pending = (state.get("pending_sells") or {}).get(token_in)
         if isinstance(pending, dict):
             pending_hash = str(pending.get("tx_hash") or pending.get("swap_tx") or "").lower()
-            if pending_hash == tx_hash.lower() or pending.get("stage"):
+            if pending_hash == tx_hash.lower():
+                seen.add(identity)
                 return []
+            if pending.get("stage"):
+                raise RuntimeError(
+                    f"manual SELL discovery for {token_in} deferred while automatic SELL intent is active"
+                )
         event = next((x for x in identities if x[0] == token_in and x[2] == "OUT"), None)
         log_index = event[1] if event else 0
         identity = _processed_id(tx_hash, log_index, token_in, "SELL")
