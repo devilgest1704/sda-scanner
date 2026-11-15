@@ -352,6 +352,19 @@ def deployed_cost_basis(state):
 def safety_check(position_sda, state):
     _reset_daily_pnl_if_needed(state)
     position_sda = float(position_sda)
+    # Live BUY is fail-closed until this worker has completed a recent wallet
+    # sync and ledger reconciliation. SELL evaluation is intentionally separate.
+    if cfg.REAL_TRADING_ENABLED and not cfg.REAL_TRADING_DRY_RUN:
+        from real_live_wallet_sync import freshness
+        sync_health, sync_age = freshness(state)
+        if sync_health != "FRESH" or not state.get("walletSyncHealthy") or not state.get("reconciliationHealthy"):
+            age_text = "unknown" if sync_age is None else f"{int(sync_age)}s"
+            raise RuntimeError(
+                f"REAL BUY blocked: wallet/reconciliation {sync_health} "
+                f"(last successful sync age {age_text}); {state.get('lastSyncError') or 'awaiting live sync'}"
+            )
+        if state.get("sellDataHealthy") is not True:
+            raise RuntimeError("REAL BUY blocked: existing SELL protection is not healthy")
     if position_sda < cfg.POSITION_MIN_SDA or position_sda > cfg.POSITION_MAX_SDA:
         raise ValueError(f"Real position must be between {cfg.POSITION_MIN_SDA:g} and {cfg.POSITION_MAX_SDA:g} SDA")
     positions = state.get("positions", {})

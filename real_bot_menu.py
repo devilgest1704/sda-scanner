@@ -25,7 +25,7 @@ SUPABASE_HEADERS = {
     "accept-profile": "public",
 }
 MARKET_PRICE_STALE_SECONDS = 900
-_DASHBOARD_CACHE = {"at": 0.0, "value": None}
+_DASHBOARD_CACHE = {"at": 0.0, "value": None, "version": None}
 _DASHBOARD_CACHE_TTL = 20.0
 EXTERNAL_REFERENCE_ENV = "REAL_WALLET_REFERENCE_TOTAL_SDA"
 
@@ -113,12 +113,16 @@ def _status(worker_state=None):
         return f"⚪ STATUS UNKNOWN — worker heartbeat stale ({int(heartbeat_age)}s)"
     if not enabled:
         return "🔴 REAL TRADING DISABLED"
-    if worker_state.get("worker_health") == "CRITICAL_FAILURE":
-        return "🔴 CRITICAL FAILURE"
-    if enabled and not dry_run and worker_state.get("syncStatus") != "FRESH":
+    if enabled and not dry_run and (
+            worker_state.get("syncStatus") != "FRESH"
+            or worker_state.get("walletSyncHealthy") is not True
+            or worker_state.get("reconciliationHealthy") is not True
+            or worker_state.get("buyDataHealthy") is not True):
         sync_status = worker_state.get("syncStatus") or "UNKNOWN"
-        reason = worker_state.get("lastSyncError") or f"wallet sync {sync_status.lower()}"
+        reason = worker_state.get("lastSyncError") or f"wallet/reconciliation {sync_status.lower()}"
         return f"🟠 LIVE — BUY DATA DEGRADED — {reason}"
+    if worker_state.get("worker_health") == "CRITICAL_FAILURE":
+        return "🔴 CRITICAL FAILURE — SELL/worker safety degraded"
     if worker_state.get("worker_health") == "BUY_DATA_DEGRADED":
         if worker_state.get("whale_source_health") == "SOURCE_UNAVAILABLE":
             return "🟠 LIVE — BUY DATA DEGRADED — WHALE SOURCE UNAVAILABLE"
@@ -138,26 +142,43 @@ def _parse_timestamp(value):
 
 def _ledger_freshness_warning(state, worker_state, now=None):
     now = now or datetime.now(timezone.utc)
-    # Heartbeat, successful snapshot fetch, blockchain snapshot generation,
-    # and ledger mutation are separate clocks. A live worker never overrides a
-    # failed/stale reconciliation state.
-    sync_status = (worker_state or {}).get("syncStatus") or (state or {}).get("syncStatus")
+    worker_state = worker_state if isinstance(worker_state, dict) else {}
+    state = state if isinstance(state, dict) else {}
+    sync_status = worker_state.get("syncStatus") or state.get("syncStatus")
+    sync_stamp = (_parse_timestamp(worker_state.get("lastSuccessfulWalletSyncAt"))
+                  or _parse_timestamp(state.get("lastSuccessfulWalletSyncAt"))
+                  or _parse_timestamp(worker_state.get("lastSuccessfulWalletSync"))
+                  or _parse_timestamp(state.get("lastSuccessfulWalletSync")))
     if sync_status and sync_status != "FRESH":
-        error = ((worker_state or {}).get("lastSyncError")
-                 or (state or {}).get("lastSyncError") or f"sync status {sync_status}")
-        last = _parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSync")
-                                or (state or {}).get("lastSuccessfulWalletSync"))
-        suffix = f"; last successful sync: {last.strftime('%Y-%m-%d %H:%M:%S UTC')}" if last else ""
+        error = worker_state.get("lastSyncError") or state.get("lastSyncError") or f"sync status {sync_status}"
+        suffix = f"; last successful sync: {sync_stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}" if sync_stamp else ""
         return f"⚠ REAL wallet reconciliation {sync_status}: {error}{suffix}"
-    snapshot_stamp = _parse_timestamp((worker_state or {}).get("lastBlockchainSnapshotGeneratedAt")
-                                      or (state or {}).get("lastBlockchainSnapshotGeneratedAt"))
-    if snapshot_stamp is not None and (now - snapshot_stamp).total_seconds() > 20 * 60:
-        return f"⚠ REAL blockchain snapshot stale — generated: {snapshot_stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
-    stamp = (_parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSync"))
-             or _parse_timestamp((state or {}).get("lastSuccessfulWalletSync"))
-             or _parse_timestamp((worker_state or {}).get("ledger_updated_at"))
-             or _parse_timestamp((state or {}).get("ledgerUpdatedAt"))
-             or _parse_timestamp((state or {}).get("updated_at")))
+    if sync_stamp is not None:
+        age = (now - sync_stamp).total_seconds()
+        if age < 0:
+            return f"⚠ REAL wallet sync timestamp is in the future: {sync_stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        if age > 300:
+            return f"⚠ REAL wallet sync STALE ({int(age)}s old)"
+        if age > 120:
+            return f"⚠ REAL wallet sync DEGRADED ({int(age)}s old)"
+        reconciliation_stamp = (
+            _parse_timestamp(worker_state.get("lastSuccessfulReconciliationAt"))
+            or _parse_timestamp(state.get("lastSuccessfulReconciliationAt"))
+        )
+        if reconciliation_stamp is None:
+            return "⚠ REAL reconciliation timestamp unavailable"
+        reconciliation_age = (now - reconciliation_stamp).total_seconds()
+        if reconciliation_age > 300:
+            return f"⚠ REAL reconciliation STALE ({int(reconciliation_age)}s old)"
+        if reconciliation_age > 120:
+            return f"⚠ REAL reconciliation DEGRADED ({int(reconciliation_age)}s old)"
+        return None
+    # Legacy-only fallback; live workers never depend on the GitHub accounting snapshot.
+    stamp = (_parse_timestamp(worker_state.get("lastSuccessfulWalletSync"))
+             or _parse_timestamp(state.get("lastSuccessfulWalletSync"))
+             or _parse_timestamp(worker_state.get("ledger_updated_at"))
+             or _parse_timestamp(state.get("ledgerUpdatedAt"))
+             or _parse_timestamp(state.get("updated_at")))
     if stamp is None:
         return "⚠ REAL ledger freshness unavailable (no valid ledger timestamp)"
     age = (now - stamp).total_seconds()
@@ -179,26 +200,15 @@ def _ledger_source_warning(source, state):
 
 
 def _wallet_balance_sda():
-    address = _wallet_address().strip().lower()
-    if address != BOT_WALLET_ADDRESS:
-        return None, "configured wallet does not match the REAL bot wallet"
+    """Display the last authoritative wallet balance from the live REAL ledger."""
+    state = _load_real_state()
+    balances = state.get("walletBalances") if isinstance(state, dict) else None
+    if not isinstance(balances, dict) or balances.get("native_sda_wei") is None:
+        return None, "live wallet sync has not published a verified SDA balance"
     try:
-        response = requests.post(
-            cfg.RPC_URL,
-            json={"jsonrpc": "2.0", "id": 1, "method": "eth_getBalance", "params": [address, "latest"]},
-            timeout=10,
-            headers={"Content-Type": "application/json", "User-Agent": "sda-real-bot-gui/1.1"},
-        )
-        response.raise_for_status()
-        data = response.json()
-        if "error" in data:
-            return None, str(data["error"])
-        result = data.get("result")
-        if not isinstance(result, str):
-            return None, "RPC returned no balance"
-        return int(result, 16) / 10**18, None
-    except Exception as exc:
-        return None, str(exc)
+        return int(balances["native_sda_wei"]) / 10**18, None
+    except (TypeError, ValueError, OverflowError) as exc:
+        return None, f"invalid reconciled SDA balance: {exc}"
 
 
 def _wallet_short(wallet):
@@ -854,17 +864,24 @@ def _build_bot_report(dashboard):
 
 
 def bot_report(dashboard, refresh=False):
-    """Render cached dashboard-only data; refresh=True bypasses cache."""
+    """Render cached dashboard-only data; runtime ledger version invalidates the cache."""
     now = time.monotonic()
+    state, _source, _error = _load_real_state(dashboard)
+    version = (
+        state.get("updated_at"), state.get("lastSuccessfulWalletSyncAt"),
+        state.get("lastSuccessfulReconciliationAt"),
+    ) if isinstance(state, dict) else None
     cached = _DASHBOARD_CACHE.get("value")
-    if not refresh and cached is not None and now - _DASHBOARD_CACHE.get("at", 0) < _DASHBOARD_CACHE_TTL:
+    cache_valid = (_DASHBOARD_CACHE.get("version") == version
+                   and now - _DASHBOARD_CACHE.get("at", 0) < _DASHBOARD_CACHE_TTL)
+    if not refresh and cached is not None and cache_valid:
         return cached
     try:
         value = _build_bot_report(dashboard)
     except Exception as exc:
         print(f"REAL dashboard render isolated error: {type(exc).__name__}")
         value = "🤖 REAL TRADING ⚪\n\n💰 Portfolio unavailable\n📈 Total PnL unavailable\nOpen PnL unavailable\nRealized unavailable\nPositions unavailable\n\n📊 OPEN POSITIONS\n⚪ Valuation unavailable"
-    _DASHBOARD_CACHE.update({"at": time.monotonic(), "value": value})
+    _DASHBOARD_CACHE.update({"at": time.monotonic(), "value": value, "version": version})
     return value
 
 def statistics_report(dashboard):

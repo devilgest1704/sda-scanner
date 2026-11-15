@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import real_market_price as market_prices
 import real_paper_bridge as bridge
-import real_wallet_reconciliation
+import real_live_wallet_sync
 import real_swing_sell_executor as executor
 import real_trader
 import real_trading_config as cfg
@@ -48,6 +48,7 @@ class FakeChain:
             }},
             "pending_buys": {}, "pending_sells": {}, "sell_intents": {},
             "sell_intent_counters": {}, "trades": [], "daily_realized_pnl_sda": 0.0,
+            "sellDataHealthy": True,
         }
         self.balances = {TOKEN: quantity, WSDA: 0}
         self.receipts = {}
@@ -61,10 +62,8 @@ class FakeChain:
         self.tmp = tempfile.TemporaryDirectory()
         test.addCleanup(self.tmp.cleanup)
         self.patches = [
-            patch.object(real_wallet_reconciliation, "reconcile_manual_buys",
-                         return_value={"ok": True, "syncStatus": "FRESH", "imported": [],
-                                       "lastSuccessfulWalletSync": "2026-11-10T12:00:00+00:00",
-                                       "lastSuccessfulReconciliation": "2026-11-10T12:00:00+00:00"}),
+            patch.object(real_live_wallet_sync, "due", return_value=False),
+            patch.object(real_live_wallet_sync, "freshness", return_value=("FRESH", 0)),
             patch.object(real_trader, "load_state", side_effect=lambda: copy.deepcopy(self.state)),
             patch.object(real_trader, "save_state", side_effect=self._save),
             patch.object(real_trader, "now", side_effect=lambda: self.clock.isoformat()),
@@ -190,6 +189,38 @@ class BridgeHarness:
 
     def run(self):
         return bridge.reconcile()
+
+
+class LiveAccountingWorkflowDecoupling(unittest.TestCase):
+    def test_live_disposal_does_not_dispatch_historical_accounting_workflow(self):
+        state = {"accounting_refresh_pending": True}
+        with patch.object(executor.trader, "now", return_value="2026-11-15T08:00:00+00:00"), \
+                patch.object(executor.trader, "save_state") as save, \
+                patch.object(executor.trader.requests, "post") as post:
+            result = executor._request_accounting_refresh(state)
+        self.assertEqual(result, "LIVE_RECONCILIATION_REQUIRED")
+        self.assertTrue(state["accounting_refresh_pending"])
+        self.assertIn("audit/recovery only", state["accounting_refresh_last_error"])
+        save.assert_called_once_with(state)
+        post.assert_not_called()
+
+
+class BuyDataDegradedKeepsSellProtection(unittest.TestCase):
+    def test_stale_wallet_blocks_buy_but_still_evaluates_existing_sell(self):
+        chain = FakeChain(self)
+        harness = BridgeHarness(self, chain)
+        with patch.object(real_live_wallet_sync, "due", return_value=True), \
+                patch.object(real_live_wallet_sync, "retry_due", return_value=True), \
+                patch.object(real_live_wallet_sync, "sync_once",
+                             return_value={"ok": False, "syncStatus": "STALE",
+                                           "syncError": "RPC timeout", "imported": []}), \
+                patch.object(executor, "evaluate_position", wraps=executor.evaluate_position) as evaluate:
+            result = harness.run()
+        self.assertEqual(harness.buy.call_count, 0)
+        self.assertEqual(evaluate.call_count, 1)
+        self.assertEqual(chain.sent, [])
+        self.assertEqual(result["wallet_sync"]["syncStatus"], "STALE")
+        self.assertTrue(chain.state["sellDataHealthy"])
 
 
 class PartialDoubleCountRegression(unittest.TestCase):

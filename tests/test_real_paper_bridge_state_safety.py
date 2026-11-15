@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import real_paper_bridge as bridge
-import real_wallet_reconciliation
+import real_live_wallet_sync
 
 TOKEN_A = "0x" + "a" * 40
 TOKEN_B = "0x" + "b" * 40
@@ -50,13 +50,12 @@ class PaperStateSafetyTests(unittest.TestCase):
             load_market_snapshot=lambda: {}, load_token_metadata=lambda: {}, newest_supabase_price=None,
             resolve_market_price=lambda *a, **k: {"price_sda": 1.0, "timestamp": _stamp(), "age_seconds": 0,
                                                   "source": "mock"})
-        self.wallet_sync_patch = patch.object(
-            real_wallet_reconciliation, "reconcile_manual_buys",
-            return_value={"ok": True, "syncStatus": "FRESH", "imported": [],
-                          "lastSuccessfulWalletSync": _stamp(),
-                          "lastSuccessfulReconciliation": _stamp()})
-        self.wallet_sync_patch.start()
-        self.addCleanup(self.wallet_sync_patch.stop)
+        self.wallet_due_patch = patch.object(real_live_wallet_sync, "due", return_value=False)
+        self.wallet_fresh_patch = patch.object(real_live_wallet_sync, "freshness", return_value=("FRESH", 0))
+        self.wallet_due_patch.start()
+        self.wallet_fresh_patch.start()
+        self.addCleanup(self.wallet_due_patch.stop)
+        self.addCleanup(self.wallet_fresh_patch.stop)
         for item in (
             patch.object(bridge, "PAPER_FILE", self.paper),
             patch.object(bridge, "STATE_FILE", self.state_file),
@@ -241,12 +240,27 @@ class PaperStateSafetyTests(unittest.TestCase):
                 os.chdir(previous_cwd)
         reconcile.assert_called_once_with()
 
+    def test_sell_v2_still_evaluates_positions_when_live_buy_wallet_sync_is_stale(self):
+        self.swing.evaluate_position.reset_mock()
+        with patch.object(real_live_wallet_sync, "due", return_value=True), \
+                patch.object(real_live_wallet_sync, "retry_due", return_value=True), \
+                patch.object(real_live_wallet_sync, "sync_once", return_value={
+                    "ok": False, "syncStatus": "FAILED", "syncError": "RPC timeout",
+                    "lastSyncAttemptAt": _stamp(), "imported": [],
+                }):
+            result = self.run_bridge()
+        self.assertFalse(any(a.get("action") == "BUY" for a in result["actions"]))
+        self.assertEqual([call.args[0] for call in self.swing.evaluate_position.call_args_list], [HELD])
+        self.trader.execute_buy.assert_not_called()
+        self.trader.execute_sell.assert_not_called()
+
     def test_invalid_paper_never_initializes_a_baseline(self):
         self.state_file.unlink()
         self.paper.write_text("{", encoding="utf-8")
         result = self.run_bridge()
         self.assertEqual(result["status"], "paper_state_unavailable")
-        self.assertFalse(self.state_file.exists())
+        self.assertTrue(self.state_file.exists())
+        self.assertFalse(json.loads(self.state_file.read_text()).get("initialized", False))
         self.assertEqual(self.buys(), [])
 
     def test_pending_real_buy_is_preserved_during_paper_failure(self):

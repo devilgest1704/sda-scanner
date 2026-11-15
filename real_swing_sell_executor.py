@@ -451,52 +451,22 @@ def _retry_gate(state, position_id, reason):
 
 
 def _request_accounting_refresh(state):
-    """Dispatch the existing read-only FIFO accounting rebuild after real disposals."""
+    """Do not dispatch the historical GitHub workflow from the live REAL worker.
+
+    Supported swaps are reconciled directly by real_live_wallet_sync. If a
+    balance-only disposal remains unresolved, preserve the pending marker for
+    diagnostics/recovery instead of making live trading wait for Actions.
+    """
     if not state.get("accounting_refresh_pending"):
         return "NOT_PENDING"
     now = trader.now()
-    previous = state.get("accounting_refresh_last_attempt_at")
-    if previous:
-        try:
-            age = (datetime.fromisoformat(now) -
-                   datetime.fromisoformat(str(previous).replace("Z", "+00:00"))).total_seconds()
-            if 0 <= age < 60:
-                return "THROTTLED"
-        except Exception:
-            pass
-    token = os.getenv("GH_TOKEN", "").strip()
-    repository = os.getenv("GITHUB_REPOSITORY", "").strip()
-    if not token or not repository:
-        state["accounting_refresh_last_error"] = "GH_TOKEN or GITHUB_REPOSITORY unavailable"
-        trader.save_state(state)
-        return "NOT_CONFIGURED"
     state["accounting_refresh_last_attempt_at"] = now
-    try:
-        response = trader.requests.post(
-            f"https://api.github.com/repos/{repository}/actions/workflows/real-accounting-readonly.yml/dispatches",
-            json={"ref": "main"},
-            headers={"Authorization": f"Bearer {token}",
-                     "Accept": "application/vnd.github+json",
-                     "X-GitHub-Api-Version": "2022-11-28"},
-            timeout=(3, 10),
-        )
-        if int(response.status_code) not in (200, 201, 204):
-            raise RuntimeError(f"workflow dispatch HTTP {response.status_code}")
-        state["accounting_refresh_pending"] = False
-        state["accounting_refresh_last_dispatched_at"] = now
-        state.pop("accounting_refresh_last_error", None)
-        for item in state.get("sell_intents", {}).values():
-            if isinstance(item, dict) and item.get("accounting_applied"):
-                item["accounting_refresh_status"] = "DISPATCHED"
-        for item in state.get("manual_disposals", []):
-            if isinstance(item, dict):
-                item["accounting_refresh_status"] = "DISPATCHED"
-        trader.save_state(state)
-        return "DISPATCHED"
-    except Exception as exc:
-        state["accounting_refresh_last_error"] = f"{type(exc).__name__}: {str(exc)[:180]}"
-        trader.save_state(state)
-        return "FAILED"
+    state["accounting_refresh_last_error"] = (
+        "Historical accounting workflow is audit/recovery only; "
+        "live transaction evidence is required for this disposal."
+    )
+    trader.save_state(state)
+    return "LIVE_RECONCILIATION_REQUIRED"
 
 
 def _tx_status(intent, kind):

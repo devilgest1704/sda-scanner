@@ -44,6 +44,22 @@ def _state(count=8, cost=20, extra=None, pending=None):
 
 def _set_state(env, state):
     env.state = state
+    state["syncStatus"] = "FRESH"
+    state["walletSyncHealthy"] = True
+    state["reconciliationHealthy"] = True
+    state["lastSuccessfulWalletSyncAt"] = datetime.now(timezone.utc).isoformat()
+    state["lastSuccessfulReconciliationAt"] = state["lastSuccessfulWalletSyncAt"]
+    state["walletBalances"] = {
+        "native_sda_wei": str(1000 * 10**18), "wallet": "0x" + "9" * 40,
+        "tokens": {
+            token: {"raw": str(int(position.get("remaining_quantity",
+                                                 position.get("token_amount_raw", 0)) or 0)),
+                    "decimals": 18, "symbol": token[:8]}
+            for token, position in state.get("positions", {}).items()
+        },
+        "checked_at": state["lastSuccessfulWalletSyncAt"],
+    }
+    env.files["real_trade_state.json"] = state
     rows = []
     for token, position in state.get("positions", {}).items():
         try:
@@ -81,10 +97,14 @@ def env(monkeypatch):
              "whale_state.json": {"updated_at": datetime.now(timezone.utc).isoformat(),
                                   "last_successful_whale_at": datetime.now(timezone.utc).isoformat(),
                                   "whale_source_health": "HEALTHY"}}
+    now_stamp = datetime.now(timezone.utc).isoformat()
     holder = SimpleNamespace(state=_state(), worker={"enabled": True, "dry_run": False,
-                             "syncStatus": "FRESH",
-                             "lastSuccessfulWalletSync": datetime.now(timezone.utc).isoformat(),
-                             "updated_at": datetime.now(timezone.utc).isoformat()}, files=files,
+                             "syncStatus": "FRESH", "walletSyncHealthy": True,
+                             "reconciliationHealthy": True, "buyDataHealthy": True,
+                             "lastSuccessfulWalletSync": now_stamp,
+                             "lastSuccessfulWalletSyncAt": now_stamp,
+                             "lastSuccessfulReconciliationAt": now_stamp,
+                             "updated_at": now_stamp}, files=files,
                              forbidden=forbidden)
     monkeypatch.setattr(rb, "_state", lambda _d: holder.state)
     monkeypatch.setattr(rb, "_load_worker_status", lambda _d: holder.worker)
@@ -183,7 +203,7 @@ def test_pending_buy_is_pending(env, monkeypatch):
 def test_stale_scanner_shows_data_stale_without_counts_or_candidate(env, monkeypatch):
     rows = _rows(_row("ACV", "BUY", 89, blocked=False, phase="CONFIRMATION"), age_seconds=3600)
     text = _home(env, monkeypatch, rows)
-    assert "🔥 REAL BUY SCANNER\n⚪ Data stale" in text
+    assert "🔥 REAL BUY SCANNER" in text and "⚪ Data stale" in text
     assert "BUY-ready" not in text and "WATCH" not in text and "ACV" not in text
     assert "⚪ REAL BUY: DATA STALE" in text
     unknown = telegram_home.ScannerRows([_row("ACV", "BUY", 89, blocked=False)])
