@@ -185,7 +185,9 @@ def real_gate(real, token=None):
 def real_buy_status(rows, real, stale):
     """(state, reason, best BUY-ready row) for the HOME summary."""
     if stale:
-        if real is not None and not real.get("sync_healthy"):
+        if real is None:
+            return "BLOCKED", "REAL worker/wallet state unavailable", None
+        if not real.get("sync_healthy"):
             return "BLOCKED", "Wallet sync/reconciliation is not FRESH", None
         return "DATA STALE", None, None
     if real is not None and real.get("worker_critical"):
