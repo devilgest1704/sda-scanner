@@ -25,7 +25,7 @@ SUPABASE_HEADERS = {
     "accept-profile": "public",
 }
 MARKET_PRICE_STALE_SECONDS = 900
-_DASHBOARD_CACHE = {"at": 0.0, "value": None}
+_DASHBOARD_CACHE = {"at": 0.0, "value": None, "version": None}
 _DASHBOARD_CACHE_TTL = 20.0
 EXTERNAL_REFERENCE_ENV = "REAL_WALLET_REFERENCE_TOTAL_SDA"
 
@@ -864,17 +864,24 @@ def _build_bot_report(dashboard):
 
 
 def bot_report(dashboard, refresh=False):
-    """Render cached dashboard-only data; refresh=True bypasses cache."""
+    """Render cached dashboard-only data; runtime ledger version invalidates the cache."""
     now = time.monotonic()
+    state, _source, _error = _load_real_state(dashboard)
+    version = (
+        state.get("updated_at"), state.get("lastSuccessfulWalletSyncAt"),
+        state.get("lastSuccessfulReconciliationAt"),
+    ) if isinstance(state, dict) else None
     cached = _DASHBOARD_CACHE.get("value")
-    if not refresh and cached is not None and now - _DASHBOARD_CACHE.get("at", 0) < _DASHBOARD_CACHE_TTL:
+    cache_valid = (_DASHBOARD_CACHE.get("version") == version
+                   and now - _DASHBOARD_CACHE.get("at", 0) < _DASHBOARD_CACHE_TTL)
+    if not refresh and cached is not None and cache_valid:
         return cached
     try:
         value = _build_bot_report(dashboard)
     except Exception as exc:
         print(f"REAL dashboard render isolated error: {type(exc).__name__}")
         value = "🤖 REAL TRADING ⚪\n\n💰 Portfolio unavailable\n📈 Total PnL unavailable\nOpen PnL unavailable\nRealized unavailable\nPositions unavailable\n\n📊 OPEN POSITIONS\n⚪ Valuation unavailable"
-    _DASHBOARD_CACHE.update({"at": time.monotonic(), "value": value})
+    _DASHBOARD_CACHE.update({"at": time.monotonic(), "value": value, "version": version})
     return value
 
 def statistics_report(dashboard):
