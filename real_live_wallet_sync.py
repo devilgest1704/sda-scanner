@@ -262,10 +262,8 @@ def _reconcile_unresolved_manual_sell(state, tx_hash, token, raw_sold, raw_proce
         delta = abs((tx_time - disposal_time).total_seconds()) if tx_time and disposal_time else 10**12
         if delta <= 24 * 60 * 60:
             candidates.append((delta, disposal))
-    if not candidates:
-        return None
     candidates.sort(key=lambda item: item[0])
-    disposal = candidates[0][1]
+    disposal = candidates[0][1] if candidates else None
 
     trades = state.get("trades") or []
     trade_candidates = []
@@ -287,6 +285,8 @@ def _reconcile_unresolved_manual_sell(state, tx_hash, token, raw_sold, raw_proce
         if delta <= 24 * 60 * 60:
             trade_candidates.append((delta, trade))
     if not trade_candidates:
+        if disposal is None:
+            return None
         raise RuntimeError(
             f"unresolved manual disposal for {token} has no matching cost-basis ledger row"
         )
@@ -324,13 +324,14 @@ def _reconcile_unresolved_manual_sell(state, tx_hash, token, raw_sold, raw_proce
         "resulting_token_balance_raw": resulting_balance_raw, "at": timestamp,
         "swap_fee_tier": fee_tier,
     })
-    disposal.update({
-        "tx": tx_hash, "status": "RECONCILED", "proceeds_sda": str(proceeds),
-        "network_fee_sda": str(network_fee), "fees_sda": str(fees),
-        "realized_pnl_sda": str(net_pnl), "execution_price_sda": str(execution_price),
-        "accounting_status": "CONFIRMED", "resulting_token_balance_raw": resulting_balance_raw,
-        "at": timestamp, "reconciled_at": _iso(),
-    })
+    if disposal is not None:
+        disposal.update({
+            "tx": tx_hash, "status": "RECONCILED", "proceeds_sda": str(proceeds),
+            "network_fee_sda": str(network_fee), "fees_sda": str(fees),
+            "realized_pnl_sda": str(net_pnl), "execution_price_sda": str(execution_price),
+            "accounting_status": "CONFIRMED", "resulting_token_balance_raw": resulting_balance_raw,
+            "at": timestamp, "reconciled_at": _iso(),
+        })
     seen.add(identity)
     # Only a disposal executed today contributes to the daily risk counter.
     if tx_time and tx_time.date() == _now().date():
