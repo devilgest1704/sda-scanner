@@ -536,22 +536,23 @@ def reconcile():
     _persist_events(actions[pre_paper_action_count:])
     # Publish the authoritative runtime ledger/status for Telegram. This is a
     # state-only checkpoint, not an accounting workflow and never a trade gate.
-    try:
-        import tools.worker_code_pin as worker_code_pin
-        worker_code_pin.write_status()
-        from tools.state_checkpoint import push_state
-        published = push_state(
-            ["real_trade_state.json", "real_paper_bridge_state.json", "real_worker_status.json"],
-            "Publish live REAL wallet reconciliation",
-        )
-        state["telegram_state_publish"] = published.get("status")
-        if published.get("status") not in {"PUSHED", "NOOP"}:
-            print(f"::warning::REAL Telegram state publish {published.get('status')}: "
-                  f"{published.get('paths', [])}", file=sys.stderr, flush=True)
-    except Exception as exc:  # noqa: BLE001 - display publishing cannot stop SELL management
-        state["telegram_state_publish"] = "FAILED"
-        print(f"::warning::REAL Telegram state publish failed: {type(exc).__name__}: {str(exc)[:200]}",
-              file=sys.stderr, flush=True)
+    if os.getenv("GITHUB_ACTIONS", "").strip().lower() == "true":
+        try:
+            import tools.worker_code_pin as worker_code_pin
+            worker_code_pin.write_status()
+            from tools.state_checkpoint import push_state
+            published = push_state(
+                ["real_trade_state.json", "real_paper_bridge_state.json", "real_worker_status.json"],
+                "Publish live REAL wallet reconciliation",
+            )
+            state["telegram_state_publish"] = published.get("status")
+            if published.get("status") not in {"PUSHED", "NOOP"}:
+                print(f"::warning::REAL Telegram state publish {published.get('status')}: "
+                      f"{published.get('paths', [])}", file=sys.stderr, flush=True)
+        except Exception as exc:  # noqa: BLE001 - display publishing cannot stop SELL management
+            state["telegram_state_publish"] = "FAILED"
+            print(f"::warning::REAL Telegram state publish failed: {type(exc).__name__}: {str(exc)[:200]}",
+                  file=sys.stderr, flush=True)
     if health["health"] == "SELL_ERROR":
         print(f"::error::REAL SELL HEALTH SELL_ERROR {json.dumps(health['errors'], default=str)[:1500]}",
               file=sys.stderr, flush=True)
