@@ -225,6 +225,9 @@ def _scanner_inputs(dashboard):
                          or (market_stamp is not None and _scanner_stale(market_rows))))
     market_stale = market_stale or source_health in ("STALE", "SOURCE_UNAVAILABLE")
     wallet_sync_stale = (worker.get("syncStatus") != "FRESH"
+                         or worker.get("walletSyncHealthy") is not True
+                         or worker.get("reconciliationHealthy") is not True
+                         or real is None or not real.get("sync_healthy")
                          or "STATUS UNKNOWN" in rb._status(worker)
                          or "CRITICAL FAILURE" in str(worker.get("worker_health") or ""))
     return rows, real, _scanner_stale(rows) or whale_stale or market_stale or wallet_sync_stale
