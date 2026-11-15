@@ -523,7 +523,15 @@ def reconcile():
         if a.get("action") == "SELL_DECISION"
         and a.get("status") in {"ERROR", "PRICE_UNAVAILABLE", "QUARANTINED"}
     ]
-    state["sell_data_healthy"] = not sell_data_errors
+    runtime_after_sell = real_trader.load_state()
+    open_after_sell = runtime_after_sell.get("positions", {})
+    sell_decisions = [a for a in actions if a.get("action") == "SELL_DECISION"]
+    sell_data_healthy = (len(sell_decisions) >= len(open_after_sell)
+                         and not sell_data_errors)
+    runtime_after_sell["sellDataHealthy"] = sell_data_healthy
+    runtime_after_sell["sellHealth"] = health["health"]
+    real_trader.save_state(runtime_after_sell)
+    state["sell_data_healthy"] = sell_data_healthy
     _save(STATE_FILE, state)
     _persist_events(actions[pre_paper_action_count:])
     # Publish the authoritative runtime ledger/status for Telegram. This is a
