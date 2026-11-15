@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import real_paper_bridge as bridge
-import real_wallet_reconciliation
+import real_live_wallet_sync
 
 TOKEN_A = "0x" + "a" * 40
 TOKEN_B = "0x" + "b" * 40
@@ -50,13 +50,12 @@ class PaperStateSafetyTests(unittest.TestCase):
             load_market_snapshot=lambda: {}, load_token_metadata=lambda: {}, newest_supabase_price=None,
             resolve_market_price=lambda *a, **k: {"price_sda": 1.0, "timestamp": _stamp(), "age_seconds": 0,
                                                   "source": "mock"})
-        self.wallet_sync_patch = patch.object(
-            real_wallet_reconciliation, "reconcile_manual_buys",
-            return_value={"ok": True, "syncStatus": "FRESH", "imported": [],
-                          "lastSuccessfulWalletSync": _stamp(),
-                          "lastSuccessfulReconciliation": _stamp()})
-        self.wallet_sync_patch.start()
-        self.addCleanup(self.wallet_sync_patch.stop)
+        self.wallet_due_patch = patch.object(real_live_wallet_sync, "due", return_value=False)
+        self.wallet_fresh_patch = patch.object(real_live_wallet_sync, "freshness", return_value=("FRESH", 0))
+        self.wallet_due_patch.start()
+        self.wallet_fresh_patch.start()
+        self.addCleanup(self.wallet_due_patch.stop)
+        self.addCleanup(self.wallet_fresh_patch.stop)
         for item in (
             patch.object(bridge, "PAPER_FILE", self.paper),
             patch.object(bridge, "STATE_FILE", self.state_file),
