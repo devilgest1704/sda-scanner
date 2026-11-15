@@ -56,7 +56,7 @@ def _address(value):
 
 def _age(value, now=None):
     try:
-        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        stamp = datetime.fromisoformat(str(value))
         if stamp.tzinfo is None:
             return None
         return max(0.0, ((now or _now()) - stamp.astimezone(UTC)).total_seconds())
@@ -103,7 +103,7 @@ def _get_json(path, params=None):
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, (dict, list)):
-        raise RuntimeError(f"Blockscout returned invalid JSON for {path}")
+        raise TypeError(f"Blockscout returned invalid JSON for {path}")
     return payload
 
 
@@ -115,14 +115,14 @@ def _fetch_pages(path, params, cursor_block, cutoff, max_pages=MAX_PAGES_PER_END
     for _ in range(max_pages):
         payload = _get_json(path, page_params)
         if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
-            raise RuntimeError(f"Blockscout pagination contract invalid for {path}")
+            raise TypeError(f"Blockscout pagination contract invalid for {path}")
         items = payload["items"]
         if not items:
             boundary_reached = True
             break
         for item in items:
             if not isinstance(item, dict):
-                raise RuntimeError(f"Blockscout returned malformed row for {path}")
+                raise TypeError(f"Blockscout returned malformed row for {path}")
             block = _int(item.get("block_number"))
             stamp = item.get("timestamp") or item.get("block_timestamp")
             if cursor_block is not None and block < int(cursor_block):
@@ -141,7 +141,7 @@ def _fetch_pages(path, params, cursor_block, cutoff, max_pages=MAX_PAGES_PER_END
         if boundary_reached:
             break
         if not isinstance(next_params, dict):
-            raise RuntimeError(f"Blockscout next_page_params invalid for {path}")
+            raise TypeError(f"Blockscout next_page_params invalid for {path}")
         page_params = dict(params or {})
         page_params.update(next_params)
     if not boundary_reached:
@@ -165,7 +165,7 @@ def _token_rows(payload):
     else:
         rows = payload
     if not isinstance(rows, list):
-        raise RuntimeError("Blockscout token-balances response is not a list")
+        raise TypeError("Blockscout token-balances response is not a list")
     result = {}
     for item in rows:
         if not isinstance(item, dict):
@@ -654,7 +654,7 @@ def sync_once(real_trader, *, now=None):
                 tx = real_trader.rpc("eth_getTransactionByHash", [tx_hash])
                 receipt = real_trader.rpc("eth_getTransactionReceipt", [tx_hash])
                 if not isinstance(tx, dict) or not isinstance(receipt, dict):
-                    raise RuntimeError(f"transaction or receipt unavailable for {tx_hash}")
+                    raise TypeError(f"transaction or receipt unavailable for {tx_hash}")
                 if _int(receipt.get("status")) != 1:
                     processed_signatures.add(tx_hash)
                     continue
@@ -719,7 +719,7 @@ def sync_once(real_trader, *, now=None):
                     "lastBlockchainDataAt": staged["lastBlockchainDataAt"],
                     "imported": imported, "processed_transactions": len(tx_hashes),
                     "walletBalances": staged["walletBalances"]}
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - fail closed for any provider or reconciliation error
             try:
                 failed = real_trader.load_state()
                 failures = int(failed.get("walletSyncFailures") or 0) + 1
@@ -732,8 +732,12 @@ def sync_once(real_trader, *, now=None):
                 failed["buyDataHealthy"] = False
                 failed["walletSyncRetryAfterSeconds"] = _retry_delay(failures)
                 real_trader.save_state(failed)
-            except Exception:
-                pass
+            except Exception as save_exc:  # noqa: BLE001 - preserve the original sync failure
+                print(
+                    f"REAL wallet sync failure status could not be persisted: "
+                    f"{type(save_exc).__name__}: {str(save_exc)[:200]}",
+                    file=sys.stderr, flush=True,
+                )
             return {"ok": False, "syncStatus": "FAILED",
                     "syncError": f"{type(exc).__name__}: {str(exc)[:300]}",
                     "lastSyncAttemptAt": attempted}
