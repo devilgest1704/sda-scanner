@@ -228,7 +228,7 @@ def _processed_id(tx_hash, log_index, token, direction):
     return f"{str(tx_hash).lower()}:{int(log_index)}:{str(token).lower()}:{direction}"
 
 
-def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen):
+def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trader):
     if _address(tx.get("to")) != str(cfg.ROUTER_ADDRESS).lower():
         return []
     decoded = _calldata_tokens(tx.get("input") or tx.get("data"))
@@ -244,8 +244,8 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen):
         if raw_in <= 0:
             raw_in = _int(tx.get("value"))
         if raw_out <= 0 or raw_in <= 0:
-            return []
-        decimals = _token_rows_for_decimals(state, token_out)
+            raise RuntimeError(f"confirmed BUY swap {tx_hash} lacks exact wallet transfer evidence")
+        decimals = _token_rows_for_decimals(state, token_out, real_trader)
         quantity = Decimal(raw_out) / (Decimal(10) ** decimals)
         spent = Decimal(raw_in) / Decimal(10**18)
         event = next((x for x in identities if x[0] == token_out and x[2] == "IN"), None)
@@ -314,14 +314,14 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen):
         raw_sold = outgoing.get(token_in, 0)
         raw_proceeds = incoming.get(token_out, 0)
         if raw_sold <= 0 or raw_proceeds <= 0:
-            return []
+            raise RuntimeError(f"confirmed SELL swap {tx_hash} lacks exact wallet transfer evidence")
         position = state["positions"].get(token_in)
         if not isinstance(position, dict):
             return []
         pending = (state.get("pending_sells") or {}).get(token_in)
         if isinstance(pending, dict):
             pending_hash = str(pending.get("tx_hash") or pending.get("swap_tx") or "").lower()
-            if pending_hash == tx_hash.lower():
+            if pending_hash == tx_hash.lower() or pending.get("stage"):
                 return []
         event = next((x for x in identities if x[0] == token_in and x[2] == "OUT"), None)
         log_index = event[1] if event else 0
@@ -367,14 +367,14 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen):
     return imported
 
 
-def _token_rows_for_decimals(state, token):
+def _token_rows_for_decimals(state, token, real_trader):
     balances = (state.get("walletBalances") or {}).get("tokens") or {}
     if token in balances:
         return int(balances[token]["decimals"])
     metadata = state.get("_liveTokenMetadata") or {}
     if token in metadata:
         return int(metadata[token]["decimals"])
-    raise RuntimeError(f"Token decimals unavailable for discovered token {token}")
+    return int(real_trader.token_decimals(token))
 
 
 def sync_once(real_trader, *, now=None):
@@ -457,7 +457,7 @@ def sync_once(real_trader, *, now=None):
                     if parsed is None:
                         raise RuntimeError(f"transaction timestamp unavailable for {tx_hash}")
                     imported.extend(_apply_swap(staged, tx_hash, tx, receipt, parsed.isoformat(),
-                                                wallet, seen))
+                                                wallet, seen, real_trader))
             # Preserve decimals for all known open tokens even if an explorer omits zero balances.
             for token in staged["positions"]:
                 if token not in token_balances:
@@ -469,7 +469,15 @@ def sync_once(real_trader, *, now=None):
             synced_at = _iso(now)
             staged.pop("_liveTokenMetadata", None)
             staged["lastProcessedBlock"] = latest_block
-            staged["lastProcessedSignature"] = max(tx_hashes) if tx_hashes else state.get("lastProcessedSignature")
+            newest_row = max(
+                (row for row in transactions if row.get("hash") or row.get("transaction_hash")),
+                key=lambda row: (_int(row.get("block_number")), _int(row.get("transaction_index", row.get("index", 0)))),
+                default=None,
+            )
+            staged["lastProcessedSignature"] = (
+                str(newest_row.get("hash") or newest_row.get("transaction_hash")).lower()
+                if newest_row else state.get("lastProcessedSignature")
+            )
             staged["lastBlockchainDataAt"] = _iso(latest_timestamp) if latest_timestamp else synced_at
             staged["lastSyncAttemptAt"] = attempted
             staged["lastSuccessfulWalletSyncAt"] = synced_at
