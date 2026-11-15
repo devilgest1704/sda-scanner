@@ -151,7 +151,7 @@ def _fetch_pages(path, params, cursor_block, cutoff, max_pages=MAX_PAGES_PER_END
 
 def _parse_timestamp(value):
     try:
-        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        stamp = datetime.fromisoformat(str(value))
         return stamp.astimezone(UTC) if stamp.tzinfo else None
     except (TypeError, ValueError, OverflowError):
         return None
