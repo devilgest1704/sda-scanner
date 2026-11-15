@@ -453,7 +453,7 @@ def _build_dashboard_data(dashboard):
     expected_count=int(snapshot.get("tracked_expected_count") or 0)
     portfolio_total_count=1+expected_count
     portfolio_valued_count=(1 if native is not None else 0)+market_count
-    portfolio_complete=(native is not None and bool(snapshot.get("token_balances_loaded"))
+    portfolio_complete=(complete and native is not None and bool(snapshot.get("token_balances_loaded"))
                         and bool(snapshot.get("market_complete"))
                         and not snapshot.get("tracked_missing_contracts"))
     buy_records=[{"symbol":x.get("symbol") or "UNKNOWN","at":x.get("at"),
@@ -479,7 +479,8 @@ def _build_dashboard_data(dashboard):
     realized_pnl=float(pnl_model["realized"])
     best=stats.get("best_trade") if isinstance(stats.get("best_trade"),dict) else {}
     worst=stats.get("worst_trade") if isinstance(stats.get("worst_trade"),dict) else {}
-    return {"source":"blockchain_fifo","load_error":None,"worker":worker,
+    return {"source":"live_runtime_ledger" if live_runtime_ready else "blockchain_fifo",
+        "load_error":None,"worker":worker,
         "worker_status":rb._status(worker),"state":accounting,"snapshot":snapshot,
         "positions":positions,"buy_records":buy_records,"sell_records":sell_records,
         "buy_count":int(stats.get("confirmed_buys_count") or len(buy_records)),
