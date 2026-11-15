@@ -121,6 +121,19 @@ def _persist_events(actions):
     _save(EVENTS_FILE, events[-1000:])
 
 
+def _publish_telegram_state():
+    """Publish runtime JSON only; historical accounting workflow is not a live dependency."""
+    if os.getenv("GITHUB_ACTIONS", "").strip().lower() != "true":
+        return {"status": "SKIPPED_NON_GITHUB_WORKER"}
+    import tools.worker_code_pin as worker_code_pin
+    worker_code_pin.write_status()
+    from tools.state_checkpoint import push_state
+    paths = ["real_trade_state.json", "real_worker_status.json"]
+    if STATE_FILE.exists():
+        paths.append(str(STATE_FILE))
+    return push_state(paths, "Publish live REAL wallet reconciliation")
+
+
 def _reconcile_real_wallets(real_trader, swing_executor):
     actions = []
     try:
@@ -299,6 +312,11 @@ def reconcile():
                             "reason": paper_error, "at": _now()})
             # Keep the bridge baseline absent until a valid PAPER snapshot exists.
             _persist_events(actions[pre_paper_action_count:])
+            try:
+                _publish_telegram_state()
+            except Exception as exc:
+                print(f"::warning::REAL Telegram status publish failed: {type(exc).__name__}: {str(exc)[:180]}",
+                      file=sys.stderr, flush=True)
             return {"status": "paper_state_unavailable", "paper_state_error": paper_error,
                     "actions": actions}
         state = {"initialized": True, "paper_positions": sorted(current),
@@ -306,6 +324,11 @@ def reconcile():
                  "wallet_sync": _wallet_sync_summary(wallet_sync, real_trader)}
         _save(STATE_FILE, state)
         _persist_events(actions[pre_paper_action_count:])
+        try:
+            _publish_telegram_state()
+        except Exception as exc:
+            print(f"::warning::REAL Telegram status publish failed: {type(exc).__name__}: {str(exc)[:180]}",
+                  file=sys.stderr, flush=True)
         return {"status": "baseline_initialized", "actions": actions}
 
     previous = set(state.get("paper_positions", []))
@@ -536,23 +559,16 @@ def reconcile():
     _persist_events(actions[pre_paper_action_count:])
     # Publish the authoritative runtime ledger/status for Telegram. This is a
     # state-only checkpoint, not an accounting workflow and never a trade gate.
-    if os.getenv("GITHUB_ACTIONS", "").strip().lower() == "true":
-        try:
-            import tools.worker_code_pin as worker_code_pin
-            worker_code_pin.write_status()
-            from tools.state_checkpoint import push_state
-            published = push_state(
-                ["real_trade_state.json", "real_paper_bridge_state.json", "real_worker_status.json"],
-                "Publish live REAL wallet reconciliation",
-            )
-            state["telegram_state_publish"] = published.get("status")
-            if published.get("status") not in {"PUSHED", "NOOP"}:
-                print(f"::warning::REAL Telegram state publish {published.get('status')}: "
-                      f"{published.get('paths', [])}", file=sys.stderr, flush=True)
-        except Exception as exc:  # noqa: BLE001 - display publishing cannot stop SELL management
-            state["telegram_state_publish"] = "FAILED"
-            print(f"::warning::REAL Telegram state publish failed: {type(exc).__name__}: {str(exc)[:200]}",
-                  file=sys.stderr, flush=True)
+    try:
+        published = _publish_telegram_state()
+        state["telegram_state_publish"] = published.get("status")
+        if published.get("status") not in {"PUSHED", "NOOP", "SKIPPED_NON_GITHUB_WORKER"}:
+            print(f"::warning::REAL Telegram state publish {published.get('status')}: "
+                  f"{published.get('paths', [])}", file=sys.stderr, flush=True)
+    except Exception as exc:  # noqa: BLE001 - display publishing cannot stop SELL management
+        state["telegram_state_publish"] = "FAILED"
+        print(f"::warning::REAL Telegram state publish failed: {type(exc).__name__}: {str(exc)[:200]}",
+              file=sys.stderr, flush=True)
     if health["health"] == "SELL_ERROR":
         print(f"::error::REAL SELL HEALTH SELL_ERROR {json.dumps(health['errors'], default=str)[:1500]}",
               file=sys.stderr, flush=True)
