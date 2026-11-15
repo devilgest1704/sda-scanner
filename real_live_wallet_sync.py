@@ -93,7 +93,7 @@ def retry_due(state, now=None):
 
 def _retry_delay(failures):
     base = BACKOFF_SECONDS[min(max(int(failures) - 1, 0), len(BACKOFF_SECONDS) - 1)]
-    return max(1, int(base * random.uniform(0.8, 1.2)))
+    return min(60, max(1, int(base * random.uniform(0.8, 1.2))))
 
 
 def _get_json(path, params=None):
