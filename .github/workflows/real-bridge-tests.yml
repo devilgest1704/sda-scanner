@@ -67,6 +67,73 @@ jobs:
             printf '::error::Failing test module: %s\n' "${failed[@]}"
             exit 1
           fi
+      - name: Read-only live wallet reconciliation verification (no trades)
+        env:
+          REAL_TRADING_ENABLED: "false"
+          REAL_TRADING_DRY_RUN: "true"
+          REAL_TRADING_WALLET_ADDRESS: "0x9e3643f2ac15c91ee83aa2814015f15b18d573f2"
+        run: |
+          python - <<'PY'
+          import json
+          import shutil
+          import tempfile
+          from pathlib import Path
+
+          import real_trading_config as cfg
+          import real_trader
+          import real_live_wallet_sync
+
+          wallet_state = json.loads(Path("real_trade_state.json").read_text(encoding="utf-8"))
+          with tempfile.TemporaryDirectory(prefix="sda-live-wallet-readonly-") as tmp:
+              cfg.STATE_FILE = str(Path(tmp) / "real_trade_state.json")
+              shutil.copyfile("real_trade_state.json", cfg.STATE_FILE)
+              result = real_live_wallet_sync.sync_once(real_trader)
+              state = real_trader.load_state()
+              print(json.dumps({
+                  "sync": result,
+                  "lastProcessedBlock": state.get("lastProcessedBlock"),
+                  "lastProcessedSignature": state.get("lastProcessedSignature"),
+                  "positions": len(state.get("positions") or {}),
+                  "manualImports": state.get("manual_imports") or [],
+                  "unresolvedManualSells": [
+                      trade for trade in state.get("trades") or []
+                      if trade.get("action") == "MANUAL_SELL"
+                      and trade.get("accounting_status") == "PROCEEDS_UNKNOWN"
+                      and float(trade.get("cost_basis_sda") or 0) > 0.1
+                  ],
+              }, indent=2, default=str))
+              if not result.get("ok"):
+                  raise SystemExit("READ-ONLY live wallet reconciliation failed")
+              ride = "0xe91cac00c1092611eb598b284a87a623a35af9b7"
+              ride_tx = "0x06ee04a59d81b1c8ce03e69fa5ad9ce05c936e3928ad1719756b89df27247bce"
+              position = (state.get("positions") or {}).get(ride)
+              trade = next((item for item in state.get("trades") or []
+                            if str(item.get("tx") or "").lower() == ride_tx), None)
+              if not position or position.get("source") != "MANUAL" or position.get("status") != "OPEN":
+                  raise SystemExit("Current RIDE manual BUY was not reconstructed as an OPEN MANUAL position")
+              if position.get("sellManagementEnabled") is not True or not trade:
+                  raise SystemExit("RIDE manual BUY is missing SELL management or transaction evidence")
+              for field in ("token_amount", "spent_sda", "fees_sda", "execution_price_sda",
+                            "resulting_token_balance_raw"):
+                  if trade.get(field) in (None, "", 0):
+                      raise SystemExit(f"RIDE manual BUY evidence is missing {field}")
+              unresolved = [
+                  item for item in state.get("trades") or []
+                  if item.get("action") == "MANUAL_SELL"
+                  and item.get("accounting_status") == "PROCEEDS_UNKNOWN"
+                  and float(item.get("cost_basis_sda") or 0) > 0.1
+              ]
+              if unresolved:
+                  raise SystemExit(f"Unresolved material manual SELL disposals remain: {len(unresolved)}")
+              print("VERIFIED_RIDE_MANUAL_BUY", json.dumps({
+                  "tx": ride_tx, "token": ride, "timestamp": trade.get("at"),
+                  "token_amount": trade.get("token_amount"), "spent_sda": trade.get("spent_sda"),
+                  "fees_sda": trade.get("fees_sda"),
+                  "execution_price_sda": trade.get("execution_price_sda"),
+                  "resulting_token_balance_raw": trade.get("resulting_token_balance_raw"),
+                  "sellManagementEnabled": position.get("sellManagementEnabled"),
+              }, indent=2))
+          PY
       - name: Run Swing SELL V2 policy regression tests
         run: python -m pytest -q tests/test_swing_sell_v2.py
       - name: Run read-only Swing SELL V2 decision report tests
