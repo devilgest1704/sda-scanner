@@ -263,7 +263,6 @@ def write_status(cwd=None, output=STATUS_FILE):
               "enabled": _flag("REAL_TRADING_ENABLED"), "dry_run": _flag("REAL_TRADING_DRY_RUN"),
               "updated_at": _now()}
     ledger = _read_json(root, "real_trade_state.json")
-    accounting = _read_json(root, "real_accounting_state.json")
     status["lastWorkerHeartbeat"] = status["updated_at"]
     status["ledger_updated_at"] = ledger.get("ledgerUpdatedAt") or ledger.get("updated_at")
     bridge = _read_json(root, "real_paper_bridge_state.json")
