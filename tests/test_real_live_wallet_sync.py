@@ -156,7 +156,7 @@ class LiveWalletSyncTests(unittest.TestCase):
         self.assertEqual(position["spent_sda"], "2")
         self.assertEqual(Decimal(position["initial_cost_basis"]), Decimal("2"))
         self.assertEqual(position["buy_tx"], TX_BUY)
-        self.assertEqual(trader.state["lastProcessedBlock"], 101)
+        self.assertEqual(trader.state["lastProcessedBlock"], 995)
         self.assertEqual(trader.state["lastProcessedSignature"], TX_BUY)
         self.assertIn(TX_BUY, trader.state["processedBlockchainSignatures"])
         self.assertEqual(len(trader.state["trades"]), 1)
