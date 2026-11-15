@@ -554,7 +554,7 @@ def reconcile():
     try:
         published = _publish_telegram_state()
         state["telegram_state_publish"] = published.get("status")
-        if published.get("status") not in {"PUSHED", "NOOP", "SKIPPED_NON_GITHUB_WORKER"}:
+        if published.get("status") not in {"PUSHED", "NOOP", "SKIPPED_NON_PRODUCTION_WORKER"}:
             print(f"::warning::REAL Telegram state publish {published.get('status')}: "
                   f"{published.get('paths', [])}", file=sys.stderr, flush=True)
     except Exception as exc:  # noqa: BLE001 - display publishing cannot stop SELL management
