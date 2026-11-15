@@ -600,6 +600,16 @@ def main():
         "native_balance_sda":str(native_sda),
         "wallet_valuation":{"valued_assets_count":max(0,len(priced)-len(unpriced)),
             "total_assets_count":len(priced),"unpriced_assets":unpriced},
+        # Keep the consumer's strict validation contract in the published
+        # BOT snapshot as well as in the richer report. These are evidence-
+        # derived values, not permissive defaults.
+        "validation":{"all_pagination_exhausted":True,
+            "detail_fetch_errors":errors,
+            "cash_reconciliation_zero":abs(cash_delta)<=Decimal("0.00000001"),
+            "ledger_loaded":ledger is not None,
+            "open_positions_valued":bot_open_complete,
+            "wallet_value_complete":wallet_value_complete,
+            "unmatched_sell_count":len(bot_unmatched)},
         "excluded_external_activity":{"unmatched_sells":excluded_external_sells,
             "unknown_basis_assets":[{"symbol":x.get("symbol"),"contract":x.get("contract")} for x in external_assets]},
         "method":{"lot_matching":"FIFO","bot_buy_rule":"successful wallet-funded router BUY with received token delta",
