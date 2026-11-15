@@ -259,7 +259,8 @@ class PaperStateSafetyTests(unittest.TestCase):
         self.paper.write_text("{", encoding="utf-8")
         result = self.run_bridge()
         self.assertEqual(result["status"], "paper_state_unavailable")
-        self.assertFalse(self.state_file.exists())
+        self.assertTrue(self.state_file.exists())
+        self.assertFalse(json.loads(self.state_file.read_text()).get("initialized", False))
         self.assertEqual(self.buys(), [])
 
     def test_pending_real_buy_is_preserved_during_paper_failure(self):
