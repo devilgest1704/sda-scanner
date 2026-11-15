@@ -333,22 +333,16 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
                 (Decimal(str(lot.get("remaining_cost_basis_sda") or 0)) for lot in lots), Decimal("0")))
             position["entry_gas_remaining_sda"] = str(sum(
                 (Decimal(str(lot.get("remaining_entry_fee_sda") or 0)) for lot in lots), Decimal("0")))
-            position["remaining_quantity"] = int(position.get("remaining_quantity",
-                                                              position.get("token_amount_raw", 0)) or 0) + raw_out
             position["token_amount_raw"] = int(position.get("token_amount_raw") or 0) + raw_out
             position["initial_quantity"] = int(position.get("initial_quantity") or 0) + raw_out
             position["token_amount"] = str(
                 Decimal(str(position.get("token_amount") or 0)) + quantity)
             position["spent_sda"] = str(Decimal(str(position.get("spent_sda") or 0)) + spent)
-            position["remaining_cost_basis"] = str(
-                Decimal(str(position.get("remaining_cost_basis", position.get("amount_sda", 0)) or 0)) + spent)
             position["initial_cost_basis"] = str(
                 Decimal(str(position.get("initial_cost_basis", position.get("amount_sda", 0)) or 0)) + spent)
             position["amount_sda"] = float(Decimal(str(position["initial_cost_basis"])))
             position["network_fee_sda"] = str(Decimal(str(position.get("network_fee_sda") or 0)) + network_fee)
             position["entry_gas_sda"] = str(Decimal(str(position.get("entry_gas_sda") or 0)) + network_fee)
-            position["entry_gas_remaining_sda"] = str(
-                Decimal(str(position.get("entry_gas_remaining_sda") or 0)) + network_fee)
             total_quantity = Decimal(int(position["initial_quantity"])) / (Decimal(10) ** decimals)
             position["execution_price_sda"] = str(Decimal(str(position["initial_cost_basis"])) / total_quantity)
             position["all_in_cost_price_sda"] = str(
