@@ -115,9 +115,13 @@ def _status(worker_state=None):
         return "🔴 REAL TRADING DISABLED"
     if worker_state.get("worker_health") == "CRITICAL_FAILURE":
         return "🔴 CRITICAL FAILURE"
-    if enabled and not dry_run and worker_state.get("syncStatus") != "FRESH":
+    if enabled and not dry_run and (
+            worker_state.get("syncStatus") != "FRESH"
+            or worker_state.get("walletSyncHealthy") is not True
+            or worker_state.get("reconciliationHealthy") is not True
+            or worker_state.get("buyDataHealthy") is not True):
         sync_status = worker_state.get("syncStatus") or "UNKNOWN"
-        reason = worker_state.get("lastSyncError") or f"wallet sync {sync_status.lower()}"
+        reason = worker_state.get("lastSyncError") or f"wallet/reconciliation {sync_status.lower()}"
         return f"🟠 LIVE — BUY DATA DEGRADED — {reason}"
     if worker_state.get("worker_health") == "BUY_DATA_DEGRADED":
         if worker_state.get("whale_source_health") == "SOURCE_UNAVAILABLE":
@@ -138,26 +142,43 @@ def _parse_timestamp(value):
 
 def _ledger_freshness_warning(state, worker_state, now=None):
     now = now or datetime.now(timezone.utc)
-    # Heartbeat, successful snapshot fetch, blockchain snapshot generation,
-    # and ledger mutation are separate clocks. A live worker never overrides a
-    # failed/stale reconciliation state.
-    sync_status = (worker_state or {}).get("syncStatus") or (state or {}).get("syncStatus")
+    worker_state = worker_state if isinstance(worker_state, dict) else {}
+    state = state if isinstance(state, dict) else {}
+    sync_status = worker_state.get("syncStatus") or state.get("syncStatus")
+    sync_stamp = (_parse_timestamp(worker_state.get("lastSuccessfulWalletSyncAt"))
+                  or _parse_timestamp(state.get("lastSuccessfulWalletSyncAt"))
+                  or _parse_timestamp(worker_state.get("lastSuccessfulWalletSync"))
+                  or _parse_timestamp(state.get("lastSuccessfulWalletSync")))
     if sync_status and sync_status != "FRESH":
-        error = ((worker_state or {}).get("lastSyncError")
-                 or (state or {}).get("lastSyncError") or f"sync status {sync_status}")
-        last = _parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSync")
-                                or (state or {}).get("lastSuccessfulWalletSync"))
-        suffix = f"; last successful sync: {last.strftime('%Y-%m-%d %H:%M:%S UTC')}" if last else ""
+        error = worker_state.get("lastSyncError") or state.get("lastSyncError") or f"sync status {sync_status}"
+        suffix = f"; last successful sync: {sync_stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}" if sync_stamp else ""
         return f"⚠ REAL wallet reconciliation {sync_status}: {error}{suffix}"
-    snapshot_stamp = _parse_timestamp((worker_state or {}).get("lastBlockchainSnapshotGeneratedAt")
-                                      or (state or {}).get("lastBlockchainSnapshotGeneratedAt"))
-    if snapshot_stamp is not None and (now - snapshot_stamp).total_seconds() > 20 * 60:
-        return f"⚠ REAL blockchain snapshot stale — generated: {snapshot_stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
-    stamp = (_parse_timestamp((worker_state or {}).get("lastSuccessfulWalletSync"))
-             or _parse_timestamp((state or {}).get("lastSuccessfulWalletSync"))
-             or _parse_timestamp((worker_state or {}).get("ledger_updated_at"))
-             or _parse_timestamp((state or {}).get("ledgerUpdatedAt"))
-             or _parse_timestamp((state or {}).get("updated_at")))
+    if sync_stamp is not None:
+        age = (now - sync_stamp).total_seconds()
+        if age < 0:
+            return f"⚠ REAL wallet sync timestamp is in the future: {sync_stamp.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        if age > 300:
+            return f"⚠ REAL wallet sync STALE ({int(age)}s old)"
+        if age > 120:
+            return f"⚠ REAL wallet sync DEGRADED ({int(age)}s old)"
+        reconciliation_stamp = (
+            _parse_timestamp(worker_state.get("lastSuccessfulReconciliationAt"))
+            or _parse_timestamp(state.get("lastSuccessfulReconciliationAt"))
+        )
+        if reconciliation_stamp is None:
+            return "⚠ REAL reconciliation timestamp unavailable"
+        reconciliation_age = (now - reconciliation_stamp).total_seconds()
+        if reconciliation_age > 300:
+            return f"⚠ REAL reconciliation STALE ({int(reconciliation_age)}s old)"
+        if reconciliation_age > 120:
+            return f"⚠ REAL reconciliation DEGRADED ({int(reconciliation_age)}s old)"
+        return None
+    # Legacy-only fallback; live workers never depend on the GitHub accounting snapshot.
+    stamp = (_parse_timestamp(worker_state.get("lastSuccessfulWalletSync"))
+             or _parse_timestamp(state.get("lastSuccessfulWalletSync"))
+             or _parse_timestamp(worker_state.get("ledger_updated_at"))
+             or _parse_timestamp(state.get("ledgerUpdatedAt"))
+             or _parse_timestamp(state.get("updated_at")))
     if stamp is None:
         return "⚠ REAL ledger freshness unavailable (no valid ledger timestamp)"
     age = (now - stamp).total_seconds()
