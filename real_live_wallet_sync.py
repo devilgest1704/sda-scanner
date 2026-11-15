@@ -596,6 +596,7 @@ def sync_once(real_trader, *, now=None):
             synced_at = _iso()
             staged["walletBalances"]["checked_at"] = synced_at
             staged.pop("_liveTokenMetadata", None)
+            latest_block = max(latest_block, max(0, latest_explorer_block - 5))
             staged["lastProcessedBlock"] = latest_block
             newest_row = max(
                 (row for row in transactions if row.get("hash") or row.get("transaction_hash")),
@@ -606,7 +607,9 @@ def sync_once(real_trader, *, now=None):
                 str(newest_row.get("hash") or newest_row.get("transaction_hash")).lower()
                 if newest_row else state.get("lastProcessedSignature")
             )
-            staged["lastBlockchainDataAt"] = _iso(latest_timestamp) if latest_timestamp else synced_at
+            staged["lastBlockchainDataAt"] = (
+                _iso(latest_timestamp) if latest_timestamp else state.get("lastBlockchainDataAt")
+            )
             staged["lastSyncAttemptAt"] = attempted
             staged["lastSuccessfulWalletSyncAt"] = synced_at
             staged["lastSuccessfulWalletSync"] = synced_at
