@@ -301,7 +301,8 @@ def write_status(cwd=None, output=STATUS_FILE):
     sell_total = len(ledger.get("positions", {})) if isinstance(ledger.get("positions"), dict) else 0
     sell_evaluated = int(bridge.get("real_positions_evaluated", bridge_health.get("evaluated", 0)) or 0)
     sell_recent = _freshness(sell_stamp)
-    sell_failed = bridge_health.get("health") == "SELL_ERROR"
+    sell_failed = (bridge_health.get("health") == "SELL_ERROR"
+                   or ledger.get("sellDataHealthy") is False)
     sell_protection = ("ACTIVE" if sell_recent and not sell_failed and sell_evaluated >= sell_total
                        else "FAILING" if sell_recent and sell_failed else "UNKNOWN")
     reconciliation_stamp = (wallet_sync.get("lastSuccessfulReconciliation")
