@@ -245,6 +245,17 @@ def _freshness(value, max_age=900):
         return False
 
 
+def _age_seconds(value):
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()
+        return age if age >= 0 else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def write_status(cwd=None, output=STATUS_FILE):
     """Worker heartbeat for the REAL dashboard including the pinned code identity."""
     root = Path(cwd or ".").resolve()
@@ -252,7 +263,6 @@ def write_status(cwd=None, output=STATUS_FILE):
               "enabled": _flag("REAL_TRADING_ENABLED"), "dry_run": _flag("REAL_TRADING_DRY_RUN"),
               "updated_at": _now()}
     ledger = _read_json(root, "real_trade_state.json")
-    accounting = _read_json(root, "real_accounting_state.json")
     status["lastWorkerHeartbeat"] = status["updated_at"]
     status["ledger_updated_at"] = ledger.get("ledgerUpdatedAt") or ledger.get("updated_at")
     bridge = _read_json(root, "real_paper_bridge_state.json")
@@ -260,15 +270,40 @@ def write_status(cwd=None, output=STATUS_FILE):
     status["lastSyncAttemptAt"] = wallet_sync.get("lastSyncAttemptAt") or ledger.get("lastSyncAttemptAt")
     status["lastSuccessfulWalletSync"] = (wallet_sync.get("lastSuccessfulWalletSync")
                                            or ledger.get("lastSuccessfulWalletSync"))
-    status["lastBlockchainSnapshotGeneratedAt"] = (wallet_sync.get("lastBlockchainSnapshotGeneratedAt")
-                                                    or ledger.get("lastBlockchainSnapshotGeneratedAt"))
+    status["lastSuccessfulWalletSyncAt"] = (wallet_sync.get("lastSuccessfulWalletSyncAt")
+                                             or ledger.get("lastSuccessfulWalletSyncAt"))
     status["lastSuccessfulReconciliation"] = wallet_sync.get("lastSuccessfulReconciliation") or ledger.get("lastSuccessfulReconciliation")
+    status["lastSuccessfulReconciliationAt"] = (wallet_sync.get("lastSuccessfulReconciliationAt")
+                                                or ledger.get("lastSuccessfulReconciliationAt"))
+    status["lastProcessedSignature"] = wallet_sync.get("lastProcessedSignature") or ledger.get("lastProcessedSignature")
+    wallet_age = _age_seconds(status.get("lastSuccessfulWalletSyncAt"))
+    reconciliation_age = _age_seconds(status.get("lastSuccessfulReconciliationAt"))
+    persisted_sync_status = str(wallet_sync.get("syncStatus") or ledger.get("syncStatus") or "UNKNOWN").upper()
+    if persisted_sync_status in {"FAILED", "STALE", "DEGRADED", "IN_PROGRESS"}:
+        effective_sync_status = persisted_sync_status
+    elif wallet_age is None or wallet_age > 300:
+        effective_sync_status = "STALE"
+    elif wallet_age > 120:
+        effective_sync_status = "DEGRADED"
+    else:
+        effective_sync_status = "FRESH"
+    status["syncStatus"] = effective_sync_status
+    status["walletSyncAgeSeconds"] = int(wallet_age) if wallet_age is not None else None
+    status["reconciliationAgeSeconds"] = int(reconciliation_age) if reconciliation_age is not None else None
+    status["walletSyncHealthy"] = bool(ledger.get("walletSyncHealthy")) and effective_sync_status == "FRESH"
+    status["reconciliationHealthy"] = (
+        bool(ledger.get("reconciliationHealthy"))
+        and reconciliation_age is not None and reconciliation_age <= 120
+    )
+    status["buyDataHealthy"] = (
+        bool(ledger.get("buyDataHealthy"))
+        and status["walletSyncHealthy"] and status["reconciliationHealthy"]
+    )
+    status["sellDataHealthy"] = bool(ledger.get("sellDataHealthy"))
     status["lastBlockchainDataAt"] = (wallet_sync.get("lastBlockchainDataAt")
-                                       or ledger.get("lastBlockchainDataAt")
-                                       or (accounting.get("blockchain_range") or {}).get("latest_timestamp"))
+                                       or ledger.get("lastBlockchainDataAt"))
     status["ledgerUpdatedAt"] = wallet_sync.get("ledgerUpdatedAt") or ledger.get("ledgerUpdatedAt") or ledger.get("updated_at")
     status["lastSyncError"] = wallet_sync.get("lastSyncError") or ledger.get("lastSyncError")
-    status["syncStatus"] = wallet_sync.get("syncStatus") or ledger.get("syncStatus") or "UNKNOWN"
     whale = _read_json(root, "whale_state.json")
     market_data = _read_json(root, "market_data.json")
     market_source = _read_json(root, "market_source_state.json")
@@ -294,15 +329,21 @@ def write_status(cwd=None, output=STATUS_FILE):
     sell_total = len(ledger.get("positions", {})) if isinstance(ledger.get("positions"), dict) else 0
     sell_evaluated = int(bridge.get("real_positions_evaluated", bridge_health.get("evaluated", 0)) or 0)
     sell_recent = _freshness(sell_stamp)
-    sell_failed = bridge_health.get("health") == "SELL_ERROR"
+    sell_failed = (bridge_health.get("health") == "SELL_ERROR"
+                   or ledger.get("sellDataHealthy") is False)
     sell_protection = ("ACTIVE" if sell_recent and not sell_failed and sell_evaluated >= sell_total
                        else "FAILING" if sell_recent and sell_failed else "UNKNOWN")
     reconciliation_stamp = (wallet_sync.get("lastSuccessfulReconciliation")
                              or ledger.get("lastSuccessfulReconciliation")
                              or bridge.get("last_real_reconciliation_at"))
-    sync_status = wallet_sync.get("syncStatus") or ledger.get("syncStatus")
+    sync_status = status.get("syncStatus") or wallet_sync.get("syncStatus") or ledger.get("syncStatus")
     if sync_status == "FRESH":
-        reconciliation_health = "ACTIVE" if _freshness(reconciliation_stamp) else "FAILING"
+        if reconciliation_age is None or reconciliation_age > 300:
+            reconciliation_health = "FAILING"
+        elif reconciliation_age > 120:
+            reconciliation_health = "DEGRADED"
+        else:
+            reconciliation_health = "ACTIVE"
     elif sync_status in {"STALE", "FAILED", "DEGRADED", "IN_PROGRESS"}:
         reconciliation_health = "FAILING"
     else:
@@ -321,8 +362,14 @@ def write_status(cwd=None, output=STATUS_FILE):
         "last_real_reconciliation_at": reconciliation_stamp,
         "lastSyncAttemptAt": status.get("lastSyncAttemptAt"),
         "lastSuccessfulWalletSync": status.get("lastSuccessfulWalletSync"),
-        "lastBlockchainSnapshotGeneratedAt": status.get("lastBlockchainSnapshotGeneratedAt"),
+        "lastSuccessfulWalletSyncAt": status.get("lastSuccessfulWalletSyncAt"),
         "lastSuccessfulReconciliation": reconciliation_stamp,
+        "lastSuccessfulReconciliationAt": status.get("lastSuccessfulReconciliationAt"),
+        "lastProcessedSignature": status.get("lastProcessedSignature"),
+        "walletSyncHealthy": status.get("walletSyncHealthy"),
+        "reconciliationHealthy": status.get("reconciliationHealthy"),
+        "buyDataHealthy": status.get("buyDataHealthy"),
+        "sellDataHealthy": status.get("sellDataHealthy"),
         "lastBlockchainDataAt": status.get("lastBlockchainDataAt"),
         "ledgerUpdatedAt": status.get("ledgerUpdatedAt"),
         "lastSyncError": status.get("lastSyncError"),
