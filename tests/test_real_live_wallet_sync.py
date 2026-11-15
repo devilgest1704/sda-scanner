@@ -89,6 +89,7 @@ class LiveWalletSyncTests(unittest.TestCase):
         self.lock_patch.start()
         self.addCleanup(self.lock_patch.stop)
         self.now = datetime(2026, 11, 15, 8, 0, tzinfo=timezone.utc)
+        self.explorer_block_height = 1000
         self.tx_row = {
             "hash": TX_BUY, "block_number": 101, "transaction_index": 0,
             "timestamp": "2026-11-15T07:59:30Z",
@@ -108,7 +109,7 @@ class LiveWalletSyncTests(unittest.TestCase):
     def explorer(self, path, params=None):
         params = params or {}
         if path == "/blocks":
-            return {"items": [{"height": 1000}], "next_page_params": None}
+            return {"items": [{"height": self.explorer_block_height}], "next_page_params": None}
         if path.endswith("/transactions"):
             if params.get("filter") == "from":
                 return {"items": [self.tx_row], "next_page_params": None}
@@ -220,6 +221,15 @@ class LiveWalletSyncTests(unittest.TestCase):
         self.assertEqual(trader.state["lastProcessedBlock"], 101)
         self.assertEqual(trader.state["walletSyncFailures"], 0)
         self.assertEqual(trader.state["walletSyncRetryAfterSeconds"], 0)
+
+    def test_stale_explorer_index_keeps_cursor_and_blocks_fresh_status(self):
+        trader = self.trader_with_buy({"positions": {}, "trades": [], "lastProcessedBlock": 100})
+        self.explorer_block_height = 900
+        result = live.sync_once(trader, now=self.now)
+        self.assertFalse(result["ok"])
+        self.assertIn("index lag", result["syncError"])
+        self.assertEqual(trader.state["lastProcessedBlock"], 100)
+        self.assertEqual(trader.state["syncStatus"], "FAILED")
 
     def test_rpc_chain_timeout_keeps_cursor(self):
         trader = self.trader_with_buy({"positions": {}, "trades": [], "lastProcessedBlock": 100})
