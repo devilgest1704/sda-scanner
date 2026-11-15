@@ -245,6 +245,17 @@ def _freshness(value, max_age=900):
         return False
 
 
+def _age_seconds(value):
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()
+        return age if age >= 0 else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def write_status(cwd=None, output=STATUS_FILE):
     """Worker heartbeat for the REAL dashboard including the pinned code identity."""
     root = Path(cwd or ".").resolve()
@@ -266,9 +277,29 @@ def write_status(cwd=None, output=STATUS_FILE):
     status["lastSuccessfulReconciliationAt"] = (wallet_sync.get("lastSuccessfulReconciliationAt")
                                                 or ledger.get("lastSuccessfulReconciliationAt"))
     status["lastProcessedSignature"] = wallet_sync.get("lastProcessedSignature") or ledger.get("lastProcessedSignature")
-    status["walletSyncHealthy"] = bool(ledger.get("walletSyncHealthy"))
-    status["reconciliationHealthy"] = bool(ledger.get("reconciliationHealthy"))
-    status["buyDataHealthy"] = bool(ledger.get("buyDataHealthy"))
+    wallet_age = _age_seconds(status.get("lastSuccessfulWalletSyncAt"))
+    reconciliation_age = _age_seconds(status.get("lastSuccessfulReconciliationAt"))
+    persisted_sync_status = str(status.get("syncStatus") or "UNKNOWN").upper()
+    if persisted_sync_status in {"FAILED", "STALE", "DEGRADED", "IN_PROGRESS"}:
+        effective_sync_status = persisted_sync_status
+    elif wallet_age is None or wallet_age > 300:
+        effective_sync_status = "STALE"
+    elif wallet_age > 120:
+        effective_sync_status = "DEGRADED"
+    else:
+        effective_sync_status = "FRESH"
+    status["syncStatus"] = effective_sync_status
+    status["walletSyncAgeSeconds"] = int(wallet_age) if wallet_age is not None else None
+    status["reconciliationAgeSeconds"] = int(reconciliation_age) if reconciliation_age is not None else None
+    status["walletSyncHealthy"] = bool(ledger.get("walletSyncHealthy")) and effective_sync_status == "FRESH"
+    status["reconciliationHealthy"] = (
+        bool(ledger.get("reconciliationHealthy"))
+        and reconciliation_age is not None and reconciliation_age <= 120
+    )
+    status["buyDataHealthy"] = (
+        bool(ledger.get("buyDataHealthy"))
+        and status["walletSyncHealthy"] and status["reconciliationHealthy"]
+    )
     status["sellDataHealthy"] = bool(ledger.get("sellDataHealthy"))
     status["lastBlockchainDataAt"] = (wallet_sync.get("lastBlockchainDataAt")
                                        or ledger.get("lastBlockchainDataAt")
@@ -310,7 +341,12 @@ def write_status(cwd=None, output=STATUS_FILE):
                              or bridge.get("last_real_reconciliation_at"))
     sync_status = wallet_sync.get("syncStatus") or ledger.get("syncStatus")
     if sync_status == "FRESH":
-        reconciliation_health = "ACTIVE" if _freshness(reconciliation_stamp) else "FAILING"
+        if reconciliation_age is None or reconciliation_age > 300:
+            reconciliation_health = "FAILING"
+        elif reconciliation_age > 120:
+            reconciliation_health = "DEGRADED"
+        else:
+            reconciliation_health = "ACTIVE"
     elif sync_status in {"STALE", "FAILED", "DEGRADED", "IN_PROGRESS"}:
         reconciliation_health = "FAILING"
     else:
