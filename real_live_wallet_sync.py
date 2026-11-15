@@ -25,6 +25,7 @@ FRESH_SECONDS = int(os.getenv("REAL_WALLET_FRESH_SECONDS", "120"))
 DEGRADED_SECONDS = int(os.getenv("REAL_WALLET_DEGRADED_SECONDS", "300"))
 INITIAL_LOOKBACK_DAYS = int(os.getenv("REAL_WALLET_INITIAL_LOOKBACK_DAYS", "30"))
 MAX_PAGES_PER_ENDPOINT = int(os.getenv("REAL_WALLET_MAX_PAGES", "100"))
+MAX_INDEX_LAG_BLOCKS = int(os.getenv("REAL_WALLET_MAX_INDEX_LAG_BLOCKS", "20"))
 BACKOFF_SECONDS = (5, 15, 30, 60)
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 HTTP = requests.Session()
@@ -448,6 +449,21 @@ def sync_once(real_trader, *, now=None):
                 raise RuntimeError("REAL wallet address unavailable")
             if int(real_trader.chain_id()) != cfg.CHAIN_ID:
                 raise RuntimeError("RPC chain ID mismatch")
+            latest_rpc_block = _int(real_trader.rpc("eth_blockNumber", []))
+            block_payload = _get_json("/blocks")
+            block_items = block_payload.get("items") if isinstance(block_payload, dict) else None
+            if not isinstance(block_items, list) or not block_items:
+                raise RuntimeError("Blockscout latest-block index unavailable")
+            latest_explorer_block = _int(
+                block_items[0].get("height", block_items[0].get("number",
+                    block_items[0].get("block_number")))
+            )
+            index_lag = latest_rpc_block - latest_explorer_block
+            if index_lag < 0 or index_lag > MAX_INDEX_LAG_BLOCKS:
+                raise RuntimeError(
+                    f"Blockscout index lag {index_lag} blocks "
+                    f"(RPC={latest_rpc_block}, explorer={latest_explorer_block})"
+                )
             cursor_block = state.get("lastProcessedBlock")
             cutoff = now - timedelta(days=max(1, INITIAL_LOOKBACK_DAYS)) if cursor_block is None else None
             tx_path = f"/addresses/{wallet}/transactions"
@@ -497,6 +513,9 @@ def sync_once(real_trader, *, now=None):
             staged["walletBalances"] = {
                 "native_sda_wei": str(native_balance),
                 "tokens": token_balances, "wallet": wallet, "chain_id": cfg.CHAIN_ID,
+                "rpc_latest_block": latest_rpc_block,
+                "explorer_latest_block": latest_explorer_block,
+                "explorer_index_lag_blocks": index_lag,
                 "checked_at": attempted,
             }
             staged["_liveTokenMetadata"] = {k: {"decimals": v["decimals"]} for k, v in token_balances.items()}
