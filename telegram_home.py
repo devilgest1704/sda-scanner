@@ -9,7 +9,6 @@ from decimal import Decimal
 import real_bot_menu as rb
 import real_bot_views
 import real_trading_config as cfg
-import real_wallet_reconciliation as wallet_reconciliation
 import v30_dashboard_patch as v30_view
 
 SCANNER_LIMIT = 5
@@ -100,67 +99,67 @@ def _held_tokens(positions):
 
 
 def real_capacity(dashboard):
-    """Single admission view from the latest blockchain accounting snapshot."""
+    """Read capacity only from the runtime ledger written by live reconciliation."""
     worker = rb._load_worker_status(dashboard) or {}
-    try:
-        accounting = dashboard.load("real_accounting_state.json", {})
-    except Exception:
-        return None
-    if not isinstance(accounting, dict) or accounting.get("bot_reconciliation_status") != "COMPLETE":
-        return None
-    sync_stamp = worker.get("lastSuccessfulWalletSync") or accounting.get("generated_at")
-    try:
-        stamp = datetime.fromisoformat(str(sync_stamp).replace("Z", "+00:00"))
-        if stamp.tzinfo is None or (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds() > wallet_reconciliation.MAX_SNAPSHOT_AGE_SECONDS:
-            return None
-    except (TypeError, ValueError):
-        return None
-    if worker.get("syncStatus") != "FRESH" or "STATUS UNKNOWN" in rb._status(worker):
-        return None
     state = rb._state(dashboard)
-    try:
-        metadata = dashboard.load("token_metadata.json", {})
-    except Exception:
-        metadata = {}
-    accounting_positions = {}
-    deployed = Decimal("0")
-    for item in accounting.get("open_positions") or []:
-        if not isinstance(item, dict) or not item.get("token"):
-            continue
-        token = str(item["token"]).lower()
-        try:
-            cost = Decimal(str(item.get("cost_basis_sda")))
-            quantity = Decimal(str(item.get("quantity")))
-            if cost <= 0 or quantity <= 0:
-                continue
-        except Exception:
-            continue
-        accounting_positions[token] = item
-        deployed += cost
-    pending = {k: v for k, v in (state.get("pending_buys") or {}).items() if isinstance(v, dict)}
+    if not isinstance(state, dict) or not isinstance(state.get("walletBalances"), dict):
+        return None
+    positions = {str(k).lower(): v for k, v in (state.get("positions") or {}).items()
+                 if isinstance(v, dict) and int(v.get("remaining_quantity",
+                     v.get("token_amount_raw", 0)) or 0) > 0}
+    pending = {str(k).lower(): v for k, v in (state.get("pending_buys") or {}).items()
+               if isinstance(v, dict)}
+    deployed = sum((Decimal(str(v.get("remaining_cost_basis",
+                                      v.get("amount_sda", v.get("cost_sda", 0))) or 0))
+                    for v in positions.values()), Decimal("0"))
     pending_cost = sum((Decimal(str(v.get("position_sda") or 0)) for v in pending.values()), Decimal("0"))
     deployed += pending_cost
     cap = Decimal(str(worker.get("real_capital_cap_sda") or cfg.TRADING_WALLET_CAPITAL_SDA))
-    native = Decimal(str(accounting.get("native_balance_sda") or 0))
-    available = max(Decimal("0"), min(cap - deployed, native))
+    balances = state["walletBalances"]
+    native_raw = balances.get("native_sda_wei")
+    native = Decimal(str(native_raw)) / Decimal(10**18) if native_raw is not None else None
+    sync_stamp = worker.get("lastSuccessfulWalletSyncAt") or state.get("lastSuccessfulWalletSyncAt")
+    try:
+        stamp = datetime.fromisoformat(str(sync_stamp).replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()
+    except (TypeError, ValueError, AttributeError):
+        age = None
+    try:
+        heartbeat = datetime.fromisoformat(str(worker.get("updated_at")).replace("Z", "+00:00"))
+        heartbeat_age = (datetime.now(timezone.utc) - heartbeat.astimezone(timezone.utc)).total_seconds()
+    except (TypeError, ValueError, AttributeError):
+        heartbeat_age = None
+    if heartbeat_age is None or heartbeat_age < 0 or heartbeat_age > 300:
+        return None
+    sync_healthy = (worker.get("syncStatus") == "FRESH"
+                    and worker.get("walletSyncHealthy") is True
+                    and worker.get("reconciliationHealthy") is True
+                    and age is not None and 0 <= age <= 120)
+    available = max(Decimal("0"), min(cap - deployed, native)) if native is not None and sync_healthy else None
     paper = dashboard.load("positions.json", {})
     paper_positions = paper.get("positions", {}) if isinstance(paper, dict) else {}
     return {
-        "positions": len(accounting_positions), "reserved_positions": len(accounting_positions) + len(pending),
+        "positions": len(positions), "reserved_positions": len(positions) + len(pending),
         "pending": len(pending),
         "max_positions": int(worker.get("real_max_open_positions") or cfg.MAX_OPEN_POSITIONS),
-        "cap": float(cap), "deployed": float(deployed), "available": float(available),
+        "cap": float(cap), "deployed": float(deployed),
+        "available": float(available) if available is not None else None,
         "next_buy": float(worker.get("real_buy_size_sda") or cfg.position_sda()),
-        "held": set(accounting_positions) | _held_tokens(pending),
+        "held": set(positions) | set(pending),
         "paper_held": _held_tokens(paper_positions if isinstance(paper_positions, dict) else {}),
         "paper_full": isinstance(paper_positions, dict) and len(paper_positions) >= int(v30_view.v30.MAX_OPEN),
-        "sync_status": worker.get("syncStatus"),
+        "sync_status": worker.get("syncStatus"), "sync_healthy": sync_healthy,
+        "worker_critical": worker.get("worker_health") == "CRITICAL_FAILURE",
     }
 
 def real_gate(real, token=None):
     """(state, reason) for one BUY-ready signal under current REAL (PAPER-coupled) admission."""
     if real is None:
         return "UNKNOWN", "REAL state unavailable"
+    if not real.get("sync_healthy"):
+        return "BLOCKED", "Wallet/reconciliation not FRESH"
+    if real.get("worker_critical"):
+        return "BLOCKED", "SELL/worker safety degraded"
     if real["pending"]:
         return "PENDING", "BUY in flight"
     token = str(token or "").lower()
@@ -178,7 +177,11 @@ def real_gate(real, token=None):
 def real_buy_status(rows, real, stale):
     """(state, reason, best BUY-ready row) for the HOME summary."""
     if stale:
+        if real is not None and not real.get("sync_healthy"):
+            return "BLOCKED", "Wallet sync/reconciliation is not FRESH", None
         return "DATA STALE", None, None
+    if real is not None and real.get("worker_critical"):
+        return "BLOCKED", "SELL/worker safety degraded", None
     ready = [row for row in rows if row["status"] == "BUY"]
     if real is not None and real["pending"]:
         return "PENDING", "BUY in flight", ready[0] if ready else None
@@ -195,11 +198,13 @@ def real_buy_status(rows, real, stale):
 def _real_lines(real, labelled=True):
     if real is None:
         return ["⚪ REAL capacity unavailable"]
+    available = _sda(real["available"]) if real.get("available") is not None else "N/A (sync not fresh)"
     if labelled:
-        return [_line("💰 Available", _sda(real["available"])),
+        return [_line("📦 Positions", f"{real['positions']}/{real['max_positions']}"),
+                _line("💰 Available", available),
                 _line("💵 Next BUY", _sda(real["next_buy"]))]
-    return [f"Available: {_sda(real['available'])}",
-            f"Next BUY: {_sda(real['next_buy'])}"]
+    return [f"Positions: {real['positions']}/{real['max_positions']}",
+            f"Available: {available}", f"Next BUY: {_sda(real['next_buy'])}"]
 
 
 def _metrics(decision):
@@ -234,15 +239,41 @@ def _scanner_inputs(dashboard):
                          or (market_stamp is not None and _scanner_stale(market_rows))))
     market_stale = market_stale or source_health in ("STALE", "SOURCE_UNAVAILABLE")
     wallet_sync_stale = (worker.get("syncStatus") != "FRESH"
-                         or "STATUS UNKNOWN" in rb._status(worker)
-                         or "CRITICAL FAILURE" in str(worker.get("worker_health") or ""))
+                         or worker.get("walletSyncHealthy") is not True
+                         or worker.get("reconciliationHealthy") is not True
+                         or real is None or not real.get("sync_healthy")
+                         or "STATUS UNKNOWN" in rb._status(worker))
     return rows, real, _scanner_stale(rows) or whale_stale or market_stale or wallet_sync_stale
+
+
+def _age_label(stamp):
+    try:
+        parsed = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return "unknown", "⚪"
+        age = max(0, int((datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()))
+        icon = "🟢" if age <= 120 else "🟡" if age <= 300 else "🔴"
+        return f"{age}s ago", icon
+    except (TypeError, ValueError, OverflowError):
+        return "unknown", "⚪"
+
+
+def _wallet_diagnostics(worker):
+    sync_age, sync_icon = _age_label(worker.get("lastSuccessfulWalletSyncAt"))
+    recon_age, recon_icon = _age_label(worker.get("lastSuccessfulReconciliationAt"))
+    wallet_ok = worker.get("walletSyncHealthy") is True
+    return [
+        f"{sync_icon} Blockchain sync {sync_age}",
+        f"{recon_icon} Reconciliation {recon_age}",
+        ("🟢 Wallet OK" if wallet_ok else "🔴 Wallet not verified"),
+    ]
 
 
 def _home_scanner_lines(dashboard):
     rows, real, stale = _scanner_inputs(dashboard)
     worker = rb._load_worker_status(dashboard) or {}
     lines = ["", "🔥 REAL BUY SCANNER"]
+    lines.extend(_wallet_diagnostics(worker))
     if stale:
         lines.append("⚪ Data stale")
         if _scanner_stale(rows):
@@ -255,7 +286,7 @@ def _home_scanner_lines(dashboard):
         if worker.get("syncStatus") != "FRESH" or "STATUS UNKNOWN" in rb._status(worker):
             detail = worker.get("lastSyncError") or rb._status(worker)
             lines.append(f"⚠ {detail}")
-            last_sync = worker.get("lastSuccessfulWalletSync")
+            last_sync = worker.get("lastSuccessfulWalletSyncAt") or worker.get("lastSuccessfulWalletSync")
             if last_sync:
                 lines.append(f"Last successful wallet sync: {last_sync}")
     else:
@@ -334,6 +365,7 @@ def home_keyboard():
 def buy_scanner_text(dashboard, detail=False):
     rows, real, stale = _scanner_inputs(dashboard)
     lines = ["🔍 REAL BUY SCANNER • DETAIL" if detail else "🔥 REAL BUY SCANNER", ""]
+    lines.extend(_wallet_diagnostics(rb._load_worker_status(dashboard) or {}))
     if stale:
         lines += ["⚪ Data stale", ""]
     else:
