@@ -310,6 +310,29 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
             if transaction_at <= opened_at:
                 seen.add(identity)
                 return []
+            old_remaining = int(position.get("remaining_quantity",
+                                             position.get("token_amount_raw", 0)) or 0)
+            old_cost = Decimal(str(position.get("remaining_cost_basis",
+                                                position.get("amount_sda", 0)) or 0))
+            old_entry_fee = Decimal(str(position.get("entry_gas_remaining_sda",
+                                                      position.get("network_fee_sda", 0)) or 0))
+            lots = position.get("cost_lots")
+            if not isinstance(lots, list):
+                lots = ([{"tx": position.get("buy_tx"), "at": position.get("opened_at"),
+                          "quantity_raw": old_remaining, "remaining_quantity_raw": old_remaining,
+                          "cost_basis_sda": str(old_cost), "remaining_cost_basis_sda": str(old_cost),
+                          "entry_fee_sda": str(old_entry_fee),
+                          "remaining_entry_fee_sda": str(old_entry_fee)}] if old_remaining > 0 else [])
+            lots.append({"tx": tx_hash, "at": timestamp, "quantity_raw": raw_out,
+                         "remaining_quantity_raw": raw_out, "cost_basis_sda": str(spent),
+                         "remaining_cost_basis_sda": str(spent), "entry_fee_sda": str(network_fee),
+                         "remaining_entry_fee_sda": str(network_fee)})
+            position["cost_lots"] = lots
+            position["remaining_quantity"] = old_remaining + raw_out
+            position["remaining_cost_basis"] = str(sum(
+                (Decimal(str(lot.get("remaining_cost_basis_sda") or 0)) for lot in lots), Decimal("0")))
+            position["entry_gas_remaining_sda"] = str(sum(
+                (Decimal(str(lot.get("remaining_entry_fee_sda") or 0)) for lot in lots), Decimal("0")))
             position["remaining_quantity"] = int(position.get("remaining_quantity",
                                                               position.get("token_amount_raw", 0)) or 0) + raw_out
             position["token_amount_raw"] = int(position.get("token_amount_raw") or 0) + raw_out
@@ -345,6 +368,10 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
                 "resulting_token_balance_raw": resulting_balance_raw,
                 "resulting_token_balance": str(resulting_balance),
                 "spent_sda": str(spent), "confirmed_sold_quantity": 0,
+                "cost_lots": [{"tx": tx_hash, "at": timestamp, "quantity_raw": raw_out,
+                               "remaining_quantity_raw": raw_out, "cost_basis_sda": str(spent),
+                               "remaining_cost_basis_sda": str(spent), "entry_fee_sda": str(network_fee),
+                               "remaining_entry_fee_sda": str(network_fee)}],
                 "decimals": decimals, "opened_at": timestamp, "buy_tx": tx_hash,
                 "position_id": identity, "accounting_identity": identity,
                 "network_fee_sda": str(network_fee), "entry_gas_sda": str(network_fee),
@@ -412,7 +439,42 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
         if recorded <= 0 or sold <= 0:
             raise RuntimeError(f"confirmed SELL swap {tx_hash} has no remaining tracked quantity")
         basis = Decimal(str(position.get("remaining_cost_basis", position.get("amount_sda", 0)) or 0))
-        sold_cost = basis * Decimal(sold) / Decimal(recorded)
+        lots = position.get("cost_lots")
+        if not isinstance(lots, list):
+            legacy_fee = Decimal(str(position.get("entry_gas_remaining_sda",
+                                                  position.get("network_fee_sda", 0)) or 0))
+            lots = [{"tx": position.get("buy_tx"), "at": position.get("opened_at"),
+                     "quantity_raw": recorded, "remaining_quantity_raw": recorded,
+                     "cost_basis_sda": str(basis), "remaining_cost_basis_sda": str(basis),
+                     "entry_fee_sda": str(legacy_fee), "remaining_entry_fee_sda": str(legacy_fee)}]
+        remaining_to_allocate = sold
+        sold_cost = Decimal("0")
+        entry_fee_sold = Decimal("0")
+        for lot in lots:
+            lot_remaining = int(lot.get("remaining_quantity_raw") or 0)
+            if lot_remaining <= 0 or remaining_to_allocate <= 0:
+                continue
+            take = min(lot_remaining, remaining_to_allocate)
+            fraction = Decimal(take) / Decimal(lot_remaining)
+            lot_cost = Decimal(str(lot.get("remaining_cost_basis_sda") or 0))
+            lot_fee = Decimal(str(lot.get("remaining_entry_fee_sda") or 0))
+            cost_part = lot_cost * fraction
+            fee_part = lot_fee * fraction
+            lot["remaining_quantity_raw"] = lot_remaining - take
+            lot["remaining_cost_basis_sda"] = str(max(Decimal("0"), lot_cost - cost_part))
+            lot["remaining_entry_fee_sda"] = str(max(Decimal("0"), lot_fee - fee_part))
+            sold_cost += cost_part
+            entry_fee_sold += fee_part
+            remaining_to_allocate -= take
+        if remaining_to_allocate:
+            raise RuntimeError(f"SELL {tx_hash} exceeds tracked FIFO lot quantities")
+        position["cost_lots"] = [lot for lot in lots if int(lot.get("remaining_quantity_raw") or 0) > 0]
+        position["remaining_cost_basis"] = str(sum(
+            (Decimal(str(lot.get("remaining_cost_basis_sda") or 0)) for lot in position["cost_lots"]),
+            Decimal("0")))
+        position["entry_gas_remaining_sda"] = str(sum(
+            (Decimal(str(lot.get("remaining_entry_fee_sda") or 0)) for lot in position["cost_lots"]),
+            Decimal("0")))
         proceeds_total = Decimal(raw_proceeds) / Decimal(10**18)
         resulting_balance_raw = _int(
             ((state.get("walletBalances") or {}).get("tokens") or {}).get(token_in, {}).get("raw")
@@ -420,9 +482,6 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
         sold_fraction = Decimal(sold) / Decimal(raw_sold)
         proceeds = proceeds_total * sold_fraction
         network_fee_allocated = network_fee * sold_fraction
-        entry_fee_left = Decimal(str(position.get("entry_gas_remaining_sda",
-                                                  position.get("network_fee_sda", 0)) or 0))
-        entry_fee_sold = entry_fee_left * Decimal(sold) / Decimal(recorded)
         net_pnl = proceeds - sold_cost - network_fee_allocated - entry_fee_sold
         remaining = recorded - sold
         position["remaining_quantity"] = remaining
