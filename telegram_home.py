@@ -149,6 +149,7 @@ def real_capacity(dashboard):
         "paper_held": _held_tokens(paper_positions if isinstance(paper_positions, dict) else {}),
         "paper_full": isinstance(paper_positions, dict) and len(paper_positions) >= int(v30_view.v30.MAX_OPEN),
         "sync_status": worker.get("syncStatus"), "sync_healthy": sync_healthy,
+        "worker_critical": worker.get("worker_health") == "CRITICAL_FAILURE",
     }
 
 def real_gate(real, token=None):
@@ -157,6 +158,8 @@ def real_gate(real, token=None):
         return "UNKNOWN", "REAL state unavailable"
     if not real.get("sync_healthy"):
         return "BLOCKED", "Wallet/reconciliation not FRESH"
+    if real.get("worker_critical"):
+        return "BLOCKED", "SELL/worker safety degraded"
     if real["pending"]:
         return "PENDING", "BUY in flight"
     token = str(token or "").lower()
@@ -237,8 +240,7 @@ def _scanner_inputs(dashboard):
                          or worker.get("walletSyncHealthy") is not True
                          or worker.get("reconciliationHealthy") is not True
                          or real is None or not real.get("sync_healthy")
-                         or "STATUS UNKNOWN" in rb._status(worker)
-                         or "CRITICAL FAILURE" in str(worker.get("worker_health") or ""))
+                         or "STATUS UNKNOWN" in rb._status(worker))
     return rows, real, _scanner_stale(rows) or whale_stale or market_stale or wallet_sync_stale
 
 
