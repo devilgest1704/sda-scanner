@@ -339,7 +339,7 @@ def write_status(cwd=None, output=STATUS_FILE):
     reconciliation_stamp = (wallet_sync.get("lastSuccessfulReconciliation")
                              or ledger.get("lastSuccessfulReconciliation")
                              or bridge.get("last_real_reconciliation_at"))
-    sync_status = wallet_sync.get("syncStatus") or ledger.get("syncStatus")
+    sync_status = status.get("syncStatus") or wallet_sync.get("syncStatus") or ledger.get("syncStatus")
     if sync_status == "FRESH":
         if reconciliation_age is None or reconciliation_age > 300:
             reconciliation_health = "FAILING"
