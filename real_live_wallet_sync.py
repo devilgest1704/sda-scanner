@@ -350,6 +350,8 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
             position.setdefault("additional_buy_txs", []).append(tx_hash)
             position["resulting_token_balance_raw"] = resulting_balance_raw
             position["resulting_token_balance"] = str(resulting_balance)
+            if source == "MANUAL":
+                position["sellManagementEnabled"] = True
         else:
             position = {
                 "symbol": token_out[:10], "token": token_out, "status": "OPEN",
