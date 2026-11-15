@@ -1,17 +1,17 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-11-15T20:44:31.187166+00:00",
+  "checked_at": "2026-11-15T20:50:28.157381+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-11-15T20:43:44.736085+00:00",
+    "market_at": "2026-11-15T20:49:44.910374+00:00",
     "tokens": 170,
-    "quotes_last_5m": 1,
-    "quotes_last_15m": 6,
-    "quotes_last_60m": 30,
-    "fresh_with_8_trades_1h": 0,
+    "quotes_last_5m": 3,
+    "quotes_last_15m": 7,
+    "quotes_last_60m": 29,
+    "fresh_with_8_trades_1h": 1,
     "fresh_with_12_trades_1h": 0,
-    "fresh_m15_ge_1_5pct": 0,
-    "fresh_m15_ge_1_5pct_and_8_trades": 0,
+    "fresh_m15_ge_1_5pct": 2,
+    "fresh_m15_ge_1_5pct_and_8_trades": 1,
     "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 0
   },
   "paper_loss_circuit": {
@@ -32,39 +32,41 @@
   "last_paper_close_at": "2026-11-14T23:19:42.493908+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-11-15T20:44:25.427255+00:00",
+    "at": "2026-11-15T20:50:22.362244+00:00",
     "age_minutes": 0.1,
     "aligned_to_market": true,
     "tokens_scored": 170,
-    "fresh_tokens": 6,
+    "fresh_tokens": 7,
     "champion_ready": 0,
     "shadow_ready": 0,
     "sampled_rows": 40,
     "sampled_phases": {
-      "WATCH": 3,
-      "NO": 37
+      "CONFIRMATION": 1,
+      "WATCH": 5,
+      "NO": 34
     },
     "sampled_rejections": {
       "temporal_recovery": 40,
-      "v31_age": 40,
-      "quote_continuity": 40,
+      "quote_continuity": 38,
+      "v31_age": 38,
       "v31_activity": 36,
-      "late_spike": 5,
-      "price_flow": 2
+      "late_spike": 3,
+      "price_flow": 1
     },
     "fresh_rejections": {
-      "quote_continuity": 6,
-      "temporal_recovery": 6,
-      "v31_age": 6,
+      "temporal_recovery": 7,
+      "quote_continuity": 5,
       "v31_activity": 5,
+      "v31_age": 5,
       "late_spike": 1
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "stale_or_invalid_current_quote": 6
+        "stale_or_invalid_current_quote": 5,
+        "single_quote_swing_filters_insufficient": 2
       },
       "confirmed_continuation": {
-        "missing_reason": 6
+        "missing_reason": 7
       }
     },
     "temporal_lane_ready": {
@@ -75,76 +77,71 @@
     "would_buy_if_only_loss_circuit_cleared": false,
     "top_near_ready": [
       {
-        "address": "0x4765561e63914e72168bbd2a7e2ce72f9057ca04",
-        "symbol": "GMAI",
-        "score": 16.9,
-        "quality": 16.9,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 387.3,
-        "gates": [
-          "temporal_recovery",
-          "v31_age",
-          "quote_continuity"
-        ],
-        "reason": "quote_continuity: stale_or_invalid_current_quote"
-      },
-      {
-        "address": "0xa80c9a3b7a92f181648209cb98e1974d05cbe68f",
-        "symbol": "AILP",
-        "score": 31.2,
-        "quality": 31.2,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 378.2,
-        "gates": [
-          "temporal_recovery",
-          "v31_age",
-          "v31_activity",
-          "quote_continuity"
-        ],
-        "reason": "quote_continuity: stale_or_invalid_current_quote"
-      },
-      {
         "address": "0xacb361fee5537c08b5504ccf936f5aa3e1c62f3d",
         "symbol": "sUSDC",
-        "score": 28.9,
-        "quality": 28.9,
-        "impulse": 0.0,
-        "phase": "NO",
-        "data_age_sec": 676.2,
+        "score": 50.9,
+        "quality": 47.4,
+        "impulse": 12.9,
+        "phase": "CONFIRMATION",
+        "data_age_sec": 263.2,
         "gates": [
           "temporal_recovery",
-          "v31_age",
-          "v31_activity",
-          "quote_continuity"
+          "v31_activity"
         ],
-        "reason": "quote_continuity: stale_or_invalid_current_quote"
+        "reason": "CONFIRMATION / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
       },
       {
         "address": "0x8d7a3eefbc25187a229d442c20b443d7675b44cd",
         "symbol": "XAUS",
-        "score": 6.7,
-        "quality": 6.7,
+        "score": 8.1,
+        "quality": 8.1,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 318.2,
+        "data_age_sec": 107.2,
+        "gates": [
+          "temporal_recovery",
+          "v31_activity"
+        ],
+        "reason": "NO / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
+      },
+      {
+        "address": "0x04e0a7503c64ef7a143b92b60b471baedc81cab9",
+        "symbol": "HAQ",
+        "score": 68.2,
+        "quality": 68.2,
+        "impulse": 0.0,
+        "phase": "WATCH",
+        "data_age_sec": 712.1,
         "gates": [
           "temporal_recovery",
           "v31_age",
-          "v31_activity",
           "quote_continuity"
         ],
         "reason": "quote_continuity: stale_or_invalid_current_quote"
       },
       {
-        "address": "0x6d1537bee4f1ee3f55f4bc9319aa40252cd39133",
-        "symbol": "BNDQ",
-        "score": 4.2,
-        "quality": 4.2,
+        "address": "0x4765561e63914e72168bbd2a7e2ce72f9057ca04",
+        "symbol": "GMAI",
+        "score": 15.2,
+        "quality": 15.2,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 860.3,
+        "data_age_sec": 744.2,
+        "gates": [
+          "temporal_recovery",
+          "v31_age",
+          "quote_continuity"
+        ],
+        "reason": "quote_continuity: stale_or_invalid_current_quote"
+      },
+      {
+        "address": "0x88cec49aab029b49863b8e623e62265b2fb7b6ff",
+        "symbol": "NEX",
+        "score": 52.9,
+        "quality": 52.9,
+        "impulse": 0.0,
+        "phase": "WATCH",
+        "data_age_sec": 320.2,
         "gates": [
           "temporal_recovery",
           "v31_age",
