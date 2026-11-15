@@ -222,6 +222,16 @@ class LiveWalletSyncTests(unittest.TestCase):
         self.assertEqual(trader.state["walletSyncFailures"], 0)
         self.assertEqual(trader.state["walletSyncRetryAfterSeconds"], 0)
 
+    def test_unknown_swap_router_does_not_advance_cursor(self):
+        trader = self.trader_with_buy({"positions": {}, "trades": [], "lastProcessedBlock": 100})
+        trader.tx_by_hash[TX_BUY]["to"] = "0x" + "f" * 40
+        trader.receipt_by_hash[TX_BUY]["logs"].insert(
+            0, transfer_log(cfg.WSDA_ADDRESS, WALLET, POOL, 2 * 10**18, 1))
+        result = live.sync_once(trader, now=self.now)
+        self.assertFalse(result["ok"])
+        self.assertIn("unconfigured router", result["syncError"])
+        self.assertEqual(trader.state["lastProcessedBlock"], 100)
+
     def test_stale_explorer_index_keeps_cursor_and_blocks_fresh_status(self):
         trader = self.trader_with_buy({"positions": {}, "trades": [], "lastProcessedBlock": 100})
         self.explorer_block_height = 900
