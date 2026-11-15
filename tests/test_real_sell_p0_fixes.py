@@ -205,6 +205,24 @@ class LiveAccountingWorkflowDecoupling(unittest.TestCase):
         post.assert_not_called()
 
 
+class BuyDataDegradedKeepsSellProtection(unittest.TestCase):
+    def test_stale_wallet_blocks_buy_but_still_evaluates_existing_sell(self):
+        chain = FakeChain(self)
+        harness = BridgeHarness(self, chain)
+        with patch.object(real_live_wallet_sync, "due", return_value=True), \
+                patch.object(real_live_wallet_sync, "retry_due", return_value=True), \
+                patch.object(real_live_wallet_sync, "sync_once",
+                             return_value={"ok": False, "syncStatus": "STALE",
+                                           "syncError": "RPC timeout", "imported": []}), \
+                patch.object(executor, "evaluate_position", wraps=executor.evaluate_position) as evaluate:
+            result = harness.run()
+        self.assertEqual(harness.buy.call_count, 0)
+        self.assertEqual(evaluate.call_count, 1)
+        self.assertEqual(chain.sent, [])
+        self.assertEqual(result["wallet_sync"]["syncStatus"], "STALE")
+        self.assertTrue(chain.state["sellDataHealthy"])
+
+
 class PartialDoubleCountRegression(unittest.TestCase):
     def test_partial_swap_confirmed_unwrap_pending_is_not_manual_sell(self):
         chain = FakeChain(self)
