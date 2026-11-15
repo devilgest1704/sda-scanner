@@ -119,6 +119,47 @@ def _persist_events(actions):
     _save(EVENTS_FILE, events[-1000:])
 
 
+def _request_snapshot_refresh_if_stale(real_trader, swing_executor):
+    """Worker watchdog: keep the read-only blockchain snapshot refreshing while REAL runs.
+
+    The scheduled workflow is the primary producer, but the live worker must also
+    recover automatically if scheduled Actions are paused, delayed or fail. This
+    dispatches only the existing read-only accounting workflow; it never places
+    or signs a transaction.
+    """
+    try:
+        state = real_trader.load_state()
+        if not isinstance(state, dict):
+            return "STATE_UNAVAILABLE"
+        now = datetime.now(timezone.utc)
+        generated = state.get("lastBlockchainSnapshotGeneratedAt")
+        try:
+            stamp = datetime.fromisoformat(str(generated).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = None
+        except (TypeError, ValueError):
+            stamp = None
+        snapshot_age = (now - stamp).total_seconds() if stamp else None
+        if snapshot_age is not None and 0 <= snapshot_age <= 20 * 60:
+            return "FRESH"
+        # Do not flood Actions if the collector is still running. A failed
+        # dispatch is retried by the next worker cycle (the dispatcher itself
+        # also has a short attempt throttle).
+        last_dispatch = state.get("accounting_refresh_last_dispatched_at")
+        try:
+            dispatched = datetime.fromisoformat(str(last_dispatch).replace("Z", "+00:00"))
+            if dispatched.tzinfo is not None and 0 <= (now - dispatched).total_seconds() < 15 * 60:
+                return "DISPATCH_RECENT"
+        except (TypeError, ValueError):
+            pass
+        state["accounting_refresh_pending"] = True
+        return swing_executor._request_accounting_refresh(state)
+    except Exception as exc:  # noqa: BLE001 - watchdog must not interrupt SELL management
+        print(f"::warning::REAL accounting refresh watchdog failed: {type(exc).__name__}: {str(exc)[:180]}",
+              file=sys.stderr, flush=True)
+        return "FAILED"
+
+
 def _reconcile_real_wallets(real_trader, swing_executor):
     actions = []
     try:
@@ -207,6 +248,9 @@ def reconcile():
     # The read-only blockchain accounting snapshot is the import authority for
     # newly discovered manual BUY lots. This path never signs or broadcasts.
     migrated = swing_executor.migrate_if_needed()
+    refresh_dispatch = _request_snapshot_refresh_if_stale(real_trader, swing_executor)
+    if refresh_dispatch not in {"FRESH", "DISPATCH_RECENT"}:
+        print(f"REAL blockchain snapshot refresh: {refresh_dispatch}", flush=True)
     import real_wallet_reconciliation
     try:
         wallet_sync = real_wallet_reconciliation.reconcile_manual_buys(real_trader)
