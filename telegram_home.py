@@ -167,6 +167,8 @@ def real_gate(real, token=None):
 def real_buy_status(rows, real, stale):
     """(state, reason, best BUY-ready row) for the HOME summary."""
     if stale:
+        if real is not None and not real.get("sync_healthy"):
+            return "BLOCKED", "Wallet sync/reconciliation is not FRESH", None
         return "DATA STALE", None, None
     ready = [row for row in rows if row["status"] == "BUY"]
     if real is not None and real["pending"]:
