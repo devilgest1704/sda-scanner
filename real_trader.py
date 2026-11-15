@@ -363,6 +363,8 @@ def safety_check(position_sda, state):
                 f"REAL BUY blocked: wallet/reconciliation {sync_health} "
                 f"(last successful sync age {age_text}); {state.get('lastSyncError') or 'awaiting live sync'}"
             )
+        if state.get("sellDataHealthy") is not True:
+            raise RuntimeError("REAL BUY blocked: existing SELL protection is not healthy")
     if position_sda < cfg.POSITION_MIN_SDA or position_sda > cfg.POSITION_MAX_SDA:
         raise ValueError(f"Real position must be between {cfg.POSITION_MIN_SDA:g} and {cfg.POSITION_MAX_SDA:g} SDA")
     positions = state.get("positions", {})
