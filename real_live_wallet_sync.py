@@ -314,6 +314,9 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
                                                               position.get("token_amount_raw", 0)) or 0) + raw_out
             position["token_amount_raw"] = int(position.get("token_amount_raw") or 0) + raw_out
             position["initial_quantity"] = int(position.get("initial_quantity") or 0) + raw_out
+            position["token_amount"] = str(
+                Decimal(str(position.get("token_amount") or 0)) + quantity)
+            position["spent_sda"] = str(Decimal(str(position.get("spent_sda") or 0)) + spent)
             position["remaining_cost_basis"] = str(
                 Decimal(str(position.get("remaining_cost_basis", position.get("amount_sda", 0)) or 0)) + spent)
             position["initial_cost_basis"] = str(
