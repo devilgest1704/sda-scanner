@@ -440,11 +440,18 @@ def sync_once(real_trader, *, now=None):
                 if tx_hash:
                     tx_hash = str(tx_hash).lower()
                     tx_hashes.add(tx_hash)
-                    order = (block_number,
-                             _int(row.get("transaction_index", row.get("index", 0))),
-                             stamp.isoformat() if stamp else "")
-                    if tx_hash not in tx_order or order < tx_order[tx_hash]:
-                        tx_order[tx_hash] = order
+            # The address-transactions endpoint supplies transaction_index;
+            # token-transfer index is a log index and must not reorder swaps.
+            for row in transactions:
+                tx_hash = str(row.get("hash") or row.get("transaction_hash") or "").lower()
+                if tx_hash:
+                    tx_order[tx_hash] = (
+                        _int(row.get("block_number")),
+                        _int(row.get("transaction_index", row.get("index", 0))),
+                        str(row.get("timestamp") or row.get("block_timestamp") or ""),
+                    )
+            for tx_hash in tx_hashes:
+                tx_order.setdefault(tx_hash, (0, 0, ""))
 
             staged = dict(state)
             staged["positions"] = {str(k).lower(): dict(v) for k, v in (state.get("positions") or {}).items()}
