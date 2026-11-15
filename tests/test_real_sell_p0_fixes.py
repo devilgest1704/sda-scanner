@@ -190,6 +190,20 @@ class BridgeHarness:
         return bridge.reconcile()
 
 
+class LiveAccountingWorkflowDecoupling(unittest.TestCase):
+    def test_live_disposal_does_not_dispatch_historical_accounting_workflow(self):
+        state = {"accounting_refresh_pending": True}
+        with patch.object(executor.trader, "now", return_value="2026-11-15T08:00:00+00:00"), \
+                patch.object(executor.trader, "save_state") as save, \
+                patch.object(executor.trader.requests, "post") as post:
+            result = executor._request_accounting_refresh(state)
+        self.assertEqual(result, "LIVE_RECONCILIATION_REQUIRED")
+        self.assertTrue(state["accounting_refresh_pending"])
+        self.assertIn("audit/recovery only", state["accounting_refresh_last_error"])
+        save.assert_called_once_with(state)
+        post.assert_not_called()
+
+
 class PartialDoubleCountRegression(unittest.TestCase):
     def test_partial_swap_confirmed_unwrap_pending_is_not_manual_sell(self):
         chain = FakeChain(self)
