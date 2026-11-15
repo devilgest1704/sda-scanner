@@ -221,6 +221,58 @@ class LiveWalletSyncTests(unittest.TestCase):
         self.assertGreater(float(sell["net_pnl_sda"]), 0.59)
         self.assertEqual(trader.state["daily_realized_pnl_sda"], float(Decimal(sell["net_pnl_sda"])))
 
+    def test_partial_sell_consumes_fifo_cost_lots(self):
+        position = {
+            "symbol": "TST", "source": "MANUAL", "status": "OPEN",
+            "sellManagementEnabled": True, "decimals": 18,
+            "token_amount_raw": 10 * 10**18, "initial_quantity": 10 * 10**18,
+            "remaining_quantity": 10 * 10**18, "initial_cost_basis": "3",
+            "remaining_cost_basis": "3", "entry_gas_remaining_sda": "0.00003",
+            "buy_tx": TX_BUY, "opened_at": "2026-11-15T07:00:00Z",
+            "cost_lots": [
+                {"tx": "0xlot1", "quantity_raw": 5 * 10**18,
+                 "remaining_quantity_raw": 5 * 10**18, "cost_basis_sda": "1",
+                 "remaining_cost_basis_sda": "1", "entry_fee_sda": "0.00001",
+                 "remaining_entry_fee_sda": "0.00001"},
+                {"tx": "0xlot2", "quantity_raw": 5 * 10**18,
+                 "remaining_quantity_raw": 5 * 10**18, "cost_basis_sda": "2",
+                 "remaining_cost_basis_sda": "2", "entry_fee_sda": "0.00002",
+                 "remaining_entry_fee_sda": "0.00002"},
+            ],
+        }
+        trader = FakeTrader({
+            "positions": {TOKEN: position}, "trades": [], "lastProcessedBlock": 100,
+            "walletBalances": {"tokens": {TOKEN: {"decimals": 18}}},
+        })
+        self.tx_row = {"hash": TX_SELL, "block_number": 101, "transaction_index": 1,
+                       "timestamp": "2026-11-15T07:59:45Z"}
+        self.transfer_row = {"transaction_hash": TX_SELL, "block_number": 101, "index": 4,
+                             "timestamp": "2026-11-15T07:59:45Z"}
+        self.token_payload = [{
+            "token": {"address_hash": TOKEN, "decimals": "18", "symbol": "TST"},
+            "value": str(4 * 10**18),
+        }]
+        trader.tx_by_hash[TX_SELL] = {
+            "hash": TX_SELL, "from": WALLET, "to": cfg.ROUTER_ADDRESS,
+            "value": "0x0", "gasPrice": hex(10**9),
+            "input": calldata(TOKEN, cfg.WSDA_ADDRESS, 6 * 10**18),
+        }
+        trader.receipt_by_hash[TX_SELL] = {
+            "status": "0x1", "gasUsed": hex(21000), "effectiveGasPrice": hex(10**9),
+            "logs": [
+                transfer_log(TOKEN, WALLET, POOL, 6 * 10**18, 3),
+                transfer_log(cfg.WSDA_ADDRESS, POOL, WALLET, 36 * 10**17, 4),
+            ],
+        }
+        result = live.sync_once(trader, now=self.now)
+        self.assertTrue(result["ok"])
+        updated = trader.state["positions"][TOKEN]
+        self.assertEqual(updated["remaining_quantity"], 4 * 10**18)
+        self.assertAlmostEqual(float(updated["remaining_cost_basis"]), 1.6, places=8)
+        self.assertAlmostEqual(float(updated["entry_gas_remaining_sda"]), 0.000016, places=9)
+        sell = next(x for x in trader.state["trades"] if x["action"] == "MANUAL_SELL")
+        self.assertAlmostEqual(float(sell["cost_basis_sda"]), 1.4, places=8)
+
     def test_rpc_failure_never_advances_cursor_and_recovery_resets_backoff(self):
         trader = self.trader_with_buy({"positions": {}, "trades": [], "lastProcessedBlock": 100})
         trader.fail_native = True
