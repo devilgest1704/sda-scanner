@@ -322,10 +322,13 @@ def reconcile():
 
     previous = set(state.get("paper_positions", []))
     paper_valid = paper_error is None
+    real_snapshot = real_trader.load_state()
+    sell_protection_ready = real_snapshot.get("sellDataHealthy") is True
     buy_data_available = (
         paper_profile_valid
         and os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE", "true").strip().lower() == "true"
         and bool(wallet_sync.get("ok"))
+        and sell_protection_ready
     )
     now_keys = set(current) if paper_valid else set(previous)
     legacy_bridge = state.setdefault("legacy_pending_sell", [])
@@ -334,7 +337,6 @@ def reconcile():
                               "reason": "pre_swing_v2_bridge_sell_never_replayed"})
     state["pending_sell"] = []
 
-    real_snapshot = real_trader.load_state()
     pending_buy = set(state.get("pending_buy", [])) | set(real_snapshot.get("pending_buys", {}))
     newly_seen = now_keys - previous
     opened = sorted(newly_seen | pending_buy) if paper_valid and buy_data_available else []
