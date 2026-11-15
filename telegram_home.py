@@ -118,6 +118,12 @@ def real_capacity(dashboard):
     balances = state["walletBalances"]
     native_raw = balances.get("native_sda_wei")
     native = Decimal(str(native_raw)) / Decimal(10**18) if native_raw is not None else None
+    token_balances = balances.get("tokens") if isinstance(balances.get("tokens"), dict) else {}
+    wsda = token_balances.get(str(cfg.WSDA_ADDRESS).lower(), {})
+    wsda_sda = (Decimal(str(wsda.get("raw") or 0)) /
+                (Decimal(10) ** int(wsda.get("decimals") or 18))
+                if isinstance(wsda, dict) else Decimal("0"))
+    wallet_sda = native + wsda_sda if native is not None else None
     sync_stamp = worker.get("lastSuccessfulWalletSyncAt") or state.get("lastSuccessfulWalletSyncAt")
     try:
         stamp = datetime.fromisoformat(str(sync_stamp).replace("Z", "+00:00"))
@@ -135,7 +141,7 @@ def real_capacity(dashboard):
                     and worker.get("walletSyncHealthy") is True
                     and worker.get("reconciliationHealthy") is True
                     and age is not None and 0 <= age <= 120)
-    available = max(Decimal("0"), min(cap - deployed, native)) if native is not None and sync_healthy else None
+    available = max(Decimal("0"), min(cap - deployed, wallet_sda)) if wallet_sda is not None and sync_healthy else None
     paper = dashboard.load("positions.json", {})
     paper_positions = paper.get("positions", {}) if isinstance(paper, dict) else {}
     return {
@@ -143,6 +149,8 @@ def real_capacity(dashboard):
         "pending": len(pending),
         "max_positions": int(worker.get("real_max_open_positions") or cfg.MAX_OPEN_POSITIONS),
         "cap": float(cap), "deployed": float(deployed),
+        "native_sda": float(native) if native is not None else None,
+        "wsda_sda": float(wsda_sda), "wallet_sda": float(wallet_sda) if wallet_sda is not None else None,
         "available": float(available) if available is not None else None,
         "next_buy": float(worker.get("real_buy_size_sda") or cfg.position_sda()),
         "held": set(positions) | set(pending),
