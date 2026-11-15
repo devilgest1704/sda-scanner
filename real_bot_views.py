@@ -103,6 +103,12 @@ def _runtime_accounting(state):
     complete = (state.get("syncStatus") == "FRESH"
                 and state.get("walletSyncHealthy") is True
                 and state.get("reconciliationHealthy") is True)
+    unresolved = [
+        {"tx": t.get("tx"), "at": t.get("at"), "symbol": t.get("symbol")}
+        for t in trades
+        if str(t.get("action") or "").upper() == "MANUAL_SELL"
+        and (t.get("proceeds_sda") is None or t.get("net_pnl_sda", t.get("realized_pnl_sda")) is None)
+    ]
     return {
         "schema_version": 1, "generated_at": state.get("lastSuccessfulWalletSyncAt"),
         "chain_id": balances.get("chain_id"), "wallet": balances.get("wallet"),
@@ -110,7 +116,7 @@ def _runtime_accounting(state):
         "buy_transactions": buys, "sell_transactions": sells,
         "realized_pnl_sda": str(realized), "statistics": statistics,
         "bot_reconciliation_status": "COMPLETE" if complete else "INCOMPLETE",
-        "bot_unresolved_transactions": state.get("unresolvedBlockchainTransactions") or [],
+        "bot_unresolved_transactions": (state.get("unresolvedBlockchainTransactions") or []) + unresolved,
         "excluded_external_activity": {},
     }
 
@@ -377,7 +383,7 @@ def _build_dashboard_data(dashboard):
     runtime_buy_txs = {
         str(trade.get("tx") or trade.get("tx_hash") or "").lower()
         for trade in (runtime_state.get("trades") or [])
-        if isinstance(trade,dict) and str(trade.get("action") or "").upper() in {"BUY","MANUAL_BUY"}
+        if isinstance(trade,dict) and str(trade.get("action") or "").upper() in {"BUY","MANUAL_BUY","BUY_RECONCILED"}
     } if isinstance(runtime_state,dict) else set()
     holdings_by_address={}
     snapshot=_tracked_wallet_snapshot(accounting, dashboard)
