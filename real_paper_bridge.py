@@ -239,26 +239,28 @@ def reconcile():
         actions.append({"action": "WALLET_RECONCILIATION", "status": wallet_sync.get("syncStatus", "FAILED"),
                         "error": wallet_sync.get("syncError"), "at": _now()})
     actions.extend(_reconcile_real_wallets(real_trader, swing_executor))
+    snapshot_sync_ok = bool(wallet_sync.get("ok"))
     wallet_reconcile_errors = [a for a in actions
-                               if a.get("action") == "WALLET_RECONCILIATION"
+                               if a.get("action") in {"WALLET_RECONCILIATION", "MANUAL_SELL_RECONCILIATION"}
                                and a.get("status") in {"ERROR", "FAILED", "STALE", "DEGRADED"}]
     sell_reconcile_errors = [a for a in actions
                              if a.get("action") == "MANUAL_SELL_RECONCILIATION"
                              and a.get("status") in {"ERROR", "FAILED", "STALE", "DEGRADED"}]
-    live_sync_ok = bool(wallet_sync.get("ok")) and not wallet_reconcile_errors
+    live_sync_ok = snapshot_sync_ok and not wallet_reconcile_errors
     wallet_sync["ok"] = live_sync_ok
     real_state = real_trader.load_state()
     real_state["buyDataHealthy"] = bool(live_sync_ok)
     real_state["walletSyncHealthy"] = bool(live_sync_ok)
     real_state["reconciliationHealthy"] = bool(live_sync_ok)
-    real_state["sellDataHealthy"] = not sell_reconcile_errors
     real_state["sellReconciliationErrors"] = sell_reconcile_errors[:20]
     if wallet_sync["ok"]:
         real_state["lastSuccessfulReconciliation"] = _now()
+        real_state["lastSuccessfulReconciliationAt"] = real_state["lastSuccessfulReconciliation"]
         real_state["syncStatus"] = "FRESH"
         real_state["lastSyncError"] = None
         if _safe_save_real_state(real_trader, real_state, wallet_sync, actions):
             wallet_sync["lastSuccessfulReconciliation"] = real_state["lastSuccessfulReconciliation"]
+            wallet_sync["lastSuccessfulReconciliationAt"] = real_state["lastSuccessfulReconciliationAt"]
     else:
         if snapshot_sync_ok:
             wallet_sync["syncStatus"] = "DEGRADED"
