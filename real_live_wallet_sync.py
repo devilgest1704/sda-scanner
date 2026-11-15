@@ -175,10 +175,10 @@ def _token_rows(payload):
         value = item.get("value", item.get("balance", item.get("token_balance")))
         decimals = token.get("decimals", item.get("decimals"))
         if not address or value is None or decimals is None:
-            raise RuntimeError("Blockscout token balance missing address/value/decimals")
+            raise TypeError("Blockscout token balance missing address/value/decimals")
         decimals = int(decimals)
         if not 0 <= decimals <= 36:
-            raise RuntimeError(f"Invalid token decimals for {address}")
+            raise TypeError(f"Invalid token decimals for {address}")
         result[address] = {
             "raw": str(_int(value)), "decimals": decimals,
             "symbol": str(token.get("symbol") or address[:10]),
@@ -667,7 +667,7 @@ def sync_once(real_trader, *, now=None):
             block_payload = _get_json("/blocks")
             block_items = block_payload.get("items") if isinstance(block_payload, dict) else None
             if not isinstance(block_items, list) or not block_items:
-                raise RuntimeError("Blockscout latest-block index unavailable")
+                raise TypeError("Blockscout latest-block index unavailable")
             latest_explorer_block = _int(
                 block_items[0].get("height", block_items[0].get("number",
                     block_items[0].get("block_number")))
@@ -791,7 +791,7 @@ def sync_once(real_trader, *, now=None):
                                       if str(x.get("transaction_hash") or "").lower() == tx_hash), None)
                 parsed = _parse_timestamp(timestamp)
                 if parsed is None:
-                    raise RuntimeError(f"transaction timestamp unavailable for {tx_hash}")
+                    raise TypeError(f"transaction timestamp unavailable for {tx_hash}")
                 imported.extend(_apply_swap(staged, tx_hash, tx, receipt, parsed.isoformat(),
                                             wallet, seen, real_trader))
                 processed_signatures.add(tx_hash)
@@ -802,7 +802,7 @@ def sync_once(real_trader, *, now=None):
                     token_balances[token] = {"raw": "0", "decimals": decimals, "symbol": token[:10]}
             # Confirm that the explorer token snapshot and RPC native balance are usable.
             if any(not isinstance(v, dict) or int(v.get("raw", -1)) < 0 for v in token_balances.values()):
-                raise RuntimeError("wallet token-balance snapshot failed validation")
+                raise TypeError("wallet token-balance snapshot failed validation")
             synced_at = _iso()
             staged["walletBalances"]["checked_at"] = synced_at
             staged.pop("_liveTokenMetadata", None)
