@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import real_live_wallet_sync as live
 import real_trading_config as cfg
+import real_trader
 
 WALLET = "0x" + "a" * 40
 POOL = "0x" + "c" * 40
@@ -222,6 +223,27 @@ class LiveWalletSyncTests(unittest.TestCase):
         result = live.sync_once(trader, now=self.now)
         self.assertFalse(result["ok"])
         self.assertEqual(trader.state["lastProcessedBlock"], 100)
+
+    def test_real_buy_gate_blocks_stale_and_allows_fresh_reconciliation(self):
+        base = {
+            "positions": {}, "pending_buys": {}, "daily_realized_pnl_sda": 0,
+            "syncStatus": "STALE", "walletSyncHealthy": False,
+            "reconciliationHealthy": False,
+            "lastSuccessfulWalletSyncAt": "2026-11-15T07:00:00+00:00",
+            "lastSyncError": "RPC timeout",
+        }
+        with patch.object(real_trader.cfg, "REAL_TRADING_ENABLED", True), \
+             patch.object(real_trader.cfg, "REAL_TRADING_DRY_RUN", False):
+            with self.assertRaisesRegex(RuntimeError, "REAL BUY blocked"):
+                real_trader.safety_check(10, copy.deepcopy(base))
+            fresh = copy.deepcopy(base)
+            fresh.update({
+                "syncStatus": "FRESH", "walletSyncHealthy": True,
+                "reconciliationHealthy": True,
+                "lastSuccessfulWalletSyncAt": self.now.isoformat(),
+                "lastSyncError": None,
+            })
+            real_trader.safety_check(10, fresh)
 
     def test_fresh_degraded_stale_thresholds(self):
         state = {"syncStatus": "FRESH", "lastSuccessfulWalletSyncAt": self.now.isoformat()}
