@@ -237,6 +237,117 @@ def _processed_id(tx_hash, log_index, token, direction):
     return f"{str(tx_hash).lower()}:{int(log_index)}:{str(token).lower()}:{direction}"
 
 
+def _reconcile_unresolved_manual_sell(state, tx_hash, token, raw_sold, raw_proceeds,
+                                       network_fee, fee_tier, timestamp, resulting_balance_raw,
+                                       decimals, identity, seen):
+    """Attach on-chain proceeds to a prior wallet-balance-only disposal.
+
+    The older runtime may already have removed the sold quantity from positions.
+    In that case update the unresolved MANUAL_SELL ledger row in place; never
+    reduce the position or add a second PnL event.
+    """
+    disposals = state.get("manual_disposals") or []
+    candidates = []
+    tx_time = _parse_timestamp(timestamp)
+    for disposal in disposals:
+        if not isinstance(disposal, dict):
+            continue
+        if str(disposal.get("token") or "").lower() != token:
+            continue
+        if str(disposal.get("status") or "").upper() != "PROCEEDS_UNKNOWN":
+            continue
+        if _int(disposal.get("quantity_raw")) != raw_sold:
+            continue
+        disposal_time = _parse_timestamp(disposal.get("at"))
+        delta = abs((tx_time - disposal_time).total_seconds()) if tx_time and disposal_time else 10**12
+        if delta <= 24 * 60 * 60:
+            candidates.append((delta, disposal))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    disposal = candidates[0][1]
+
+    trades = state.get("trades") or []
+    trade_candidates = []
+    for trade in trades:
+        if not isinstance(trade, dict):
+            continue
+        if str(trade.get("action") or "").upper() != "MANUAL_SELL":
+            continue
+        if str(trade.get("token") or "").lower() != token:
+            continue
+        if _int(trade.get("sold_quantity_raw")) != raw_sold:
+            continue
+        if str(trade.get("accounting_status") or "").upper() != "PROCEEDS_UNKNOWN":
+            continue
+        if trade.get("tx"):
+            continue
+        trade_time = _parse_timestamp(trade.get("at"))
+        delta = abs((tx_time - trade_time).total_seconds()) if tx_time and trade_time else 10**12
+        if delta <= 24 * 60 * 60:
+            trade_candidates.append((delta, trade))
+    if not trade_candidates:
+        raise RuntimeError(
+            f"unresolved manual disposal for {token} has no matching cost-basis ledger row"
+        )
+    trade_candidates.sort(key=lambda item: item[0])
+    trade = trade_candidates[0][1]
+    cost_basis = Decimal(str(trade.get("cost_basis_sda") or disposal.get("cost_basis_sda") or 0))
+    if cost_basis < 0:
+        raise RuntimeError(f"manual disposal cost basis is invalid for {token}")
+    quantity = Decimal(raw_sold) / (Decimal(10) ** decimals)
+    proceeds = Decimal(raw_proceeds) / Decimal(10**18)
+    entry_fee = Decimal(str(trade.get("entry_network_fee_sda") or 0))
+    fees = network_fee + entry_fee
+    net_pnl = proceeds - cost_basis - fees
+    execution_price = proceeds / quantity if quantity else Decimal("0")
+    buy_trade = None
+    for candidate in trades:
+        if not isinstance(candidate, dict):
+            continue
+        if str(candidate.get("action") or "").upper() not in {"BUY", "BUY_RECONCILED", "MANUAL_BUY"}:
+            continue
+        if str(candidate.get("token") or "").lower() != token:
+            continue
+        if candidate.get("tx"):
+            candidate_time = _parse_timestamp(candidate.get("at"))
+            if candidate_time and tx_time and candidate_time <= tx_time:
+                if buy_trade is None or candidate_time > _parse_timestamp(buy_trade.get("at")):
+                    buy_trade = candidate
+    trade.update({
+        "tx": tx_hash, "source": "MANUAL", "status": "CONFIRMED",
+        "buy_tx": trade.get("buy_tx") or (buy_trade or {}).get("tx"),
+        "proceeds_sda": str(proceeds), "network_fee_sda": str(network_fee),
+        "entry_network_fee_sda": str(entry_fee), "fees_sda": str(fees),
+        "execution_price_sda": str(execution_price), "net_pnl_sda": str(net_pnl),
+        "realized_pnl_sda": str(net_pnl), "accounting_status": "CONFIRMED",
+        "resulting_token_balance_raw": resulting_balance_raw, "at": timestamp,
+        "swap_fee_tier": fee_tier,
+    })
+    disposal.update({
+        "tx": tx_hash, "status": "RECONCILED", "proceeds_sda": str(proceeds),
+        "network_fee_sda": str(network_fee), "fees_sda": str(fees),
+        "realized_pnl_sda": str(net_pnl), "execution_price_sda": str(execution_price),
+        "accounting_status": "CONFIRMED", "resulting_token_balance_raw": resulting_balance_raw,
+        "at": timestamp, "reconciled_at": _iso(),
+    })
+    seen.add(identity)
+    # Only a disposal executed today contributes to the daily risk counter.
+    if tx_time and tx_time.date() == _now().date():
+        state["daily_realized_pnl_sda"] = float(
+            Decimal(str(state.get("daily_realized_pnl_sda") or 0)) + net_pnl
+        )
+    state.setdefault("manual_sell_reconciliations", []).append({
+        "tx": tx_hash, "token": token, "quantity_raw": raw_sold,
+        "proceeds_sda": str(proceeds), "realized_pnl_sda": str(net_pnl),
+        "event_id": identity, "at": timestamp,
+    })
+    return {"tx": tx_hash, "token": token, "source": "MANUAL_SELL_RECONCILED",
+            "sold_quantity_raw": raw_sold, "cost_basis_sda": str(cost_basis),
+            "proceeds_sda": str(proceeds), "fees_sda": str(fees),
+            "realized_pnl_sda": str(net_pnl)}
+
+
 def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trader):
     incoming, outgoing, identities = _receipt_deltas(receipt, wallet)
     if _address(tx.get("to")) != str(cfg.ROUTER_ADDRESS).lower():
@@ -414,6 +525,15 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
             raise RuntimeError(f"confirmed SELL swap {tx_hash} lacks exact wallet transfer evidence")
         position = state["positions"].get(token_in)
         if not isinstance(position, dict):
+            reconciled = _reconcile_unresolved_manual_sell(
+                state, tx_hash, token_in, raw_sold, raw_proceeds, _gas_fee(receipt, tx),
+                fee_tier, timestamp,
+                _int(((state.get("walletBalances") or {}).get("tokens") or {}).get(token_in, {}).get("raw")),
+                _token_rows_for_decimals(state, token_in, real_trader), identity, seen,
+            )
+            if reconciled is not None:
+                imported.append(reconciled)
+                return imported
             raise RuntimeError(f"confirmed SELL swap {tx_hash} has no tracked cost basis for {token_in}")
         event = next((x for x in identities if x[0] == token_in and x[2] == "OUT"), None)
         log_index = event[1] if event else 0
