@@ -523,17 +523,19 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
         if (raw_sold <= 0 or raw_proceeds <= 0
                 or (amount_in_calldata > 0 and raw_sold != amount_in_calldata)):
             raise RuntimeError(f"confirmed SELL swap {tx_hash} lacks exact wallet transfer evidence")
+        resulting_balance_raw = _int(
+            ((state.get("walletBalances") or {}).get("tokens") or {}).get(token_in, {}).get("raw")
+        )
+        decimals = _token_rows_for_decimals(state, token_in, real_trader)
+        reconciled = _reconcile_unresolved_manual_sell(
+            state, tx_hash, token_in, raw_sold, raw_proceeds, _gas_fee(receipt, tx),
+            fee_tier, timestamp, resulting_balance_raw, decimals, identity, seen,
+        )
+        if reconciled is not None:
+            imported.append(reconciled)
+            return imported
         position = state["positions"].get(token_in)
         if not isinstance(position, dict):
-            reconciled = _reconcile_unresolved_manual_sell(
-                state, tx_hash, token_in, raw_sold, raw_proceeds, _gas_fee(receipt, tx),
-                fee_tier, timestamp,
-                _int(((state.get("walletBalances") or {}).get("tokens") or {}).get(token_in, {}).get("raw")),
-                _token_rows_for_decimals(state, token_in, real_trader), identity, seen,
-            )
-            if reconciled is not None:
-                imported.append(reconciled)
-                return imported
             raise RuntimeError(f"confirmed SELL swap {tx_hash} has no tracked cost basis for {token_in}")
         event = next((x for x in identities if x[0] == token_in and x[2] == "OUT"), None)
         log_index = event[1] if event else 0
@@ -592,9 +594,6 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
             (Decimal(str(lot.get("remaining_entry_fee_sda") or 0)) for lot in position["cost_lots"]),
             Decimal("0")))
         proceeds_total = Decimal(raw_proceeds) / Decimal(10**18)
-        resulting_balance_raw = _int(
-            ((state.get("walletBalances") or {}).get("tokens") or {}).get(token_in, {}).get("raw")
-        )
         sold_fraction = Decimal(sold) / Decimal(raw_sold)
         proceeds = proceeds_total * sold_fraction
         network_fee_allocated = network_fee * sold_fraction
