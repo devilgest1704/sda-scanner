@@ -288,15 +288,15 @@ def reconcile():
     pre_paper_action_count = len(actions)
     _persist_events(actions)
 
-    # REAL must follow the exact active PAPER entry/exit profile. Fail closed
-    # rather than trading a different strategy after a workflow config drift.
+    # A PAPER-profile mismatch blocks new BUY discovery only; existing REAL
+    # positions must still reach their independent SELL evaluation path.
     paper_buy_mode = os.getenv("SDA_PAPER_BUY_MODE", "temporal_recovery").strip()
     paper_tp4 = os.getenv("SDA_PAPER_TP4", "0").strip() == "1"
-    if paper_buy_mode != "temporal_recovery" or not paper_tp4:
-        raise RuntimeError(
-            "REAL bridge requires the active PAPER profile: "
-            "SDA_PAPER_BUY_MODE=temporal_recovery and SDA_PAPER_TP4=1"
-        )
+    paper_profile_valid = paper_buy_mode == "temporal_recovery" and paper_tp4
+    if not paper_profile_valid:
+        actions.append({"action": "BUY_PROFILE_GUARD", "status": "BLOCKED",
+                        "reason": "REAL requires temporal_recovery and TP4 PAPER profile",
+                        "at": _now()})
 
     current, paper_error = _paper_positions()
     if STATE_FILE.exists():
@@ -307,34 +307,23 @@ def reconcile():
         state = {}
     if not state.get("initialized"):
         if paper_error:
-            # Never create a baseline from an unknown PAPER state.
+            # Do not create a PAPER baseline from unknown state. Continue into
+            # independent SELL evaluation for every existing REAL position.
             actions.append({"action": "PAPER_STATE_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
                             "reason": paper_error, "at": _now()})
-            # Keep the bridge baseline absent until a valid PAPER snapshot exists.
-            _persist_events(actions[pre_paper_action_count:])
-            try:
-                _publish_telegram_state()
-            except Exception as exc:
-                print(f"::warning::REAL Telegram status publish failed: {type(exc).__name__}: {str(exc)[:180]}",
-                      file=sys.stderr, flush=True)
-            return {"status": "paper_state_unavailable", "paper_state_error": paper_error,
-                    "actions": actions}
-        state = {"initialized": True, "paper_positions": sorted(current),
-                 "initialized_at": _now(), "last_run": _now(),
-                 "wallet_sync": _wallet_sync_summary(wallet_sync, real_trader)}
-        _save(STATE_FILE, state)
-        _persist_events(actions[pre_paper_action_count:])
-        try:
-            _publish_telegram_state()
-        except Exception as exc:
-            print(f"::warning::REAL Telegram status publish failed: {type(exc).__name__}: {str(exc)[:180]}",
-                  file=sys.stderr, flush=True)
-        return {"status": "baseline_initialized", "actions": actions}
+        else:
+            state = {"initialized": True, "paper_positions": sorted(current),
+                     "initialized_at": _now(), "last_run": _now(),
+                     "wallet_sync": _wallet_sync_summary(wallet_sync, real_trader)}
+            _save(STATE_FILE, state)
 
     previous = set(state.get("paper_positions", []))
     paper_valid = paper_error is None
-    buy_data_available = (os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE", "true").strip().lower() == "true"
-                          and bool(wallet_sync.get("ok")))
+    buy_data_available = (
+        paper_profile_valid
+        and os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE", "true").strip().lower() == "true"
+        and bool(wallet_sync.get("ok"))
+    )
     now_keys = set(current) if paper_valid else set(previous)
     legacy_bridge = state.setdefault("legacy_pending_sell", [])
     for token in list(state.get("pending_sell", [])):
