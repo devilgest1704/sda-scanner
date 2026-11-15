@@ -123,8 +123,9 @@ def _persist_events(actions):
 
 def _publish_telegram_state():
     """Publish runtime JSON only; historical accounting workflow is not a live dependency."""
-    if os.getenv("GITHUB_ACTIONS", "").strip().lower() != "true":
-        return {"status": "SKIPPED_NON_GITHUB_WORKER"}
+    if (os.getenv("GITHUB_ACTIONS", "").strip().lower() != "true"
+            or os.getenv("SDA_REAL_TELEGRAM_STATE_PUBLISH", "true").strip().lower() != "true"):
+        return {"status": "SKIPPED_NON_PRODUCTION_WORKER"}
     import tools.worker_code_pin as worker_code_pin
     worker_code_pin.write_status()
     from tools.state_checkpoint import push_state
