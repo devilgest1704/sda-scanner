@@ -10,8 +10,8 @@ import real_bot_menu as rb
 import real_pnl_stats
 import real_trading_config as cfg
 
-_CACHE={"at":0.0,"data":None}
-_CACHE_TTL=60.0
+_CACHE={"at":0.0,"data":None,"version":None}
+_CACHE_TTL=10.0
 _ORIGINAL_FETCH_WALLET_SNAPSHOT=rb._fetch_wallet_snapshot
 _WSDA=str(cfg.WSDA_ADDRESS).lower()
 
@@ -32,6 +32,88 @@ def _runtime_dust(token,position,metadata):
             position.get("remaining_cost_basis",position.get("amount_sda")),position.get("last_market_price"))
     except Exception:
         return False
+
+def _runtime_accounting(state):
+    """Build Telegram's accounting projection exclusively from the reconciled REAL runtime ledger."""
+    trades = [t for t in (state.get("trades") or []) if isinstance(t, dict)]
+    buys, sells = [], []
+    for trade in trades:
+        action = str(trade.get("action") or "").upper()
+        tx = trade.get("tx") or trade.get("tx_hash")
+        token = str(trade.get("token") or trade.get("contract") or "").lower()
+        if action in {"BUY", "MANUAL_BUY", "BUY_RECONCILED"} and tx and token:
+            buys.append({
+                "tx": tx, "contract": token, "token": token,
+                "symbol": trade.get("symbol"), "at": trade.get("at"),
+                "invested_sda": trade.get("invested_sda", trade.get("cost_basis_sda",
+                                                                  trade.get("amount_sda"))),
+                "source": trade.get("source") or "BOT",
+            })
+        elif action in {"SELL", "MANUAL_SELL"} and tx:
+            proceeds = trade.get("proceeds_sda")
+            cost = trade.get("cost_basis_sda", trade.get("amount_sda", trade.get("cost_sda")))
+            pnl = trade.get("net_pnl_sda", trade.get("realized_pnl_sda"))
+            if proceeds is None or cost is None or pnl is None:
+                continue
+            sells.append({
+                "tx": tx, "contract": token, "token": token,
+                "symbol": trade.get("symbol"), "at": trade.get("at"),
+                "proceeds_sda": proceeds, "cost_basis_sda": cost,
+                "net_pnl_sda": pnl, "buy_tx": trade.get("buy_tx"),
+                "source": trade.get("source") or "BOT",
+            })
+    open_positions = []
+    for token, position in (state.get("positions") or {}).items():
+        if not isinstance(position, dict):
+            continue
+        decimals = int(position.get("decimals") or 18)
+        raw = int(position.get("remaining_quantity", position.get("token_amount_raw", 0)) or 0)
+        if raw <= 0:
+            continue
+        open_positions.append({
+            "token": str(token).lower(), "symbol": position.get("symbol"),
+            "quantity": str(Decimal(raw) / (Decimal(10) ** decimals)),
+            "cost_basis_sda": position.get("remaining_cost_basis",
+                                           position.get("amount_sda", position.get("cost_sda"))),
+            "buy_tx": position.get("buy_tx"), "at": position.get("opened_at"),
+            "decimals": decimals, "source": position.get("source"),
+        })
+    realized = sum((Decimal(str(x["net_pnl_sda"])) for x in sells), Decimal("0"))
+    wins = [Decimal(str(x["net_pnl_sda"])) for x in sells if Decimal(str(x["net_pnl_sda"])) > 0]
+    losses = [Decimal(str(x["net_pnl_sda"])) for x in sells if Decimal(str(x["net_pnl_sda"])) < 0]
+    pnl_values = [Decimal(str(x["net_pnl_sda"])) for x in sells]
+    statistics = {
+        "confirmed_buys_count": len(buys), "matched_sells_count": len(sells),
+        "wins": len(wins), "losses": len(losses),
+        "win_rate_pct": (len(wins) / len(sells) * 100) if sells else 0,
+        "average_win_sda": str(sum(wins) / len(wins)) if wins else None,
+        "average_loss_sda": str(sum(losses) / len(losses)) if losses else None,
+        "average_trade_sda": str(sum(pnl_values) / len(pnl_values)) if pnl_values else None,
+        "best_trade": ({"net_pnl_sda": str(max(pnl_values)),
+                        "symbol": next((x.get("symbol") for x in sells
+                                        if Decimal(str(x["net_pnl_sda"])) == max(pnl_values)), None)}
+                       if pnl_values else {}),
+        "worst_trade": ({"net_pnl_sda": str(min(pnl_values)),
+                         "symbol": next((x.get("symbol") for x in sells
+                                         if Decimal(str(x["net_pnl_sda"])) == min(pnl_values)), None)}
+                        if pnl_values else {}),
+    }
+    balances = state.get("walletBalances") if isinstance(state.get("walletBalances"), dict) else {}
+    native = Decimal(str(balances.get("native_sda_wei") or 0)) / Decimal(10**18)
+    complete = (state.get("syncStatus") == "FRESH"
+                and state.get("walletSyncHealthy") is True
+                and state.get("reconciliationHealthy") is True)
+    return {
+        "schema_version": 1, "generated_at": state.get("lastSuccessfulWalletSyncAt"),
+        "chain_id": balances.get("chain_id"), "wallet": balances.get("wallet"),
+        "native_balance_sda": str(native), "open_positions": open_positions,
+        "buy_transactions": buys, "sell_transactions": sells,
+        "realized_pnl_sda": str(realized), "statistics": statistics,
+        "bot_reconciliation_status": "COMPLETE" if complete else "INCOMPLETE",
+        "bot_unresolved_transactions": state.get("unresolvedBlockchainTransactions") or [],
+        "excluded_external_activity": {},
+    }
+
 
 def _symbol(token,fallback=None):
     try:
