@@ -498,7 +498,6 @@ def sync_once(real_trader, *, now=None):
             staged["walletSyncHealthy"] = True
             staged["reconciliationHealthy"] = True
             staged["buyDataHealthy"] = True
-            staged["sellDataHealthy"] = True
             staged["processedBlockchainEvents"] = sorted(seen)[-50000:]
             staged["updated_at"] = synced_at
             real_trader.save_state(staged)
