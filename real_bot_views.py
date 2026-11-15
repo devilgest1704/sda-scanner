@@ -16,7 +16,7 @@ _ORIGINAL_FETCH_WALLET_SNAPSHOT=rb._fetch_wallet_snapshot
 _WSDA=str(cfg.WSDA_ADDRESS).lower()
 
 def clear_cache():
-    _CACHE.update({"at":0.0,"data":None})
+    _CACHE.update({"at":0.0,"data":None,"version":None})
 
 def _log(message):
     print(f"[REAL_TELEGRAM] {message}")
@@ -496,13 +496,23 @@ def _build_dashboard_data(dashboard):
 
 def _get_data(dashboard,refresh=False,cache_only=False):
     now=time.monotonic()
-    if not refresh and _CACHE.get("data") is not None:
-        if now-float(_CACHE.get("at") or 0)<=_CACHE_TTL:
-            return _CACHE["data"]
+    version=None
+    try:
+        runtime=dashboard.load("real_trade_state.json",{})
+        if isinstance(runtime,dict):
+            version=(runtime.get("updated_at"),runtime.get("lastSuccessfulWalletSyncAt"),
+                     runtime.get("lastSuccessfulReconciliationAt"))
+    except Exception:
+        version=None
+    cache_valid = (_CACHE.get("data") is not None
+                   and _CACHE.get("version") == version
+                   and now-float(_CACHE.get("at") or 0)<=_CACHE_TTL)
+    if not refresh and cache_valid:
+        return _CACHE["data"]
     if cache_only:
         return None
     data=_build_dashboard_data(dashboard)
-    _CACHE.update({"at":time.monotonic(),"data":data})
+    _CACHE.update({"at":time.monotonic(),"data":data,"version":version})
     return data
 
 def _main_keyboard():
