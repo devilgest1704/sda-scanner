@@ -416,14 +416,22 @@ def sync_once(real_trader, *, now=None):
             latest_block = int(cursor_block or 0)
             latest_timestamp = None
             tx_hashes = set()
+            tx_order = {}
             for row in transactions + transfers:
-                latest_block = max(latest_block, _int(row.get("block_number")))
+                block_number = _int(row.get("block_number"))
+                latest_block = max(latest_block, block_number)
                 stamp = _parse_timestamp(row.get("timestamp") or row.get("block_timestamp"))
                 if stamp and (latest_timestamp is None or stamp > latest_timestamp):
                     latest_timestamp = stamp
                 tx_hash = row.get("hash") or row.get("transaction_hash")
                 if tx_hash:
-                    tx_hashes.add(str(tx_hash).lower())
+                    tx_hash = str(tx_hash).lower()
+                    tx_hashes.add(tx_hash)
+                    order = (block_number,
+                             _int(row.get("transaction_index", row.get("index", 0))),
+                             stamp.isoformat() if stamp else "")
+                    if tx_hash not in tx_order or order < tx_order[tx_hash]:
+                        tx_order[tx_hash] = order
 
             staged = dict(state)
             staged["positions"] = {str(k).lower(): dict(v) for k, v in (state.get("positions") or {}).items()}
@@ -444,7 +452,7 @@ def sync_once(real_trader, *, now=None):
                 tx_hash = str(row.get("hash") or row.get("transaction_hash") or "").lower()
                 if tx_hash:
                     transaction_map[tx_hash] = row
-            for tx_hash in sorted(tx_hashes):
+            for tx_hash in sorted(tx_hashes, key=lambda value: (tx_order.get(value, (0, 0, "")), value)):
                 if not any(item.startswith(tx_hash + ":") for item in seen):
                     tx = real_trader.rpc("eth_getTransactionByHash", [tx_hash])
                     receipt = real_trader.rpc("eth_getTransactionReceipt", [tx_hash])
