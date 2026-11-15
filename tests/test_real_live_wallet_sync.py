@@ -384,7 +384,7 @@ class LiveWalletSyncTests(unittest.TestCase):
             fresh = copy.deepcopy(base)
             fresh.update({
                 "syncStatus": "FRESH", "walletSyncHealthy": True,
-                "reconciliationHealthy": True,
+                "reconciliationHealthy": True, "sellDataHealthy": True,
                 "lastSuccessfulWalletSyncAt": self.now.isoformat(),
                 "lastSyncError": None,
             })
