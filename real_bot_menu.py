@@ -200,26 +200,15 @@ def _ledger_source_warning(source, state):
 
 
 def _wallet_balance_sda():
-    address = _wallet_address().strip().lower()
-    if address != BOT_WALLET_ADDRESS:
-        return None, "configured wallet does not match the REAL bot wallet"
+    """Display the last authoritative wallet balance from the live REAL ledger."""
+    state = _load_real_state()
+    balances = state.get("walletBalances") if isinstance(state, dict) else None
+    if not isinstance(balances, dict) or balances.get("native_sda_wei") is None:
+        return None, "live wallet sync has not published a verified SDA balance"
     try:
-        response = requests.post(
-            cfg.RPC_URL,
-            json={"jsonrpc": "2.0", "id": 1, "method": "eth_getBalance", "params": [address, "latest"]},
-            timeout=10,
-            headers={"Content-Type": "application/json", "User-Agent": "sda-real-bot-gui/1.1"},
-        )
-        response.raise_for_status()
-        data = response.json()
-        if "error" in data:
-            return None, str(data["error"])
-        result = data.get("result")
-        if not isinstance(result, str):
-            return None, "RPC returned no balance"
-        return int(result, 16) / 10**18, None
-    except Exception as exc:
-        return None, str(exc)
+        return int(balances["native_sda_wei"]) / 10**18, None
+    except (TypeError, ValueError, OverflowError) as exc:
+        return None, f"invalid reconciled SDA balance: {exc}"
 
 
 def _wallet_short(wallet):
