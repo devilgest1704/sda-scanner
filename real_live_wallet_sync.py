@@ -378,8 +378,11 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
             state["pending_buys"].pop(token_out, None)
         seen.add(identity)
         imported.append({"tx": tx_hash, "token": token_out, "source": source,
-                         "token_amount_raw": raw_out, "spent_sda": str(spent),
-                         "fees_sda": str(network_fee), "execution_price_sda": str(spent / quantity)})
+                         "token_amount_raw": raw_out, "token_amount": str(quantity),
+                         "spent_sda": str(spent), "fees_sda": str(network_fee),
+                         "execution_price_sda": str(spent / quantity),
+                         "resulting_token_balance_raw": resulting_balance_raw,
+                         "resulting_token_balance": str(resulting_balance)})
     elif token_out == str(cfg.WSDA_ADDRESS).lower() and token_in != token_out:
         raw_sold = outgoing.get(token_in, 0)
         raw_proceeds = max(0, incoming.get(token_out, 0) - outgoing.get(token_out, 0))
