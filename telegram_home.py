@@ -124,6 +124,13 @@ def real_capacity(dashboard):
         age = (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()
     except (TypeError, ValueError, AttributeError):
         age = None
+    try:
+        heartbeat = datetime.fromisoformat(str(worker.get("updated_at")).replace("Z", "+00:00"))
+        heartbeat_age = (datetime.now(timezone.utc) - heartbeat.astimezone(timezone.utc)).total_seconds()
+    except (TypeError, ValueError, AttributeError):
+        heartbeat_age = None
+    if heartbeat_age is None or heartbeat_age < 0 or heartbeat_age > 300:
+        return None
     sync_healthy = (worker.get("syncStatus") == "FRESH"
                     and worker.get("walletSyncHealthy") is True
                     and worker.get("reconciliationHealthy") is True
