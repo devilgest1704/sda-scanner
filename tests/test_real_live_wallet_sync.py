@@ -152,6 +152,8 @@ class LiveWalletSyncTests(unittest.TestCase):
         self.assertEqual(position["status"], "OPEN")
         self.assertTrue(position["sellManagementEnabled"])
         self.assertEqual(position["token_amount_raw"], 10 * 10**18)
+        self.assertEqual(position["resulting_token_balance_raw"], 10 * 10**18)
+        self.assertEqual(position["spent_sda"], "2")
         self.assertEqual(Decimal(position["initial_cost_basis"]), Decimal("2"))
         self.assertEqual(position["buy_tx"], TX_BUY)
         self.assertEqual(trader.state["lastProcessedBlock"], 101)
@@ -159,6 +161,7 @@ class LiveWalletSyncTests(unittest.TestCase):
         self.assertIn(TX_BUY, trader.state["processedBlockchainSignatures"])
         self.assertEqual(len(trader.state["trades"]), 1)
         self.assertEqual(result["imported"][0]["fees_sda"], "0.000021")
+        self.assertEqual(result["imported"][0]["resulting_token_balance_raw"], 10 * 10**18)
 
         # A restarted process sees the same indexed event but cannot import it again.
         restarted = FakeTrader(trader.state)
@@ -209,6 +212,7 @@ class LiveWalletSyncTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         updated = trader.state["positions"][TOKEN]
         self.assertEqual(updated["remaining_quantity"], 7 * 10**18)
+        self.assertEqual(updated["resulting_token_balance_raw"], 7 * 10**18)
         self.assertAlmostEqual(float(updated["remaining_cost_basis"]), 1.4, places=8)
         sell = next(x for x in trader.state["trades"] if x["action"] == "MANUAL_SELL")
         self.assertEqual(sell["buy_tx"], TX_BUY)
