@@ -283,6 +283,10 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
         decimals = _token_rows_for_decimals(state, token_out, real_trader)
         quantity = Decimal(raw_out) / (Decimal(10) ** decimals)
         spent = Decimal(raw_in) / Decimal(10**18)
+        resulting_balance_raw = _int(
+            ((state.get("walletBalances") or {}).get("tokens") or {}).get(token_out, {}).get("raw")
+        )
+        resulting_balance = Decimal(resulting_balance_raw) / (Decimal(10) ** decimals)
         event = next((x for x in identities if x[0] == token_out and x[2] == "IN"), None)
         log_index = event[1] if event else 0
         identity = _processed_id(tx_hash, log_index, token_out, "BUY")
@@ -324,6 +328,8 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
             position["all_in_cost_price_sda"] = str(
                 (Decimal(str(position["initial_cost_basis"])) + Decimal(str(position["entry_gas_sda"]))) / total_quantity)
             position.setdefault("additional_buy_txs", []).append(tx_hash)
+            position["resulting_token_balance_raw"] = resulting_balance_raw
+            position["resulting_token_balance"] = str(resulting_balance)
         else:
             position = {
                 "symbol": token_out[:10], "token": token_out, "status": "OPEN",
@@ -331,8 +337,11 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
                 "sellManagementEnabled": True, "amount_sda": float(spent),
                 "initial_cost_basis": str(spent), "remaining_cost_basis": str(spent),
                 "sold_cost_basis": "0", "realized_proceeds": "0", "realized_pnl": "0",
-                "token_amount_raw": raw_out, "initial_quantity": raw_out,
-                "remaining_quantity": raw_out, "confirmed_sold_quantity": 0,
+                "token_amount_raw": raw_out, "token_amount": str(quantity),
+                "initial_quantity": raw_out, "remaining_quantity": raw_out,
+                "resulting_token_balance_raw": resulting_balance_raw,
+                "resulting_token_balance": str(resulting_balance),
+                "spent_sda": str(spent), "confirmed_sold_quantity": 0,
                 "decimals": decimals, "opened_at": timestamp, "buy_tx": tx_hash,
                 "position_id": identity, "accounting_identity": identity,
                 "network_fee_sda": str(network_fee), "entry_gas_sda": str(network_fee),
@@ -347,8 +356,10 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
             "source": source, "status": "OPEN", "token": token_out,
             "symbol": position.get("symbol"), "tx": tx_hash,
             "instruction_index": log_index, "quantity": str(quantity),
-            "quantity_raw": raw_out, "decimals": decimals,
-            "invested_sda": str(spent), "cost_basis_sda": str(spent),
+            "token_amount": str(quantity), "quantity_raw": raw_out, "decimals": decimals,
+            "invested_sda": str(spent), "spent_sda": str(spent), "cost_basis_sda": str(spent),
+            "resulting_token_balance_raw": resulting_balance_raw,
+            "resulting_token_balance": str(resulting_balance),
             "execution_price_sda": str(spent / quantity),
             "network_fee_sda": str(network_fee), "swap_fee_tier": fee_tier,
             "accounting_identity": identity, "sellManagementEnabled": True, "at": timestamp,
@@ -356,7 +367,10 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
         if source == "MANUAL":
             imports = state.setdefault("manual_imports", [])
             if not any(isinstance(item, dict) and item.get("event_id") == identity for item in imports):
-                imports.append({"tx": tx_hash, "token": token_out, "event_id": identity, "at": timestamp})
+                imports.append({"tx": tx_hash, "token": token_out, "event_id": identity, "at": timestamp,
+                                "token_amount": str(quantity), "spent_sda": str(spent),
+                                "fees_sda": str(network_fee), "execution_price_sda": str(spent / quantity),
+                                "resulting_token_balance": str(resulting_balance)})
         if isinstance(pending, dict):
             state["pending_buys"].pop(token_out, None)
         seen.add(identity)
@@ -394,6 +408,9 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
         basis = Decimal(str(position.get("remaining_cost_basis", position.get("amount_sda", 0)) or 0))
         sold_cost = basis * Decimal(sold) / Decimal(recorded)
         proceeds_total = Decimal(raw_proceeds) / Decimal(10**18)
+        resulting_balance_raw = _int(
+            ((state.get("walletBalances") or {}).get("tokens") or {}).get(token_in, {}).get("raw")
+        )
         sold_fraction = Decimal(sold) / Decimal(raw_sold)
         proceeds = proceeds_total * sold_fraction
         network_fee_allocated = network_fee * sold_fraction
@@ -418,6 +435,8 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
             "token": token_in, "symbol": position.get("symbol"), "tx": tx_hash,
             "buy_tx": position.get("buy_tx"),
             "instruction_index": log_index, "sold_quantity_raw": sold,
+            "token_amount": str(Decimal(sold) / (Decimal(10) ** int(position.get("decimals") or 18))),
+            "resulting_token_balance_raw": resulting_balance_raw,
             "cost_basis_sda": str(sold_cost), "proceeds_sda": str(proceeds),
             "network_fee_sda": str(network_fee_allocated), "entry_network_fee_sda": str(entry_fee_sold),
             "net_pnl_sda": str(net_pnl), "swap_fee_tier": fee_tier,
