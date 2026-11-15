@@ -466,6 +466,7 @@ def sync_once(real_trader, *, now=None):
             }
             staged["_liveTokenMetadata"] = {k: {"decimals": v["decimals"]} for k, v in token_balances.items()}
             seen = set(state.get("processedBlockchainEvents") or [])
+            processed_signatures = set(state.get("processedBlockchainSignatures") or [])
             imported = []
             transaction_map = {}
             for row in transactions:
@@ -473,24 +474,27 @@ def sync_once(real_trader, *, now=None):
                 if tx_hash:
                     transaction_map[tx_hash] = row
             for tx_hash in sorted(tx_hashes, key=lambda value: (tx_order.get(value, (0, 0, "")), value)):
-                if not any(item.startswith(tx_hash + ":") for item in seen):
-                    tx = real_trader.rpc("eth_getTransactionByHash", [tx_hash])
-                    receipt = real_trader.rpc("eth_getTransactionReceipt", [tx_hash])
-                    if not isinstance(tx, dict) or not isinstance(receipt, dict):
-                        raise RuntimeError(f"transaction or receipt unavailable for {tx_hash}")
-                    if _int(receipt.get("status")) != 1:
-                        continue
-                    row = transaction_map.get(tx_hash, {})
-                    timestamp = row.get("timestamp") or row.get("block_timestamp")
-                    if not timestamp:
-                        # A token-transfer row supplies the same confirmed block timestamp.
-                        timestamp = next((x.get("timestamp") for x in transfers
-                                          if str(x.get("transaction_hash") or "").lower() == tx_hash), None)
-                    parsed = _parse_timestamp(timestamp)
-                    if parsed is None:
-                        raise RuntimeError(f"transaction timestamp unavailable for {tx_hash}")
-                    imported.extend(_apply_swap(staged, tx_hash, tx, receipt, parsed.isoformat(),
-                                                wallet, seen, real_trader))
+                if tx_hash in processed_signatures:
+                    continue
+                tx = real_trader.rpc("eth_getTransactionByHash", [tx_hash])
+                receipt = real_trader.rpc("eth_getTransactionReceipt", [tx_hash])
+                if not isinstance(tx, dict) or not isinstance(receipt, dict):
+                    raise RuntimeError(f"transaction or receipt unavailable for {tx_hash}")
+                if _int(receipt.get("status")) != 1:
+                    processed_signatures.add(tx_hash)
+                    continue
+                row = transaction_map.get(tx_hash, {})
+                timestamp = row.get("timestamp") or row.get("block_timestamp")
+                if not timestamp:
+                    # A token-transfer row supplies the same confirmed block timestamp.
+                    timestamp = next((x.get("timestamp") for x in transfers
+                                      if str(x.get("transaction_hash") or "").lower() == tx_hash), None)
+                parsed = _parse_timestamp(timestamp)
+                if parsed is None:
+                    raise RuntimeError(f"transaction timestamp unavailable for {tx_hash}")
+                imported.extend(_apply_swap(staged, tx_hash, tx, receipt, parsed.isoformat(),
+                                            wallet, seen, real_trader))
+                processed_signatures.add(tx_hash)
             # Preserve decimals for all known open tokens even if an explorer omits zero balances.
             for token in staged["positions"]:
                 if token not in token_balances:
@@ -528,6 +532,7 @@ def sync_once(real_trader, *, now=None):
             staged["reconciliationHealthy"] = True
             staged["buyDataHealthy"] = True
             staged["processedBlockchainEvents"] = sorted(seen)[-50000:]
+            staged["processedBlockchainSignatures"] = sorted(processed_signatures)[-50000:]
             staged["updated_at"] = synced_at
             real_trader.save_state(staged)
             return {"ok": True, "syncStatus": "FRESH", "lastSyncAttemptAt": attempted,
