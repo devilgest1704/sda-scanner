@@ -66,7 +66,10 @@ def _age(value, now=None):
 def freshness(state, now=None):
     age = _age(state.get("lastSuccessfulWalletSyncAt"), now)
     status = str(state.get("syncStatus") or "").upper()
-    if age is None or age > DEGRADED_SECONDS or status in {"FAILED", "STALE"}:
+    if (age is None or age > DEGRADED_SECONDS
+            or status in {"FAILED", "STALE", "IN_PROGRESS"}
+            or state.get("walletSyncHealthy") is not True
+            or state.get("reconciliationHealthy") is not True):
         return "STALE", age
     if age > FRESH_SECONDS or status == "DEGRADED":
         return "DEGRADED", age
@@ -77,7 +80,7 @@ def due(state, now=None):
     status = str(state.get("syncStatus") or "").upper()
     if status in {"FAILED", "STALE", "DEGRADED", "IN_PROGRESS"}:
         return True
-    if state.get("walletSyncHealthy") is False or state.get("reconciliationHealthy") is False:
+    if state.get("walletSyncHealthy") is not True or state.get("reconciliationHealthy") is not True:
         return True
     age = _age(state.get("lastSuccessfulWalletSyncAt"), now)
     return age is None or age >= SYNC_INTERVAL_SECONDS
