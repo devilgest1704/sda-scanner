@@ -327,12 +327,26 @@ def _build_dashboard_data(dashboard):
     # live and excludes unverified external receipts, airdrops and unmatched sells.
     """All REAL Telegram screens consume one blockchain-derived accounting state."""
     try:
-        accounting=dashboard.load("real_accounting_state.json",{})
-    except Exception as exc:
-        accounting={}
-        load_error=f"{type(exc).__name__}: {str(exc)[:180]}"
+        runtime_state=dashboard.load("real_trade_state.json",{})
+    except Exception:
+        runtime_state={}
+    live_runtime_ready = (
+        isinstance(runtime_state, dict)
+        and runtime_state.get("lastSuccessfulWalletSyncAt")
+        and isinstance(runtime_state.get("walletBalances"), dict)
+        and isinstance(runtime_state.get("positions"), dict)
+    )
+    if live_runtime_ready:
+        accounting = _runtime_accounting(runtime_state)
+        load_error = None
     else:
-        load_error=None
+        try:
+            accounting=dashboard.load("real_accounting_state.json",{})
+        except Exception as exc:
+            accounting={}
+            load_error=f"{type(exc).__name__}: {str(exc)[:180]}"
+        else:
+            load_error=None
     if not isinstance(accounting,dict) or accounting.get("schema_version")!=1:
         return {"source":"unavailable","load_error":load_error or "real_accounting_state.json missing or unsupported",
             "worker":None,"worker_status":"⚪ UNKNOWN","state":{},"snapshot":{},
