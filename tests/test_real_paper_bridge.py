@@ -52,6 +52,7 @@ class BridgeTests(unittest.TestCase):
             migrate_if_needed=unittest.mock.Mock(return_value=True),
             reconcile_position_wallet=unittest.mock.Mock(return_value={"status": "UNCHANGED"}),
             startup_recovery=unittest.mock.Mock(return_value=[]),
+            _request_accounting_refresh=unittest.mock.Mock(return_value="DISPATCHED"),
             evaluate_position=unittest.mock.Mock(return_value={"action": "HOLD", "status": "NO_THRESHOLD"}),
         )
         self.modules = patch.dict("sys.modules", {
@@ -71,6 +72,36 @@ class BridgeTests(unittest.TestCase):
 
     def write_paper(self, positions):
         self.paper.write_text(json.dumps({"positions": positions}), encoding="utf-8")
+
+    def test_stale_snapshot_dispatches_readonly_refresh(self):
+        stale = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        self.trader.load_state.return_value = {
+            "positions": {}, "lastBlockchainSnapshotGeneratedAt": stale,
+        }
+        bridge._request_snapshot_refresh_if_stale(self.trader, self.swing)
+        self.swing._request_accounting_refresh.assert_called_once()
+        dispatched_state = self.swing._request_accounting_refresh.call_args.args[0]
+        self.assertTrue(dispatched_state["accounting_refresh_pending"])
+
+    def test_fresh_snapshot_does_not_dispatch_refresh(self):
+        fresh = datetime.now(timezone.utc).isoformat()
+        self.trader.load_state.return_value = {
+            "positions": {}, "lastBlockchainSnapshotGeneratedAt": fresh,
+        }
+        result = bridge._request_snapshot_refresh_if_stale(self.trader, self.swing)
+        self.assertEqual(result, "FRESH")
+        self.swing._request_accounting_refresh.assert_not_called()
+
+    def test_recent_dispatch_is_not_repeated(self):
+        stale = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        dispatched = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+        self.trader.load_state.return_value = {
+            "positions": {}, "lastBlockchainSnapshotGeneratedAt": stale,
+            "accounting_refresh_last_dispatched_at": dispatched,
+        }
+        result = bridge._request_snapshot_refresh_if_stale(self.trader, self.swing)
+        self.assertEqual(result, "DISPATCH_RECENT")
+        self.swing._request_accounting_refresh.assert_not_called()
 
     def test_disabled_is_inert(self):
         with patch.dict(os.environ, {"REAL_TRADING_ENABLED": "false"}):
