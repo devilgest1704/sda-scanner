@@ -240,7 +240,7 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
     imported = []
     if token_in == str(cfg.WSDA_ADDRESS).lower() and token_out != token_in:
         raw_out = incoming.get(token_out, 0)
-        raw_in = outgoing.get(token_in, 0)
+        raw_in = max(0, outgoing.get(token_in, 0) - incoming.get(token_in, 0))
         if raw_in <= 0:
             raw_in = _int(tx.get("value"))
         if raw_out <= 0 or raw_in <= 0:
@@ -312,7 +312,7 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
                          "fees_sda": str(network_fee), "execution_price_sda": str(spent / quantity)})
     elif token_out == str(cfg.WSDA_ADDRESS).lower() and token_in != token_out:
         raw_sold = outgoing.get(token_in, 0)
-        raw_proceeds = incoming.get(token_out, 0)
+        raw_proceeds = max(0, incoming.get(token_out, 0) - outgoing.get(token_out, 0))
         if raw_sold <= 0 or raw_proceeds <= 0:
             raise RuntimeError(f"confirmed SELL swap {tx_hash} lacks exact wallet transfer evidence")
         position = state["positions"].get(token_in)
@@ -471,7 +471,8 @@ def sync_once(real_trader, *, now=None):
             # Confirm that the explorer token snapshot and RPC native balance are usable.
             if any(not isinstance(v, dict) or int(v.get("raw", -1)) < 0 for v in token_balances.values()):
                 raise RuntimeError("wallet token-balance snapshot failed validation")
-            synced_at = _iso(now)
+            synced_at = _iso()
+            staged["walletBalances"]["checked_at"] = synced_at
             staged.pop("_liveTokenMetadata", None)
             staged["lastProcessedBlock"] = latest_block
             newest_row = max(
