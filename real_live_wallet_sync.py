@@ -238,9 +238,18 @@ def _processed_id(tx_hash, log_index, token, direction):
 
 
 def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trader):
-    if _address(tx.get("to")) != str(cfg.ROUTER_ADDRESS).lower():
-        return []
     incoming, outgoing, identities = _receipt_deltas(receipt, wallet)
+    if _address(tx.get("to")) != str(cfg.ROUTER_ADDRESS).lower():
+        wsda = str(cfg.WSDA_ADDRESS).lower()
+        non_wsda_in = any(token != wsda and amount > 0 for token, amount in incoming.items())
+        non_wsda_out = any(token != wsda and amount > 0 for token, amount in outgoing.items())
+        if ((outgoing.get(wsda, 0) > 0 and non_wsda_in)
+                or (incoming.get(wsda, 0) > 0 and non_wsda_out)):
+            raise RuntimeError(
+                f"wallet swap used an unconfigured router {tx.get('to')}; "
+                "manual accounting is blocked until router is verified"
+            )
+        return []
     decoded = _calldata_tokens(tx.get("input") or tx.get("data"))
     if not decoded:
         tracked = set(state["positions"])
