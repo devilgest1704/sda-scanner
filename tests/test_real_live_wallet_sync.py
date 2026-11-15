@@ -172,6 +172,61 @@ class LiveWalletSyncTests(unittest.TestCase):
         self.assertEqual(len(restarted.state["positions"]), 1)
         self.assertEqual(len(restarted.state["trades"]), 1)
 
+    def test_reconcile_legacy_proceeds_unknown_disposal_in_place(self):
+        sell_at = "2026-11-15T07:59:45Z"
+        buy_trade = {"action": "BUY", "token": TOKEN, "tx": TX_BUY,
+                     "amount_sda": 2, "at": "2026-11-15T07:00:00Z"}
+        unresolved_trade = {
+            "action": "MANUAL_SELL", "source": "wallet_reconciliation",
+            "token": TOKEN, "sold_quantity_raw": 10 * 10**18,
+            "cost_basis_sda": 2, "proceeds_sda": None, "realized_pnl_sda": None,
+            "accounting_status": "PROCEEDS_UNKNOWN", "at": sell_at,
+        }
+        disposal = {"token": TOKEN, "quantity_raw": 10 * 10**18,
+                    "status": "PROCEEDS_UNKNOWN", "at": sell_at}
+        trader = FakeTrader({
+            "positions": {}, "trades": [buy_trade, unresolved_trade],
+            "manual_disposals": [disposal], "lastProcessedBlock": 100,
+        })
+        self.tx_row = {"hash": TX_SELL, "block_number": 101, "transaction_index": 1,
+                       "timestamp": sell_at}
+        self.transfer_row = {"transaction_hash": TX_SELL, "block_number": 101, "index": 4,
+                             "timestamp": sell_at}
+        self.token_payload = []
+        trader.tx_by_hash[TX_SELL] = {
+            "hash": TX_SELL, "from": WALLET, "to": cfg.ROUTER_ADDRESS,
+            "value": "0x0", "gasPrice": hex(10**9),
+            "input": calldata(TOKEN, cfg.WSDA_ADDRESS, 10 * 10**18),
+        }
+        trader.receipt_by_hash[TX_SELL] = {
+            "status": "0x1", "gasUsed": hex(21000), "effectiveGasPrice": hex(10**9),
+            "logs": [
+                transfer_log(TOKEN, WALLET, POOL, 10 * 10**18, 3),
+                transfer_log(cfg.WSDA_ADDRESS, POOL, WALLET, 3 * 10**18, 4),
+            ],
+        }
+        result = live.sync_once(trader, now=self.now)
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(trader.state["trades"]), 2)
+        sell = next(x for x in trader.state["trades"] if x["action"] == "MANUAL_SELL")
+        self.assertEqual(sell["tx"], TX_SELL)
+        self.assertEqual(sell["buy_tx"], TX_BUY)
+        self.assertEqual(sell["accounting_status"], "CONFIRMED")
+        self.assertAlmostEqual(float(sell["proceeds_sda"]), 3, places=8)
+        self.assertAlmostEqual(float(sell["realized_pnl_sda"]), 0.999979, places=8)
+        self.assertEqual(trader.state["manual_disposals"][0]["status"], "RECONCILED")
+        self.assertEqual(len(trader.state["manual_sell_reconciliations"]), 1)
+        before = trader.state["daily_realized_pnl_sda"]
+
+        restarted = FakeTrader(trader.state)
+        restarted.tx_by_hash = trader.tx_by_hash
+        restarted.receipt_by_hash = trader.receipt_by_hash
+        second = live.sync_once(restarted, now=self.now)
+        self.assertTrue(second["ok"])
+        self.assertEqual(len(restarted.state["trades"]), 2)
+        self.assertEqual(len(restarted.state["manual_sell_reconciliations"]), 1)
+        self.assertEqual(restarted.state["daily_realized_pnl_sda"], before)
+
     def test_manual_partial_sell_updates_quantity_cost_basis_and_realized_pnl(self):
         position = {
             "token": TOKEN, "symbol": "TST", "source": "MANUAL", "status": "OPEN",
