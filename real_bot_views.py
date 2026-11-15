@@ -10,13 +10,13 @@ import real_bot_menu as rb
 import real_pnl_stats
 import real_trading_config as cfg
 
-_CACHE={"at":0.0,"data":None}
-_CACHE_TTL=60.0
+_CACHE={"at":0.0,"data":None,"version":None}
+_CACHE_TTL=10.0
 _ORIGINAL_FETCH_WALLET_SNAPSHOT=rb._fetch_wallet_snapshot
 _WSDA=str(cfg.WSDA_ADDRESS).lower()
 
 def clear_cache():
-    _CACHE.update({"at":0.0,"data":None})
+    _CACHE.update({"at":0.0,"data":None,"version":None})
 
 def _log(message):
     print(f"[REAL_TELEGRAM] {message}")
@@ -32,6 +32,107 @@ def _runtime_dust(token,position,metadata):
             position.get("remaining_cost_basis",position.get("amount_sda")),position.get("last_market_price"))
     except Exception:
         return False
+
+def _runtime_accounting(state):
+    """Build Telegram's accounting projection exclusively from the reconciled REAL runtime ledger."""
+    trades = [t for t in (state.get("trades") or []) if isinstance(t, dict)]
+    buys, sells = [], []
+    for trade in trades:
+        action = str(trade.get("action") or "").upper()
+        tx = trade.get("tx") or trade.get("tx_hash")
+        token = str(trade.get("token") or trade.get("contract") or "").lower()
+        if action in {"BUY", "MANUAL_BUY", "BUY_RECONCILED"} and tx and token:
+            buys.append({
+                "tx": tx, "contract": token, "token": token,
+                "symbol": trade.get("symbol"), "at": trade.get("at"),
+                "invested_sda": trade.get("invested_sda", trade.get("cost_basis_sda",
+                                                                  trade.get("amount_sda"))),
+                "source": trade.get("source") or "BOT",
+            })
+        elif action in {"SELL", "MANUAL_SELL"} and tx:
+            proceeds = trade.get("proceeds_sda")
+            cost = trade.get("cost_basis_sda", trade.get("amount_sda", trade.get("cost_sda")))
+            pnl = trade.get("net_pnl_sda", trade.get("realized_pnl_sda"))
+            if proceeds is None or cost is None or pnl is None:
+                continue
+            sells.append({
+                "tx": tx, "contract": token, "token": token,
+                "symbol": trade.get("symbol"), "at": trade.get("at"),
+                "proceeds_sda": proceeds, "cost_basis_sda": cost,
+                "net_pnl_sda": pnl, "buy_tx": trade.get("buy_tx"),
+                "source": trade.get("source") or "BOT",
+            })
+    open_positions = []
+    for token, position in (state.get("positions") or {}).items():
+        if not isinstance(position, dict):
+            continue
+        decimals = int(position.get("decimals") or 18)
+        raw = int(position.get("remaining_quantity", position.get("token_amount_raw", 0)) or 0)
+        if raw <= 0:
+            continue
+        open_positions.append({
+            "token": str(token).lower(), "symbol": position.get("symbol"),
+            "quantity": str(Decimal(raw) / (Decimal(10) ** decimals)),
+            "cost_basis_sda": position.get("remaining_cost_basis",
+                                           position.get("amount_sda", position.get("cost_sda"))),
+            "buy_tx": position.get("buy_tx"), "at": position.get("opened_at"),
+            "decimals": decimals, "source": position.get("source"),
+        })
+    realized = sum((Decimal(str(x["net_pnl_sda"])) for x in sells), Decimal("0"))
+    wins = [Decimal(str(x["net_pnl_sda"])) for x in sells if Decimal(str(x["net_pnl_sda"])) > 0]
+    losses = [Decimal(str(x["net_pnl_sda"])) for x in sells if Decimal(str(x["net_pnl_sda"])) < 0]
+    pnl_values = [Decimal(str(x["net_pnl_sda"])) for x in sells]
+    statistics = {
+        "confirmed_buys_count": len(buys), "matched_sells_count": len(sells),
+        "wins": len(wins), "losses": len(losses),
+        "win_rate_pct": (len(wins) / len(sells) * 100) if sells else 0,
+        "average_win_sda": str(sum(wins) / len(wins)) if wins else None,
+        "average_loss_sda": str(sum(losses) / len(losses)) if losses else None,
+        "average_trade_sda": str(sum(pnl_values) / len(pnl_values)) if pnl_values else None,
+        "best_trade": ({"net_pnl_sda": str(max(pnl_values)),
+                        "symbol": next((x.get("symbol") for x in sells
+                                        if Decimal(str(x["net_pnl_sda"])) == max(pnl_values)), None)}
+                       if pnl_values else {}),
+        "worst_trade": ({"net_pnl_sda": str(min(pnl_values)),
+                         "symbol": next((x.get("symbol") for x in sells
+                                         if Decimal(str(x["net_pnl_sda"])) == min(pnl_values)), None)}
+                        if pnl_values else {}),
+    }
+    balances = state.get("walletBalances") if isinstance(state.get("walletBalances"), dict) else {}
+    native = Decimal(str(balances.get("native_sda_wei") or 0)) / Decimal(10**18)
+    def _fresh(stamp):
+        try:
+            parsed = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                return False
+            age = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
+            return 0 <= age <= 120
+        except (TypeError, ValueError, OverflowError):
+            return False
+    complete = (
+        state.get("syncStatus") == "FRESH"
+        and state.get("walletSyncHealthy") is True
+        and state.get("reconciliationHealthy") is True
+        and _fresh(state.get("lastSuccessfulWalletSyncAt"))
+        and _fresh(state.get("lastSuccessfulReconciliationAt"))
+    )
+    unresolved = [
+        {"tx": t.get("tx"), "at": t.get("at"), "symbol": t.get("symbol")}
+        for t in trades
+        if str(t.get("action") or "").upper() == "MANUAL_SELL"
+        and (t.get("proceeds_sda") is None or t.get("net_pnl_sda", t.get("realized_pnl_sda")) is None)
+    ]
+    return {
+        "schema_version": 1, "generated_at": state.get("lastSuccessfulWalletSyncAt"),
+        "chain_id": balances.get("chain_id"), "wallet": balances.get("wallet"),
+        "native_balance_sda": str(native), "open_positions": open_positions,
+        "buy_transactions": buys, "sell_transactions": sells,
+        "realized_pnl_sda": str(realized), "statistics": statistics,
+        "bot_reconciliation_status": "COMPLETE" if complete else "INCOMPLETE",
+        "bot_unresolved_transactions": (state.get("unresolvedBlockchainTransactions") or []) + unresolved,
+        "excluded_external_activity": {},
+    }
+
 
 def _symbol(token,fallback=None):
     try:
@@ -165,12 +266,50 @@ def _tracked_wallet_snapshot(accounting, dashboard=None):
                 has_quantity = False
             if has_quantity and not _runtime_dust(token, position, metadata):
                 expected.add(str(position.get("token") or token).lower())
+    live_balances = {}
     try:
-        snapshot = _ORIGINAL_FETCH_WALLET_SNAPSHOT(include_prices=False)
-    except Exception as exc:
-        return {"native_sda": None, "holdings": [], "token_balances_loaded": False,
-                "tracked_expected_count": len(expected), "tracked_missing_contracts": sorted(expected),
-                "market_complete": False, "errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
+        live_state = dashboard.load("real_trade_state.json", {}) if dashboard is not None else {}
+        live_balances = live_state.get("walletBalances") if isinstance(live_state, dict) else {}
+    except Exception:
+        live_balances = {}
+    if isinstance(live_balances, dict) and isinstance(live_balances.get("tokens"), dict):
+        tokens = live_balances["tokens"]
+        all_holdings = []
+        for address, item in tokens.items():
+            if not isinstance(item, dict):
+                continue
+            try:
+                raw = int(item.get("raw") or 0)
+                decimals = int(item.get("decimals"))
+                if raw <= 0 or not 0 <= decimals <= 36:
+                    continue
+                quantity = Decimal(raw) / (Decimal(10) ** decimals)
+            except (TypeError, ValueError, ArithmeticError):
+                continue
+            all_holdings.append({
+                "address": str(address).lower(), "symbol": item.get("symbol") or str(address)[:10],
+                "amount_raw": raw, "decimals": decimals, "amount": quantity,
+                "price_sda": Decimal(1) if str(address).lower() == _WSDA else None,
+                "market_value_sda": quantity if str(address).lower() == _WSDA else None,
+                "price_timestamp": live_balances.get("checked_at") if str(address).lower() == _WSDA else None,
+                "price_age_seconds": 0 if str(address).lower() == _WSDA else None,
+                "price_stale": False,
+            })
+        native_raw = live_balances.get("native_sda_wei")
+        native = (Decimal(str(native_raw)) / Decimal(10**18)) if native_raw is not None else None
+        snapshot = {
+            "wallet_address": str(live_balances.get("wallet") or rb._wallet_address()).lower(),
+            "native_sda": native, "holdings": all_holdings,
+            "token_balances_loaded": True, "updated_at": live_balances.get("checked_at"),
+            "errors": [], "source": "REAL_RUNTIME_WALLET_SYNC",
+        }
+    else:
+        try:
+            snapshot = _ORIGINAL_FETCH_WALLET_SNAPSHOT(include_prices=False)
+        except Exception as exc:
+            return {"native_sda": None, "holdings": [], "token_balances_loaded": False,
+                    "tracked_expected_count": len(expected), "tracked_missing_contracts": sorted(expected),
+                    "market_complete": False, "errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
     if not isinstance(snapshot, dict):
         snapshot = {}
     all_holdings = snapshot.get("holdings")
@@ -207,12 +346,26 @@ def _build_dashboard_data(dashboard):
     # live and excludes unverified external receipts, airdrops and unmatched sells.
     """All REAL Telegram screens consume one blockchain-derived accounting state."""
     try:
-        accounting=dashboard.load("real_accounting_state.json",{})
-    except Exception as exc:
-        accounting={}
-        load_error=f"{type(exc).__name__}: {str(exc)[:180]}"
+        runtime_state=dashboard.load("real_trade_state.json",{})
+    except Exception:
+        runtime_state={}
+    live_runtime_ready = (
+        isinstance(runtime_state, dict)
+        and runtime_state.get("lastSuccessfulWalletSyncAt")
+        and isinstance(runtime_state.get("walletBalances"), dict)
+        and isinstance(runtime_state.get("positions"), dict)
+    )
+    if live_runtime_ready:
+        accounting = _runtime_accounting(runtime_state)
+        load_error = None
     else:
-        load_error=None
+        try:
+            accounting=dashboard.load("real_accounting_state.json",{})
+        except Exception as exc:
+            accounting={}
+            load_error=f"{type(exc).__name__}: {str(exc)[:180]}"
+        else:
+            load_error=None
     if not isinstance(accounting,dict) or accounting.get("schema_version")!=1:
         return {"source":"unavailable","load_error":load_error or "real_accounting_state.json missing or unsupported",
             "worker":None,"worker_status":"⚪ UNKNOWN","state":{},"snapshot":{},
@@ -243,7 +396,7 @@ def _build_dashboard_data(dashboard):
     runtime_buy_txs = {
         str(trade.get("tx") or trade.get("tx_hash") or "").lower()
         for trade in (runtime_state.get("trades") or [])
-        if isinstance(trade,dict) and str(trade.get("action") or "").upper() in {"BUY","MANUAL_BUY"}
+        if isinstance(trade,dict) and str(trade.get("action") or "").upper() in {"BUY","MANUAL_BUY","BUY_RECONCILED"}
     } if isinstance(runtime_state,dict) else set()
     holdings_by_address={}
     snapshot=_tracked_wallet_snapshot(accounting, dashboard)
@@ -300,7 +453,7 @@ def _build_dashboard_data(dashboard):
     expected_count=int(snapshot.get("tracked_expected_count") or 0)
     portfolio_total_count=1+expected_count
     portfolio_valued_count=(1 if native is not None else 0)+market_count
-    portfolio_complete=(native is not None and bool(snapshot.get("token_balances_loaded"))
+    portfolio_complete=(complete and native is not None and bool(snapshot.get("token_balances_loaded"))
                         and bool(snapshot.get("market_complete"))
                         and not snapshot.get("tracked_missing_contracts"))
     buy_records=[{"symbol":x.get("symbol") or "UNKNOWN","at":x.get("at"),
@@ -326,7 +479,8 @@ def _build_dashboard_data(dashboard):
     realized_pnl=float(pnl_model["realized"])
     best=stats.get("best_trade") if isinstance(stats.get("best_trade"),dict) else {}
     worst=stats.get("worst_trade") if isinstance(stats.get("worst_trade"),dict) else {}
-    return {"source":"blockchain_fifo","load_error":None,"worker":worker,
+    return {"source":"live_runtime_ledger" if live_runtime_ready else "blockchain_fifo",
+        "load_error":None,"worker":worker,
         "worker_status":rb._status(worker),"state":accounting,"snapshot":snapshot,
         "positions":positions,"buy_records":buy_records,"sell_records":sell_records,
         "buy_count":int(stats.get("confirmed_buys_count") or len(buy_records)),
@@ -362,13 +516,23 @@ def _build_dashboard_data(dashboard):
 
 def _get_data(dashboard,refresh=False,cache_only=False):
     now=time.monotonic()
-    if not refresh and _CACHE.get("data") is not None:
-        if now-float(_CACHE.get("at") or 0)<=_CACHE_TTL:
-            return _CACHE["data"]
+    version=None
+    try:
+        runtime=dashboard.load("real_trade_state.json",{})
+        if isinstance(runtime,dict):
+            version=(runtime.get("updated_at"),runtime.get("lastSuccessfulWalletSyncAt"),
+                     runtime.get("lastSuccessfulReconciliationAt"))
+    except Exception:
+        version=None
+    cache_valid = (_CACHE.get("data") is not None
+                   and _CACHE.get("version") == version
+                   and now-float(_CACHE.get("at") or 0)<=_CACHE_TTL)
+    if not refresh and cache_valid:
+        return _CACHE["data"]
     if cache_only:
         return None
     data=_build_dashboard_data(dashboard)
-    _CACHE.update({"at":time.monotonic(),"data":data})
+    _CACHE.update({"at":time.monotonic(),"data":data,"version":version})
     return data
 
 def _main_keyboard():
