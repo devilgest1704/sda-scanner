@@ -655,6 +655,11 @@ def sync_once(real_trader, *, now=None):
                 receipt = real_trader.rpc("eth_getTransactionReceipt", [tx_hash])
                 if not isinstance(tx, dict) or not isinstance(receipt, dict):
                     raise TypeError(f"transaction or receipt unavailable for {tx_hash}")
+                # Only wallet-originated transactions can represent the user's
+                # own manual BUY/SELL. Incoming gifts/transfers are not purchases.
+                if _address(tx.get("from")) != wallet:
+                    processed_signatures.add(tx_hash)
+                    continue
                 if _int(receipt.get("status")) != 1:
                     processed_signatures.add(tx_hash)
                     continue
