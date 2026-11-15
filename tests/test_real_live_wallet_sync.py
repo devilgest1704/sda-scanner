@@ -112,10 +112,10 @@ class LiveWalletSyncTests(unittest.TestCase):
             return {"items": [{"height": self.explorer_block_height}], "next_page_params": None}
         if path.endswith("/transactions"):
             if params.get("filter") == "from":
-                return {"items": [self.tx_row], "next_page_params": None}
+                return {"items": [self.tx_row] if self.tx_row else [], "next_page_params": None}
             return {"items": [], "next_page_params": None}
         if path.endswith("/token-transfers"):
-            return {"items": [self.transfer_row], "next_page_params": None}
+            return {"items": [self.transfer_row] if self.transfer_row else [], "next_page_params": None}
         if path.endswith("/token-balances"):
             return self.token_payload
         raise AssertionError(path)
@@ -132,6 +132,16 @@ class LiveWalletSyncTests(unittest.TestCase):
             "logs": [transfer_log(TOKEN, POOL, WALLET, 10 * 10**18, 2)],
         }
         return trader
+
+    def test_initial_sync_without_wallet_activity_still_commits_recent_block_cursor(self):
+        self.tx_row = None
+        self.transfer_row = None
+        trader = FakeTrader({"positions": {}, "trades": []})
+        result = live.sync_once(trader, now=self.now)
+        self.assertTrue(result["ok"])
+        self.assertEqual(trader.state["lastProcessedBlock"], 995)
+        self.assertIsNone(trader.state.get("lastProcessedSignature"))
+        self.assertIsNone(trader.state.get("lastBlockchainDataAt"))
 
     def test_manual_buy_imports_exactly_once_and_commits_cursor(self):
         trader = self.trader_with_buy()
