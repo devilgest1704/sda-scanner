@@ -407,7 +407,7 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
         recorded = int(position.get("remaining_quantity", position.get("token_amount_raw", 0)) or 0)
         sold = min(recorded, raw_sold)
         if recorded <= 0 or sold <= 0:
-            return []
+            raise RuntimeError(f"confirmed SELL swap {tx_hash} has no remaining tracked quantity")
         basis = Decimal(str(position.get("remaining_cost_basis", position.get("amount_sda", 0)) or 0))
         sold_cost = basis * Decimal(sold) / Decimal(recorded)
         proceeds_total = Decimal(raw_proceeds) / Decimal(10**18)
@@ -430,6 +430,9 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
         position["realized_pnl"] = str(Decimal(str(position.get("realized_pnl") or 0)) + net_pnl)
         position["entry_gas_remaining_sda"] = str(max(Decimal(0), entry_fee_left - entry_fee_sold))
         position["wallet_available_quantity"] = remaining
+        position["resulting_token_balance_raw"] = resulting_balance_raw
+        position["resulting_token_balance"] = str(
+            Decimal(resulting_balance_raw) / (Decimal(10) ** int(position.get("decimals") or 18)))
         if remaining == 0:
             state["positions"].pop(token_in, None)
         state["daily_realized_pnl_sda"] = float(state.get("daily_realized_pnl_sda") or 0) + float(net_pnl)
@@ -441,13 +444,17 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
             "token_amount": str(Decimal(sold) / (Decimal(10) ** int(position.get("decimals") or 18))),
             "resulting_token_balance_raw": resulting_balance_raw,
             "cost_basis_sda": str(sold_cost), "proceeds_sda": str(proceeds),
+            "execution_price_sda": str(proceeds / (Decimal(sold) / (Decimal(10) ** int(position.get("decimals") or 18)))),
             "network_fee_sda": str(network_fee_allocated), "entry_network_fee_sda": str(entry_fee_sold),
+            "fees_sda": str(network_fee_allocated + entry_fee_sold),
             "net_pnl_sda": str(net_pnl), "swap_fee_tier": fee_tier,
             "accounting_identity": identity, "at": timestamp,
         })
         seen.add(identity)
         imported.append({"tx": tx_hash, "token": token_in, "source": "MANUAL_SELL",
                          "sold_quantity_raw": sold, "proceeds_sda": str(proceeds),
+                         "network_fee_sda": str(network_fee_allocated),
+                         "entry_network_fee_sda": str(entry_fee_sold),
                          "realized_pnl_sda": str(net_pnl)})
     return imported
 
