@@ -71,6 +71,8 @@ class FakeTrader:
         return 18
 
     def rpc(self, method, params):
+        if method == "eth_blockNumber":
+            return hex(1000)
         if method == "eth_getTransactionByHash":
             return self.tx_by_hash.get(params[0])
         if method == "eth_getTransactionReceipt":
@@ -105,6 +107,8 @@ class LiveWalletSyncTests(unittest.TestCase):
 
     def explorer(self, path, params=None):
         params = params or {}
+        if path == "/blocks":
+            return {"items": [{"height": 1000}], "next_page_params": None}
         if path.endswith("/transactions"):
             if params.get("filter") == "from":
                 return {"items": [self.tx_row], "next_page_params": None}
