@@ -480,11 +480,9 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
         remaining = recorded - sold
         position["remaining_quantity"] = remaining
         position["confirmed_sold_quantity"] = int(position.get("confirmed_sold_quantity") or 0) + sold
-        position["remaining_cost_basis"] = str(max(Decimal(0), basis - sold_cost))
         position["sold_cost_basis"] = str(Decimal(str(position.get("sold_cost_basis") or 0)) + sold_cost)
         position["realized_proceeds"] = str(Decimal(str(position.get("realized_proceeds") or 0)) + proceeds)
         position["realized_pnl"] = str(Decimal(str(position.get("realized_pnl") or 0)) + net_pnl)
-        position["entry_gas_remaining_sda"] = str(max(Decimal(0), entry_fee_left - entry_fee_sold))
         position["wallet_available_quantity"] = remaining
         position["resulting_token_balance_raw"] = resulting_balance_raw
         position["resulting_token_balance"] = str(
