@@ -247,12 +247,50 @@ def _tracked_wallet_snapshot(accounting, dashboard=None):
                 has_quantity = False
             if has_quantity and not _runtime_dust(token, position, metadata):
                 expected.add(str(position.get("token") or token).lower())
+    live_balances = {}
     try:
-        snapshot = _ORIGINAL_FETCH_WALLET_SNAPSHOT(include_prices=False)
-    except Exception as exc:
-        return {"native_sda": None, "holdings": [], "token_balances_loaded": False,
-                "tracked_expected_count": len(expected), "tracked_missing_contracts": sorted(expected),
-                "market_complete": False, "errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
+        live_state = dashboard.load("real_trade_state.json", {}) if dashboard is not None else {}
+        live_balances = live_state.get("walletBalances") if isinstance(live_state, dict) else {}
+    except Exception:
+        live_balances = {}
+    if isinstance(live_balances, dict) and isinstance(live_balances.get("tokens"), dict):
+        tokens = live_balances["tokens"]
+        all_holdings = []
+        for address, item in tokens.items():
+            if not isinstance(item, dict):
+                continue
+            try:
+                raw = int(item.get("raw") or 0)
+                decimals = int(item.get("decimals"))
+                if raw <= 0 or not 0 <= decimals <= 36:
+                    continue
+                quantity = Decimal(raw) / (Decimal(10) ** decimals)
+            except (TypeError, ValueError, ArithmeticError):
+                continue
+            all_holdings.append({
+                "address": str(address).lower(), "symbol": item.get("symbol") or str(address)[:10],
+                "amount_raw": raw, "decimals": decimals, "amount": quantity,
+                "price_sda": Decimal(1) if str(address).lower() == _WSDA else None,
+                "market_value_sda": quantity if str(address).lower() == _WSDA else None,
+                "price_timestamp": live_balances.get("checked_at") if str(address).lower() == _WSDA else None,
+                "price_age_seconds": 0 if str(address).lower() == _WSDA else None,
+                "price_stale": False,
+            })
+        native_raw = live_balances.get("native_sda_wei")
+        native = (Decimal(str(native_raw)) / Decimal(10**18)) if native_raw is not None else None
+        snapshot = {
+            "wallet_address": str(live_balances.get("wallet") or rb._wallet_address()).lower(),
+            "native_sda": native, "holdings": all_holdings,
+            "token_balances_loaded": True, "updated_at": live_balances.get("checked_at"),
+            "errors": [], "source": "REAL_RUNTIME_WALLET_SYNC",
+        }
+    else:
+        try:
+            snapshot = _ORIGINAL_FETCH_WALLET_SNAPSHOT(include_prices=False)
+        except Exception as exc:
+            return {"native_sda": None, "holdings": [], "token_balances_loaded": False,
+                    "tracked_expected_count": len(expected), "tracked_missing_contracts": sorted(expected),
+                    "market_complete": False, "errors": [f"{type(exc).__name__}: {str(exc)[:160]}"]}
     if not isinstance(snapshot, dict):
         snapshot = {}
     all_holdings = snapshot.get("holdings")
