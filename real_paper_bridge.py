@@ -305,6 +305,7 @@ def reconcile():
             raise RuntimeError("Invalid bridge state; refusing to overwrite it")
     else:
         state = {}
+    baseline_initialized = False
     if not state.get("initialized"):
         if paper_error:
             # Do not create a PAPER baseline from unknown state. Continue into
@@ -316,6 +317,7 @@ def reconcile():
                      "initialized_at": _now(), "last_run": _now(),
                      "wallet_sync": _wallet_sync_summary(wallet_sync, real_trader)}
             _save(STATE_FILE, state)
+            baseline_initialized = True
 
     previous = set(state.get("paper_positions", []))
     paper_valid = paper_error is None
@@ -568,6 +570,8 @@ def reconcile():
         status = "reconciled_with_sell_error"
     elif not paper_valid:
         status = "paper_state_unavailable"
+    elif baseline_initialized:
+        status = "baseline_initialized"
     else:
         status = "reconciled"
     return {"status": status,
