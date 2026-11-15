@@ -100,9 +100,22 @@ def _runtime_accounting(state):
     }
     balances = state.get("walletBalances") if isinstance(state.get("walletBalances"), dict) else {}
     native = Decimal(str(balances.get("native_sda_wei") or 0)) / Decimal(10**18)
-    complete = (state.get("syncStatus") == "FRESH"
-                and state.get("walletSyncHealthy") is True
-                and state.get("reconciliationHealthy") is True)
+    def _fresh(stamp):
+        try:
+            parsed = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                return False
+            age = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
+            return 0 <= age <= 120
+        except (TypeError, ValueError, OverflowError):
+            return False
+    complete = (
+        state.get("syncStatus") == "FRESH"
+        and state.get("walletSyncHealthy") is True
+        and state.get("reconciliationHealthy") is True
+        and _fresh(state.get("lastSuccessfulWalletSyncAt"))
+        and _fresh(state.get("lastSuccessfulReconciliationAt"))
+    )
     unresolved = [
         {"tx": t.get("tx"), "at": t.get("at"), "symbol": t.get("symbol")}
         for t in trades
