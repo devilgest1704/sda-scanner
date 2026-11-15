@@ -74,6 +74,11 @@ def freshness(state, now=None):
 
 
 def due(state, now=None):
+    status = str(state.get("syncStatus") or "").upper()
+    if status in {"FAILED", "STALE", "DEGRADED", "IN_PROGRESS"}:
+        return True
+    if state.get("walletSyncHealthy") is False or state.get("reconciliationHealthy") is False:
+        return True
     age = _age(state.get("lastSuccessfulWalletSyncAt"), now)
     return age is None or age >= SYNC_INTERVAL_SECONDS
 
