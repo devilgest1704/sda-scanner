@@ -231,11 +231,19 @@ def _processed_id(tx_hash, log_index, token, direction):
 def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trader):
     if _address(tx.get("to")) != str(cfg.ROUTER_ADDRESS).lower():
         return []
+    incoming, outgoing, identities = _receipt_deltas(receipt, wallet)
     decoded = _calldata_tokens(tx.get("input") or tx.get("data"))
     if not decoded:
+        tracked = set(state["positions"])
+        touched = (set(incoming) | set(outgoing)) - {str(cfg.WSDA_ADDRESS).lower()}
+        if tracked.intersection(touched) or touched:
+            raise RuntimeError(f"unsupported router swap encoding in confirmed transaction {tx_hash}")
         return []
     token_in, token_out, fee_tier, amount_in_calldata = decoded
-    incoming, outgoing, identities = _receipt_deltas(receipt, wallet)
+    if token_in != str(cfg.WSDA_ADDRESS).lower() and token_out != str(cfg.WSDA_ADDRESS).lower():
+        if token_in in state["positions"] or token_out in state["positions"]:
+            raise RuntimeError(f"token-to-token swap for tracked position requires manual valuation: {tx_hash}")
+        return []
     network_fee = _network_fee(receipt, tx)
     imported = []
     if token_in == str(cfg.WSDA_ADDRESS).lower() and token_out != token_in:
@@ -326,7 +334,7 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
             raise RuntimeError(f"confirmed SELL swap {tx_hash} lacks exact wallet transfer evidence")
         position = state["positions"].get(token_in)
         if not isinstance(position, dict):
-            return []
+            raise RuntimeError(f"confirmed SELL swap {tx_hash} has no tracked cost basis for {token_in}")
         event = next((x for x in identities if x[0] == token_in and x[2] == "OUT"), None)
         log_index = event[1] if event else 0
         identity = _processed_id(tx_hash, log_index, token_in, "SELL")
