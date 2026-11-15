@@ -246,7 +246,9 @@ class LiveWalletSyncTests(unittest.TestCase):
             real_trader.safety_check(10, fresh)
 
     def test_fresh_degraded_stale_thresholds(self):
-        state = {"syncStatus": "FRESH", "lastSuccessfulWalletSyncAt": self.now.isoformat()}
+        state = {"syncStatus": "FRESH", "walletSyncHealthy": True,
+                 "reconciliationHealthy": True,
+                 "lastSuccessfulWalletSyncAt": self.now.isoformat()}
         self.assertEqual(live.freshness(state, self.now)[0], "FRESH")
         from datetime import timedelta
         state["lastSuccessfulWalletSyncAt"] = (self.now - timedelta(seconds=180)).isoformat()
