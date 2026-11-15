@@ -37,7 +37,8 @@ class RuntimeTelegramTests(unittest.TestCase):
     def test_runtime_accounting_includes_manual_buy_and_partial_sell(self):
         state = {
             "syncStatus": "FRESH", "walletSyncHealthy": True, "reconciliationHealthy": True,
-            "lastSuccessfulWalletSyncAt": "2026-11-15T08:00:00+00:00",
+            "lastSuccessfulWalletSyncAt": "2026-11-15T07:45:00+00:00",
+            "lastSuccessfulReconciliationAt": "2026-11-15T07:45:00+00:00",
             "walletBalances": {"native_sda_wei": str(100 * 10**18), "wallet": "0xabc"},
             "positions": {
                 "0x" + "a" * 40: {
