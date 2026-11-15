@@ -473,6 +473,30 @@ def sync_once(real_trader, *, now=None):
             staged["_liveTokenMetadata"] = {k: {"decimals": v["decimals"]} for k, v in token_balances.items()}
             seen = set(state.get("processedBlockchainEvents") or [])
             processed_signatures = set(state.get("processedBlockchainSignatures") or [])
+            known_trade_signatures = set()
+            for trade in staged["trades"]:
+                if not isinstance(trade, dict):
+                    continue
+                action = str(trade.get("action") or "").upper()
+                tx = str(trade.get("tx") or trade.get("tx_hash") or "").lower()
+                if tx and action in {"BUY", "BUY_RECONCILED", "SELL", "MANUAL_BUY", "MANUAL_SELL"}:
+                    known_trade_signatures.add(tx)
+            for position in staged["positions"].values():
+                if not isinstance(position, dict):
+                    continue
+                buy_tx = str(position.get("buy_tx") or "").lower()
+                if buy_tx:
+                    known_trade_signatures.add(buy_tx)
+                known_trade_signatures.update(str(tx).lower() for tx in position.get("additional_buy_txs", []))
+            for item in staged["manual_imports"]:
+                if isinstance(item, dict) and item.get("tx"):
+                    known_trade_signatures.add(str(item["tx"]).lower())
+            for intent in (state.get("sell_intents") or {}).values():
+                if isinstance(intent, dict) and (intent.get("swap_tx") or intent.get("tx_hash")):
+                    known_trade_signatures.add(str(intent.get("swap_tx") or intent.get("tx_hash")).lower())
+            for intent in staged["pending_sells"].values():
+                if isinstance(intent, dict) and (intent.get("swap_tx") or intent.get("tx_hash")):
+                    known_trade_signatures.add(str(intent.get("swap_tx") or intent.get("tx_hash")).lower())
             imported = []
             transaction_map = {}
             for row in transactions:
@@ -481,6 +505,9 @@ def sync_once(real_trader, *, now=None):
                     transaction_map[tx_hash] = row
             for tx_hash in sorted(tx_hashes, key=lambda value: (tx_order.get(value, (0, 0, "")), value)):
                 if tx_hash in processed_signatures:
+                    continue
+                if tx_hash in known_trade_signatures:
+                    processed_signatures.add(tx_hash)
                     continue
                 tx = real_trader.rpc("eth_getTransactionByHash", [tx_hash])
                 receipt = real_trader.rpc("eth_getTransactionReceipt", [tx_hash])
