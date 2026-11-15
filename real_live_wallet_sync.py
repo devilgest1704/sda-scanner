@@ -241,9 +241,7 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
         return []
     token_in, token_out, fee_tier, amount_in_calldata = decoded
     if token_in != str(cfg.WSDA_ADDRESS).lower() and token_out != str(cfg.WSDA_ADDRESS).lower():
-        if token_in in state["positions"] or token_out in state["positions"]:
-            raise RuntimeError(f"token-to-token swap for tracked position requires manual valuation: {tx_hash}")
-        return []
+        raise RuntimeError(f"token-to-token swap requires SDA valuation before cursor commit: {tx_hash}")
     network_fee = _network_fee(receipt, tx)
     imported = []
     if token_in == str(cfg.WSDA_ADDRESS).lower() and token_out != token_in:
