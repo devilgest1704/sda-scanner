@@ -254,10 +254,21 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
     imported = []
     if token_in == str(cfg.WSDA_ADDRESS).lower() and token_out != token_in:
         raw_out = incoming.get(token_out, 0)
-        raw_in = max(0, outgoing.get(token_in, 0) - incoming.get(token_in, 0))
-        if raw_in <= 0:
-            raw_in = _int(tx.get("value"))
-        if raw_out <= 0 or raw_in <= 0:
+        transfer_spend = max(0, outgoing.get(token_in, 0) - incoming.get(token_in, 0))
+        native_spend = _int(tx.get("value"))
+        if transfer_spend and native_spend:
+            if transfer_spend == amount_in_calldata:
+                raw_in = transfer_spend
+            elif native_spend == amount_in_calldata:
+                raw_in = native_spend
+            elif transfer_spend + native_spend == amount_in_calldata:
+                raw_in = transfer_spend + native_spend
+            else:
+                raise RuntimeError(f"confirmed BUY swap {tx_hash} has ambiguous native/token input")
+        else:
+            raw_in = transfer_spend or native_spend
+        if (raw_out <= 0 or raw_in <= 0
+                or (amount_in_calldata > 0 and raw_in != amount_in_calldata)):
             raise RuntimeError(f"confirmed BUY swap {tx_hash} lacks exact wallet transfer evidence")
         decimals = _token_rows_for_decimals(state, token_out, real_trader)
         quantity = Decimal(raw_out) / (Decimal(10) ** decimals)
@@ -345,7 +356,8 @@ def _apply_swap(state, tx_hash, tx, receipt, timestamp, wallet, seen, real_trade
     elif token_out == str(cfg.WSDA_ADDRESS).lower() and token_in != token_out:
         raw_sold = outgoing.get(token_in, 0)
         raw_proceeds = max(0, incoming.get(token_out, 0) - outgoing.get(token_out, 0))
-        if raw_sold <= 0 or raw_proceeds <= 0:
+        if (raw_sold <= 0 or raw_proceeds <= 0
+                or (amount_in_calldata > 0 and raw_sold != amount_in_calldata)):
             raise RuntimeError(f"confirmed SELL swap {tx_hash} lacks exact wallet transfer evidence")
         position = state["positions"].get(token_in)
         if not isinstance(position, dict):
