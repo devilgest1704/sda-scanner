@@ -279,7 +279,7 @@ def write_status(cwd=None, output=STATUS_FILE):
     status["lastProcessedSignature"] = wallet_sync.get("lastProcessedSignature") or ledger.get("lastProcessedSignature")
     wallet_age = _age_seconds(status.get("lastSuccessfulWalletSyncAt"))
     reconciliation_age = _age_seconds(status.get("lastSuccessfulReconciliationAt"))
-    persisted_sync_status = str(status.get("syncStatus") or "UNKNOWN").upper()
+    persisted_sync_status = str(wallet_sync.get("syncStatus") or ledger.get("syncStatus") or "UNKNOWN").upper()
     if persisted_sync_status in {"FAILED", "STALE", "DEGRADED", "IN_PROGRESS"}:
         effective_sync_status = persisted_sync_status
     elif wallet_age is None or wallet_age > 300:
@@ -302,11 +302,9 @@ def write_status(cwd=None, output=STATUS_FILE):
     )
     status["sellDataHealthy"] = bool(ledger.get("sellDataHealthy"))
     status["lastBlockchainDataAt"] = (wallet_sync.get("lastBlockchainDataAt")
-                                       or ledger.get("lastBlockchainDataAt")
-                                       or (accounting.get("blockchain_range") or {}).get("latest_timestamp"))
+                                       or ledger.get("lastBlockchainDataAt"))
     status["ledgerUpdatedAt"] = wallet_sync.get("ledgerUpdatedAt") or ledger.get("ledgerUpdatedAt") or ledger.get("updated_at")
     status["lastSyncError"] = wallet_sync.get("lastSyncError") or ledger.get("lastSyncError")
-    status["syncStatus"] = wallet_sync.get("syncStatus") or ledger.get("syncStatus") or "UNKNOWN"
     whale = _read_json(root, "whale_state.json")
     market_data = _read_json(root, "market_data.json")
     market_source = _read_json(root, "market_source_state.json")
