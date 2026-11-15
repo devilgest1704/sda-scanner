@@ -180,6 +180,8 @@ def real_buy_status(rows, real, stale):
         if real is not None and not real.get("sync_healthy"):
             return "BLOCKED", "Wallet sync/reconciliation is not FRESH", None
         return "DATA STALE", None, None
+    if real is not None and real.get("worker_critical"):
+        return "BLOCKED", "SELL/worker safety degraded", None
     ready = [row for row in rows if row["status"] == "BUY"]
     if real is not None and real["pending"]:
         return "PENDING", "BUY in flight", ready[0] if ready else None
