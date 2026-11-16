@@ -115,7 +115,11 @@ def main():
     hashes=sorted({str(x.get("hash") or "").lower() for x in txs if x.get("hash")} | {str(x.get("transaction_hash") or "").lower() for x in transfers if x.get("transaction_hash")} | {str(x.get("transaction_hash") or "").lower() for x in internal if x.get("transaction_hash")})
     details={}; errors={}
     for i,h in enumerate(hashes,1):
-        try: details[h]=get(f"/transactions/{h}")
+        try:
+            detail=get(f"/transactions/{h}")
+            # Some explorer transaction-detail endpoints legitimately return JSON null.
+            # Fall back to the already-fetched base transaction record for those hashes.
+            details[h]=detail if isinstance(detail,dict) else {}
         except Exception as e: errors[h]=str(e)
         if i%25==0: print(f"Details {i}/{len(hashes)}",flush=True)
     logs={}; txtrans={}; txinternal={}
