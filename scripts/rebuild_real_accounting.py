@@ -36,9 +36,19 @@ def get(path,params=None):
 def paged(path,params=None):
     p=dict(params or {}); rows=[]; pages=0; seen=set()
     while True:
-        d=get(path,p)
+        d=None; last_shape="unknown"
+        for attempt in range(5):
+            d=get(path,p)
+            if isinstance(d,dict) and isinstance(d.get("items"),list):
+                break
+            if isinstance(d,dict):
+                last_shape=f"object keys={sorted(str(k) for k in d.keys())}"
+            else:
+                last_shape=f"type={type(d).__name__}"
+            print(f"Retrying malformed explorer page {path} ({attempt+1}/5): {last_shape}",flush=True)
+            if attempt<4: time.sleep(min(2**attempt,16))
         if not isinstance(d,dict) or not isinstance(d.get("items"),list):
-            raise RuntimeError("Unexpected paginated response: "+path)
+            raise RuntimeError(f"Unexpected paginated response: {path} ({last_shape})")
         rows.extend(d["items"]); pages+=1
         nxt=d.get("next_page_params")
         if not nxt: return rows,pages
