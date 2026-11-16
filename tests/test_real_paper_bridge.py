@@ -93,15 +93,57 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(result, "FRESH")
         self.swing._request_accounting_refresh.assert_not_called()
 
-    def test_recent_dispatch_is_not_repeated(self):
-        stale = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
-        dispatched = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+    def test_refresh_is_requested_after_five_minutes(self):
+        stale = (datetime.now(timezone.utc) - timedelta(minutes=6)).isoformat()
         self.trader.load_state.return_value = {
             "positions": {}, "lastBlockchainSnapshotGeneratedAt": stale,
-            "accounting_refresh_last_dispatched_at": dispatched,
         }
         result = bridge._request_snapshot_refresh_if_stale(self.trader, self.swing)
-        self.assertEqual(result, "DISPATCH_RECENT")
+        self.assertEqual(result, "DISPATCHED")
+        dispatched_state = self.swing._request_accounting_refresh.call_args.args[0]
+        self.assertEqual(dispatched_state["accounting_refresh_requested_from_snapshot_at"], stale)
+
+    def test_refresh_retries_after_two_minutes_until_snapshot_is_reconciled(self):
+        stale = (datetime.now(timezone.utc) - timedelta(minutes=12)).isoformat()
+        requested = (datetime.now(timezone.utc) - timedelta(minutes=12)).isoformat()
+        attempted = (datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat()
+        self.trader.load_state.return_value = {
+            "positions": {}, "lastBlockchainSnapshotGeneratedAt": stale,
+            "accounting_refresh_requested_from_snapshot_at": requested,
+            "accounting_refresh_requested_at": requested,
+            "accounting_refresh_last_attempt_at": attempted,
+        }
+        result = bridge._request_snapshot_refresh_if_stale(self.trader, self.swing)
+        self.assertEqual(result, "DISPATCHED")
+        self.swing._request_accounting_refresh.assert_called_once()
+
+    def test_refresh_waits_until_two_minute_retry_window(self):
+        stale = (datetime.now(timezone.utc) - timedelta(minutes=12)).isoformat()
+        attempted = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
+        self.trader.load_state.return_value = {
+            "positions": {}, "lastBlockchainSnapshotGeneratedAt": stale,
+            "accounting_refresh_requested_from_snapshot_at": stale,
+            "accounting_refresh_last_attempt_at": attempted,
+        }
+        result = bridge._request_snapshot_refresh_if_stale(self.trader, self.swing)
+        self.assertEqual(result, "RETRY_WAIT")
+        self.swing._request_accounting_refresh.assert_not_called()
+
+    def test_refresh_only_clears_after_new_snapshot_and_reconciliation(self):
+        now = datetime.now(timezone.utc)
+        old = (now - timedelta(minutes=8)).isoformat()
+        generated = (now - timedelta(minutes=1)).isoformat()
+        self.trader.load_state.return_value = {
+            "positions": {}, "lastBlockchainSnapshotGeneratedAt": generated,
+            "accounting_refresh_requested_from_snapshot_at": old,
+            "lastSuccessfulWalletSync": now.isoformat(),
+            "lastSuccessfulReconciliation": now.isoformat(),
+            "syncStatus": "FRESH",
+        }
+        result = bridge._request_snapshot_refresh_if_stale(self.trader, self.swing)
+        self.assertEqual(result, "REFRESH_CONFIRMED")
+        saved = self.trader.save_state.call_args.args[0]
+        self.assertNotIn("accounting_refresh_requested_from_snapshot_at", saved)
         self.swing._request_accounting_refresh.assert_not_called()
 
     def test_disabled_is_inert(self):
