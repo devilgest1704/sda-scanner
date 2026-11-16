@@ -88,6 +88,9 @@ class BridgeTests(unittest.TestCase):
         fresh = datetime.now(timezone.utc).isoformat()
         self.trader.load_state.return_value = {
             "positions": {}, "lastBlockchainSnapshotGeneratedAt": fresh,
+            "lastSuccessfulWalletSync": fresh,
+            "lastSuccessfulReconciliation": fresh,
+            "syncStatus": "FRESH",
         }
         result = bridge._request_snapshot_refresh_if_stale(self.trader, self.swing)
         self.assertEqual(result, "FRESH")
