@@ -370,7 +370,13 @@ def main():
     # Native cash-flow reconciliation: external SDA in/out, router buy spends,
     # swap proceeds, residual WSDA, and gas paid by this wallet.
     wallet_fees=Decimal(0); native_in=Decimal(0); native_out=Decimal(0); router_buy_spend=Decimal(0)
-    for h,d in details.items():
+    # Transaction-detail endpoints can return JSON null for valid hashes.
+    # Use the already-fetched address transaction as the authoritative fallback
+    # so native cash flows and gas are not silently omitted from reconciliation.
+    for h in hashes:
+        d=details.get(h)
+        if not isinstance(d,dict) or not d:
+            d=txmap.get(h,{})
         fee=dec((d.get("fee") or {}).get("value","0"),18)
         if addr(d.get("from"))==WALLET: wallet_fees+=fee
         val=dec(d.get("value","0"),18); fr,to=addr(d.get("from")),addr(d.get("to"))
