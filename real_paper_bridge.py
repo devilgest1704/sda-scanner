@@ -179,7 +179,7 @@ def _request_snapshot_refresh_if_stale(real_trader, swing_executor):
         # mistaken for a refreshed snapshot. Every retry retains that baseline.
         if not request_pending:
             state["accounting_refresh_requested_from_snapshot_at"] = (
-                generated.isoformat() if generated else ""
+                generated.isoformat() if generated else now.isoformat()
             )
             state["accounting_refresh_requested_at"] = now.isoformat()
         state["accounting_refresh_pending"] = True
