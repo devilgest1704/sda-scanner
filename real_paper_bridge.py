@@ -172,7 +172,12 @@ def _request_snapshot_refresh_if_stale(real_trader, swing_executor):
                 return "RETRY_WAIT"
 
         elif snapshot_age is not None and 0 <= snapshot_age < SNAPSHOT_REFRESH_TRIGGER_SECONDS:
-            return "FRESH"
+            wallet_sync = _refresh_timestamp(state.get("lastSuccessfulWalletSync"))
+            reconciliation = _refresh_timestamp(state.get("lastSuccessfulReconciliation"))
+            if (str(state.get("syncStatus") or "").upper() == "FRESH"
+                    and wallet_sync is not None and wallet_sync >= generated
+                    and reconciliation is not None and reconciliation >= generated):
+                return "FRESH"
 
         # Missing/invalid/future timestamps fail closed and trigger collection.
         # Record the baseline before dispatch so a 204 response cannot be
