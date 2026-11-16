@@ -119,41 +119,72 @@ def _persist_events(actions):
     _save(EVENTS_FILE, events[-1000:])
 
 
-def _request_snapshot_refresh_if_stale(real_trader, swing_executor):
-    """Worker watchdog: keep the read-only blockchain snapshot refreshing while REAL runs.
+SNAPSHOT_REFRESH_TRIGGER_SECONDS = 5 * 60
+SNAPSHOT_REFRESH_RETRY_SECONDS = 2 * 60
+SNAPSHOT_FRESHNESS_LIMIT_SECONDS = 20 * 60
 
-    The scheduled workflow is the primary producer, but the live worker must also
-    recover automatically if scheduled Actions are paused, delayed or fail. This
-    dispatches only the existing read-only accounting workflow; it never places
-    or signs a transaction.
+
+def _refresh_timestamp(value):
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return stamp if stamp.tzinfo is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _request_snapshot_refresh_if_stale(real_trader, swing_executor):
+    """Proactively refresh after 5m; retry every 2m until load + reconciliation.
+
+    Dispatch is never treated as success. Success requires a newer snapshot to be
+    loaded by the worker, FRESH wallet sync, and successful reconciliation. This
+    path only dispatches the read-only collector and cannot block independent SELL
+    management.
     """
     try:
         state = real_trader.load_state()
         if not isinstance(state, dict):
             return "STATE_UNAVAILABLE"
         now = datetime.now(timezone.utc)
-        generated = state.get("lastBlockchainSnapshotGeneratedAt")
-        try:
-            stamp = datetime.fromisoformat(str(generated).replace("Z", "+00:00"))
-            if stamp.tzinfo is None:
-                stamp = None
-        except (TypeError, ValueError):
-            stamp = None
-        snapshot_age = (now - stamp).total_seconds() if stamp else None
-        if snapshot_age is not None and 0 <= snapshot_age <= 20 * 60:
+        generated = _refresh_timestamp(state.get("lastBlockchainSnapshotGeneratedAt"))
+        snapshot_age = (now - generated).total_seconds() if generated else None
+
+        requested_from = _refresh_timestamp(state.get("accounting_refresh_requested_from_snapshot_at"))
+        request_pending = requested_from is not None
+        if request_pending:
+            loaded_new_snapshot = generated is not None and generated > requested_from
+            wallet_sync = _refresh_timestamp(state.get("lastSuccessfulWalletSync"))
+            reconciliation = _refresh_timestamp(state.get("lastSuccessfulReconciliation"))
+            fully_reconciled = (
+                loaded_new_snapshot
+                and str(state.get("syncStatus") or "").upper() == "FRESH"
+                and wallet_sync is not None and wallet_sync >= generated
+                and reconciliation is not None and reconciliation >= generated
+            )
+            if fully_reconciled:
+                state.pop("accounting_refresh_requested_from_snapshot_at", None)
+                state.pop("accounting_refresh_requested_at", None)
+                state.pop("accounting_refresh_last_error", None)
+                state["accounting_refresh_pending"] = False
+                real_trader.save_state(state)
+                return "REFRESH_CONFIRMED"
+            last_attempt = _refresh_timestamp(state.get("accounting_refresh_last_attempt_at"))
+            if last_attempt is not None and 0 <= (now - last_attempt).total_seconds() < SNAPSHOT_REFRESH_RETRY_SECONDS:
+                return "RETRY_WAIT"
+
+        elif snapshot_age is not None and 0 <= snapshot_age < SNAPSHOT_REFRESH_TRIGGER_SECONDS:
             return "FRESH"
-        # Do not flood Actions if the collector is still running. A failed
-        # dispatch is retried by the next worker cycle (the dispatcher itself
-        # also has a short attempt throttle).
-        last_dispatch = state.get("accounting_refresh_last_dispatched_at")
-        try:
-            dispatched = datetime.fromisoformat(str(last_dispatch).replace("Z", "+00:00"))
-            if dispatched.tzinfo is not None and 0 <= (now - dispatched).total_seconds() < 15 * 60:
-                return "DISPATCH_RECENT"
-        except (TypeError, ValueError):
-            pass
+
+        # Missing/invalid/future timestamps fail closed and trigger collection.
+        # Record the baseline before dispatch so a 204 response cannot be
+        # mistaken for a refreshed snapshot. Every retry retains that baseline.
+        if not request_pending:
+            state["accounting_refresh_requested_from_snapshot_at"] = (
+                generated.isoformat() if generated else ""
+            )
+            state["accounting_refresh_requested_at"] = now.isoformat()
         state["accounting_refresh_pending"] = True
-        return swing_executor._request_accounting_refresh(state)
+        result = swing_executor._request_accounting_refresh(state)
+        return result if result in {"DISPATCHED", "THROTTLED"} else "RETRY_" + str(result)
     except Exception as exc:  # noqa: BLE001 - watchdog must not interrupt SELL management
         print(f"::warning::REAL accounting refresh watchdog failed: {type(exc).__name__}: {str(exc)[:180]}",
               file=sys.stderr, flush=True)
