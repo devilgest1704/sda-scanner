@@ -1,7 +1,7 @@
-"""Concise, read-only Telegram home screen and BUY Scanner.
+"""Concise, read-only Telegram home screen and independent REAL BUY Scanner.
 
-Presentation only: reuses the REAL accounting view model and the PAPER V30
-decision engine. Never prepares, signs or broadcasts a transaction.
+Presentation only: reads REAL accounting and REAL BUY signal diagnostics.
+Never prepares, signs or broadcasts a transaction.
 """
 from datetime import datetime, timezone
 from decimal import Decimal
