@@ -874,7 +874,19 @@ def patch(main_module,engine):
             from datetime import datetime, timezone
             import json
             from pathlib import Path
-            p=Path(EXECUTION_STATE_FILE)
+            # Publish a market-only scanner snapshot for the independent REAL adapter.
+        # No PAPER ledger, cooldown, optimizer or forward-Shadow state is included.
+        real_market_rows=[{k:row.get(k) for k in (
+            "address","contract","symbol","score","quality","impulse","phase",
+            "price_sda","quote_at","trades_1h","buy_ratio","flow_1h","flow_15m",
+            "volume_1h","m15","m1h","data_age_sec","strategy_version","macd_filter"
+        )} for row in candidates]
+        real_market={"schema_version":1,"updated_at":scan_at,"candidates":real_market_rows}
+        real_market_path=Path("real_buy_market_snapshot.json")
+        real_market_tmp=real_market_path.with_suffix(".json.tmp")
+        real_market_tmp.write_text(json.dumps(real_market,indent=2,ensure_ascii=False),encoding="utf-8")
+        real_market_tmp.replace(real_market_path)
+        p=Path(EXECUTION_STATE_FILE)
             state={}
             try:
                 state=json.loads(p.read_text(encoding="utf-8"))
@@ -1003,6 +1015,7 @@ def write_scan_funnel(market_file="market_analysis.json"):
                     "buy_ratio":round(n(d.get("buy_ratio")),4),
                     "quote_quality":d.get("paper_quote_quality")},
                 "decision_reason":d.get("paper_buy_block_reason"),
+                "macd_filter":d.get("paper_macd_filter"),
                 "fresh_momentum_research_ready":bool(d.get("fresh_momentum_research_ready")),
                 "paper_entry_lane":d.get("paper_entry_lane"),
                 "gates":list(dict.fromkeys(d.get("paper_buy_gate_failures") or [])),
