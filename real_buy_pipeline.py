@@ -21,6 +21,7 @@ REAL_SIGNAL_LOSS_BUDGET_SDA = 20.0
 REAL_SIGNAL_MIN_CLOSED_TRADES = 8
 REAL_COOLDOWN_HOURS = 6.0
 SCHEMA_VERSION = 1
+MAX_BUYS_PER_SCAN = 1  # Same active V30 limit; independent from PAPER scan counters.
 
 
 def _now():
@@ -255,11 +256,17 @@ def run(market_path=MARKET_FILE, state_path=STATE_FILE, *, at=None):
                 "blocker": f"REAL_LEDGER_UNAVAILABLE: {str(exc)[:180]}"}
 
     _sync_real_cooldowns(signal_state, real_state, now)
-    rows = market["candidates"]
+    rows = sorted(market["candidates"], key=lambda row: (
+        -(_number(row.get("score")) or 0.0),
+        -(_number(row.get("quality")) or 0.0),
+        -(_number(row.get("impulse")) or 0.0),
+        str(row.get("address") or ""),
+    ))
     diagnostics = {}
     actions = []
     buy_ready = 0
     watch = 0
+    executions_this_scan = 0
     for candidate in rows:
         if not isinstance(candidate, dict):
             continue
@@ -276,6 +283,9 @@ def run(market_path=MARKET_FILE, state_path=STATE_FILE, *, at=None):
         }
         result = admit_candidate(candidate, temporal, signal_state, real_state,
                                  cfg, real_trader.safety_check, now)
+        if result["ready"] and executions_this_scan >= MAX_BUYS_PER_SCAN:
+            result = {"ready": False, "status": "BLOCKED",
+                      "reason": "REAL_MAX_BUYS_PER_SCAN"}
         diagnostics[token] = {
             "symbol": candidate.get("symbol"), "status": result["status"],
             "buy_ready": result["ready"], "blocker": result["reason"],
@@ -293,6 +303,7 @@ def run(market_path=MARKET_FILE, state_path=STATE_FILE, *, at=None):
             signal_state["consumed_signal_ids"] = signal_state["consumed_signal_ids"][-20000:]
             save_state(signal_state, state_path)
             if cfg.REAL_TRADING_ENABLED and not cfg.REAL_TRADING_DRY_RUN:
+                executions_this_scan += 1
                 try:
                     executed = real_trader.execute_buy(
                         result["token"], result["symbol"], result["amount_sda"]
@@ -302,8 +313,12 @@ def run(market_path=MARKET_FILE, state_path=STATE_FILE, *, at=None):
                     real_state = real_trader.load_state()
                 except Exception as exc:
                     actions.append({"token": token, "status": "ERROR", "error": str(exc)[:240]})
-            else:
+            elif cfg.REAL_TRADING_ENABLED and cfg.REAL_TRADING_DRY_RUN:
+                executions_this_scan += 1
                 actions.append({"token": token, "status": "WOULD_EXECUTE",
+                                "amount_sda": result["amount_sda"]})
+            else:
+                actions.append({"token": token, "status": "REAL_TRADING_DISABLED",
                                 "amount_sda": result["amount_sda"]})
     signal_state["last_scan_at"] = now.isoformat()
     signal_state["last_diagnostics"] = diagnostics
