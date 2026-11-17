@@ -134,7 +134,7 @@ def _sync_real_cooldowns(signal_state, real_state, at):
     for trade in real_state.get("trades", []) if isinstance(real_state.get("trades"), list) else []:
         if not isinstance(trade, dict) or str(trade.get("action") or "").upper() != "SELL":
             continue
-        reason = str(trade.get("close_reason") or trade.get("reason") or "").upper()
+        reason = str(trade.get("sell_reason") or trade.get("close_reason") or trade.get("reason") or "").upper()
         if not any(marker in reason for marker in ("STOP", "WEAK", "STALE", "BREAKDOWN")):
             continue
         token = str(trade.get("token") or "").lower()
