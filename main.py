@@ -19,7 +19,7 @@ engine=_paper
 def _run_with_paper_telemetry():
     """Run the REAL and PAPER adapters independently against one market scan."""
     import os
-    os.environ.setdefault("REAL_BUY_PIPELINE_ENABLED", "true")
+    os.environ["REAL_BUY_PIPELINE_ENABLED"] = "true"
     # The scanner snapshot and REAL BUY evaluation run BEFORE PAPER processing.
     # No PAPER position transition is needed to discover or authorize a REAL signal.
     try:
