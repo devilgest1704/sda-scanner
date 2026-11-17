@@ -91,10 +91,13 @@ def load_market_snapshot(path=MARKET_FILE):
         value = json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception as exc:
         raise RuntimeError(f"REAL BUY market snapshot unavailable: {exc}") from exc
+    updated = _stamp(value.get("updated_at")) if isinstance(value, dict) else None
     if (not isinstance(value, dict) or value.get("schema_version") != 1
-            or not isinstance(value.get("candidates"), list)
-            or not _stamp(value.get("updated_at"))):
+            or not isinstance(value.get("candidates"), list) or updated is None):
         raise RuntimeError("REAL BUY market snapshot invalid")
+    age = ((_now() - updated).total_seconds())
+    if age < 0 or age > 300:
+        raise RuntimeError(f"REAL BUY market snapshot stale ({age:.0f}s)")
     return value
 
 
