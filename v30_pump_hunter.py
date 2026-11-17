@@ -1181,6 +1181,16 @@ def write_real_market_snapshot(market_file="market_data.json"):
     data=json.loads(Path(market_file).read_text(encoding="utf-8"))
     if not isinstance(data,dict) or not isinstance(data.get("tokens"),dict):
         raise RuntimeError("REAL market source is invalid")
+    source_stamp=data.get("updated_at")
+    try:
+        source_dt=datetime.fromisoformat(str(source_stamp).replace("Z","+00:00"))
+        if source_dt.tzinfo is None:
+            raise ValueError("timezone missing")
+        source_age=(datetime.now(timezone.utc)-source_dt.astimezone(timezone.utc)).total_seconds()
+        if source_age<0 or source_age>300:
+            raise ValueError("market source stale")
+    except (TypeError,ValueError) as exc:
+        raise RuntimeError(f"REAL market source timestamp invalid or stale: {exc}") from exc
     state=load_state()
     market_history={"history":state.setdefault("market_history",{})}
     rows=[]
