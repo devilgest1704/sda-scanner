@@ -21,7 +21,12 @@ def _run_with_paper_telemetry():
     try:
         return engine.main()
     finally:
-        # Publish shared market-only candidates, then independently evaluate REAL.
+        # REAL market snapshot uses the same V30 scoring math with REAL-owned history.
+        try:
+            _v30.write_real_market_snapshot("market_data.json")
+        except Exception as exc:
+            print("::error::REAL market snapshot failed closed:", repr(exc))
+        # PAPER telemetry runs in parallel and cannot authorize or block REAL BUY.
         try:
             _v30.write_scan_funnel("market_analysis.json")
         except Exception as exc:
