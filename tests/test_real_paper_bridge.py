@@ -176,6 +176,14 @@ class BridgeTests(unittest.TestCase):
         bridge.reconcile()
         self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 30.0)
 
+    def test_independent_real_pipeline_does_not_read_paper_positions_or_buy_from_them(self):
+        self.paper.unlink()
+        with patch.dict(os.environ, {"REAL_BUY_PIPELINE_ENABLED": "true"}):
+            result = bridge.reconcile()
+        self.assertEqual(result["paper_state"], "NOT_READ")
+        self.trader.execute_buy.assert_not_called()
+        self.trader.execute_sell.assert_not_called()
+
     def test_first_run_only_sets_baseline(self):
         self.write_paper({TOKEN: {"symbol": "TEST"}})
         result = bridge.reconcile()
