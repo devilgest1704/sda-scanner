@@ -167,7 +167,7 @@ def _candidate_signal(candidate, previous, at):
         "trades_1h": candidate.get("trades_1h"),
         "buy_ratio": candidate.get("buy_ratio"),
     }
-    temporal = evaluate_tp4(token, current, at=at, previous=previous)
+    temporal = evaluate_tp4(token, current, at=at, previous=previous if isinstance(previous, dict) else {})
     return current, temporal
 
 
