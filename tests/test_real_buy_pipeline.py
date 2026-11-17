@@ -113,6 +113,15 @@ class RealBuyPipelineTests(unittest.TestCase):
                                           real_state(positions=7), self.cfg, safety, self.now)
         self.assertTrue(result["ready"])
 
+    def test_temporal_adapter_never_falls_back_to_forward_shadow(self):
+        from tools import temporal_recovery_buy
+        with patch.object(temporal_recovery_buy, "previous_signals",
+                          side_effect=AssertionError("PAPER Shadow journal read")):
+            _current, result = pipeline._candidate_signal(
+                candidate(self.now), None, self.now
+            )
+        self.assertFalse(result["ready"])
+
     def test_09_restart_preserves_temporal_state_and_deduplicates(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "real_buy_signal_state.json"
