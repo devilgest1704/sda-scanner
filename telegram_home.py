@@ -239,6 +239,14 @@ def _scanner_inputs(dashboard):
 
 def _home_scanner_lines(dashboard):
     rows, real, stale = _scanner_inputs(dashboard)
+    real_signal = dashboard.load("real_buy_signal_state.json", {})
+    last_scan = real_signal.get("last_scan_at") if isinstance(real_signal, dict) else None
+    try:
+        signal_stamp = datetime.fromisoformat(str(last_scan).replace("Z", "+00:00"))
+        signal_age = (datetime.now(timezone.utc) - signal_stamp.astimezone(timezone.utc)).total_seconds() if signal_stamp.tzinfo else float("inf")
+    except (TypeError, ValueError):
+        signal_age = float("inf")
+    stale = stale or signal_age < 0 or signal_age > 300
     worker = rb._load_worker_status(dashboard) or {}
     lines = ["", "🔥 REAL BUY SCANNER"]
     if stale:
@@ -257,12 +265,10 @@ def _home_scanner_lines(dashboard):
             if last_sync:
                 lines.append(f"Last successful wallet sync: {last_sync}")
     else:
-        real_signal = dashboard.load("real_buy_signal_state.json", {})
         summary = real_signal.get("summary", {}) if isinstance(real_signal, dict) else {}
         lines += [_line("🟢 BUY-ready", str(int(summary.get("buy_ready") or 0))),
                   _line("🟡 WATCH", str(int(summary.get("watch") or 0)))]
     lines += _real_lines(real)
-    real_signal = dashboard.load("real_buy_signal_state.json", {})
     summary = real_signal.get("summary", {}) if isinstance(real_signal, dict) else {}
     state = "READY" if int(summary.get("buy_ready") or 0) > 0 else ("DATA STALE" if stale else "NO SIGNAL")
     lines.append(f"{STATUS_ICONS[state]} REAL BUY: {state}")
@@ -338,6 +344,14 @@ def buy_scanner_text(dashboard, detail=False):
     summary = signal_state.get("summary", {}) if isinstance(signal_state, dict) else {}
     diagnostics = signal_state.get("last_diagnostics", {}) if isinstance(signal_state, dict) else {}
     lines = ["🔍 REAL BUY SCANNER • DETAIL" if detail else "🔥 REAL BUY SCANNER", ""]
+    last_scan = signal_state.get("last_scan_at") if isinstance(signal_state, dict) else None
+    try:
+        signal_stamp = datetime.fromisoformat(str(last_scan).replace("Z", "+00:00"))
+        signal_age = (datetime.now(timezone.utc) - signal_stamp.astimezone(timezone.utc)).total_seconds() if signal_stamp.tzinfo else float("inf")
+    except (TypeError, ValueError):
+        signal_age = float("inf")
+    if signal_age < 0 or signal_age > 300:
+        lines.append("⚪ REAL BUY signal data stale or unavailable")
     lines += [
         _line("🟢 BUY-ready", str(int(summary.get("buy_ready") or 0))),
         _line("🟡 WATCH", str(int(summary.get("watch") or 0))),
