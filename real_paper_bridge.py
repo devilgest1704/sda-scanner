@@ -342,6 +342,7 @@ def reconcile():
         previous = set()
         now_keys = set()
         opened = []
+        newly_seen = set()
         next_pending_buy = set()
         buy_data_available = False
         state["pending_sell"] = []
