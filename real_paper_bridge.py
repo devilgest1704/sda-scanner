@@ -330,73 +330,94 @@ def reconcile():
     pre_paper_action_count = len(actions)
     _persist_events(actions)
 
-    # REAL must follow the exact active PAPER entry/exit profile. Fail closed
-    # rather than trading a different strategy after a workflow config drift.
-    paper_buy_mode = os.getenv("SDA_PAPER_BUY_MODE", "temporal_recovery").strip()
-    paper_tp4 = os.getenv("SDA_PAPER_TP4", "0").strip() == "1"
-    if paper_buy_mode != "temporal_recovery" or not paper_tp4:
-        raise RuntimeError(
-            "REAL bridge requires the active PAPER profile: "
-            "SDA_PAPER_BUY_MODE=temporal_recovery and SDA_PAPER_TP4=1"
-        )
-
-    current, paper_error = _paper_positions()
-    if STATE_FILE.exists():
-        state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    real_pipeline_enabled = os.getenv("REAL_BUY_PIPELINE_ENABLED", "false").strip().lower() == "true"
+    if real_pipeline_enabled:
+        # Independent REAL BUY owns signal discovery. Do not read PAPER positions,
+        # PAPER config, PAPER cooldown, PAPER capacity or PAPER pending transitions.
+        state = _load(STATE_FILE, {})
         if not isinstance(state, dict):
-            raise RuntimeError("Invalid bridge state; refusing to overwrite it")
+            state = {}
+        current = {}
+        paper_error = None
+        paper_valid = True
+        previous = set()
+        now_keys = set()
+        opened = []
+        next_pending_buy = set()
+        buy_data_available = False
+        state["pending_sell"] = []
+        real_snapshot = real_trader.load_state()
+        pending_buy = set(real_snapshot.get("pending_buys", {}))
+        detected_at = datetime.now(timezone.utc)
     else:
-        state = {}
-    if not state.get("initialized"):
-        if paper_error:
-            # Never create a baseline from an unknown PAPER state.
-            actions.append({"action": "PAPER_STATE_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
-                            "reason": paper_error, "at": _now()})
-            # Keep the bridge baseline absent until a valid PAPER snapshot exists.
+        # REAL must follow the exact active PAPER entry/exit profile. Fail closed
+        # rather than trading a different strategy after a workflow config drift.
+        paper_buy_mode = os.getenv("SDA_PAPER_BUY_MODE", "temporal_recovery").strip()
+        paper_tp4 = os.getenv("SDA_PAPER_TP4", "0").strip() == "1"
+        if paper_buy_mode != "temporal_recovery" or not paper_tp4:
+            raise RuntimeError(
+                "REAL bridge requires the active PAPER profile: "
+                "SDA_PAPER_BUY_MODE=temporal_recovery and SDA_PAPER_TP4=1"
+            )
+    
+        current, paper_error = _paper_positions()
+        if STATE_FILE.exists():
+            state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            if not isinstance(state, dict):
+                raise RuntimeError("Invalid bridge state; refusing to overwrite it")
+        else:
+            state = {}
+        if not state.get("initialized"):
+            if paper_error:
+                # Never create a baseline from an unknown PAPER state.
+                actions.append({"action": "PAPER_STATE_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
+                                "reason": paper_error, "at": _now()})
+                # Keep the bridge baseline absent until a valid PAPER snapshot exists.
+                _persist_events(actions[pre_paper_action_count:])
+                return {"status": "paper_state_unavailable", "paper_state_error": paper_error,
+                        "actions": actions}
+            state = {"initialized": True, "paper_positions": sorted(current),
+                     "initialized_at": _now(), "last_run": _now(),
+                     "wallet_sync": _wallet_sync_summary(wallet_sync, real_trader)}
+            _save(STATE_FILE, state)
             _persist_events(actions[pre_paper_action_count:])
-            return {"status": "paper_state_unavailable", "paper_state_error": paper_error,
-                    "actions": actions}
-        state = {"initialized": True, "paper_positions": sorted(current),
-                 "initialized_at": _now(), "last_run": _now(),
-                 "wallet_sync": _wallet_sync_summary(wallet_sync, real_trader)}
-        _save(STATE_FILE, state)
-        _persist_events(actions[pre_paper_action_count:])
-        return {"status": "baseline_initialized", "actions": actions}
-
-    previous = set(state.get("paper_positions", []))
-    paper_valid = paper_error is None
-    buy_data_available = (os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE", "true").strip().lower() == "true"
-                          and bool(wallet_sync.get("ok")))
-    now_keys = set(current) if paper_valid else set(previous)
-    legacy_bridge = state.setdefault("legacy_pending_sell", [])
-    for token in list(state.get("pending_sell", [])):
-        legacy_bridge.append({"token": token, "archived_at": _now(),
-                              "reason": "pre_swing_v2_bridge_sell_never_replayed"})
-    state["pending_sell"] = []
-
-    real_snapshot = real_trader.load_state()
-    pending_buy = set(state.get("pending_buy", [])) | set(real_snapshot.get("pending_buys", {}))
-    newly_seen = now_keys - previous
-    opened = sorted(newly_seen | pending_buy) if paper_valid and buy_data_available else []
-    next_pending_buy = (set() if paper_valid else set(state.get("pending_buy", [])))
-    if not buy_data_available:
-        next_pending_buy = pending_buy
-        actions.append({"action": "BUY_DATA_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
-                        "reason": "required market or whale data unavailable", "at": _now()})
-    detected_at = datetime.now(timezone.utc)
-    if not paper_valid:
-        # BUY discovery is skipped; REAL SELL V2 below still uses REAL state only.
-        failures = int((state.get("paper_state") or {}).get("consecutive_failures") or 0) + 1
-        state["paper_state"] = {"status": "UNAVAILABLE", "reason": paper_error,
-                                "consecutive_failures": failures, "at": _now()}
-        actions.append({"action": "PAPER_STATE_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
-                        "reason": paper_error, "preserved_baseline_size": len(previous),
-                        "at": _now()})
-        print(f"::warning::PAPER_STATE_UNAVAILABLE ({paper_error}); REAL BUY discovery skipped, "
-              "previous PAPER baseline preserved", file=sys.stderr, flush=True)
-    elif buy_data_available:
-        state["paper_state"] = {"status": "VALID", "consecutive_failures": 0, "at": _now()}
-
+            return {"status": "baseline_initialized", "actions": actions}
+    
+        previous = set(state.get("paper_positions", []))
+        paper_valid = paper_error is None
+        buy_data_available = (os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE", "true").strip().lower() == "true"
+                              and bool(wallet_sync.get("ok")))
+        now_keys = set(current) if paper_valid else set(previous)
+        legacy_bridge = state.setdefault("legacy_pending_sell", [])
+        for token in list(state.get("pending_sell", [])):
+            legacy_bridge.append({"token": token, "archived_at": _now(),
+                                  "reason": "pre_swing_v2_bridge_sell_never_replayed"})
+        state["pending_sell"] = []
+    
+        real_snapshot = real_trader.load_state()
+        pending_buy = set(state.get("pending_buy", [])) | set(real_snapshot.get("pending_buys", {}))
+        newly_seen = now_keys - previous
+        opened = sorted(newly_seen | pending_buy) if paper_valid and buy_data_available else []
+        next_pending_buy = (set() if paper_valid else set(state.get("pending_buy", [])))
+        if not buy_data_available:
+            next_pending_buy = pending_buy
+            actions.append({"action": "BUY_DATA_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
+                            "reason": "required market or whale data unavailable", "at": _now()})
+        detected_at = datetime.now(timezone.utc)
+        if not paper_valid:
+            # BUY discovery is skipped; REAL SELL V2 below still uses REAL state only.
+            failures = int((state.get("paper_state") or {}).get("consecutive_failures") or 0) + 1
+            state["paper_state"] = {"status": "UNAVAILABLE", "reason": paper_error,
+                                    "consecutive_failures": failures, "at": _now()}
+            actions.append({"action": "PAPER_STATE_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
+                            "reason": paper_error, "preserved_baseline_size": len(previous),
+                            "at": _now()})
+            print(f"::warning::PAPER_STATE_UNAVAILABLE ({paper_error}); REAL BUY discovery skipped, "
+                  "previous PAPER baseline preserved", file=sys.stderr, flush=True)
+        elif buy_data_available:
+            state["paper_state"] = {"status": "VALID", "consecutive_failures": 0, "at": _now()}
+    
+    
     # Recover only post-migration Swing V2 intents. The executor checks their
     # persisted hashes/receipts and never blindly resubmits an UNKNOWN tx.
     try:
@@ -582,13 +603,15 @@ def reconcile():
               file=sys.stderr, flush=True)
     if health["health"] == "SELL_ERROR":
         status = "reconciled_with_sell_error"
+    elif real_pipeline_enabled:
+        status = "real_only_reconciled"
     elif not paper_valid:
         status = "paper_state_unavailable"
     else:
         status = "reconciled"
     return {"status": status,
             "sell_health": health["health"], "sell_health_detail": health,
-            "paper_state": "VALID" if paper_valid else "UNAVAILABLE",
+            "paper_state": "NOT_READ" if real_pipeline_enabled else ("VALID" if paper_valid else "UNAVAILABLE"),
             "paper_state_error": paper_error,
             "actions": actions,
             "paper_open": len(now_keys), "opened": len(opened),
