@@ -143,8 +143,6 @@ def real_capacity(dashboard):
     cap = Decimal(str(worker.get("real_capital_cap_sda") or cfg.TRADING_WALLET_CAPITAL_SDA))
     native = Decimal(str(accounting.get("native_balance_sda") or 0))
     available = max(Decimal("0"), min(cap - deployed, native))
-    paper = dashboard.load("positions.json", {})
-    paper_positions = paper.get("positions", {}) if isinstance(paper, dict) else {}
     return {
         "positions": len(accounting_positions), "reserved_positions": len(accounting_positions) + len(pending),
         "pending": len(pending),
@@ -152,8 +150,6 @@ def real_capacity(dashboard):
         "cap": float(cap), "deployed": float(deployed), "available": float(available),
         "next_buy": float(worker.get("real_buy_size_sda") or cfg.position_sda()),
         "held": set(accounting_positions) | _held_tokens(pending),
-        "paper_held": _held_tokens(paper_positions if isinstance(paper_positions, dict) else {}),
-        "paper_full": isinstance(paper_positions, dict) and len(paper_positions) >= int(v30_view.v30.MAX_OPEN),
         "sync_status": worker.get("syncStatus"),
     }
 
@@ -164,14 +160,12 @@ def real_gate(real, token=None):
     if real["pending"]:
         return "PENDING", "BUY in flight"
     token = str(token or "").lower()
-    if token and (token in real["held"] or token in real["paper_held"]):
-        return "BLOCKED", "Already held"
+    if token and token in real["held"]:
+        return "BLOCKED", "REAL token already held or pending"
     if real["reserved_positions"] >= real["max_positions"]:
         return "BLOCKED", "Position limit"
     if real["deployed"] + real["next_buy"] > real["cap"] + 1e-9:
         return "BLOCKED", "Capital limit"
-    if real["paper_full"]:
-        return "BLOCKED", "PAPER capacity"
     return "READY", None
 
 
@@ -259,17 +253,20 @@ def _home_scanner_lines(dashboard):
             if last_sync:
                 lines.append(f"Last successful wallet sync: {last_sync}")
     else:
-        ready, watch = _counts(rows)
-        lines += [_line("🟢 BUY-ready", str(ready)), _line("🟡 WATCH", str(watch))]
+        real_signal = dashboard.load("real_buy_signal_state.json", {})
+        summary = real_signal.get("summary", {}) if isinstance(real_signal, dict) else {}
+        lines += [_line("🟢 BUY-ready", str(int(summary.get("buy_ready") or 0))),
+                  _line("🟡 WATCH", str(int(summary.get("watch") or 0)))]
     lines += _real_lines(real)
-    state, reason, best = real_buy_status(rows, real, stale)
+    real_signal = dashboard.load("real_buy_signal_state.json", {})
+    summary = real_signal.get("summary", {}) if isinstance(real_signal, dict) else {}
+    state = "READY" if int(summary.get("buy_ready") or 0) > 0 else ("DATA STALE" if stale else "NO SIGNAL")
     lines.append(f"{STATUS_ICONS[state]} REAL BUY: {state}")
-    if reason and state == "BLOCKED":
-        lines.append(reason)
-    if best is not None:
-        d = best["decision"]
-        lines += [f"🎯 {best['symbol']}  {_n(d.get('pump_score')):.0f}/100",
-                  f"   {d.get('pump_phase') or 'NO'} | {_metrics(d)}"]
+    diagnostics = real_signal.get("last_diagnostics", {}) if isinstance(real_signal, dict) else {}
+    best = next((item for item in diagnostics.values() if isinstance(item, dict) and item.get("buy_ready")), None)
+    if best:
+        lines += [f"🎯 {best.get('symbol') or 'Candidate'}  {_n(best.get('score')):.0f}/100",
+                  f"   {best.get('phase') or 'NO'} | Age {_n(best.get('data_age_sec')):.0f}s"]
     return lines
 
 
@@ -332,36 +329,34 @@ def home_keyboard():
 
 
 def buy_scanner_text(dashboard, detail=False):
-    rows, real, stale = _scanner_inputs(dashboard)
+    real = real_capacity(dashboard)
+    signal_state = dashboard.load("real_buy_signal_state.json", {})
+    summary = signal_state.get("summary", {}) if isinstance(signal_state, dict) else {}
+    diagnostics = signal_state.get("last_diagnostics", {}) if isinstance(signal_state, dict) else {}
     lines = ["🔍 REAL BUY SCANNER • DETAIL" if detail else "🔥 REAL BUY SCANNER", ""]
-    if stale:
-        lines += ["⚪ Data stale", ""]
-    else:
-        ready, watch = _counts(rows)
-        lines += ["SHARED SIGNAL", f"BUY-ready: {ready}", f"WATCH: {watch}", ""]
-    state, reason, _best = real_buy_status(rows, real, stale)
-    lines += ["REAL"] + _real_lines(real, labelled=False)
-    lines.append(f"Status: {state}" + (f" — {reason}" if reason and state == "BLOCKED" else ""))
-    lines += ["Production admission: PAPER-coupled", ""]
-    if stale:
-        return "\n".join(lines).rstrip()
-    if not rows:
-        lines.append("⚪ No market candidates")
-    for index, row in enumerate(rows[:SCANNER_LIMIT], 1):
-        d = row["decision"]
-        label = "🟢 BUY" if row["status"] == "BUY" else row["status"]
-        lines.append(f"{index}. {row['symbol']:<6} {label:<5} {_n(d.get('pump_score')):.0f}/100")
-        lines.append(f"   {_metrics(d)}")
-        if row["status"] == "BUY":
-            gate, why = real_gate(real, row["address"])
-            lines.append(f"   REAL: {gate}" + (f" — {why.upper()}" if why and gate == "BLOCKED" else ""))
+    lines += [
+        _line("🟢 BUY-ready", str(int(summary.get("buy_ready") or 0))),
+        _line("🟡 WATCH", str(int(summary.get("watch") or 0))),
+    ]
+    lines += _real_lines(real, labelled=False)
+    lines.append(f"📦 Positions: {int(summary.get('positions') or 0)}/{int(summary.get('max_positions') or cfg.MAX_OPEN_POSITIONS)}")
+    if not diagnostics:
+        lines.append("⚪ REAL scanner diagnostics unavailable")
+        return "\n".join(lines)
+    ranked = sorted(diagnostics.items(), key=lambda item: (
+        not bool(item[1].get("buy_ready")), -_n(item[1].get("score"))
+    ))
+    for index, (token, item) in enumerate(ranked[:SCANNER_LIMIT], 1):
+        status = "🟢 BUY-ready" if item.get("buy_ready") else "🟡 WATCH"
+        lines.append(f"{index}. {item.get('symbol') or token[:10]} {status} {_n(item.get('score')):.0f}/100")
+        lines.append(f"   {item.get('phase') or 'NO'} | Age {_n(item.get('data_age_sec')):.0f}s")
+        if not item.get("buy_ready"):
+            lines.append(f"   REAL blocker: {item.get('blocker') or 'unknown'}")
         if detail:
-            lines.append(f"   1h {_n(d.get('m1h')):+.1f}% | Vol {_n(d.get('volume_1h')):.0f} | "
-                         f"Trades {_n(d.get('trades_1h')):.0f} | Ratio {_n(d.get('buy_ratio')):.2f}x")
-            lines.append(f"   Phase {d.get('pump_phase') or 'NO'} | "
-                         f"{d.get('paper_buy_block_reason') or 'ready'}")
+            lines.append(f"   Quote: {item.get('quote_at') or 'N/A'}")
+            temporal = item.get("temporal") or {}
+            lines.append(f"   Temporal: {temporal.get('reason') or 'N/A'}")
     return "\n".join(lines)
-
 
 def buy_scanner_keyboard(detail=False):
     first = ([{"text": "🔥 BUY Scanner", "callback_data": "BUY_SCANNER"}] if detail
