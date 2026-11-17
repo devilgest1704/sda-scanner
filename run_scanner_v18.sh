@@ -287,6 +287,16 @@ run_one_scan() {
     buy_data_available=false
   fi
 
+  # Independent REAL signal discovery runs from the market snapshot BEFORE PAPER.
+  # Its history/cooldown/risk/positions/capital are REAL-owned; PAPER is not an input.
+  if [ "$buy_data_available" = "true" ]; then
+    if ! run_timed_stage real_buy_pipeline env SDA_SCANNER_BUY_DATA_AVAILABLE=true python -c 'import v30_pump_hunter as v30; print("REAL MARKET SNAPSHOT:", v30.write_real_market_snapshot()); from real_buy_pipeline import run; print("REAL BUY PIPELINE:", run())'; then
+      echo "::error::REAL BUY pipeline failed closed; no PAPER fallback is permitted." >&2
+    fi
+  else
+    echo "::warning::REAL BUY pipeline skipped: required scanner source is degraded."
+  fi
+
   if ! run_timed_stage paper_engine env TELEGRAM_TOKEN="" python paper_engine_v19.py; then
     echo "::warning::PAPER evaluation failed; REAL BUY discovery is fail-closed, REAL SELL and wallet reconciliation continue." >&2
     buy_data_available=false
