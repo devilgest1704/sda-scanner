@@ -1,0 +1,44 @@
+name: REAL BUY pipeline regression
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "real_buy_pipeline.py"
+      - "main.py"
+      - "v30_pump_hunter.py"
+      - "real_paper_bridge.py"
+      - "telegram_home.py"
+      - "run_scanner_v18.sh"
+      - "tests/**"
+      - ".github/workflows/real-buy-pipeline-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project and validation tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest ruff mypy
+      - name: Full test suite
+        run: python -m pytest -q
+      - name: Lint new REAL pipeline and regression tests
+        run: ruff check real_buy_pipeline.py tests/test_real_buy_pipeline.py tests/test_real_paper_bridge.py
+      - name: Lint safety-critical legacy integration syntax and undefined names
+        run: ruff check --select E9,F63,F7,F82 main.py v30_pump_hunter.py real_paper_bridge.py telegram_home.py
+      - name: Typecheck REAL pipeline
+        run: mypy --ignore-missing-imports --follow-imports=silent real_buy_pipeline.py
+      - name: Python syntax/build check
+        run: python -m compileall -q real_buy_pipeline.py main.py v30_pump_hunter.py real_paper_bridge.py telegram_home.py tests/test_real_buy_pipeline.py tests/test_real_paper_bridge.py
+      - name: Scanner shell syntax
+        run: bash -n run_scanner_v18.sh
