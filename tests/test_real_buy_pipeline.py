@@ -85,6 +85,24 @@ class RealBuyPipelineTests(unittest.TestCase):
                                           state, self.cfg, safety, self.now)
         self.assertTrue(result["ready"])
 
+    def test_real_rolling_loss_circuit_blocks_new_entries(self):
+        state = real_state(positions=7)
+        state["trades"] = [{
+            "action": "SELL", "at": self.now.isoformat(),
+            "realized_pnl_sda": -21.0,
+        }]
+        result = pipeline.admit_candidate(candidate(self.now), READY, self.signal_state,
+                                          state, self.cfg, safety, self.now)
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["reason"], "REAL_24H_LOSS_BUDGET")
+
+    def test_corrupt_real_signal_state_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "real_buy_signal_state.json"
+            path.write_text("{broken", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "BUY disabled"):
+                pipeline.load_state(path)
+
     def test_05_real_cooldown_blocks(self):
         self.signal_state["cooldowns"][TOKEN] = (self.now + timedelta(hours=1)).isoformat()
         result = pipeline.admit_candidate(candidate(self.now), READY, self.signal_state,
