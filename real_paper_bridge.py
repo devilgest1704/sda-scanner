@@ -1,9 +1,8 @@
-"""Opt-in reconciliation from the canonical PAPER ledger to the real executor.
+"""REAL wallet reconciliation and Swing SELL V2 worker integration.
 
-The bridge is inert unless REAL_TRADING_ENABLED=true AND
-REAL_TRADING_DRY_RUN=false. First run establishes a baseline and never
-backfills existing PAPER positions. It only reacts to subsequent PAPER
-position transitions. PAPER remains the sole signal/exit authority.
+Production sets REAL_BUY_PIPELINE_ENABLED=true: this bridge then skips PAPER
+ledger discovery entirely and only reconciles the REAL wallet and REAL SELLs.
+The legacy PAPER transition path remains only as a compatibility test seam.
 """
 import json
 import os
