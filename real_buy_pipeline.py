@@ -233,6 +233,9 @@ def admit_candidate(candidate, temporal, signal_state, real_state, cfg, safety_c
 def run(market_path=MARKET_FILE, state_path=STATE_FILE, *, at=None):
     """Evaluate current scanner candidates and execute only after REAL safety passes."""
     now = at or _now()
+    if os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE", "true").strip().lower() != "true":
+        return {"status": "BUY_DATA_DEGRADED", "buy_ready": 0, "watch": 0,
+                "blocker": "REQUIRED_SCANNER_SOURCE_DEGRADED"}
     try:
         market = load_market_snapshot(market_path)
         signal_state = load_state(state_path)
