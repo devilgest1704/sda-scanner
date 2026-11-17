@@ -21,18 +21,24 @@ def _run_with_paper_telemetry():
     try:
         return engine.main()
     finally:
-        # REAL wallet reconciliation must still run when PAPER processing fails.
-        try:
-            from real_paper_bridge import reconcile
-            print("PAPER->REAL bridge:", reconcile())
-        except Exception as exc:
-            print("::error::PAPER->REAL bridge failed:", repr(exc))
-        # Persist scored eligible AND rejected candidate snapshots after each
-        # scanner cycle. Diagnostics are paper-only and never block trading.
+        # Publish shared market-only candidates, then independently evaluate REAL.
         try:
             _v30.write_scan_funnel("market_analysis.json")
         except Exception as exc:
             print("::warning::V30 candidate telemetry failed:", repr(exc))
+        try:
+            import os
+            os.environ.setdefault("REAL_BUY_PIPELINE_ENABLED", "true")
+            from real_buy_pipeline import run as run_real_buy_pipeline
+            print("REAL BUY PIPELINE:", run_real_buy_pipeline())
+        except Exception as exc:
+            print("::error::REAL BUY pipeline failed closed:", repr(exc))
+        # Bridge remains responsible for REAL wallet reconciliation and SELL only.
+        try:
+            from real_paper_bridge import reconcile
+            print("REAL wallet/SELL reconciliation:", reconcile())
+        except Exception as exc:
+            print("::error::REAL reconciliation failed:", repr(exc))
         # Report generation must never mutate or replace the trading ledger.
         try:
             from pathlib import Path
