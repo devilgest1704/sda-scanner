@@ -201,7 +201,11 @@ def _metrics(decision):
 
 
 def _scanner_inputs(dashboard):
-    rows = scanner_candidates(dashboard)
+    # REAL scanner freshness is market-source freshness only. Never invoke the
+    # PAPER V30 decision engine to decide or count REAL BUY-ready candidates.
+    market_snapshot = dashboard.load("market_data.json", {})
+    rows = ScannerRows()
+    rows.updated_at = market_snapshot.get("updated_at") if isinstance(market_snapshot, dict) else None
     try:
         real = real_capacity(dashboard)
     except Exception as exc:
