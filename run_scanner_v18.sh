@@ -10,7 +10,7 @@ set -euo pipefail
 # SCANNER_INTERVAL_SECONDS -> target cadence between scan starts (default 60).
 # SCANNER_STATE_CHECKPOINT_SECONDS -> push runtime state periodically (default 300).
 #
-# The scanner is paper-only. No source code is rewritten at runtime.
+# PAPER and REAL adapters run independently from the same market scan. No source code is rewritten at runtime.
 
 INTERVAL="${SCANNER_INTERVAL_SECONDS:-60}"
 CHECKPOINT="${SCANNER_STATE_CHECKPOINT_SECONDS:-300}"
