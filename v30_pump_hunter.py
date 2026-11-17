@@ -124,8 +124,9 @@ def metrics(a):
       "data_age_sec":data_age_seconds(a.get("last_transaction"))
     }
 
-def score(address,a,persist=True):
-    st=load_state(); hist=st.setdefault("history",{}); key=str(address).lower()
+def score(address,a,persist=True,state_override=None):
+    st=state_override if isinstance(state_override,dict) else load_state()
+    hist=st.setdefault("history",{}); key=str(address).lower()
     c=metrics(a); rec=hist.get(key,{})
     # Keep the sample before the latest scanner observation separately.
     # Dashboard reads are read-only and must not erase impulse history.
@@ -229,7 +230,9 @@ def score(address,a,persist=True):
                    "impulse":round(impulse,1),"raw_impulse":round(raw_impulse,1),"fresh":fresh,"sample_status":sample_status,"phase":phase,
                    "last_transaction":c.get("last_transaction"),"data_age_sec":c.get("data_age_sec"),
                    "updated_at":now()}
-        st["updated_at"]=now();save_state(st)
+        st["updated_at"]=now()
+        if state_override is None:
+            save_state(st)
     return c,round(min(100,quality+impulse),1),round(quality,1),round(impulse,1),phase
 
 def cooldown_active(address):
@@ -1003,6 +1006,7 @@ def write_scan_funnel(market_file="market_analysis.json"):
                     "buy_ratio":round(n(d.get("buy_ratio")),4),
                     "quote_quality":d.get("paper_quote_quality")},
                 "decision_reason":d.get("paper_buy_block_reason"),
+                "macd_filter":d.get("paper_macd_filter"),
                 "fresh_momentum_research_ready":bool(d.get("fresh_momentum_research_ready")),
                 "paper_entry_lane":d.get("paper_entry_lane"),
                 "gates":list(dict.fromkeys(d.get("paper_buy_gate_failures") or [])),
@@ -1162,3 +1166,64 @@ def market_debug(dashboard,snapshot=None):
     rows.sort(reverse=True)
     return "\n".join([f"V30 CLEAN • loaded {len(tokens)} • ready {sum(1 for _,_,d in rows[:5] if not d['paper_buy_blocked'])}"]+
       [f"{i}. {d['pump_phase']} {a} score {d['pump_score']:.0f} impulse +{d['pump_change']:.1f} M15 {d['m15']:+.1f}% M1H {d['m1h']:+.1f}% flow {d['net_1h']:+.0f}" for i,(_,a,d) in enumerate(rows[:5],1)])
+
+def write_real_market_snapshot(market_file="market_data.json"):
+    """Create REAL market candidates using shared scoring with REAL-owned history only.
+
+    This intentionally bypasses decision(), temporal Shadow, PAPER cooldown,
+    PAPER loss circuit and Champion/optimizer state.
+    """
+    import json
+    from pathlib import Path
+    from datetime import datetime, timezone
+    from real_buy_pipeline import load_state, save_state
+
+    data=json.loads(Path(market_file).read_text(encoding="utf-8"))
+    if not isinstance(data,dict) or not isinstance(data.get("tokens"),dict):
+        raise RuntimeError("REAL market source is invalid")
+    source_stamp=data.get("updated_at")
+    try:
+        source_dt=datetime.fromisoformat(str(source_stamp).replace("Z","+00:00"))
+        if source_dt.tzinfo is None:
+            raise ValueError("timezone missing")
+        source_age=(datetime.now(timezone.utc)-source_dt.astimezone(timezone.utc)).total_seconds()
+        if source_age<0 or source_age>300:
+            raise ValueError("market source stale")
+    except (TypeError,ValueError) as exc:
+        raise RuntimeError(f"REAL market source timestamp invalid or stale: {exc}") from exc
+    state=load_state()
+    market_history={"history":state.setdefault("market_history",{})}
+    rows=[]
+    for address,td in data["tokens"].items():
+        an=td.get("analysis") if isinstance(td,dict) and isinstance(td.get("analysis"),dict) else td
+        if not isinstance(an,dict) or n(an.get("price_in_sda"))<=0:
+            continue
+        c,s,q,impulse,phase=score(address,an,persist=True,state_override=market_history)
+        age=c.get("data_age_sec")
+        snapshot_impulse=min(20,max(0,
+            max(0,c["m1"])*0.8+max(0,c["m15"])*0.8+
+            max(0,c["flow15"])/100+min(4,c["trades"]/5)+min(4,c["vol"]/250)
+        )) if isinstance(age,(int,float)) and age<=MAX_ENTRY_DATA_AGE_SEC else 0.0
+        entry_impulse=max(impulse,snapshot_impulse) if age is not None and age<=MAX_ENTRY_DATA_AGE_SEC and phase=="CONFIRMATION" else impulse
+        macd=paper_macd_veto(an)
+        rows.append({
+            "address":str(address).lower(),"contract":str(address).lower(),
+            "symbol":str(an.get("symbol") or address[:10])[:20],
+            "score":round(s,2),"quality":round(q,2),"impulse":round(entry_impulse,2),
+            "phase":phase,"price_sda":c["price"],
+            "quote_at":c.get("last_transaction"),"data_age_sec":round(age,1) if isinstance(age,(int,float)) else None,
+            "m1h":c["m1"],"m15":c["m15"],"m4h":c["m4"],
+            "volume_1h":c["vol"],"flow_1h":c["flow"],"flow_15m":c["flow15"],
+            "trades_1h":c["trades"],"buy_ratio":c["buy_ratio"],
+            "strategy_version":VERSION,"macd_filter":macd,
+        })
+    # Persist the scanner's own REAL market history and temporal state atomically.
+    state["market_history"]=market_history["history"]
+    save_state(state)
+    snapshot={"schema_version":1,"updated_at":datetime.now(timezone.utc).isoformat(),
+              "market_source_at":data.get("updated_at"),"candidates":rows}
+    path=Path("real_buy_market_snapshot.json")
+    tmp=path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(snapshot,indent=2,ensure_ascii=False),encoding="utf-8")
+    tmp.replace(path)
+    return {"candidates":len(rows),"updated_at":snapshot["updated_at"]}
