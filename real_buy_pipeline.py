@@ -96,8 +96,10 @@ def load_market_snapshot(path=MARKET_FILE):
             or not isinstance(value.get("candidates"), list) or updated is None):
         raise RuntimeError("REAL BUY market snapshot invalid")
     age = ((_now() - updated).total_seconds())
-    if age < 0 or age > 300:
-        raise RuntimeError(f"REAL BUY market snapshot stale ({age:.0f}s)")
+    source_at = _stamp(value.get("market_source_at"))
+    source_age = ((_now() - source_at).total_seconds()) if source_at else None
+    if age < 0 or age > 300 or source_age is None or source_age < 0 or source_age > 300:
+        raise RuntimeError("REAL BUY market snapshot stale or source timestamp invalid")
     return value
 
 
