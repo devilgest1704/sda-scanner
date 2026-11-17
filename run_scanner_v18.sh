@@ -10,12 +10,13 @@ set -euo pipefail
 # SCANNER_INTERVAL_SECONDS -> target cadence between scan starts (default 60).
 # SCANNER_STATE_CHECKPOINT_SECONDS -> push runtime state periodically (default 300).
 #
-# The scanner is paper-only. No source code is rewritten at runtime.
+# PAPER and REAL adapters run independently from the same market scan. No source code is rewritten at runtime.
 
 INTERVAL="${SCANNER_INTERVAL_SECONDS:-60}"
 CHECKPOINT="${SCANNER_STATE_CHECKPOINT_SECONDS:-300}"
 CONTINUOUS="${SCANNER_CONTINUOUS:-true}"
 OPTIMIZER_INTERVAL="${SCANNER_OPTIMIZER_INTERVAL_SECONDS:-3600}"
+export REAL_BUY_PIPELINE_ENABLED="true"
 
 if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]] || [ "$INTERVAL" -lt 1 ]; then
   echo "Invalid SCANNER_INTERVAL_SECONDS=$INTERVAL" >&2
@@ -31,7 +32,7 @@ if ! [[ "$OPTIMIZER_INTERVAL" =~ ^[0-9]+$ ]] || [ "$OPTIMIZER_INTERVAL" -lt 900 
   exit 1
 fi
 
-STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json v30_no_buy_diagnostic.json strategy_lab/candidate_outcomes.json strategy_lab/missed_pump_learning.json strategy_lab/forward_shadow_state.json strategy_lab/execution_quote_audit.json strategy_lab/evolution_state.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json real_worker_status.json real_paper_bridge_state.json real_paper_bridge_events.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json strategy_lab/temporal_paper_trial.json strategy_lab/temporal_paper_trial_report.json strategy_lab/lane_research_state.json strategy_lab/paper_paths"
+STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json v30_no_buy_diagnostic.json strategy_lab/candidate_outcomes.json strategy_lab/missed_pump_learning.json strategy_lab/forward_shadow_state.json strategy_lab/execution_quote_audit.json strategy_lab/evolution_state.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json real_worker_status.json real_paper_bridge_state.json real_paper_bridge_events.json real_buy_signal_state.json real_buy_market_snapshot.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json strategy_lab/temporal_paper_trial.json strategy_lab/temporal_paper_trial_report.json strategy_lab/lane_research_state.json strategy_lab/paper_paths"
 STATE_FILES="$STATE_FILES market_source_state.json"
 
 ensure_json_state() {
@@ -39,7 +40,7 @@ ensure_json_state() {
 import json
 from pathlib import Path
 
-files = '''state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json real_paper_bridge_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json'''.split()
+files = '''state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json real_paper_bridge_state.json real_buy_signal_state.json real_buy_market_snapshot.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json'''.split()
 files.append("market_source_state.json")
 
 # Never reset trading ledgers or transaction journals automatically.
@@ -53,7 +54,13 @@ files = [f for f in files if f not in (
 for name in files:
     p = Path(name)
     if not p.exists() or p.stat().st_size == 0:
-        p.write_text('{}\n', encoding='utf-8')
+        if name == "real_buy_signal_state.json":
+            initial = {"schema_version": 1, "signals": {}, "market_history": {},
+                       "cooldowns": {}, "consumed_signal_ids": [],
+                       "last_scan_at": None, "last_diagnostics": {}}
+            p.write_text(json.dumps(initial, indent=2) + "\n", encoding="utf-8")
+        else:
+            p.write_text('{}\n', encoding='utf-8')
         continue
     try:
         json.loads(p.read_text(encoding='utf-8'))
@@ -278,6 +285,16 @@ run_one_scan() {
   if ! run_timed_stage liquidity_scanner python liquidity_scanner.py; then
     echo "::warning::Liquidity data failed; REAL BUY discovery is fail-closed, protections continue." >&2
     buy_data_available=false
+  fi
+
+  # Independent REAL signal discovery runs from the market snapshot BEFORE PAPER.
+  # Its history/cooldown/risk/positions/capital are REAL-owned; PAPER is not an input.
+  if [ "$buy_data_available" = "true" ]; then
+    if ! run_timed_stage real_buy_pipeline env SDA_SCANNER_BUY_DATA_AVAILABLE=true python -c 'import v30_pump_hunter as v30; print("REAL MARKET SNAPSHOT:", v30.write_real_market_snapshot()); from real_buy_pipeline import run; print("REAL BUY PIPELINE:", run())'; then
+      echo "::error::REAL BUY pipeline failed closed; no PAPER fallback is permitted." >&2
+    fi
+  else
+    echo "::warning::REAL BUY pipeline skipped: required scanner source is degraded."
   fi
 
   if ! run_timed_stage paper_engine env TELEGRAM_TOKEN="" python paper_engine_v19.py; then
