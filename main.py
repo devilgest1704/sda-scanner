@@ -1,4 +1,4 @@
-"""Canonical paper trading entrypoint: V30 clean pump hunter."""
+"""Scanner entrypoint with independent REAL BUY and PAPER trading adapters."""
 import main_core as _core
 for _name,_value in _core.__dict__.items():
     if not _name.startswith("__"):
@@ -17,22 +17,31 @@ _paper.SL_PCT=_v30.SL_PCT
 engine=_paper
 
 def _run_with_paper_telemetry():
-    """Generate diagnostics from the SAME runtime ledger the paper engine uses."""
+    """Run the REAL and PAPER adapters independently against one market scan."""
+    import os
+    os.environ["REAL_BUY_PIPELINE_ENABLED"] = "true"
+    # The scanner snapshot and REAL BUY evaluation run BEFORE PAPER processing.
+    # No PAPER position transition is needed to discover or authorize a REAL signal.
+    try:
+        _v30.write_real_market_snapshot("market_data.json")
+        from real_buy_pipeline import run as run_real_buy_pipeline
+        print("REAL BUY PIPELINE:", run_real_buy_pipeline())
+    except Exception as exc:
+        print("::error::REAL BUY pipeline failed closed:", repr(exc))
     try:
         return engine.main()
     finally:
-        # REAL wallet reconciliation must still run when PAPER processing fails.
-        try:
-            from real_paper_bridge import reconcile
-            print("PAPER->REAL bridge:", reconcile())
-        except Exception as exc:
-            print("::error::PAPER->REAL bridge failed:", repr(exc))
-        # Persist scored eligible AND rejected candidate snapshots after each
-        # scanner cycle. Diagnostics are paper-only and never block trading.
+        # PAPER diagnostics are parallel telemetry and do not feed REAL signals.
         try:
             _v30.write_scan_funnel("market_analysis.json")
         except Exception as exc:
             print("::warning::V30 candidate telemetry failed:", repr(exc))
+        # Bridge remains responsible for REAL wallet reconciliation and SELL only.
+        try:
+            from real_paper_bridge import reconcile
+            print("REAL wallet/SELL reconciliation:", reconcile())
+        except Exception as exc:
+            print("::error::REAL reconciliation failed:", repr(exc))
         # Report generation must never mutate or replace the trading ledger.
         try:
             from pathlib import Path
