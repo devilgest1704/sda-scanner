@@ -1,4 +1,4 @@
-"""Canonical paper trading entrypoint: V30 clean pump hunter."""
+"""Scanner entrypoint with independent REAL BUY and PAPER trading adapters."""
 import main_core as _core
 for _name,_value in _core.__dict__.items():
     if not _name.startswith("__"):
