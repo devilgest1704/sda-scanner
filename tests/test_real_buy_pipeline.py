@@ -149,7 +149,7 @@ class RealBuyPipelineTests(unittest.TestCase):
             state_path = Path(tmp) / "state.json"
             market_path.write_text(json.dumps({
                 "schema_version": 1, "updated_at": self.now.isoformat(),
-                "candidates": [candidate(self.now)],
+                "market_source_at": self.now.isoformat(), "candidates": [candidate(self.now)],
             }), encoding="utf-8")
             fake_cfg = SimpleNamespace(
                 REAL_TRADING_ENABLED=True, REAL_TRADING_DRY_RUN=True,
