@@ -58,7 +58,7 @@ for name in files:
             initial = {"schema_version": 1, "signals": {}, "market_history": {},
                        "cooldowns": {}, "consumed_signal_ids": [],
                        "last_scan_at": None, "last_diagnostics": {}}
-            p.write_text(json.dumps(initial, indent=2) + "\\n", encoding="utf-8")
+            p.write_text(json.dumps(initial, indent=2) + "\n", encoding="utf-8")
         else:
             p.write_text('{}\n', encoding='utf-8')
         continue
