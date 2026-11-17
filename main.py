@@ -17,27 +17,25 @@ _paper.SL_PCT=_v30.SL_PCT
 engine=_paper
 
 def _run_with_paper_telemetry():
-    """Generate diagnostics from the SAME runtime ledger the paper engine uses."""
+    """Run the REAL and PAPER adapters independently against one market scan."""
+    import os
+    os.environ.setdefault("REAL_BUY_PIPELINE_ENABLED", "true")
+    # The scanner snapshot and REAL BUY evaluation run BEFORE PAPER processing.
+    # No PAPER position transition is needed to discover or authorize a REAL signal.
+    try:
+        _v30.write_real_market_snapshot("market_data.json")
+        from real_buy_pipeline import run as run_real_buy_pipeline
+        print("REAL BUY PIPELINE:", run_real_buy_pipeline())
+    except Exception as exc:
+        print("::error::REAL BUY pipeline failed closed:", repr(exc))
     try:
         return engine.main()
     finally:
-        # REAL market snapshot uses the same V30 scoring math with REAL-owned history.
-        try:
-            _v30.write_real_market_snapshot("market_data.json")
-        except Exception as exc:
-            print("::error::REAL market snapshot failed closed:", repr(exc))
-        # PAPER telemetry runs in parallel and cannot authorize or block REAL BUY.
+        # PAPER diagnostics are parallel telemetry and do not feed REAL signals.
         try:
             _v30.write_scan_funnel("market_analysis.json")
         except Exception as exc:
             print("::warning::V30 candidate telemetry failed:", repr(exc))
-        try:
-            import os
-            os.environ.setdefault("REAL_BUY_PIPELINE_ENABLED", "true")
-            from real_buy_pipeline import run as run_real_buy_pipeline
-            print("REAL BUY PIPELINE:", run_real_buy_pipeline())
-        except Exception as exc:
-            print("::error::REAL BUY pipeline failed closed:", repr(exc))
         # Bridge remains responsible for REAL wallet reconciliation and SELL only.
         try:
             from real_paper_bridge import reconcile
