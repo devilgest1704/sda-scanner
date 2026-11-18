@@ -51,8 +51,14 @@ def load_state(path=STATE):
     try:
         state=json.loads(path.read_text(encoding="utf-8"))
         if (not isinstance(state,dict) or state.get("schema_version")!=VERSION
+            or stamp(state.get("updated_at")) is None
             or any(not isinstance(state.get(k),dict) for k in ("history","temporal_history","cooldowns","risk_circuit","buy_ready"))
-            or not isinstance(state.get("consumed_signal_ids"),list)):
+            or not isinstance(state.get("consumed_signal_ids"),list)
+            or any(not isinstance(v,dict) for v in state["history"].values())
+            or any(not isinstance(v,dict) for v in state["temporal_history"].values())
+            or any(not isinstance(v,dict) for v in state["buy_ready"].values())
+            or any(not isinstance(k,str) or stamp(v) is None for k,v in state["cooldowns"].items())
+            or any(not isinstance(v,str) or not v for v in state["consumed_signal_ids"])):
             return None,"REAL_SIGNAL_STATE_INVALID_SCHEMA"
         return state,None
     except (OSError,ValueError,TypeError):
