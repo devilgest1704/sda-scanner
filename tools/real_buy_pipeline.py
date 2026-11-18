@@ -5,7 +5,7 @@ import hashlib
 import json
 import math
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import real_trader
@@ -196,7 +196,7 @@ def run_scan(market_path="market_analysis.json",execute=True,state_path=STATE):
             if status in ("CONFIRMED","PENDING_CONFIRMATION"):
                 state["consumed_signal_ids"].append(result["signal_id"])
                 state["consumed_signal_ids"]=state["consumed_signal_ids"][-20000:]
-                state["cooldowns"][token]=(at:=now()).__class__.fromtimestamp(at.timestamp()+COOLDOWN_HOURS*3600,tz=UTC).isoformat()
+                state["cooldowns"][token]=(now()+timedelta(hours=COOLDOWN_HOURS)).isoformat()
         except Exception as exc:  # noqa: BLE001 - never let one candidate bypass REAL safety
             actions.append({"token":token,"status":"SAFETY_OR_EXECUTION_BLOCKED","error":type(exc).__name__+":"+str(exc)[:180]})
     state["updated_at"]=now().isoformat(); save_state(state,state_path)
