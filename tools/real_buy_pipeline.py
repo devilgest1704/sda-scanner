@@ -70,20 +70,7 @@ def _capacity(real):
         "deployed_sda":float(deployed),"capital_cap_sda":cfg.TRADING_WALLET_CAPITAL_SDA,
         "wallet_balance_sda":balance/10**18}
 
-def evaluate_candidate(token,analysis,state,real_state,at=None):
-    at=at or now(); token=str(token).lower()
-    scored=strategy.score(token,analysis,persist=True,state=state)
-    c,score,quality,impulse,phase=scored
-    signal={"phase":phase,"score":float(score),"quality":float(quality),"impulse":float(impulse),
-        "quote_at":c.get("last_transaction"),"data_age_sec":c.get("data_age_sec"),
-        "price_sda":c.get("price"),"m1h":c.get("m1"),"m15":c.get("m15"),
-        "flow_15m":c.get("flow15"),"flow_1h":c.get("flow"),"volume_1h":c.get("vol"),
-        "trades_1h":c.get("trades"),"buy_ratio":c.get("buy_ratio"),"decision_at":at.isoformat()}
-    prior=state["temporal_history"].get(token)
-    temporal=evaluate_tp4(token,signal,at=at,previous=prior)
-    # Advance REAL's own temporal evidence; never consult Shadow/PAPER journals.
-    state["temporal_history"][token]=signal
-    state["temporal_history"]=dict(list(state["temporal_history"].items())[-5000:])
+def _market_gates(token, analysis, signal, temporal, at):
     age=signal["data_age_sec"]; trades=signal["trades_1h"]
     age_ok=isinstance(age,(int,float)) and not isinstance(age,bool) and math.isfinite(age) and 0<=age<=300
     trades_ok=isinstance(trades,(int,float)) and not isinstance(trades,bool) and math.isfinite(trades) and trades>=12
@@ -101,8 +88,35 @@ def evaluate_candidate(token,analysis,state,real_state,at=None):
     quote=quote_gate(token,signal["quote_at"],
         confirmed_continuation=bool(temporal.get("ready") and temporal.get("lane")=="confirmed_continuation"),
         require_continuity=False)
-    market_block=(not temporal.get("ready") or not age_ok or not activity_ok
+    blocked=(not temporal.get("ready") or not age_ok or not activity_ok
         or not price_flow_ok or late or macd.get("blocked") or not quote.get("ready"))
+    reasons=[]
+    if not temporal.get("ready"): reasons.append("temporal_recovery:"+str(temporal.get("reason")))
+    if not age_ok: reasons.append("v31_age")
+    if not activity_ok: reasons.append("v31_activity")
+    if not price_flow_ok: reasons.append("price_flow")
+    if late: reasons.append("late_spike")
+    if macd.get("blocked"): reasons.append("macd_bearish")
+    if not quote.get("ready"): reasons.append("quote_quality:"+str(quote.get("reason")))
+    return {"blocked":blocked,"reasons":reasons,"macd":macd,"quote":quote,
+            "age_ok":age_ok,"activity_ok":activity_ok}
+
+def evaluate_candidate(token,analysis,state,real_state,at=None):
+    at=at or now(); token=str(token).lower()
+    scored=strategy.score(token,analysis,persist=True,state=state)
+    c,score,quality,impulse,phase=scored
+    signal={"phase":phase,"score":float(score),"quality":float(quality),"impulse":float(impulse),
+        "quote_at":c.get("last_transaction"),"data_age_sec":c.get("data_age_sec"),
+        "price_sda":c.get("price"),"m1h":c.get("m1"),"m15":c.get("m15"),
+        "flow_15m":c.get("flow15"),"flow_1h":c.get("flow"),"volume_1h":c.get("vol"),
+        "trades_1h":c.get("trades"),"buy_ratio":c.get("buy_ratio"),"decision_at":at.isoformat()}
+    prior=state["temporal_history"].get(token)
+    temporal=evaluate_tp4(token,signal,at=at,previous=prior)
+    # Advance REAL's own temporal evidence; never consult Shadow/PAPER journals.
+    state["temporal_history"][token]=signal
+    state["temporal_history"]=dict(list(state["temporal_history"].items())[-5000:])
+    market=_market_gates(token,analysis,signal,temporal,at)
+    market_block=market["blocked"]
     until=stamp(state["cooldowns"].get(token)); cooldown=bool(until and until>at)
     try: daily=float(real_state.get("daily_realized_pnl_sda") or 0)
     except (ValueError,TypeError): daily=float("-inf")
