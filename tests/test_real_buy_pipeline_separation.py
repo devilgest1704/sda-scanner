@@ -10,7 +10,8 @@ class RealPaperIsolation(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory(); self.path=Path(self.tmp.name)/"real.json"
   self.at=datetime.now(timezone.utc); self.state=p.initial_state()
   self.real={"positions":{f"0x{i:040x}":{"cost_sda":30} for i in range(7)},
-             "pending_buys":{},"daily_realized_pnl_sda":0}
+             "pending_buys":{},"daily_realized_pnl_sda":0,"syncStatus":"FRESH",
+             "lastSuccessfulWalletSync":datetime.now(timezone.utc).isoformat()}
   self.analysis={"price_in_sda":1,"last_transaction":self.at.isoformat(),
    "momentum":{"1h_pct":3,"15m_pct":2,"4h_pct":1},
    "flow":{"1h":{"buy_volume":900,"sell_volume":100,"buy_count":8,"sell_count":4,"net_flow":800},

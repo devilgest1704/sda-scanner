@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import real_trading_config as cfg
 import real_trader
+import real_wallet_reconciliation as wallet_reconciliation
 import v30_pump_hunter as strategy
 from tools.temporal_recovery_buy import evaluate_tp4
 from tools.v32_hourly_macd import paper_macd_veto
@@ -54,6 +55,11 @@ def _capacity(real):
     positions=real.get("positions"); pending=real.get("pending_buys")
     if not isinstance(positions,dict) or not isinstance(pending,dict):
         return False,"REAL_POSITION_STATE_INVALID",None
+    if str(real.get("syncStatus") or "").upper() != "FRESH":
+        return False,"REAL_WALLET_SYNC_NOT_FRESH",None
+    synced=stamp(real.get("lastSuccessfulWalletSync"))
+    if synced is None or not 0 <= (now()-synced).total_seconds() <= wallet_reconciliation.MAX_SNAPSHOT_AGE_SECONDS:
+        return False,"REAL_WALLET_SYNC_STALE",None
     count=len(positions)+len(pending)
     if count>=cfg.MAX_OPEN_POSITIONS: return False,"REAL_POSITION_LIMIT",None
     deployed=real_trader.deployed_cost_basis(real)
