@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import local, Lock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from real_trading_config import DUST_TOKEN_QUANTITY
@@ -18,14 +19,18 @@ ROUTER=os.getenv("SIDRA_ROUTER_ADDRESS","0x35cAC72Db00e8dAC0e4f7F8A0F53D339E0cC2
 CHAIN=97453
 ZERO="0x"+"0"*40
 OUT=Path("accounting_evidence"); OUT.mkdir(exist_ok=True)
-S=requests.Session(); S.headers.update({"User-Agent":"sda-real-accounting-readonly/2.0","Accept":"application/json"})
-REQ=0
+THREAD_STATE=local(); REQ_LOCK=Lock(); REQ=0
 
 def get(path,params=None):
     global REQ
+    if not hasattr(THREAD_STATE,"session"):
+        session=requests.Session()
+        session.headers.update({"User-Agent":"sda-real-accounting-readonly/2.0","Accept":"application/json"})
+        THREAD_STATE.session=session
     for n in range(6):
         try:
-            r=S.get(BASE+path,params=params,timeout=(15,90)); REQ+=1
+            r=THREAD_STATE.session.get(BASE+path,params=params,timeout=(15,90))
+            with REQ_LOCK: REQ+=1
             if r.status_code==429:
                 time.sleep(2**n); continue
             r.raise_for_status(); return r.json()
@@ -159,23 +164,36 @@ def main():
     internal,ip=paged(f"/addresses/{WALLET}/internal-transactions")
     holdings,hp=paged(f"/addresses/{WALLET}/tokens",{"type":"ERC-20"})
     hashes=sorted({str(x.get("hash") or "").lower() for x in txs if x.get("hash")} | {str(x.get("transaction_hash") or "").lower() for x in transfers if x.get("transaction_hash")} | {str(x.get("transaction_hash") or "").lower() for x in internal if x.get("transaction_hash")})
-    details={}; errors={}
-    for i,h in enumerate(hashes,1):
+    details={}; errors={}; logs={}; log_errors={}
+    # Address-level token transfers and internal transactions above are already
+    # fully paginated. Re-fetching them for every hash was redundant and made
+    # the scheduled freshness job unnecessarily slow. Only details and logs
+    # are fetched per hash, concurrently, with one HTTP session per worker.
+    def fetch_transaction_bundle(h):
+        detail={}; detail_error=None
         try:
-            detail=get(f"/transactions/{h}")
-            # Some explorer transaction-detail endpoints legitimately return JSON null.
-            # Fall back to the already-fetched base transaction record for those hashes.
-            details[h]=detail if isinstance(detail,dict) else {}
-        except Exception as e: errors[h]=str(e)
-        if i%25==0: print(f"Details {i}/{len(hashes)}",flush=True)
-    logs={}; txtrans={}; txinternal={}
-    for i,h in enumerate(hashes,1):
-        for name,path,dest in [
-            ("logs",f"/transactions/{h}/logs",logs),
-            ("token_transfers",f"/transactions/{h}/token-transfers",txtrans),
-            ("internal_transactions",f"/transactions/{h}/internal-transactions",txinternal)]:
-            try: dest[h]=get(path)
-            except Exception as e: dest[h]={"fetch_error":str(e)}
+            payload=get(f"/transactions/{h}")
+            # Some explorer detail endpoints legitimately return JSON null.
+            detail=payload if isinstance(payload,dict) else {}
+        except Exception as exc:
+            detail_error=str(exc)
+        try:
+            event_logs=get(f"/transactions/{h}/logs")
+        except Exception as exc:
+            event_logs={"fetch_error":str(exc)}
+        return h,detail,detail_error,event_logs
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures=[pool.submit(fetch_transaction_bundle,h) for h in hashes]
+        for i,future in enumerate(as_completed(futures),1):
+            h,detail,detail_error,event_logs=future.result()
+            details[h]=detail; logs[h]=event_logs
+            if detail_error: errors[h]=detail_error
+            if isinstance(event_logs,dict) and event_logs.get("fetch_error"):
+                log_errors[h]=event_logs["fetch_error"]
+            if i%25==0: print(f"Transaction evidence {i}/{len(hashes)}",flush=True)
+    # Keep the evidence schema keys while relying on the complete address-level
+    # paginated collections instead of duplicating identical per-hash calls.
+    txtrans={}; txinternal={}
     native=int(rpc("eth_getBalance",[WALLET,"latest"]),16)
     token_meta={}
     for item in holdings:
@@ -194,7 +212,7 @@ def main():
         "internal_transactions":internal,"token_holdings":{"items":holdings,"next_page_params":None},
         "transaction_details":details,"transaction_logs":logs,
         "transaction_token_transfers":txtrans,"transaction_internal_transactions":txinternal,
-        "detail_errors":errors}
+        "detail_errors":errors,"log_errors":log_errors}
     raw_sha=dump("blockchain_raw.json",evidence)
 
     byhash=defaultdict(list)
@@ -617,6 +635,7 @@ def main():
     if unmatched: blockers.extend([x["sell_tx"] for x in unmatched])
     blockers.extend(external_unknown_basis_hashes)
     if errors: blockers.extend(errors.keys())
+    if log_errors: blockers.extend(log_errors.keys())
     if not open_complete: blockers.extend(x["buy_tx"] for x in open_positions if x["current_value_sda"] is None)
     if unpriced: blockers.extend(x["contract"] for x in unpriced)
     if abs(cash_delta)>Decimal("0.00000001"): blockers.append("NATIVE_CASH_RECONCILIATION_DELTA")
@@ -661,7 +680,7 @@ def main():
         "external_or_unknown_basis_assets":external_assets,"candidate_external_purchase_pairs":candidate_external_pairs,
         "external_unknown_basis_transfer_hashes":external_unknown_basis_hashes,
         "partial_confirmed_trading_pnl_sda":str(realized_net+open_pnl) if open_pnl is not None else None,
-        "ledger_discrepancies":discrepancies,
+        "ledger_discrepancies":discrepancies,"log_fetch_errors":log_errors,
         "reconciliation_status":"COMPLETE" if not blockers else "INCOMPLETE",
         "unresolved_hashes_or_items":blockers,
         "method":{"lot_matching":"FIFO","buy_cost":"confirmed native SDA value in successful router swap",
@@ -672,6 +691,7 @@ def main():
             "token_transfer_outs":"FIFO reduce open bot lots; no sale proceeds or realized PnL inferred",
             "trading_side_effects":"none; eth_call and explorer GET only"},
         "validation":{"all_pagination_exhausted":True,"detail_fetch_errors":errors,
+            "log_fetch_errors":log_errors,
             "cash_reconciliation_zero":abs(cash_delta)<=Decimal("0.00000001"),
             "open_positions_valued":open_complete,"wallet_value_complete":wallet_value_complete,
             "unmatched_sell_count":len(unmatched),"ledger_loaded":ledger is not None}}
@@ -717,6 +737,7 @@ def main():
                    and str(x.get("token") or "").upper()!="PINE"]
     bot_blockers=[]
     if errors: bot_blockers.extend(sorted(errors))
+    if log_errors: bot_blockers.extend(sorted(log_errors))
     if abs(cash_delta)>Decimal("0.00000001"): bot_blockers.append("NATIVE_CASH_RECONCILIATION_DELTA")
     bot_blockers.extend(x["sell_tx"] for x in bot_unmatched)
     bot_unmatched_transfer_outs=[x for x in unmatched_transfer_outs if x["contract"] in bot_buy_contracts]
@@ -760,7 +781,7 @@ def main():
         # BOT snapshot as well as in the richer report. These are evidence-
         # derived values, not permissive defaults.
         "validation":{"all_pagination_exhausted":True,
-            "detail_fetch_errors":errors,
+            "detail_fetch_errors":errors,"log_fetch_errors":log_errors,
             "cash_reconciliation_zero":abs(cash_delta)<=Decimal("0.00000001"),
             "ledger_loaded":ledger is not None,
             "open_positions_valued":bot_open_complete,
