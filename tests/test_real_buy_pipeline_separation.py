@@ -1,4 +1,8 @@
 import contextlib, tempfile, unittest
+import copy
+import json
+import multiprocessing
+import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -200,4 +204,436 @@ class RealPaperIsolation(unittest.TestCase):
    p.real_trader.safety_check(30,self.real); out=p.real_trader.execute_buy(self.token,"T",30)
    safety.assert_called_once(); self.assertEqual(out["status"],"DRY_RUN")
 
-if __name__=="__main__": unittest.main()
+class RealBuyClaimTests(unittest.TestCase):
+    tearDown = RealPaperIsolation.tearDown
+
+    def setUp(self):
+        RealPaperIsolation.setUp(self)
+        self.market_path = Path(self.tmp.name) / "market.json"
+        self.market_path.write_text(
+            json.dumps({"tokens": {self.token: self.analysis}}), encoding="utf-8"
+        )
+        p.save_state(self.state, self.path)
+        self.contexts = contextlib.ExitStack()
+        self.addCleanup(self.contexts.close)
+        self.contexts.enter_context(
+            patch.dict(
+                "os.environ",
+                {"REAL_TRADING_ENABLED": "true", "REAL_TRADING_DRY_RUN": "true"},
+            )
+        )
+        self.contexts.enter_context(
+            patch.object(p.real_trader, "load_state", return_value=self.real)
+        )
+        self.contexts.enter_context(
+            patch.object(p.real_trader, "wallet_address", return_value="0x" + "c" * 40)
+        )
+        self.contexts.enter_context(
+            patch.object(p.real_trader, "native_balance", return_value=1000 * 10**18)
+        )
+        self.forbidden = unittest.mock.Mock(
+            side_effect=AssertionError(
+                "Network, PAPER state, signing or broadcast forbidden"
+            )
+        )
+        for name in ("rpc", "private_account", "send_transaction"):
+            self.contexts.enter_context(
+                patch.object(p.real_trader, name, self.forbidden)
+            )
+        self.contexts.enter_context(
+            patch.object(p.strategy, "load_state", self.forbidden)
+        )
+        self.contexts.enter_context(
+            patch("tools.temporal_recovery_buy.previous_signals", self.forbidden)
+        )
+        self.actual_execute = p.real_trader.execute_buy
+        self.execute = self.contexts.enter_context(
+            patch.object(
+                p.real_trader, "execute_buy", return_value={"status": "DRY_RUN"}
+            )
+        )
+
+    def scan(self):
+        return p.run_scan(str(self.market_path), state_path=self.path)
+
+    def reserve(self):
+        ready, actions, reservations = p._prepare_scan(
+            {self.token: self.analysis}, True, self.path
+        )
+        self.assertEqual(ready, 1)
+        self.assertEqual(actions, [])
+        self.assertEqual(len(reservations), 1)
+        return reservations[0]
+
+    def stored(self):
+        state, error = p.load_state(self.path)
+        self.assertIsNone(error)
+        return state
+
+    def expire(self, reservation):
+        with p.state_lock(self.path):
+            state = self.stored()
+            state["claims"][reservation["signal_id"]]["expires_at"] = (
+                p.now() - timedelta(seconds=1)
+            ).isoformat()
+            p.save_state(state, self.path)
+
+    def test_dry_run_claim_blocks_replay_after_restart(self):
+        first = self.scan()
+        second = self.scan()
+        self.assertEqual(first["actions"][0]["status"], "WOULD EXECUTE")
+        self.assertEqual(self.execute.call_count, 1)
+        self.assertIn(
+            second["actions"][0]["status"], ("ALREADY_CLAIMED", "DUPLICATE_BLOCKED")
+        )
+        self.forbidden.assert_not_called()
+
+    def test_identity_is_stable_and_includes_chain_token_quote_and_strategy(self):
+        quote = self.at.isoformat()
+        identity = p.signal_identity(self.token, quote)
+        self.assertEqual(
+            identity,
+            p.signal_identity(self.token.upper(), quote.replace("+00:00", "Z")),
+        )
+        self.assertNotEqual(identity, p.signal_identity("0x" + "b" * 40, quote))
+        self.assertNotEqual(
+            identity,
+            p.signal_identity(self.token, (self.at + timedelta(seconds=1)).isoformat()),
+        )
+        with patch.object(cfg, "CHAIN_ID", cfg.CHAIN_ID + 1):
+            self.assertNotEqual(identity, p.signal_identity(self.token, quote))
+        with patch.object(p.strategy, "VERSION", "different-version"):
+            self.assertNotEqual(identity, p.signal_identity(self.token, quote))
+
+    def test_restart_after_claim_is_blocked(self):
+        reservation = self.reserve()
+        claim = self.stored()["claims"][reservation["signal_id"]]
+        for key in (
+            "signal_id",
+            "token",
+            "claimed_at",
+            "status",
+            "worker_id",
+            "expires_at",
+            "claim_id",
+        ):
+            self.assertTrue(claim[key])
+        self.assertEqual(self.scan()["actions"][0]["status"], "ALREADY_CLAIMED")
+        self.execute.assert_not_called()
+
+    def test_expired_prebroadcast_claim_is_retryable(self):
+        old = self.reserve()
+        self.expire(old)
+        self.assertEqual(self.scan()["actions"][0]["status"], "WOULD EXECUTE")
+        self.execute.assert_called_once()
+        current = self.stored()["claims"][old["signal_id"]]
+        self.assertNotEqual(current["claim_id"], old["claim_id"])
+
+    def test_expired_owner_is_fenced_after_claim_is_reassigned(self):
+        old = self.reserve()
+        self.expire(old)
+        current = self.reserve()
+        with self.assertRaisesRegex(RuntimeError, "OWNERSHIP_CHANGED"):
+            p._execute_reserved(old, self.path)
+        self.execute.assert_not_called()
+        self.assertEqual(
+            p._execute_reserved(current, self.path)["status"], "WOULD EXECUTE"
+        )
+        self.execute.assert_called_once()
+
+    def test_expired_broadcast_pending_is_never_released(self):
+        reservation = self.reserve()
+        p._begin_execution(reservation, self.path)
+        self.expire(reservation)
+        self.assertEqual(self.scan()["actions"][0]["status"], "ALREADY_CLAIMED")
+        self.assertEqual(
+            self.stored()["claims"][reservation["signal_id"]]["status"],
+            "BROADCAST_PENDING",
+        )
+        self.execute.assert_not_called()
+
+    def test_unknown_executor_result_is_not_retried_without_reconciliation(self):
+        self.execute.side_effect = TimeoutError("response lost")
+        self.scan()
+        reservation = next(iter(self.stored()["claims"].values()))
+        self.assertEqual(reservation["status"], "UNKNOWN")
+        self.expire(reservation)
+        self.assertEqual(self.scan()["actions"][0]["status"], "ALREADY_CLAIMED")
+        self.execute.assert_called_once()
+
+    def test_pending_intent_hash_is_reconciled_without_reexecution(self):
+        tx_hash = "0x" + "d" * 64
+
+        def broadcast_attempt(*args):
+            self.real["pending_buys"][self.token] = {
+                "tx_hash": tx_hash,
+                "position_sda": 30,
+            }
+            raise TimeoutError("receipt unavailable")
+
+        self.execute.side_effect = broadcast_attempt
+        self.scan()
+        claim = next(iter(self.stored()["claims"].values()))
+        self.assertEqual(claim["tx_hash"], tx_hash)
+        self.expire(claim)
+        with patch.object(p.real_trader, "rpc", return_value=None) as rpc:
+            self.assertEqual(self.scan()["actions"][0]["status"], "ALREADY_CLAIMED")
+        rpc.assert_called_once_with("eth_getTransactionReceipt", [tx_hash])
+        self.assertEqual(
+            self.stored()["claims"][claim["signal_id"]]["status"], "BROADCAST_PENDING"
+        )
+        self.real["pending_buys"].clear()
+        self.real["positions"][self.token] = {"buy_tx": tx_hash, "cost_sda": 30}
+        self.assertEqual(self.scan()["actions"][0]["status"], "DUPLICATE_BLOCKED")
+        self.assertEqual(
+            self.stored()["claims"][claim["signal_id"]]["status"], "EXECUTED"
+        )
+        self.execute.assert_called_once()
+
+    def test_confirmed_receipt_without_accounting_keeps_reservation(self):
+        self.execute.return_value = {
+            "status": "PENDING_CONFIRMATION",
+            "tx": "0x" + "e" * 64,
+        }
+        self.scan()
+        claim = next(iter(self.stored()["claims"].values()))
+        self.expire(claim)
+        with patch.object(p.real_trader, "rpc", return_value={"status": "0x1"}):
+            self.assertEqual(self.scan()["actions"][0]["status"], "ALREADY_CLAIMED")
+        claim = next(iter(self.stored()["claims"].values()))
+        self.assertEqual(claim["reconciliation"], "CONFIRMED_AWAITING_ACCOUNTING")
+        self.assertEqual(claim["status"], "BROADCAST_PENDING")
+        self.execute.assert_called_once()
+
+    def test_executed_signal_is_never_repeated(self):
+        self.execute.return_value = {"status": "CONFIRMED", "tx": "0x" + "f" * 64}
+        self.scan()
+        claim = next(iter(self.stored()["claims"].values()))
+        self.assertEqual(claim["status"], "EXECUTED")
+        self.expire(claim)
+        self.assertEqual(self.scan()["actions"][0]["status"], "DUPLICATE_BLOCKED")
+        self.execute.assert_called_once()
+
+    def test_different_signals_are_independent(self):
+        self.scan()
+        other = "0x" + "b" * 40
+        self.market_path.write_text(
+            json.dumps({"tokens": {other: self.analysis}}), encoding="utf-8"
+        )
+        self.assertEqual(self.scan()["actions"][0]["status"], "WOULD EXECUTE")
+        self.assertEqual(self.execute.call_count, 2)
+        self.assertEqual(len(self.stored()["claims"]), 2)
+
+    def test_prebroadcast_safety_failure_is_retryable(self):
+        with patch.object(
+            p.real_trader, "safety_check", side_effect=RuntimeError("blocked")
+        ):
+            self.scan()
+        self.execute.assert_not_called()
+        self.assertEqual(
+            next(iter(self.stored()["claims"].values()))["status"], "FAILED_RETRYABLE"
+        )
+        self.assertEqual(self.scan()["actions"][0]["status"], "WOULD EXECUTE")
+        self.execute.assert_called_once()
+
+    def test_lock_failure_blocks_executor(self):
+        with patch.object(p.fcntl, "flock", side_effect=OSError("lock unavailable")):
+            self.assertEqual(self.scan()["status"], "state_error")
+        self.execute.assert_not_called()
+
+    def test_executor_preparation_error_is_retryable_without_signing(self):
+        with patch.object(
+            p.real_trader, "prepare_buy", side_effect=RuntimeError("quote unavailable")
+        ):
+            with self.assertRaises(p.real_trader.BuyPreBroadcastError):
+                self.actual_execute(self.token, "T", 30)
+        self.execute.side_effect = p.real_trader.BuyPreBroadcastError(
+            "quote unavailable"
+        )
+        self.scan()
+        self.assertEqual(
+            next(iter(self.stored()["claims"].values()))["status"], "FAILED_RETRYABLE"
+        )
+        self.execute.side_effect = None
+        self.assertEqual(self.scan()["actions"][0]["status"], "WOULD EXECUTE")
+        self.forbidden.assert_not_called()
+
+    def test_unlock_failure_blocks_executor(self):
+        actual = p.fcntl.flock
+
+        def unlock_failure(descriptor, operation):
+            if operation == p.fcntl.LOCK_UN:
+                actual(descriptor, operation)
+                raise OSError("unlock failed")
+            return actual(descriptor, operation)
+
+        with patch.object(p.fcntl, "flock", side_effect=unlock_failure):
+            self.assertEqual(self.scan()["status"], "state_error")
+        self.execute.assert_not_called()
+
+    def test_lock_open_failure_blocks_executor(self):
+        with patch.object(p, "state_lock", side_effect=PermissionError("lock file")):
+            self.assertEqual(self.scan()["status"], "state_error")
+        self.execute.assert_not_called()
+
+    def test_read_missing_corrupt_and_schema_failures_block_executor(self):
+        for content in (
+            None,
+            "{",
+            "{}",
+            json.dumps({**self.state, "claims": {"bad": {}}}),
+        ):
+            with self.subTest(content=content):
+                if content is None:
+                    self.path.unlink(missing_ok=True)
+                else:
+                    self.path.write_text(content, encoding="utf-8")
+                self.assertEqual(self.scan()["status"], "state_error")
+        self.execute.assert_not_called()
+
+    def test_unreadable_authoritative_state_blocks_executor(self):
+        with patch.object(
+            p, "load_state", return_value=(None, "REAL_SIGNAL_STATE_UNREADABLE")
+        ):
+            self.assertEqual(self.scan()["status"], "state_error")
+        self.execute.assert_not_called()
+
+    def test_claim_atomic_save_failure_blocks_executor(self):
+        with patch.object(p.os, "replace", side_effect=OSError("atomic save failed")):
+            self.assertEqual(self.scan()["status"], "state_error")
+        self.execute.assert_not_called()
+        self.assertEqual(self.stored()["claims"], {})
+
+    def test_broadcast_transition_save_failure_blocks_executor(self):
+        reservation = self.reserve()
+        with patch.object(p.os, "replace", side_effect=OSError("atomic save failed")):
+            with self.assertRaises(OSError):
+                p._execute_reserved(reservation, self.path)
+        self.execute.assert_not_called()
+        self.assertEqual(
+            self.stored()["claims"][reservation["signal_id"]]["status"], "CLAIMED"
+        )
+
+    def test_postexecutor_save_failure_keeps_persistent_pending_claim(self):
+        original = p.save_state
+        calls = []
+
+        def fail_final_save(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 3:
+                raise OSError("final save failed")
+            return original(*args, **kwargs)
+
+        with patch.object(p, "save_state", side_effect=fail_final_save):
+            self.scan()
+        self.assertEqual(
+            next(iter(self.stored()["claims"].values()))["status"], "BROADCAST_PENDING"
+        )
+        self.assertEqual(self.scan()["actions"][0]["status"], "ALREADY_CLAIMED")
+        self.execute.assert_called_once()
+
+    def test_real_reservations_consume_real_capacity(self):
+        self.real["positions"].update(
+            {f"0x{i + 100:040x}": {"cost_sda": 30} for i in range(2)}
+        )
+        self.reserve()
+        other = "0x" + "b" * 40
+        self.market_path.write_text(
+            json.dumps({"tokens": {other: self.analysis}}), encoding="utf-8"
+        )
+        self.assertEqual(self.scan()["buy_ready"], 0)
+        self.execute.assert_not_called()
+
+    def test_paper_decision_is_unaffected_by_real_claim(self):
+        paper_state = {"history": {}, "cooldowns": {}, "paper_buy_signal_ids": []}
+        before_state = copy.deepcopy(paper_state)
+        with (
+            patch.object(p.strategy, "load_state", return_value=paper_state),
+            patch.object(p.strategy, "PAPER_BUY_MODE", "temporal_recovery"),
+            patch.object(p.strategy, "PAPER_TP4", False),
+            patch.object(p.strategy, "cooldown_active", return_value=False),
+            patch.object(
+                p.strategy,
+                "temporal_recovery_signal",
+                return_value={"ready": True, "reason": "VALID"},
+            ),
+            patch.object(
+                p.strategy,
+                "paper_entry_risk_gate",
+                return_value={"blocked": False, "status": "ACTIVE"},
+            ),
+            patch.object(
+                p.strategy, "paper_macd_veto", return_value={"blocked": False}
+            ),
+            patch.object(p.strategy.paper_champion_config, "buy_veto", return_value=[]),
+        ):
+            before = p.strategy.decision(self.token, self.analysis, persist=False)
+            self.reserve()
+            after = p.strategy.decision(self.token, self.analysis, persist=False)
+        self.assertTrue(before["eligible_for_buy"])
+        for key in (
+            "eligible_for_buy",
+            "paper_buy_blocked",
+            "paper_buy_gate_failures",
+            "pump_score",
+        ):
+            self.assertEqual(before[key], after[key])
+        self.assertEqual(paper_state, before_state)
+
+    @unittest.skipUnless(
+        sys.platform == "linux", "Real fcntl concurrency requires Linux"
+    )
+    def test_linux_parallel_processes_execute_same_signal_exactly_once(self):
+        context = multiprocessing.get_context("fork")
+        messages = context.Queue()
+        release = context.Event()
+
+        def cycle(label):
+            def executor(*args):
+                messages.put((label, "EXECUTOR"))
+                if label == "first" and not release.wait(15):
+                    raise RuntimeError("Executor was not released")
+                return {"status": "DRY_RUN"}
+
+            self.execute.side_effect = executor
+            result = self.scan()
+            self.forbidden.assert_not_called()
+            messages.put((label, result))
+
+        first = context.Process(target=cycle, args=("first",))
+        second = context.Process(target=cycle, args=("second",))
+        first.start()
+        events = []
+        try:
+            events.append(messages.get(timeout=15))
+            self.assertEqual(events[0], ("first", "EXECUTOR"))
+            second.start()
+            events.append(messages.get(timeout=15))
+        finally:
+            release.set()
+            first.join(20)
+            if second.pid is not None:
+                second.join(20)
+            for process in (first, second):
+                if process.is_alive():
+                    process.terminate()
+                    process.join(5)
+        self.assertEqual(first.exitcode, 0)
+        self.assertEqual(second.exitcode, 0)
+        events.append(messages.get(timeout=5))
+        executor_calls = [event for event in events if event[1] == "EXECUTOR"]
+        outcomes = {label: value for label, value in events if isinstance(value, dict)}
+        self.assertEqual(len(executor_calls), 1)
+        self.assertEqual(outcomes["first"]["actions"][0]["status"], "WOULD EXECUTE")
+        self.assertIn(
+            outcomes["second"]["actions"][0]["status"],
+            ("ALREADY_CLAIMED", "DUPLICATE_BLOCKED"),
+        )
+        self.assertEqual(
+            outcomes["first"]["actions"][0]["signal_id"],
+            outcomes["second"]["actions"][0]["signal_id"],
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

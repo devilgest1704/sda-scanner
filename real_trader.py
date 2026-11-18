@@ -28,6 +28,10 @@ ZERO = "0x0000000000000000000000000000000000000000"
 UINT256_MAX = (1 << 256) - 1
 
 
+class BuyPreBroadcastError(RuntimeError):
+    """BUY preparation failed before signing or broadcasting was reachable."""
+
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -455,7 +459,10 @@ def execute_buy(token, symbol, position_sda=None):
             pending["plan"], tx_hash, pending.get("gas"), pending.get("gas_price"),
             pending.get("token_balance_before"))
 
-    plan = prepare_buy(token, symbol, position_sda)
+    try:
+        plan = prepare_buy(token, symbol, position_sda)
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        raise BuyPreBroadcastError(str(exc)) from exc
     if not cfg.REAL_TRADING_ENABLED or cfg.REAL_TRADING_DRY_RUN:
         plan["status"] = "DRY_RUN"
         return plan

@@ -1,10 +1,15 @@
 """Independent REAL BUY pipeline; shares V30 market scoring and TP4 temporal rules."""
 from __future__ import annotations
 
+import copy
+import fcntl
 import hashlib
 import json
 import math
 import os
+import socket
+import uuid
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -20,6 +25,8 @@ STATE=Path("real_buy_signal_state.json")
 VERSION=1
 COOLDOWN_HOURS=6
 MAX_BUYS_PER_SCAN=1
+CLAIM_TTL_SECONDS=300
+CLAIM_STATUSES={"CLAIMED","FAILED_RETRYABLE","BROADCAST_PENDING","UNKNOWN","EXECUTED","WOULD_EXECUTE"}
 
 def now():
     return datetime.now(UTC)
@@ -27,7 +34,7 @@ def now():
 def initial_state():
     return {"schema_version":VERSION,"updated_at":now().isoformat(),"history":{},
             "temporal_history":{},"signal_history":{},"cooldowns":{},"risk_circuit":{},
-            "buy_ready":{},"consumed_signal_ids":[],"market_data_status":"UNKNOWN"}
+            "buy_ready":{},"consumed_signal_ids":[],"claims":{},"market_data_status":"UNKNOWN"}
 
 def _json_clean(value):
     if isinstance(value, float) and not math.isfinite(value):
@@ -40,9 +47,36 @@ def _json_clean(value):
 
 def save_state(state,path=STATE):
     path=Path(path); path.parent.mkdir(parents=True,exist_ok=True)
-    tmp=path.with_suffix(path.suffix+".tmp")
-    tmp.write_text(json.dumps(_json_clean(state),indent=2,ensure_ascii=False,allow_nan=False),encoding="utf-8")
-    os.replace(tmp,path)
+    tmp=path.with_suffix(path.suffix+"."+uuid.uuid4().hex+".tmp")
+    try:
+        with tmp.open("w",encoding="utf-8") as handle:
+            json.dump(_json_clean(state),handle,indent=2,ensure_ascii=False,allow_nan=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp,path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+@contextmanager
+def state_lock(path):
+    lock_path=Path(path).with_suffix(Path(path).suffix+".lock")
+    with lock_path.open("a+",encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(),fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(),fcntl.LOCK_UN)
+
+def _valid_claim(signal_id,claim):
+    return (isinstance(claim,dict) and claim.get("signal_id")==signal_id
+        and claim.get("status") in CLAIM_STATUSES
+        and all(isinstance(claim.get(key),str) and bool(claim[key])
+                for key in ("token","worker_id","claim_id"))
+        and stamp(claim.get("claimed_at")) is not None
+        and stamp(claim.get("expires_at")) is not None
+        and isinstance(claim.get("position_sda"),(int,float))
+        and not isinstance(claim.get("position_sda"),bool)
+        and math.isfinite(claim["position_sda"]) and claim["position_sda"]>0)
 
 def load_state(path=STATE):
     path=Path(path)
@@ -60,8 +94,11 @@ def load_state(path=STATE):
             or any(not isinstance(v,dict) for v in state["buy_ready"].values())
             or any(not isinstance(k,str) or stamp(v) is None for k,v in state["cooldowns"].items())
             or any(not isinstance(v,str) or not v for v in state["consumed_signal_ids"])
+            or not isinstance(state.get("claims",{}),dict)
+            or any(not _valid_claim(key,value) for key,value in state.get("claims",{}).items())
             or state.get("market_data_status","UNKNOWN") not in ("UNKNOWN","OK","MARKET_DATA_DEGRADED","INPUT_ERROR","REAL_TRADING_DISABLED")):
             return None,"REAL_SIGNAL_STATE_INVALID_SCHEMA"
+        state.setdefault("claims",{})
         return state,None
     except (OSError,ValueError,TypeError):
         return None,"REAL_SIGNAL_STATE_UNREADABLE"
@@ -72,6 +109,74 @@ def stamp(value):
         d=datetime.fromisoformat(value)
         return d.astimezone(UTC) if d.tzinfo else None
     except ValueError: return None
+
+def signal_identity(token,quote_at):
+    observed=stamp(quote_at)
+    if observed is None:
+        return None
+    identity=f"{cfg.CHAIN_ID}|{str(token).lower()}|{observed.isoformat()}|{strategy.VERSION}|REAL"
+    return hashlib.sha256(identity.encode()).hexdigest()
+
+def _required_state(path):
+    state,error=load_state(path)
+    if error or state is None:
+        raise RuntimeError(error or "REAL_SIGNAL_STATE_UNAVAILABLE")
+    return state
+
+def _save_updated(state,path):
+    state["updated_at"]=now().isoformat()
+    save_state(state,path)
+
+def _reconcile_claims(state,real):
+    for signal_id,claim in state["claims"].items():
+        if claim["status"] in ("EXECUTED","WOULD_EXECUTE"):
+            continue
+        token=claim["token"]
+        position=real.get("positions",{}).get(token)
+        pending=real.get("pending_buys",{}).get(token)
+        if isinstance(position,dict):
+            claim.update(status="EXECUTED",tx_hash=position.get("buy_tx") or claim.get("tx_hash"))
+            if signal_id not in state["consumed_signal_ids"]:
+                state["consumed_signal_ids"].append(signal_id)
+        elif isinstance(pending,dict):
+            claim.update(status="BROADCAST_PENDING",tx_hash=pending.get("tx_hash") or claim.get("tx_hash"))
+        if claim["status"] in ("BROADCAST_PENDING","UNKNOWN") and claim.get("tx_hash"):
+            completed=any(isinstance(trade,dict) and trade.get("action")=="BUY"
+                and trade.get("tx")==claim["tx_hash"] for trade in real.get("trades",[]))
+            if completed:
+                claim["status"]="EXECUTED"
+                if signal_id not in state["consumed_signal_ids"]:
+                    state["consumed_signal_ids"].append(signal_id)
+            else:
+                try:
+                    receipt=real_trader.rpc("eth_getTransactionReceipt",[claim["tx_hash"]])
+                    claim["reconciliation"]=("CONFIRMED_AWAITING_ACCOUNTING" if receipt and int(receipt.get("status","0x0"),16)==1
+                        else "REVERTED_REQUIRES_RECONCILIATION" if receipt else "PENDING_RECEIPT")
+                except (OSError,ValueError,TypeError,RuntimeError,AttributeError) as exc:
+                    claim["reconciliation"]="RECEIPT_UNAVAILABLE:"+type(exc).__name__
+
+def _claim_block(state,signal_id,token,at):
+    claim=state["claims"].get(signal_id)
+    if signal_id in state["consumed_signal_ids"] or (claim and claim["status"] in ("EXECUTED","WOULD_EXECUTE")):
+        return "DUPLICATE_BLOCKED"
+    for previous in state["claims"].values():
+        if previous["token"]!=token:
+            continue
+        if previous["status"] in ("BROADCAST_PENDING","UNKNOWN"):
+            return "ALREADY_CLAIMED"
+        if previous["status"]=="CLAIMED" and stamp(previous["expires_at"])>at:
+            return "ALREADY_CLAIMED"
+    return None
+
+def _reserved_real(state,real,at):
+    reserved=copy.deepcopy(real)
+    for claim in state["claims"].values():
+        active=(claim["status"] in ("BROADCAST_PENDING","UNKNOWN")
+            or (claim["status"]=="CLAIMED" and stamp(claim["expires_at"])>at))
+        token=claim["token"]
+        if active and token not in reserved["positions"] and token not in reserved["pending_buys"]:
+            reserved["pending_buys"][token]={"position_sda":claim["position_sda"]}
+    return reserved
 
 def _capacity(real):
     from decimal import Decimal
@@ -172,8 +277,9 @@ def evaluate_candidate(token,analysis,state,real_state,at=None):
     try: daily=float(real_state.get("daily_realized_pnl_sda") or 0)
     except (ValueError,TypeError): daily=float("-inf")
     risk_block=not math.isfinite(daily) or daily<=-float(cfg.MAX_DAILY_LOSS_SDA)
-    signal_id=hashlib.sha256(f"{token}|{signal['quote_at']}|{strategy.VERSION}|REAL".encode()).hexdigest() if signal["quote_at"] else None
-    duplicate=bool(signal_id and signal_id in state["consumed_signal_ids"])
+    signal_id=signal_identity(token,signal["quote_at"])
+    legacy_id=hashlib.sha256(f"{token}|{signal['quote_at']}|{strategy.VERSION}|REAL".encode()).hexdigest() if signal["quote_at"] else None
+    duplicate=bool(signal_id and (signal_id in state["consumed_signal_ids"] or legacy_id in state["consumed_signal_ids"]))
     exists=token in real_state.get("positions",{}) or token in real_state.get("pending_buys",{})
     cap_ok,cap_reason,capacity=_capacity(real_state)
     reasons=[]
@@ -196,67 +302,155 @@ def evaluate_candidate(token,analysis,state,real_state,at=None):
     return result
 
 def _mark_unavailable(state_path,status):
-    state,error=load_state(state_path)
-    if error or state is None: return
-    state["market_data_status"]=status
-    state["updated_at"]=now().isoformat()
-    for token,item in list(state["buy_ready"].items()):
-        state["buy_ready"][token]={"ready":False,"reason":status,"at":state["updated_at"]}
-    save_state(state,state_path)
+    with state_lock(state_path):
+        state=_required_state(state_path)
+        state["market_data_status"]=status
+        for token in state["buy_ready"]:
+            state["buy_ready"][token]={"ready":False,"reason":status,"at":now().isoformat()}
+        _save_updated(state,state_path)
+
+def _prepare_scan(tokens,execute,state_path):
+    reservations=[]; actions=[]; ready=0
+    with state_lock(state_path):
+        state=_required_state(state_path)
+        real=real_trader.load_state()
+        _reconcile_claims(state,real)
+        state["market_data_status"]="OK"
+        state["buy_ready"]={}
+        for token,row in tokens.items():
+            if not isinstance(row,dict):
+                continue
+            token=str(token).lower(); at=now()
+            signal_id=signal_identity(token,row.get("last_transaction"))
+            blocked=_claim_block(state,signal_id,token,at)
+            if blocked:
+                actions.append({"token":token,"status":blocked,"signal_id":signal_id})
+                state["buy_ready"][token]={"ready":False,"reason":blocked,"signal_id":signal_id,"at":at.isoformat()}
+                continue
+            result=evaluate_candidate(token,row,state,_reserved_real(state,real,at))
+            if not result["ready"]:
+                continue
+            if signal_id is None or result["signal_id"]!=signal_id:
+                state["buy_ready"][token]={"ready":False,"reason":"SIGNAL_IDENTITY_MISMATCH","at":at.isoformat()}
+                continue
+            ready+=1
+            if not execute or len(reservations)>=MAX_BUYS_PER_SCAN:
+                actions.append({"token":token,"status":"BUY_READY_ONLY","signal_id":signal_id})
+                continue
+            claim={"signal_id":signal_id,"token":token,"claimed_at":at.isoformat(),
+                "status":"CLAIMED","worker_id":f"{socket.gethostname()}:{os.getpid()}:{os.getenv('GITHUB_RUN_ID','local')}:{uuid.uuid4().hex}",
+                "claim_id":uuid.uuid4().hex,"expires_at":(at+timedelta(seconds=CLAIM_TTL_SECONDS)).isoformat(),
+                "chain_id":cfg.CHAIN_ID,"strategy_version":strategy.VERSION,
+                "quote_at":row.get("last_transaction"),"position_sda":cfg.position_sda()}
+            state["claims"][signal_id]=claim
+            reservations.append({**claim,"symbol":str(row.get("symbol") or row.get("ticker") or token[:8])})
+        _save_updated(state,state_path)
+    return ready,actions,reservations
+
+def _owned_claim(state,reservation):
+    claim=state["claims"].get(reservation["signal_id"])
+    if not claim or claim["claim_id"]!=reservation["claim_id"] or claim["worker_id"]!=reservation["worker_id"]:
+        raise RuntimeError("REAL_CLAIM_OWNERSHIP_CHANGED")
+    return claim
+
+def _begin_execution(reservation,state_path):
+    with state_lock(state_path):
+        state=_required_state(state_path)
+        claim=_owned_claim(state,reservation)
+        if claim["status"]!="CLAIMED" or stamp(claim["expires_at"])<=now():
+            raise RuntimeError("REAL_CLAIM_NOT_EXECUTABLE")
+        real=real_trader.load_state()
+        if reservation["token"] in real["positions"] or reservation["token"] in real["pending_buys"]:
+            raise RuntimeError("REAL_POSITION_OR_PENDING_BUY")
+        claim.update(status="BROADCAST_PENDING",execution_started_at=now().isoformat())
+        _save_updated(state,state_path)
+
+def _finish_claim(reservation,state_path,status,response=None,error=None):
+    with state_lock(state_path):
+        state=_required_state(state_path)
+        claim=_owned_claim(state,reservation)
+        if claim["status"]=="EXECUTED":
+            return
+        claim.update(status=status,updated_at=now().isoformat())
+        if response and response.get("tx"):
+            claim["tx_hash"]=response["tx"]
+        if error:
+            claim["error"]=type(error).__name__
+        if status in ("BROADCAST_PENDING","UNKNOWN"):
+            try:
+                pending=real_trader.load_state().get("pending_buys",{}).get(reservation["token"],{})
+                if pending.get("tx_hash"):
+                    claim["tx_hash"]=pending["tx_hash"]
+            except (OSError,ValueError,TypeError,RuntimeError) as exc:
+                claim["intent_read_error"]=type(exc).__name__
+        if status=="EXECUTED":
+            if reservation["signal_id"] not in state["consumed_signal_ids"]:
+                state["consumed_signal_ids"].append(reservation["signal_id"])
+            state["cooldowns"][reservation["token"]]=(now()+timedelta(hours=COOLDOWN_HOURS)).isoformat()
+        previous=state["buy_ready"].get(reservation["token"],{})
+        state["buy_ready"][reservation["token"]]={**previous,"ready":status=="WOULD_EXECUTE",
+            "reason":"READY" if status=="WOULD_EXECUTE" else "REAL_CLAIM_"+status,
+            "signal_id":reservation["signal_id"],"at":now().isoformat()}
+        _save_updated(state,state_path)
+
+def _execute_reserved(reservation,state_path):
+    token=reservation["token"]
+    action={"token":token,"signal_id":reservation["signal_id"]}
+    try:
+        real_trader.safety_check(reservation["position_sda"],real_trader.load_state())
+    except (OSError,ValueError,TypeError,RuntimeError) as exc:
+        _finish_claim(reservation,state_path,"FAILED_RETRYABLE",error=exc)
+        return {**action,"status":"SAFETY_OR_EXECUTION_BLOCKED","error":type(exc).__name__}
+    _begin_execution(reservation,state_path)
+    try:
+        response=real_trader.execute_buy(token,reservation["symbol"],reservation["position_sda"])
+        status=response.get("status","UNKNOWN")
+    except real_trader.BuyPreBroadcastError as exc:
+        _finish_claim(reservation,state_path,"FAILED_RETRYABLE",error=exc)
+        return {**action,"status":"SAFETY_OR_EXECUTION_BLOCKED","claim_status":"FAILED_RETRYABLE","error":type(exc).__name__}
+    except (OSError,ValueError,TypeError,RuntimeError) as exc:
+        _finish_claim(reservation,state_path,"UNKNOWN",error=exc)
+        return {**action,"status":"SAFETY_OR_EXECUTION_BLOCKED","claim_status":"UNKNOWN","error":type(exc).__name__}
+    outcome={"CONFIRMED":"EXECUTED","ALREADY_OPEN":"EXECUTED","DRY_RUN":"WOULD_EXECUTE",
+        "PENDING_CONFIRMATION":"BROADCAST_PENDING"}.get(status,"UNKNOWN")
+    _finish_claim(reservation,state_path,outcome,response=response)
+    return {**action,"status":"WOULD EXECUTE" if outcome=="WOULD_EXECUTE" else status,"claim_status":outcome}
 
 def run_scan(market_path="market_analysis.json",execute=True,state_path=STATE):
     if os.getenv("REAL_TRADING_ENABLED","false").lower()!="true":
-        _mark_unavailable(state_path,"REAL_TRADING_DISABLED")
+        try:
+            _mark_unavailable(state_path,"REAL_TRADING_DISABLED")
+        except (OSError,ValueError,TypeError,RuntimeError) as exc:
+            return {"status":"disabled","state_error":type(exc).__name__,"buy_ready":0,"actions":[]}
         return {"status":"disabled","buy_ready":0,"actions":[]}
-    state,error=load_state(state_path)
-    if error: return {"status":"state_error","error":error,"buy_ready":0,"actions":[]}
     if os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE","true").strip().lower()!="true":
-        _mark_unavailable(state_path,"MARKET_DATA_DEGRADED")
+        try:
+            _mark_unavailable(state_path,"MARKET_DATA_DEGRADED")
+        except (OSError,ValueError,TypeError,RuntimeError) as exc:
+            return {"status":"market_data_degraded","state_error":type(exc).__name__,"buy_ready":0,"actions":[]}
         return {"status":"market_data_degraded","buy_ready":0,"actions":[]}
     try:
         market=json.loads(Path(market_path).read_text(encoding="utf-8"))
         tokens=market.get("tokens")
         if not isinstance(tokens,dict): raise TypeError("tokens missing")
-        real=real_trader.load_state()
     except Exception as exc:  # noqa: BLE001 - malformed input or REAL ledger failure must fail closed
-        _mark_unavailable(state_path,"INPUT_ERROR")
-        return {"status":"input_error","error":type(exc).__name__,"buy_ready":0,"actions":[]}
-    state["market_data_status"]="OK"
-    state["buy_ready"]={}
-    actions=[]; ready=0; executed=0
-    for token,row in tokens.items():
-        if not isinstance(row,dict): continue
-        result=evaluate_candidate(token,row,state,real)
-        if not result["ready"]: continue
-        ready+=1
-        if not execute or executed>=MAX_BUYS_PER_SCAN:
-            actions.append({"token":token,"status":"BUY_READY_ONLY","signal_id":result["signal_id"]}); continue
         try:
-            real_trader.safety_check(cfg.position_sda(),real)
-            response=real_trader.execute_buy(token,str(row.get("symbol") or row.get("ticker") or token[:8]),cfg.position_sda())
-            status=response.get("status","UNKNOWN")
-            if status=="DRY_RUN": status="WOULD EXECUTE"
-            actions.append({"token":token,"status":status,"signal_id":result["signal_id"]})
-            if status in ("CONFIRMED","PENDING_CONFIRMATION"):
-                state["consumed_signal_ids"].append(result["signal_id"])
-                state["consumed_signal_ids"]=state["consumed_signal_ids"][-20000:]
-                state["cooldowns"][token]=(now()+timedelta(hours=COOLDOWN_HOURS)).isoformat()
-                state["buy_ready"][token]={"ready":False,"reason":"REAL_BUY_SUBMITTED" if status=="CONFIRMED" else "REAL_BUY_PENDING",
-                    "signal_id":result["signal_id"],"at":now().isoformat()}
-                ready-=1
-                executed+=1
-            elif status=="WOULD EXECUTE":
-                executed+=1
-            else:
-                state["buy_ready"][token]={"ready":False,"reason":"REAL_EXECUTOR_NOT_READY:"+str(status),
-                    "signal_id":result["signal_id"],"at":now().isoformat()}
-                ready-=1
-        except Exception as exc:  # noqa: BLE001 - never let one candidate bypass REAL safety
-            state["buy_ready"][token]={"ready":False,"reason":"REAL_SAFETY_OR_EXECUTION_BLOCKED:"+type(exc).__name__,
-                "signal_id":result["signal_id"],"at":now().isoformat()}
+            _mark_unavailable(state_path,"INPUT_ERROR")
+        except (OSError,ValueError,TypeError,RuntimeError) as state_error:
+            return {"status":"input_error","error":type(exc).__name__,"state_error":type(state_error).__name__,"buy_ready":0,"actions":[]}
+        return {"status":"input_error","error":type(exc).__name__,"buy_ready":0,"actions":[]}
+    try:
+        ready,actions,reservations=_prepare_scan(tokens,execute,state_path)
+    except (OSError,ValueError,TypeError,RuntimeError,KeyError) as exc:
+        return {"status":"state_error","error":str(exc)[:180],"buy_ready":0,"actions":[]}
+    for reservation in reservations:
+        try:
+            action=_execute_reserved(reservation,state_path)
+        except (OSError,ValueError,TypeError,RuntimeError,KeyError) as exc:
+            action={"token":reservation["token"],"status":"CLAIM_STATE_ERROR","error":type(exc).__name__}
+        actions.append(action)
+        if action["status"]!="WOULD EXECUTE":
             ready-=1
-            actions.append({"token":token,"status":"SAFETY_OR_EXECUTION_BLOCKED","error":type(exc).__name__+":"+str(exc)[:180]})
-    state["updated_at"]=now().isoformat(); save_state(state,state_path)
     return {"status":"ok","buy_ready":ready,"actions":actions,"paper_state_used":False}
 
 def main():
