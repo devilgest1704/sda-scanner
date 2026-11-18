@@ -5,6 +5,7 @@ from scripts.rebuild_real_accounting import (
     allocate_open_lot_value,
     consume_fifo_lots,
     native_cash_expected,
+    wsda_sell_proceeds,
 )
 
 
@@ -71,3 +72,16 @@ def test_whole_wallet_quote_is_allocated_pro_rata_across_fifo_lots():
     assert first == Decimal("12")
     assert second == Decimal("18")
     assert first + second == Decimal("30")
+
+
+def test_wsda_sell_proceeds_counts_router_hop_only_once():
+    flows = [
+        ("0xpool", "0xrouter", Decimal("20")),
+        ("0xrouter", "0xwallet", Decimal("20")),
+    ]
+    assert wsda_sell_proceeds(flows, "0xwallet", "0xrouter", "0xzero") == Decimal("20")
+
+
+def test_wsda_sell_proceeds_uses_router_receipt_when_no_wallet_transfer_exists():
+    flows = [("0xpool", "0xrouter", Decimal("7.5"))]
+    assert wsda_sell_proceeds(flows, "0xwallet", "0xrouter", "0xzero") == Decimal("7.5")
