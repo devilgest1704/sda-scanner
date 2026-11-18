@@ -99,7 +99,7 @@ def _set_signals(env, rows):
     env.files["real_buy_signal_state.json"] = {
         "schema_version": 1, "updated_at": datetime.now(timezone.utc).isoformat(),
         "history": {}, "temporal_history": {}, "cooldowns": {}, "risk_circuit": {},
-        "buy_ready": ready, "consumed_signal_ids": [],
+        "buy_ready": ready, "consumed_signal_ids": [], "market_data_status": "OK",
     }
 
 

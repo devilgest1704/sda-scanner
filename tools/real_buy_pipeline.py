@@ -27,7 +27,7 @@ def now():
 def initial_state():
     return {"schema_version":VERSION,"updated_at":now().isoformat(),"history":{},
             "temporal_history":{},"cooldowns":{},"risk_circuit":{},
-            "buy_ready":{},"consumed_signal_ids":[]}
+            "buy_ready":{},"consumed_signal_ids":[],"market_data_status":"UNKNOWN"}
 
 def _json_clean(value):
     if isinstance(value, float) and not math.isfinite(value):
@@ -58,7 +58,8 @@ def load_state(path=STATE):
             or any(not isinstance(v,dict) for v in state["temporal_history"].values())
             or any(not isinstance(v,dict) for v in state["buy_ready"].values())
             or any(not isinstance(k,str) or stamp(v) is None for k,v in state["cooldowns"].items())
-            or any(not isinstance(v,str) or not v for v in state["consumed_signal_ids"])):
+            or any(not isinstance(v,str) or not v for v in state["consumed_signal_ids"])
+            or state.get("market_data_status","UNKNOWN") not in ("UNKNOWN","OK","MARKET_DATA_DEGRADED","INPUT_ERROR","REAL_TRADING_DISABLED")):
             return None,"REAL_SIGNAL_STATE_INVALID_SCHEMA"
         return state,None
     except (OSError,ValueError,TypeError):
@@ -188,20 +189,33 @@ def evaluate_candidate(token,analysis,state,real_state,at=None):
         "limit_sda":cfg.MAX_DAILY_LOSS_SDA,"updated_at":at.isoformat()}
     return result
 
+def _mark_unavailable(state_path,status):
+    state,error=load_state(state_path)
+    if error or state is None: return
+    state["market_data_status"]=status
+    state["updated_at"]=now().isoformat()
+    for token,item in list(state["buy_ready"].items()):
+        state["buy_ready"][token]={"ready":False,"reason":status,"at":state["updated_at"]}
+    save_state(state,state_path)
+
 def run_scan(market_path="market_analysis.json",execute=True,state_path=STATE):
     if os.getenv("REAL_TRADING_ENABLED","false").lower()!="true":
+        _mark_unavailable(state_path,"REAL_TRADING_DISABLED")
         return {"status":"disabled","buy_ready":0,"actions":[]}
-    if os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE","true").strip().lower()!="true":
-        return {"status":"market_data_degraded","buy_ready":0,"actions":[]}
     state,error=load_state(state_path)
     if error: return {"status":"state_error","error":error,"buy_ready":0,"actions":[]}
+    if os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE","true").strip().lower()!="true":
+        _mark_unavailable(state_path,"MARKET_DATA_DEGRADED")
+        return {"status":"market_data_degraded","buy_ready":0,"actions":[]}
     try:
         market=json.loads(Path(market_path).read_text(encoding="utf-8"))
         tokens=market.get("tokens")
         if not isinstance(tokens,dict): raise TypeError("tokens missing")
         real=real_trader.load_state()
     except Exception as exc:  # noqa: BLE001 - malformed input or REAL ledger failure must fail closed
+        _mark_unavailable(state_path,"INPUT_ERROR")
         return {"status":"input_error","error":type(exc).__name__,"buy_ready":0,"actions":[]}
+    state["market_data_status"]="OK"
     actions=[]; ready=0; executed=0
     for token,row in tokens.items():
         if not isinstance(row,dict): continue
