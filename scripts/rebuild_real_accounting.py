@@ -118,6 +118,13 @@ def wsda_sell_proceeds(flows, wallet, zero):
     """Count only WSDA actually received by the wallet, never a router intermediate."""
     return sum((q for f,t,q in flows if t==wallet and f not in {zero,wallet}),Decimal(0))
 
+
+def wsda_external_in_for_transaction(flows, wallet, router, confirmed_sell):
+    """Exclude confirmed SELL receipts already counted as swap proceeds."""
+    if confirmed_sell:
+        return Decimal(0)
+    return sum((q for f,t,q in flows if t==wallet and f not in {wallet,router}),Decimal(0))
+
 def word(v): return f"{int(v):064x}"
 def aword(a): return str(a).lower().replace("0x","").rjust(64,"0")
 def calldata(token_in,token_out,fee,amount,deadline):
@@ -525,11 +532,13 @@ def main():
         if to==WALLET and fr!=WALLET: native_in+=value
         elif fr==WALLET and to!=WALLET: native_out+=value
     wsda_external_in=Decimal(0); wsda_external_out=Decimal(0); wsda_router_spend=Decimal(0)
+    confirmed_sell_hashes={r["hash"] for r in records if r["action"]=="SELL"}
     for h in hashes:
-        for fr,to,amount in wsda_flows(h):
-            if to==WALLET and fr not in {WALLET,ROUTER}:
-                wsda_external_in+=amount
-            elif fr==WALLET and to==ROUTER:
+        flows=wsda_flows(h)
+        wsda_external_in+=wsda_external_in_for_transaction(
+            flows,WALLET,ROUTER,h in confirmed_sell_hashes)
+        for fr,to,amount in flows:
+            if fr==WALLET and to==ROUTER:
                 wsda_router_spend+=amount
             elif fr==WALLET and to not in {WALLET,ROUTER,ZERO}:
                 wsda_external_out+=amount
