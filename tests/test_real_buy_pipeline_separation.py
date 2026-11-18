@@ -43,6 +43,27 @@ class RealPaperIsolation(unittest.TestCase):
  def test_real_pending_buy_blocks(self):
   self.real["pending_buys"][self.token]={"position_sda":30}
   self.assertFalse(self.ready()["ready"])
+
+ def test_real_capacity_7_of_10_has_room_under_300_sda(self):
+  with patch.object(p.real_trader,"wallet_address",return_value="0x"+"c"*40),\
+       patch.object(p.real_trader,"native_balance",return_value=1000*10**18):
+   ok,reason,capacity=p._capacity(self.real)
+  self.assertTrue(ok); self.assertEqual(reason,"REAL_CAPACITY_AVAILABLE")
+  self.assertEqual(capacity["positions"],7); self.assertEqual(capacity["deployed_sda"],210)
+ def test_real_capacity_blocks_at_ten_positions(self):
+  real=dict(self.real); real["positions"]={f"0x{i:040x}":{"cost_sda":20} for i in range(10)}
+  ok,reason,_=p._capacity(real)
+  self.assertFalse(ok); self.assertEqual(reason,"REAL_POSITION_LIMIT")
+ def test_real_capacity_blocks_over_300_sda(self):
+  real=dict(self.real); real["positions"]={f"0x{i:040x}":{"cost_sda":34} for i in range(8)}
+  with patch.object(p.real_trader,"wallet_address",return_value="0x"+"c"*40),\
+       patch.object(p.real_trader,"native_balance",return_value=1000*10**18):
+   ok,reason,_=p._capacity(real)
+  self.assertFalse(ok); self.assertEqual(reason,"REAL_CAPITAL_LIMIT")
+ def test_real_capacity_fails_closed_on_stale_wallet_sync(self):
+  real=dict(self.real); real["lastSuccessfulWalletSync"]="2020-01-01T00:00:00+00:00"
+  ok,reason,_=p._capacity(real)
+  self.assertFalse(ok); self.assertEqual(reason,"REAL_WALLET_SYNC_STALE")
  def test_real_loss_circuit_blocks(self):
   self.real["daily_realized_pnl_sda"]=-cfg.MAX_DAILY_LOSS_SDA
   self.assertFalse(self.ready()["ready"])
