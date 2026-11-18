@@ -168,9 +168,12 @@ class ScannerFailureIsolationTests(unittest.TestCase):
         self.assertNotIn("return 0", branch)
         self.assertIn("buy_data_available=false", branch)
         self.assertGreater(source.index("if ! run_timed_stage market_scanner"), end)
+        bridge = source.index('from real_paper_bridge import reconcile')
+        real_buy = source.index("if ! run_timed_stage real_buy_pipeline")
         paper = source.index("if ! run_timed_stage paper_engine")
-        bridge = source.index("SDA_SCANNER_BUY_DATA_AVAILABLE=", paper)
-        self.assertGreater(bridge, paper)
+        self.assertLess(bridge, real_buy)
+        self.assertLess(real_buy, paper)
+        self.assertIn('SDA_SCANNER_BUY_DATA_AVAILABLE="$buy_data_available"', source)
 
     def test_periodic_state_checkpoint_is_outside_the_scan_function(self):
         source = Path("run_scanner_v18.sh").read_text(encoding="utf-8")

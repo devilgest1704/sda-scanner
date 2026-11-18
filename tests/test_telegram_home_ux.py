@@ -61,9 +61,9 @@ def real_data(monkeypatch):
 
 def _candidate(symbol, status, score, m15, flow, blocked=True, phase="WATCH"):
     return {"address": "0x" + symbol.lower().ljust(40, "0")[:40], "symbol": symbol, "status": status,
-            "decision": {"pump_score": score, "m15": m15, "net_1h": flow, "paper_buy_blocked": blocked,
+            "decision": {"pump_score": score, "m15": m15, "net_1h": flow, "real_buy_ready": False,
                          "pump_phase": phase, "m1h": 1.0, "volume_1h": 900, "trades_1h": 12, "buy_ratio": 1.4,
-                         "paper_buy_block_reason": "waiting for flow confirmation"}}
+                         "real_buy_reason": "waiting for flow confirmation"}}
 
 
 def _rows(*rows, age_seconds=30):
@@ -90,6 +90,14 @@ def ui(monkeypatch, real_data):
                              "whale_source_health": "HEALTHY"},
         "market_source_state.json": {"source_health": "HEALTHY",
                                      "last_successful_market_at": now},
+        "real_buy_signal_state.json": {
+            "schema_version": 1, "updated_at": now, "market_data_status": "OK",
+            "history": {}, "temporal_history": {}, "cooldowns": {}, "risk_circuit": {},
+            "buy_ready": {
+                ("0x" + "acv".ljust(40, "0")[:40]): {"ready": False, "reason": "waiting for flow confirmation"},
+                ("0x" + "gmai".ljust(40, "0")[:40]): {"ready": False, "reason": "waiting for flow confirmation"},
+            }, "consumed_signal_ids": [],
+        },
     }
     monkeypatch.setattr(dashboard, "load", lambda path, default: (
         states[path] if path in states else original_load(path, default)))
@@ -202,8 +210,8 @@ def test_buy_scanner_short_list_detail_and_back(ui):
     text = screen["text"]
     assert text.startswith("🔥 REAL BUY SCANNER")
     assert "BUY-ready: 0" in text and "WATCH: 2" in text
-    for expected in ("SHARED SIGNAL", "REAL\nAvailable: 140 SDA", "Next BUY: 30 SDA",
-                     "Status: NO SIGNAL", "Production admission: PAPER-coupled"):
+    for expected in ("REAL SIGNAL", "REAL\nAvailable: 140 SDA", "Next BUY: 30 SDA",
+                     "Status: NO SIGNAL", "Production admission: independent REAL state"):
         assert expected in text
     assert "1. ACV" in text and "89/100" in text and "15m +16.6% | Flow +1879 SDA" in text
     assert "waiting for flow confirmation" not in text and "REAL: READY" not in text

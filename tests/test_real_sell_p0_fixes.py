@@ -163,7 +163,7 @@ class BridgeHarness:
         self.chain = chain
         self.test = test
         root = Path(chain.tmp.name)
-        self.paper = root / "positions.json"
+        self.paper = root / "positions.json"  # fixture only; the REAL bridge never reads it
         self.paper.write_text(json.dumps({"positions": {}}), encoding="utf-8")
         (root / "bridge_state.json").write_text(json.dumps({
             "initialized": True, "paper_positions": [], "pending_buy": [], "pending_sell": [],
@@ -171,7 +171,6 @@ class BridgeHarness:
         self.price = Decimal("0.2")
         self.buy = unittest.mock.Mock(return_value={"status": "CONFIRMED", "tx": "0xnewbuy"})
         for item in (
-            patch.object(bridge, "PAPER_FILE", self.paper),
             patch.object(bridge, "STATE_FILE", root / "bridge_state.json"),
             patch.object(bridge, "EVENTS_FILE", root / "bridge_events.json"),
             patch.object(market_prices, "load_market_snapshot", side_effect=self._snapshot),
@@ -179,7 +178,7 @@ class BridgeHarness:
             patch.object(market_prices, "newest_supabase_price", return_value=None),
             patch.object(real_trader, "execute_buy", self.buy),
             patch.dict(os.environ, {"REAL_TRADING_ENABLED": "true", "REAL_TRADING_DRY_RUN": "false",
-                                    "SDA_PAPER_BUY_MODE": "temporal_recovery", "SDA_PAPER_TP4": "1"}),
+                                    "GH_TOKEN": ""}),
         ):
             item.start()
             test.addCleanup(item.stop)
@@ -456,18 +455,15 @@ class RetryBackoffAndQuarantine(unittest.TestCase):
 
 
 class SellHealthVisibility(unittest.TestCase):
-    def test_sell_exception_is_sell_error_and_buy_still_runs(self):
+    def test_sell_exception_is_sell_error_and_never_triggers_a_buy(self):
         chain = FakeChain(self)
         harness = BridgeHarness(self, chain)
-        harness.paper.write_text(json.dumps({"positions": {NEW_TOKEN: {"symbol": "NEW", "investment_sda": 20,
-                                                                       "opened_at": bridge._now()}}}),
-                                 encoding="utf-8")
         with patch.object(executor, "evaluate_position", side_effect=RuntimeError("forced SELL failure")):
             result = harness.run()
         self.assertEqual(result["sell_health"], "SELL_ERROR")
         self.assertNotEqual(result["status"], "reconciled")
         self.assertIn("forced SELL failure", json.dumps(result["sell_health_detail"]))
-        harness.buy.assert_called_once_with(NEW_TOKEN, "NEW", cfg.position_sda())
+        harness.buy.assert_not_called()
         saved = json.loads((Path(chain.tmp.name) / "bridge_state.json").read_text(encoding="utf-8"))
         self.assertEqual(saved["sell_health"]["health"], "SELL_ERROR")
 

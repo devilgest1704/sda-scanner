@@ -124,8 +124,9 @@ def metrics(a):
       "data_age_sec":data_age_seconds(a.get("last_transaction"))
     }
 
-def score(address,a,persist=True):
-    st=load_state(); hist=st.setdefault("history",{}); key=str(address).lower()
+def score(address,a,persist=True,state=None):
+    # Caller-owned state allows REAL to reuse the canonical score without PAPER persistence.
+    st=state if isinstance(state,dict) else load_state(); hist=st.setdefault("history",{}); key=str(address).lower()
     c=metrics(a); rec=hist.get(key,{})
     # Keep the sample before the latest scanner observation separately.
     # Dashboard reads are read-only and must not erase impulse history.
@@ -229,7 +230,9 @@ def score(address,a,persist=True):
                    "impulse":round(impulse,1),"raw_impulse":round(raw_impulse,1),"fresh":fresh,"sample_status":sample_status,"phase":phase,
                    "last_transaction":c.get("last_transaction"),"data_age_sec":c.get("data_age_sec"),
                    "updated_at":now()}
-        st["updated_at"]=now();save_state(st)
+        st["updated_at"]=now()
+        if state is None:
+            save_state(st)
     return c,round(min(100,quality+impulse),1),round(quality,1),round(impulse,1),phase
 
 def cooldown_active(address):

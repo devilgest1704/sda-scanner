@@ -1,7 +1,4 @@
-"""HOME REAL BUY SCANNER: shared signal counts vs current REAL (PAPER-coupled) admission.
-
-Presentation only; every chain/trading entry point is forbidden.
-"""
+"""HOME REAL BUY scanner reflects only the independent REAL signal and capacity state."""
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import re
@@ -22,8 +19,8 @@ XEN = "0x53167ff5810ff1886fc554e672994c232126383e"
 
 def _row(symbol, status, score=70, blocked=True, phase="WATCH", address=None):
     return {"address": address or "0x" + symbol.lower().ljust(40, "0")[:40], "symbol": symbol, "status": status,
-            "decision": {"pump_score": score, "m15": 16.6, "net_1h": 1879, "paper_buy_blocked": blocked,
-                         "pump_phase": phase, "paper_buy_block_reason": "debug gate text"}}
+            "decision": {"pump_score": score, "m15": 16.6, "net_1h": 1879,
+                         "pump_phase": phase, "real_buy_ready": status == "BUY"}}
 
 
 def _rows(*rows, age_seconds=30):
@@ -93,7 +90,21 @@ def env(monkeypatch):
     return holder
 
 
+def _set_signals(env, rows):
+    ready = {}
+    for row in rows:
+        is_ready = row["status"] == "BUY"
+        ready[row["address"].lower()] = {"ready": is_ready,
+            "reason": "READY" if is_ready else "NO_SIGNAL"}
+    env.files["real_buy_signal_state.json"] = {
+        "schema_version": 1, "updated_at": datetime.now(timezone.utc).isoformat(),
+        "history": {}, "temporal_history": {}, "cooldowns": {}, "risk_circuit": {},
+        "buy_ready": ready, "consumed_signal_ids": [], "market_data_status": "OK",
+    }
+
+
 def _home(env, monkeypatch, rows):
+    _set_signals(env, rows)
     monkeypatch.setattr(telegram_home, "scanner_candidates", lambda _d: rows)
     monkeypatch.setattr(telegram_home.real_bot_views, "_get_data", lambda _d: None)
     text = telegram_home.home_text(env.dashboard)
@@ -127,7 +138,7 @@ def test_next_buy_and_cap_follow_running_worker_config_not_hardcoded(env, monkey
 
 
 def test_home_shows_real_buy_scanner_and_no_paper_summary(env, monkeypatch):
-    text = _home(env, monkeypatch, _rows(_row("IDM", "WATCH", 77), _row("AGFU", "NO", 52)))
+    text = _home(env, monkeypatch, _rows(_row("IDM", "WATCH", 77), _row("AGFU", "NO", 52, phase="NO")))
     assert "🔥 REAL BUY SCANNER" in text
     assert "🟢 BUY-ready   0" in text and "🟡 WATCH       1" in text
     assert "💰 Available   140 SDA" in text
@@ -160,14 +171,14 @@ def test_ready_signal_blocked_by_capital(env, monkeypatch):
     assert "💰 Available   20 SDA" in text
 
 
-def test_ready_signal_on_held_token_and_paper_capacity_are_blocked(env, monkeypatch):
+def test_real_held_token_blocks_but_paper_capacity_is_irrelevant(env, monkeypatch):
     held = "0x" + "f" * 40
     _set_state(env, _state(count=7, extra={held: _position(20)}))
     rows = _rows(_row("HELD", "BUY", 90, blocked=False, phase="IGNITION", address=held))
     assert "Already held" in _home(env, monkeypatch, rows)
     _set_state(env, _state(count=7))
     env.files["positions.json"] = {"positions": {f"p{i}": {} for i in range(10)}}
-    assert "PAPER capacity" in _home(env, monkeypatch, rows)
+    assert "🟢 REAL BUY: READY" in _home(env, monkeypatch, rows)
 
 
 def test_pending_buy_is_pending(env, monkeypatch):
@@ -242,28 +253,30 @@ def test_market_source_failure_fails_closed_and_recovers_automatically(env, monk
 def test_watch_is_never_counted_or_labelled_buy_ready(env, monkeypatch):
     rows = _rows(_row("IDM", "WATCH", 99, blocked=True, phase="WATCH"))
     assert telegram_home._counts(rows) == (0, 1)
-    detail = (monkeypatch.setattr(telegram_home, "scanner_candidates", lambda _d: rows)
-              or telegram_home.buy_scanner_text(env.dashboard))
+    _set_signals(env, rows)
+    monkeypatch.setattr(telegram_home, "scanner_candidates", lambda _d: rows)
+    detail = telegram_home.buy_scanner_text(env.dashboard)
     assert "1. IDM    WATCH 99/100" in detail and "🟢 BUY" not in detail and "REAL: " not in detail
 
 
 def test_status_mirrors_shared_engine_buy_decision():
-    assert telegram_home._status({"paper_buy_blocked": False, "pump_phase": "WATCH"}) == "BUY"
-    assert telegram_home._status({"paper_buy_blocked": True, "pump_phase": "CONFIRMATION"}) == "NO"
-    assert telegram_home._status({"paper_buy_blocked": True, "pump_phase": "WATCH"}) == "WATCH"
+    assert telegram_home._status({"real_buy_ready": True, "pump_phase": "WATCH"}) == "BUY"
+    assert telegram_home._status({"real_buy_ready": False, "pump_phase": "CONFIRMATION"}) == "NO"
+    assert telegram_home._status({"real_buy_ready": False, "pump_phase": "WATCH"}) == "WATCH"
 
 
 def test_buy_scanner_detail_shows_real_gate_per_ready_signal(env, monkeypatch):
     _set_state(env, _state(count=8, cost=35))
     rows = _rows(_row("ACV", "BUY", 89, blocked=False, phase="CONFIRMATION"), _row("IDM", "WATCH", 77))
+    _set_signals(env, rows)
     monkeypatch.setattr(telegram_home, "scanner_candidates", lambda _d: rows)
     text = telegram_home.buy_scanner_text(env.dashboard)
     assert "1. ACV    🟢 BUY 89/100" in text
     assert "REAL: BLOCKED — CAPITAL LIMIT" in text
     assert "Status: BLOCKED — Capital limit" in text
-    assert "Production admission: PAPER-coupled" in text
+    assert "Production admission: independent REAL state" in text
     detail = telegram_home.buy_scanner_text(env.dashboard, detail=True)
-    assert detail.startswith("🔍 REAL BUY SCANNER • DETAIL") and "debug gate text" in detail
+    assert detail.startswith("🔍 REAL BUY SCANNER • DETAIL") and "READY" in detail
     env.forbidden.assert_not_called()
 
 

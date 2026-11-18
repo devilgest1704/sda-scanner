@@ -291,7 +291,8 @@ class PaperIndependentReconciliation(unittest.TestCase):
 
         result = harness.run()
 
-        self.assertEqual(result["status"], "paper_state_unavailable")
+        self.assertEqual(result["status"], "reconciled")
+        self.assertEqual(result["paper_state"], "NOT_USED")
         self.assertNotIn(TOKEN, chain.state["positions"])
         self.assertIn("MANUAL_SELL_RECONCILIATION", json.dumps(result["actions"]))
         self.assertEqual(len(chain.trades("MANUAL_SELL")), 1)

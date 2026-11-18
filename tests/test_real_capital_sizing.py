@@ -120,23 +120,3 @@ class CapitalRelease(unittest.TestCase):
         self.assertEqual(chain.sent, [])
 
 
-class FreshSignalsOnly(unittest.TestCase):
-    def test_skipped_signal_not_replayed_and_fresh_signal_uses_30_sda(self):
-        chain = FakeChain(self)
-        harness = BridgeHarness(self, chain)
-        harness.buy.side_effect = RuntimeError("Real trading capital cap of 300 SDA would be exceeded")
-        harness.paper.write_text(json.dumps({"positions": {NEW_TOKEN: {
-            "symbol": "OLD", "investment_sda": 20, "opened_at": bridge._now()}}}), encoding="utf-8")
-        first = harness.run()
-        self.assertIn("PAPER_BUY_SKIPPED_REAL_LIMIT", json.dumps(first["actions"]))
-        harness.buy.side_effect = None
-        harness.buy.reset_mock()
-        harness.run()  # capital is free again; the old signal must not be replayed
-        harness.buy.assert_not_called()
-        fresh = "0x" + "f" * 40
-        harness.paper.write_text(json.dumps({"positions": {
-            NEW_TOKEN: {"symbol": "OLD", "investment_sda": 20, "opened_at": bridge._now()},
-            fresh: {"symbol": "FRESH", "investment_sda": 20, "opened_at": bridge._now()}}}), encoding="utf-8")
-        harness.run()
-        harness.buy.assert_called_once_with(fresh, "FRESH", 30.0)
-        self.assertEqual(chain.sent, [])

@@ -11,6 +11,7 @@ import real_bot_views
 import real_trading_config as cfg
 import real_wallet_reconciliation as wallet_reconciliation
 import v30_dashboard_patch as v30_view
+import v30_pump_hunter as shared_strategy
 
 SCANNER_LIMIT = 5
 # Same freshness window the shared signal engine applies to entry data.
@@ -32,7 +33,7 @@ def _n(value, default=0.0):
 
 
 def _status(decision):
-    if not decision.get("paper_buy_blocked"):
+    if decision.get("real_buy_ready") is True:
         return "BUY"
     return "WATCH" if str(decision.get("pump_phase") or "NO") == "WATCH" else "NO"
 
@@ -48,29 +49,41 @@ def _symbol(dashboard, address, meta):
 
 
 def scanner_candidates(dashboard):
-    """Rank PAPER candidates exactly like the former TOP BUY section."""
+    """Rank market candidates using shared scoring and REAL-owned history only."""
     md = v30_view._merged_market(dashboard, dashboard.load("market_data.json", {"tokens": {}}))
-    ws = dashboard.load("whale_data.json", {})
     meta = dashboard.load("token_metadata.json", {})
+    signal_state = dashboard.load("real_buy_signal_state.json", {})
+    if not isinstance(signal_state, dict) or signal_state.get("schema_version") != 1:
+        signal_state = {"history": {}, "buy_ready": {}}
+    ready_map = signal_state.get("buy_ready", {})
     ranked = ScannerRows()
     for address, token_data in (md.get("tokens", {}) or {}).items():
         analysis = v30_view._analysis(token_data)
         if not analysis or _n(analysis.get("price_in_sda")) <= 0:
             continue
-        decision = v30_view._decision(dashboard, address, analysis, ws)
-        ranked.append({"address": str(address), "symbol": _symbol(dashboard, address, meta),
-                       "status": _status(decision), "decision": decision})
+        c, score, quality, impulse, phase = shared_strategy.score(
+            address, analysis, persist=False, state=signal_state)
+        real_signal = ready_map.get(str(address).lower()) if isinstance(ready_map, dict) else None
+        ready = isinstance(real_signal, dict) and real_signal.get("ready") is True
+        decision = {
+            "pump_score": score, "pump_quality": quality, "pump_change": impulse,
+            "pump_phase": phase, "m15": c.get("m15"), "m1h": c.get("m1"),
+            "net_1h": c.get("flow"), "volume_1h": c.get("vol"),
+            "trades_1h": c.get("trades"), "buy_ratio": c.get("buy_ratio"),
+            "real_buy_ready": ready,
+            "real_buy_reason": real_signal.get("reason") if isinstance(real_signal, dict) else "REAL signal not evaluated",
+        }
+        ranked.append({"address": str(address).lower(),
+                       "symbol": _symbol(dashboard, address, meta),
+                       "status": "BUY" if ready else ("WATCH" if phase == "WATCH" else "NO"),
+                       "decision": decision})
     ranked.sort(key=lambda row: (
-        1 if row["decision"].get("shadow_confirmation_ready") else 0,
-        1 if not row["decision"].get("paper_buy_blocked") else 0,
-        1 if row["decision"].get("data_fresh_for_entry") else 0,
+        1 if row["status"] == "BUY" else 0,
         _n(row["decision"].get("pump_score")),
-        _n(row["decision"].get("shadow_snapshot_impulse")),
         _n(row["decision"].get("pump_change")),
     ), reverse=True)
     ranked.updated_at = md.get("updated_at")
     return ranked
-
 
 def _counts(rows):
     ready = sum(1 for row in rows if row["status"] == "BUY")
@@ -100,7 +113,7 @@ def _held_tokens(positions):
 
 
 def real_capacity(dashboard):
-    """Single admission view from the latest blockchain accounting snapshot."""
+    """REAL-only admission view from the latest blockchain accounting snapshot."""
     worker = rb._load_worker_status(dashboard) or {}
     try:
         accounting = dashboard.load("real_accounting_state.json", {})
@@ -143,8 +156,6 @@ def real_capacity(dashboard):
     cap = Decimal(str(worker.get("real_capital_cap_sda") or cfg.TRADING_WALLET_CAPITAL_SDA))
     native = Decimal(str(accounting.get("native_balance_sda") or 0))
     available = max(Decimal("0"), min(cap - deployed, native))
-    paper = dashboard.load("positions.json", {})
-    paper_positions = paper.get("positions", {}) if isinstance(paper, dict) else {}
     return {
         "positions": len(accounting_positions), "reserved_positions": len(accounting_positions) + len(pending),
         "pending": len(pending),
@@ -152,26 +163,23 @@ def real_capacity(dashboard):
         "cap": float(cap), "deployed": float(deployed), "available": float(available),
         "next_buy": float(worker.get("real_buy_size_sda") or cfg.position_sda()),
         "held": set(accounting_positions) | _held_tokens(pending),
-        "paper_held": _held_tokens(paper_positions if isinstance(paper_positions, dict) else {}),
-        "paper_full": isinstance(paper_positions, dict) and len(paper_positions) >= int(v30_view.v30.MAX_OPEN),
         "sync_status": worker.get("syncStatus"),
     }
 
 def real_gate(real, token=None):
-    """(state, reason) for one BUY-ready signal under current REAL (PAPER-coupled) admission."""
+    """(state, reason) for a REAL-owned BUY-ready signal."""
     if real is None:
         return "UNKNOWN", "REAL state unavailable"
     if real["pending"]:
         return "PENDING", "BUY in flight"
     token = str(token or "").lower()
-    if token and (token in real["held"] or token in real["paper_held"]):
+    if token and token in real["held"]:
+
         return "BLOCKED", "Already held"
     if real["reserved_positions"] >= real["max_positions"]:
         return "BLOCKED", "Position limit"
     if real["deployed"] + real["next_buy"] > real["cap"] + 1e-9:
         return "BLOCKED", "Capital limit"
-    if real["paper_full"]:
-        return "BLOCKED", "PAPER capacity"
     return "READY", None
 
 
@@ -208,6 +216,26 @@ def _metrics(decision):
 
 def _scanner_inputs(dashboard):
     rows = scanner_candidates(dashboard)
+    signal_state = dashboard.load("real_buy_signal_state.json", {})
+    try:
+        signal_stamp = datetime.fromisoformat(str(signal_state.get("updated_at")).replace("Z", "+00:00")) if isinstance(signal_state, dict) else None
+        if signal_stamp is not None and signal_stamp.tzinfo is None:
+            signal_stamp = None
+    except (TypeError, ValueError):
+        signal_stamp = None
+    signal_age = (datetime.now(timezone.utc) - signal_stamp).total_seconds() if signal_stamp else None
+    signal_stale = (not isinstance(signal_state, dict) or signal_state.get("schema_version") != 1
+                    or signal_age is None or not 0 <= signal_age <= 5 * 60
+                    or signal_state.get("market_data_status") != "OK")
+    ready_map = signal_state.get("buy_ready", {}) if isinstance(signal_state, dict) else {}
+    for row in rows:
+        real_signal = ready_map.get(str(row["address"]).lower()) if isinstance(ready_map, dict) else None
+        row["real_buy_ready"] = bool(isinstance(real_signal, dict) and real_signal.get("ready") is True)
+        row["real_buy_reason"] = (real_signal.get("reason") if isinstance(real_signal, dict)
+                                  else "REAL signal not evaluated")
+        row["status"] = "BUY" if row["real_buy_ready"] else ("WATCH" if str(row["decision"].get("pump_phase") or "NO") == "WATCH" else "NO")
+        row["decision"]["real_buy_ready"] = row["real_buy_ready"]
+        row["decision"]["real_buy_reason"] = row["real_buy_reason"]
     try:
         real = real_capacity(dashboard)
     except Exception as exc:
@@ -236,7 +264,7 @@ def _scanner_inputs(dashboard):
     wallet_sync_stale = (worker.get("syncStatus") != "FRESH"
                          or "STATUS UNKNOWN" in rb._status(worker)
                          or "CRITICAL FAILURE" in str(worker.get("worker_health") or ""))
-    return rows, real, _scanner_stale(rows) or whale_stale or market_stale or wallet_sync_stale
+    return rows, real, signal_stale or _scanner_stale(rows) or whale_stale or market_stale or wallet_sync_stale
 
 
 def _home_scanner_lines(dashboard):
@@ -338,11 +366,11 @@ def buy_scanner_text(dashboard, detail=False):
         lines += ["⚪ Data stale", ""]
     else:
         ready, watch = _counts(rows)
-        lines += ["SHARED SIGNAL", f"BUY-ready: {ready}", f"WATCH: {watch}", ""]
+        lines += ["REAL SIGNAL", f"BUY-ready: {ready}", f"WATCH: {watch}", ""]
     state, reason, _best = real_buy_status(rows, real, stale)
     lines += ["REAL"] + _real_lines(real, labelled=False)
     lines.append(f"Status: {state}" + (f" — {reason}" if reason and state == "BLOCKED" else ""))
-    lines += ["Production admission: PAPER-coupled", ""]
+    lines += ["Production admission: independent REAL state", ""]
     if stale:
         return "\n".join(lines).rstrip()
     if not rows:
@@ -359,7 +387,7 @@ def buy_scanner_text(dashboard, detail=False):
             lines.append(f"   1h {_n(d.get('m1h')):+.1f}% | Vol {_n(d.get('volume_1h')):.0f} | "
                          f"Trades {_n(d.get('trades_1h')):.0f} | Ratio {_n(d.get('buy_ratio')):.2f}x")
             lines.append(f"   Phase {d.get('pump_phase') or 'NO'} | "
-                         f"{d.get('paper_buy_block_reason') or 'ready'}")
+                         f"{d.get('real_buy_reason') or 'REAL signal unavailable'}")
     return "\n".join(lines)
 
 
