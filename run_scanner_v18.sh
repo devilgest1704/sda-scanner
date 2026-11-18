@@ -47,7 +47,7 @@ files.append("market_source_state.json")
 # execution or losing track of wallet positions after a damaged checkpoint.
 files = [f for f in files if f not in (
     "positions.json", "paper_stats.json",
-    "real_trade_state.json", "real_paper_bridge_state.json"
+    "real_trade_state.json", "real_paper_bridge_state.json", "real_buy_signal_state.json"
 )]
 
 for name in files:
@@ -288,6 +288,10 @@ run_one_scan() {
 
   # Independent REAL BUY admission; this stage runs from market data and
   # REAL-owned state before/independently of the PAPER engine.
+  # The REAL BUY signal state is not a trading ledger. Initialize only a
+  # zero-byte placeholder from the pipeline's canonical schema; never reset
+  # non-empty claims/cooldowns or repair corrupt state by guessing.
+  python -m tools.real_buy_state_bootstrap
   if ! run_timed_stage real_buy_pipeline env TELEGRAM_TOKEN="" SDA_SCANNER_BUY_DATA_AVAILABLE="$buy_data_available" python -m tools.real_buy_pipeline; then
     echo "::warning::REAL BUY pipeline failed closed; REAL SELL/reconciliation continues." >&2
   fi
@@ -367,7 +371,8 @@ PY
 python -m tools.paper_state_guard
 
 # Compile once per worker, not once per minute.
-python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py v30_pump_hunter.py tools/temporal_paper_trial.py tools/real_buy_pipeline.py
+python -m tools.real_buy_state_bootstrap
+python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py v30_pump_hunter.py tools/temporal_paper_trial.py tools/real_buy_pipeline.py tools/real_buy_state_bootstrap.py
 find . -type d -name __pycache__ -prune -exec rm -rf {} +
 
 # Executable code is fixed for the life of this worker (pinned by the workflow
