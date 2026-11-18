@@ -19,6 +19,7 @@ from tools.v32_hourly_macd import paper_macd_veto
 STATE=Path("real_buy_signal_state.json")
 VERSION=1
 COOLDOWN_HOURS=6
+MAX_BUYS_PER_SCAN=1
 
 def now():
     return datetime.now(UTC)
