@@ -163,15 +163,12 @@ class BridgeHarness:
         self.chain = chain
         self.test = test
         root = Path(chain.tmp.name)
-        self.paper = root / "positions.json"
-        self.paper.write_text(json.dumps({"positions": {}}), encoding="utf-8")
         (root / "bridge_state.json").write_text(json.dumps({
             "initialized": True, "paper_positions": [], "pending_buy": [], "pending_sell": [],
         }), encoding="utf-8")
         self.price = Decimal("0.2")
         self.buy = unittest.mock.Mock(return_value={"status": "CONFIRMED", "tx": "0xnewbuy"})
         for item in (
-            patch.object(bridge, "PAPER_FILE", self.paper),
             patch.object(bridge, "STATE_FILE", root / "bridge_state.json"),
             patch.object(bridge, "EVENTS_FILE", root / "bridge_events.json"),
             patch.object(market_prices, "load_market_snapshot", side_effect=self._snapshot),
@@ -179,7 +176,7 @@ class BridgeHarness:
             patch.object(market_prices, "newest_supabase_price", return_value=None),
             patch.object(real_trader, "execute_buy", self.buy),
             patch.dict(os.environ, {"REAL_TRADING_ENABLED": "true", "REAL_TRADING_DRY_RUN": "false",
-                                    "SDA_PAPER_BUY_MODE": "temporal_recovery", "SDA_PAPER_TP4": "1"}),
+                                    "GH_TOKEN": ""}),
         ):
             item.start()
             test.addCleanup(item.stop)

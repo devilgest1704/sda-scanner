@@ -86,7 +86,6 @@ def _run_case(price=None, unavailable=False, buy_data_available=True, paper_open
         if wallet_sync_exception:
             wallet_sync.side_effect = RuntimeError("wallet snapshot persistence failed")
         with ExitStack() as stack:
-            stack.enter_context(patch.object(bridge, "PAPER_FILE", paper_file))
             stack.enter_context(patch.object(bridge, "STATE_FILE", bridge_state_file))
             stack.enter_context(patch.object(bridge, "EVENTS_FILE", events_file))
             stack.enter_context(patch.object(real_wallet_reconciliation, "reconcile_manual_buys",
@@ -112,9 +111,6 @@ def _run_case(price=None, unavailable=False, buy_data_available=True, paper_open
             stack.enter_context(patch.dict(os.environ, {
                 "REAL_TRADING_ENABLED": "true",
                 "REAL_TRADING_DRY_RUN": "false",
-                "SDA_PAPER_BUY_MODE": "temporal_recovery",
-                "SDA_PAPER_TP4": "1",
-                "SDA_SCANNER_BUY_DATA_AVAILABLE": str(buy_data_available).lower(),
                 "GH_TOKEN": "",
             }))
             resolver = stack.enter_context(patch.object(
