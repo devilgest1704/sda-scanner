@@ -50,14 +50,18 @@ def test_fifo_transfer_out_remains_unresolved_when_it_exceeds_confirmed_lots():
 def test_native_cash_reconciliation_includes_opening_balance_and_internal_flows():
     expected = native_cash_expected(
         opening_balance=Decimal("100"),
+        opening_wsda=Decimal("10"),
         native_in=Decimal("20"),
         native_out=Decimal("5"),
         router_buy_spend=Decimal("30"),
+        wsda_external_in=Decimal("3"),
+        wsda_external_out=Decimal("2"),
+        wsda_router_spend=Decimal("4"),
         sell_proceeds=Decimal("12"),
         residual_wsda=Decimal("4"),
         wallet_fees=Decimal("0.5"),
     )
-    assert expected == Decimal("92.5")
+    assert expected == Decimal("99.5")
 
 
 def test_whole_wallet_quote_is_allocated_pro_rata_across_fifo_lots():
