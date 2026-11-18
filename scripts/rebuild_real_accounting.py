@@ -85,6 +85,27 @@ def native_cash_expected(opening_balance, native_in, native_out, router_buy_spen
     return (opening_balance + native_in - native_out - router_buy_spend
             + sell_proceeds - residual_wsda - wallet_fees)
 
+def consume_fifo_lots(queue, quantity):
+    """Consume a quantity from FIFO lots and return (matches, unmatched_quantity)."""
+    remaining=Decimal(str(quantity)); matches=[]
+    while remaining>Decimal("1e-18") and queue:
+        lot=queue[0]; take=min(remaining,lot["remaining"])
+        ratio=take/lot["qty"]
+        matches.append({"lot":lot,"qty":take,"cost":lot["cost"]*ratio,
+                        "gas":lot["buy_gas"]*ratio})
+        lot["remaining"]-=take; remaining-=take
+        if lot["remaining"]<=Decimal("1e-18"): queue.popleft()
+    return matches,remaining
+
+
+def allocate_open_lot_value(total_value, lot_quantity, wallet_quantity):
+    """Allocate a whole-wallet quote to one fungible FIFO lot without duplication."""
+    total=Decimal(str(total_value)); quantity=Decimal(str(lot_quantity))
+    wallet=Decimal(str(wallet_quantity))
+    if wallet<=0 or quantity<0:
+        return None
+    return total*quantity/wallet
+
 def word(v): return f"{int(v):064x}"
 def aword(a): return str(a).lower().replace("0x","").rjust(64,"0")
 def calldata(token_in,token_out,fee,amount,deadline):
@@ -268,13 +289,7 @@ def main():
             lots[c].append({"symbol":r["symbol"],"qty":r["quantity"],"remaining":r["quantity"],
                 "cost":r["cost"],"buy_gas":r["gas"],"buy_hash":r["hash"],"timestamp":r["timestamp"]})
             continue
-        remaining=r["quantity"]; matches=[]
-        while remaining>Decimal("1e-18") and lots[c]:
-            lot=lots[c][0]; take=min(remaining,lot["remaining"])
-            ratio=take/lot["qty"]
-            matches.append({"lot":lot,"qty":take,"cost":lot["cost"]*ratio,"gas":lot["buy_gas"]*ratio})
-            lot["remaining"]-=take; remaining-=take
-            if lot["remaining"]<=Decimal("1e-18"): lots[c].popleft()
+        matches,remaining=consume_fifo_lots(lots[c],r["quantity"])
         if r["action"]=="TRANSFER_OUT":
             transferred=sum((m["qty"] for m in matches),Decimal(0))
             basis=sum((m["cost"]+m["gas"] for m in matches),Decimal(0))
@@ -380,7 +395,7 @@ def main():
             full_value=h.get("exit_quote_sda")
             if full_value is None: full_value=h.get("spot_value_sda")
             err=h.get("exit_quote_error") if h.get("exit_quote_sda") is None else None
-            current=(Decimal(str(full_value))*qty/wallet_qty) if full_value is not None and wallet_qty>0 else None
+            current=allocate_open_lot_value(full_value,qty,wallet_qty) if full_value is not None else None
             if current is None: open_complete=False
         pnl=current-cost if current is not None else None
         if current is not None: open_value+=current
@@ -421,7 +436,9 @@ def main():
 
     wallet_fees=Decimal(0); native_in=Decimal(0); native_out=Decimal(0); router_buy_spend=Decimal(0)
     buy_hashes={r["hash"] for r in records if r["action"]=="BUY"}
-    top_level_value_by_hash={h:dec((details.get(h) or txmap.get(h,{ })).get("value","0"),18) for h in hashes}
+    top_level_by_hash={h:(details.get(h) or txmap.get(h,{ })) for h in hashes}
+    top_level_value_by_hash={h:dec(top_level_by_hash[h].get("value","0"),18) for h in hashes}
+    top_level_to_by_hash={h:addr(top_level_by_hash[h].get("to")) for h in hashes}
     # Transaction-detail endpoints can return JSON null for valid hashes.
     # Use the already-fetched address transaction as the authoritative fallback.
     for h in hashes:
@@ -446,10 +463,14 @@ def main():
         if str(item.get("success",True)).lower() in {"false","0","no"}: continue
         if str(item.get("is_error",False)).lower() in {"true","1","yes"}: continue
         tx_hash=str(item.get("transaction_hash") or item.get("hash") or "").lower()
-        if top_level_value_by_hash.get(tx_hash,Decimal(0))>0: continue
         fr,to=addr(item.get("from")),addr(item.get("to"))
         value=dec(rawval(item.get("value")),18)
         if value<=0: continue
+        # Ignore only an internal trace that duplicates the top-level wallet
+        # transfer itself; other internal receipts/refunds remain in the ledger.
+        if (fr==WALLET and to==top_level_to_by_hash.get(tx_hash)
+                and value==top_level_value_by_hash.get(tx_hash,Decimal(0))):
+            continue
         if to==WALLET and fr!=WALLET: native_in+=value
         elif fr==WALLET and to!=WALLET: native_out+=value
     all_proceeds=sum((r["proceeds"] for r in records if r["action"]=="SELL"),Decimal(0))
