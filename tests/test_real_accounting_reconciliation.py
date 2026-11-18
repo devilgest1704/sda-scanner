@@ -6,6 +6,7 @@ from scripts.rebuild_real_accounting import (
     consume_fifo_lots,
     native_cash_expected,
     wsda_sell_proceeds,
+    wsda_external_in_for_transaction,
 )
 
 
@@ -85,3 +86,18 @@ def test_wsda_sell_proceeds_counts_router_hop_only_once():
 def test_wsda_sell_proceeds_does_not_count_router_intermediate_without_wallet_receipt():
     flows = [("0xpool", "0xrouter", Decimal("7.5"))]
     assert wsda_sell_proceeds(flows, "0xwallet", "0xzero") == Decimal("0")
+
+
+def test_confirmed_sell_wsda_receipt_is_not_counted_again_as_external_inflow():
+    flows = [("0xpool", "0xwallet", Decimal("112.089205424448730824"))]
+    assert wsda_sell_proceeds(flows, "0xwallet", "0xzero") == Decimal("112.089205424448730824")
+    assert wsda_external_in_for_transaction(
+        flows, "0xwallet", "0xrouter", confirmed_sell=True
+    ) == Decimal("0")
+
+
+def test_non_sell_external_wsda_inflow_remains_in_cash_reconciliation():
+    flows = [("0xexternal", "0xwallet", Decimal("5.25"))]
+    assert wsda_external_in_for_transaction(
+        flows, "0xwallet", "0xrouter", confirmed_sell=False
+    ) == Decimal("5.25")
