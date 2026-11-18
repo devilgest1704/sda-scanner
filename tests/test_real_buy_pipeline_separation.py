@@ -66,7 +66,7 @@ class RealPaperIsolation(unittest.TestCase):
   # PAPER is deliberately full and has an active cooldown/loss circuit. REAL's
   # own 7/10 capacity and empty cooldown are the only admission state consulted.
   paper_file=Path(self.tmp.name)/"positions.json"
-  paper_file.write_text(__import__("json").dumps({"positions":{f"0x{i+100:040x}":{} for i in range(10)}}),encoding="utf-8")
+  paper_file.write_text(__import__("json").dumps({"positions":{**{f"0x{i+100:040x}":{} for i in range(9)},self.token:{}}}),encoding="utf-8")
   shadow_file=Path(self.tmp.name)/"strategy_lab"/"forward_shadow_state.json"
   shadow_file.parent.mkdir(parents=True,exist_ok=True)
   shadow_file.write_text(__import__("json").dumps({"cooldowns":{self.token:"2099-01-01T00:00:00+00:00"},"loss_circuit":{"blocked":True}}),encoding="utf-8")
