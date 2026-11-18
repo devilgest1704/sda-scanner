@@ -82,6 +82,9 @@ class RealPaperIsolation(unittest.TestCase):
   signal_id=__import__("hashlib").sha256(
    f"{self.token}|{quote}|{p.strategy.VERSION}|REAL".encode()).hexdigest()
   self.state["consumed_signal_ids"]=[signal_id]
+  p.save_state(self.state,self.path)
+  self.state,error=p.load_state(self.path)
+  self.assertIsNone(error)
   self.assertFalse(self.ready()["ready"])
 
  def test_first_real_observation_passes_empty_history_not_shadow_fallback(self):
