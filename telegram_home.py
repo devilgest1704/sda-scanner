@@ -386,7 +386,7 @@ def buy_scanner_text(dashboard, detail=False):
             lines.append(f"   1h {_n(d.get('m1h')):+.1f}% | Vol {_n(d.get('volume_1h')):.0f} | "
                          f"Trades {_n(d.get('trades_1h')):.0f} | Ratio {_n(d.get('buy_ratio')):.2f}x")
             lines.append(f"   Phase {d.get('pump_phase') or 'NO'} | "
-                         f"{d.get('paper_buy_block_reason') or 'ready'}")
+                         f"{d.get('real_buy_reason') or 'REAL signal unavailable'}")
     return "\n".join(lines)
 
 
