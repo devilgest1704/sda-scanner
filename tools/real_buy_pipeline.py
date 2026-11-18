@@ -121,15 +121,32 @@ def _market_gates(token, analysis, signal, temporal, at):
     return {"blocked":blocked,"reasons":reasons,"macd":macd,"quote":quote,
             "age_ok":age_ok,"activity_ok":activity_ok}
 
+def _current_signal(analysis,scored,at=None):
+    c,score,quality,delta_impulse,phase=scored
+    age=c.get("data_age_sec")
+    fresh=isinstance(age,(int,float)) and not isinstance(age,bool) and math.isfinite(age) and age<=strategy.MAX_ENTRY_DATA_AGE_SEC
+    snapshot=min(20,max(0,
+        max(0,float(c.get("m1") or 0))*0.8
+        + max(0,float(c.get("m15") or 0))*0.8
+        + max(0,float(c.get("flow15") or 0))/100
+        + min(4,float(c.get("trades") or 0)/5)
+        + min(4,float(c.get("vol") or 0)/250)
+    )) if fresh else 0.0
+    # Exact PAPER entry_gate impulse rule: snapshot impulse supports
+    # CONFIRMATION only; IGNITION still requires the observed delta impulse.
+    entry_impulse=max(float(delta_impulse),snapshot) if fresh and phase=="CONFIRMATION" else float(delta_impulse)
+    return {"phase":phase,"score":float(score),"quality":float(quality),"impulse":entry_impulse,
+        "delta_impulse":float(delta_impulse),"snapshot_impulse":snapshot,
+        "quote_at":c.get("last_transaction"),"data_age_sec":age,
+        "price_sda":c.get("price"),"m1h":c.get("m1"),"m15":c.get("m15"),
+        "flow_15m":c.get("flow15"),"flow_1h":c.get("flow"),"volume_1h":c.get("vol"),
+        "trades_1h":c.get("trades"),"buy_ratio":c.get("buy_ratio"),
+        "decision_at":(at or now()).isoformat()}
+
 def evaluate_candidate(token,analysis,state,real_state,at=None):
     at=at or now(); token=str(token).lower()
     scored=strategy.score(token,analysis,persist=True,state=state)
-    c,score,quality,impulse,phase=scored
-    signal={"phase":phase,"score":float(score),"quality":float(quality),"impulse":float(impulse),
-        "quote_at":c.get("last_transaction"),"data_age_sec":c.get("data_age_sec"),
-        "price_sda":c.get("price"),"m1h":c.get("m1"),"m15":c.get("m15"),
-        "flow_15m":c.get("flow15"),"flow_1h":c.get("flow"),"volume_1h":c.get("vol"),
-        "trades_1h":c.get("trades"),"buy_ratio":c.get("buy_ratio"),"decision_at":at.isoformat()}
+    signal=_current_signal(analysis,scored,at)
     prior=state["temporal_history"].get(token) or {}
     temporal=evaluate_tp4(token,signal,at=at,previous=prior)
     # Advance REAL's own temporal evidence; never consult Shadow/PAPER journals.
