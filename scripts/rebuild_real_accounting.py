@@ -79,10 +79,12 @@ def dump(name,obj):
     p=OUT/name; p.write_text(json.dumps(obj,indent=2,sort_keys=True,default=str)+"\n",encoding="utf-8")
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
-def native_cash_expected(opening_balance, native_in, native_out, router_buy_spend,
-                         sell_proceeds, residual_wsda, wallet_fees):
-    """Expected native balance from the opening block plus all wallet cash flows."""
-    return (opening_balance + native_in - native_out - router_buy_spend
+def native_cash_expected(opening_balance, opening_wsda, native_in, native_out,
+                         router_buy_spend, wsda_external_in, wsda_external_out,
+                         wsda_router_spend, sell_proceeds, residual_wsda, wallet_fees):
+    """Expected native balance, accounting for the wallet's SDA/WSDA cash-equivalent."""
+    return (opening_balance + opening_wsda + native_in - native_out - router_buy_spend
+            + wsda_external_in - wsda_external_out - wsda_router_spend
             + sell_proceeds - residual_wsda - wallet_fees)
 
 def consume_fifo_lots(queue, quantity):
@@ -431,8 +433,11 @@ def main():
     if not history_blocks:
         raise RuntimeError("Cannot establish opening native balance: no indexed wallet block")
     first_wallet_block=min(history_blocks)
-    opening_native_raw=int(rpc("eth_getBalance",[WALLET,hex(max(0,first_wallet_block-1))]),16)
+    opening_block=hex(max(0,first_wallet_block-1))
+    opening_native_raw=int(rpc("eth_getBalance",[WALLET,opening_block]),16)
     opening_native=Decimal(opening_native_raw)/Decimal(10**18)
+    opening_wsda_raw=int(rpc("eth_call",[{"to":WSDA,"data":"0x70a08231"+aword(WALLET)},opening_block]),16)
+    opening_wsda=Decimal(opening_wsda_raw)/Decimal(10**18)
 
     wallet_fees=Decimal(0); native_in=Decimal(0); native_out=Decimal(0); router_buy_spend=Decimal(0)
     buy_hashes={r["hash"] for r in records if r["action"]=="BUY"}
@@ -448,9 +453,9 @@ def main():
         fee=dec((d.get("fee") or {}).get("value","0"),18)
         if addr(d.get("from"))==WALLET: wallet_fees+=fee
         val=dec(d.get("value","0"),18); fr,to=addr(d.get("from")),addr(d.get("to"))
-        if val>0 and to==WALLET and fr!=WALLET:
+        if val>0 and to==WALLET and fr not in {WALLET,WSDA}:
             native_in+=val
-        elif val>0 and fr==WALLET and to!=WALLET:
+        elif val>0 and fr==WALLET and to not in {WALLET,WSDA}:
             if h in buy_hashes and to==ROUTER:
                 router_buy_spend+=val
             else:
@@ -477,10 +482,20 @@ def main():
         if fr==WSDA or to==WSDA: continue
         if to==WALLET and fr!=WALLET: native_in+=value
         elif fr==WALLET and to!=WALLET: native_out+=value
+    wsda_external_in=Decimal(0); wsda_external_out=Decimal(0); wsda_router_spend=Decimal(0)
+    for h in hashes:
+        for fr,to,amount in wsda_flows(h):
+            if to==WALLET and fr not in {WALLET,ROUTER}:
+                wsda_external_in+=amount
+            elif fr==WALLET and to==ROUTER:
+                wsda_router_spend+=amount
+            elif fr==WALLET and to not in {WALLET,ROUTER,ZERO}:
+                wsda_external_out+=amount
     all_proceeds=sum((r["proceeds"] for r in records if r["action"]=="SELL"),Decimal(0))
     residual_wsda=wsda_qty
-    expected=native_cash_expected(opening_native,native_in,native_out,router_buy_spend,
-                                  all_proceeds,residual_wsda,wallet_fees)
+    expected=native_cash_expected(opening_native,opening_wsda,native_in,native_out,
+        router_buy_spend,wsda_external_in,wsda_external_out,wsda_router_spend,
+        all_proceeds,residual_wsda,wallet_fees)
     cash_delta=native_sda-expected
 
     # Compare, never substitute, the bot ledger with blockchain facts.
@@ -618,8 +633,13 @@ def main():
         "open_pnl_sda":str(open_pnl) if open_pnl is not None else None,
         "total_pnl_sda":str(total_pnl) if total_pnl is not None else None,"statistics":stats,
         "external_flows":{"opening_native_balance_sda":str(opening_native),
+            "opening_wsda_balance_sda":str(opening_wsda),
             "native_deposits_sda":str(native_in),"native_withdrawals_and_other_out_sda":str(native_out),
-            "router_buy_spend_sda":str(router_buy_spend),"all_swap_proceeds_sda":str(all_proceeds),
+            "router_buy_spend_sda":str(router_buy_spend),
+            "wsda_external_in_sda":str(wsda_external_in),
+            "wsda_external_out_sda":str(wsda_external_out),
+            "wsda_router_spend_sda":str(wsda_router_spend),
+            "all_swap_proceeds_sda":str(all_proceeds),
             "wallet_paid_gas_sda":str(wallet_fees),"cash_reconciliation_expected_sda":str(expected),
             "native_balance_sda":str(native_sda),"cash_reconciliation_delta_sda":str(cash_delta)},
         "residual_wsda_sda":str(residual_wsda),"current_wallet_value_sda":str(wallet_value_partial),
