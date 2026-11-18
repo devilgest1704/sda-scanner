@@ -1,4 +1,4 @@
-import tempfile, unittest
+import contextlib, tempfile, unittest
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -37,6 +37,13 @@ class RealPaperIsolation(unittest.TestCase):
  def test_real_capital_blocks(self):
   with patch.object(p,"_capacity",return_value=(False,"REAL_CAPITAL_LIMIT",None)):
    self.assertFalse(self.ready()["ready"])
+
+ def test_real_held_token_blocks(self):
+  self.real["positions"][self.token]={"cost_sda":30}
+  self.assertFalse(self.ready()["ready"])
+ def test_real_pending_buy_blocks(self):
+  self.real["pending_buys"][self.token]={"position_sda":30}
+  self.assertFalse(self.ready()["ready"])
  def test_real_loss_circuit_blocks(self):
   self.real["daily_realized_pnl_sda"]=-cfg.MAX_DAILY_LOSS_SDA
   self.assertFalse(self.ready()["ready"])
@@ -58,8 +65,11 @@ class RealPaperIsolation(unittest.TestCase):
    "flow":800,"flow15":200,"vol":1000,"trades":12,"buy_ratio":9,"trade_ratio":2,"accel":1},80,70,10,"CONFIRMATION")
   # PAPER is deliberately full and has an active cooldown/loss circuit. REAL's
   # own 7/10 capacity and empty cooldown are the only admission state consulted.
-  paper_full={"positions":{f"0x{i+100:040x}":{} for i in range(10)}}
-  shadow={"cooldowns":{self.token:"2099-01-01T00:00:00+00:00"},"loss_circuit":{"blocked":True}}
+  paper_file=Path(self.tmp.name)/"positions.json"
+  paper_file.write_text(__import__("json").dumps({"positions":{f"0x{i+100:040x}":{} for i in range(10)}}),encoding="utf-8")
+  shadow_file=Path(self.tmp.name)/"strategy_lab"/"forward_shadow_state.json"
+  shadow_file.parent.mkdir(parents=True,exist_ok=True)
+  shadow_file.write_text(__import__("json").dumps({"cooldowns":{self.token:"2099-01-01T00:00:00+00:00"},"loss_circuit":{"blocked":True}}),encoding="utf-8")
   banned_reads=[]
   original_read=Path.read_text
   def guarded_read(path,*args,**kwargs):
