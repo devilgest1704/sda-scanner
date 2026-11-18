@@ -11,6 +11,7 @@ import real_bot_views
 import real_trading_config as cfg
 import real_wallet_reconciliation as wallet_reconciliation
 import v30_dashboard_patch as v30_view
+import v30_pump_hunter as shared_strategy
 
 SCANNER_LIMIT = 5
 # Same freshness window the shared signal engine applies to entry data.
@@ -48,29 +49,41 @@ def _symbol(dashboard, address, meta):
 
 
 def scanner_candidates(dashboard):
-    """Rank PAPER candidates exactly like the former TOP BUY section."""
+    """Rank market candidates using shared scoring and REAL-owned history only."""
     md = v30_view._merged_market(dashboard, dashboard.load("market_data.json", {"tokens": {}}))
-    ws = dashboard.load("whale_data.json", {})
     meta = dashboard.load("token_metadata.json", {})
+    signal_state = dashboard.load("real_buy_signal_state.json", {})
+    if not isinstance(signal_state, dict) or signal_state.get("schema_version") != 1:
+        signal_state = {"history": {}, "buy_ready": {}}
+    ready_map = signal_state.get("buy_ready", {})
     ranked = ScannerRows()
     for address, token_data in (md.get("tokens", {}) or {}).items():
         analysis = v30_view._analysis(token_data)
         if not analysis or _n(analysis.get("price_in_sda")) <= 0:
             continue
-        decision = v30_view._decision(dashboard, address, analysis, ws)
-        ranked.append({"address": str(address), "symbol": _symbol(dashboard, address, meta),
-                       "status": _status(decision), "decision": decision})
+        c, score, quality, impulse, phase = shared_strategy.score(
+            address, analysis, persist=False, state=signal_state)
+        real_signal = ready_map.get(str(address).lower()) if isinstance(ready_map, dict) else None
+        ready = isinstance(real_signal, dict) and real_signal.get("ready") is True
+        decision = {
+            "pump_score": score, "pump_quality": quality, "pump_change": impulse,
+            "pump_phase": phase, "m15": c.get("m15"), "m1h": c.get("m1"),
+            "net_1h": c.get("flow"), "volume_1h": c.get("vol"),
+            "trades_1h": c.get("trades"), "buy_ratio": c.get("buy_ratio"),
+            "real_buy_ready": ready,
+            "real_buy_reason": real_signal.get("reason") if isinstance(real_signal, dict) else "REAL signal not evaluated",
+        }
+        ranked.append({"address": str(address).lower(),
+                       "symbol": _symbol(dashboard, address, meta),
+                       "status": "BUY" if ready else ("WATCH" if phase == "WATCH" else "NO"),
+                       "decision": decision})
     ranked.sort(key=lambda row: (
-        1 if row["decision"].get("shadow_confirmation_ready") else 0,
-        1 if not row["decision"].get("paper_buy_blocked") else 0,
-        1 if row["decision"].get("data_fresh_for_entry") else 0,
+        1 if row["status"] == "BUY" else 0,
         _n(row["decision"].get("pump_score")),
-        _n(row["decision"].get("shadow_snapshot_impulse")),
         _n(row["decision"].get("pump_change")),
     ), reverse=True)
     ranked.updated_at = md.get("updated_at")
     return ranked
-
 
 def _counts(rows):
     ready = sum(1 for row in rows if row["status"] == "BUY")
@@ -204,7 +217,12 @@ def _metrics(decision):
 def _scanner_inputs(dashboard):
     rows = scanner_candidates(dashboard)
     signal_state = dashboard.load("real_buy_signal_state.json", {})
-    signal_stamp = _refresh_stamp(signal_state.get("updated_at")) if isinstance(signal_state, dict) else None
+    try:
+        signal_stamp = datetime.fromisoformat(str(signal_state.get("updated_at")).replace("Z", "+00:00")) if isinstance(signal_state, dict) else None
+        if signal_stamp is not None and signal_stamp.tzinfo is None:
+            signal_stamp = None
+    except (TypeError, ValueError):
+        signal_stamp = None
     signal_stale = (not isinstance(signal_state, dict) or signal_state.get("schema_version") != 1
                     or signal_stamp is None
                     or (datetime.now(timezone.utc) - signal_stamp).total_seconds() > 300)
