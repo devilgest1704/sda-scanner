@@ -229,7 +229,11 @@ def main():
         nonws_in=[x for x in incoming if x["contract"]!=WSDA]
         nonws_out=[x for x in outgoing if x["contract"]!=WSDA]
         ws=wsda_flows(h)
-        proceeds=sum((q for f,t,q in ws if t in {ROUTER,WALLET} and f!=ZERO),Decimal(0))
+        wallet_proceeds=sum((q for f,t,q in ws if t==WALLET and f not in {ZERO,WALLET}),Decimal(0))
+        router_proceeds=sum((q for f,t,q in ws if t==ROUTER and f not in {ZERO,WALLET}),Decimal(0))
+        # Prefer the final wallet receipt. If the router retained the output,
+        # use its receipt instead; never add both legs of one transfer chain.
+        proceeds=wallet_proceeds if wallet_proceeds>0 else router_proceeds
         burn=sum((q for f,t,q in ws if f in {ROUTER,WALLET} and t==ZERO),Decimal(0))
         kind="OTHER"
         if not success: kind="FAILED"
