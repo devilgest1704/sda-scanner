@@ -1,0 +1,172 @@
+"""Independent REAL BUY pipeline; shares V30 market scoring and TP4 temporal rules."""
+from __future__ import annotations
+import hashlib, json, math, os
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+import real_trading_config as cfg
+import real_trader
+import v30_pump_hunter as strategy
+from tools.temporal_recovery_buy import evaluate_tp4
+from tools.v32_hourly_macd import paper_macd_veto
+from tools.paper_quote_quality import entry_gate as quote_gate
+
+STATE=Path("real_buy_signal_state.json")
+VERSION=1
+COOLDOWN_HOURS=6
+
+def now():
+    return datetime.now(timezone.utc)
+
+def initial_state():
+    return {"schema_version":VERSION,"updated_at":now().isoformat(),"history":{},
+            "temporal_history":{},"cooldowns":{},"risk_circuit":{},
+            "buy_ready":{},"consumed_signal_ids":[]}
+
+def save_state(state,path=STATE):
+    path=Path(path); path.parent.mkdir(parents=True,exist_ok=True)
+    tmp=path.with_suffix(path.suffix+".tmp")
+    tmp.write_text(json.dumps(state,indent=2,ensure_ascii=False,allow_nan=False),encoding="utf-8")
+    os.replace(tmp,path)
+
+def load_state(path=STATE):
+    path=Path(path)
+    if not path.exists():
+        state=initial_state(); save_state(state,path); return state,None
+    try:
+        state=json.loads(path.read_text(encoding="utf-8"))
+        if (not isinstance(state,dict) or state.get("schema_version")!=VERSION
+            or any(not isinstance(state.get(k),dict) for k in ("history","temporal_history","cooldowns","risk_circuit","buy_ready"))
+            or not isinstance(state.get("consumed_signal_ids"),list)):
+            return None,"REAL_SIGNAL_STATE_INVALID_SCHEMA"
+        return state,None
+    except (OSError,ValueError,TypeError):
+        return None,"REAL_SIGNAL_STATE_UNREADABLE"
+
+def stamp(value):
+    if not isinstance(value,str): return None
+    try:
+        d=datetime.fromisoformat(value.replace("Z","+00:00"))
+        return d.astimezone(timezone.utc) if d.tzinfo else None
+    except ValueError: return None
+
+def _capacity(real):
+    from decimal import Decimal
+    positions=real.get("positions"); pending=real.get("pending_buys")
+    if not isinstance(positions,dict) or not isinstance(pending,dict):
+        return False,"REAL_POSITION_STATE_INVALID",None
+    count=len(positions)+len(pending)
+    if count>=cfg.MAX_OPEN_POSITIONS: return False,"REAL_POSITION_LIMIT",None
+    deployed=real_trader.deployed_cost_basis(real)
+    amount=cfg.position_sda()
+    if deployed+Decimal(str(amount))>Decimal(str(cfg.TRADING_WALLET_CAPITAL_SDA)):
+        return False,"REAL_CAPITAL_LIMIT",None
+    try:
+        wallet=real_trader.wallet_address()
+        balance=real_trader.native_balance(wallet)
+    except Exception as exc:
+        return False,"REAL_BALANCE_UNAVAILABLE:"+type(exc).__name__,None
+    if balance<int(amount*10**18): return False,"REAL_NATIVE_BALANCE_INSUFFICIENT",None
+    return True,"REAL_CAPACITY_AVAILABLE",{"positions":count,"max_positions":cfg.MAX_OPEN_POSITIONS,
+        "deployed_sda":float(deployed),"capital_cap_sda":cfg.TRADING_WALLET_CAPITAL_SDA,
+        "wallet_balance_sda":balance/10**18}
+
+def evaluate_candidate(token,analysis,state,real_state,at=None):
+    at=at or now(); token=str(token).lower()
+    scored=strategy.score(token,analysis,persist=True,state=state)
+    c,score,quality,impulse,phase=scored
+    signal={"phase":phase,"score":float(score),"quality":float(quality),"impulse":float(impulse),
+        "quote_at":c.get("last_transaction"),"data_age_sec":c.get("data_age_sec"),
+        "price_sda":c.get("price"),"m1h":c.get("m1"),"m15":c.get("m15"),
+        "flow_15m":c.get("flow15"),"flow_1h":c.get("flow"),"volume_1h":c.get("vol"),
+        "trades_1h":c.get("trades"),"buy_ratio":c.get("buy_ratio"),"decision_at":at.isoformat()}
+    prior=state["temporal_history"].get(token)
+    temporal=evaluate_tp4(token,signal,at=at,previous=prior)
+    # Advance REAL's own temporal evidence; never consult Shadow/PAPER journals.
+    state["temporal_history"][token]=signal
+    state["temporal_history"]=dict(list(state["temporal_history"].items())[-5000:])
+    age=signal["data_age_sec"]; trades=signal["trades_1h"]
+    age_ok=isinstance(age,(int,float)) and not isinstance(age,bool) and math.isfinite(age) and 0<=age<=300
+    trades_ok=isinstance(trades,(int,float)) and not isinstance(trades,bool) and math.isfinite(trades) and trades>=12
+    early_ok=(age_ok and isinstance(trades,(int,float)) and 8<=trades<12
+        and float(signal["volume_1h"] or 0)>=500 and float(signal["flow_1h"] or 0)>=200
+        and float(signal["flow_15m"] or 0)>=60 and float(signal["buy_ratio"] or 0)>=1.3
+        and float(signal["m1h"] or 0)>0 and float(signal["m15"] or 0)>=1.5)
+    temporal_early=(temporal.get("ready") is True and temporal.get("lane") in ("confirmed_continuation","swing_single_quote")
+        and (early_ok or temporal.get("sparse_activity_verified") is True))
+    activity_ok=trades_ok or temporal_early
+    volume=float(signal["volume_1h"] or 0); flow=float(signal["flow_1h"] or 0)
+    price_flow_ok=not(float(signal["m1h"] or 0)>=12 and flow/max(volume,1)<0.18)
+    late=float(signal["m1h"] or 0)>12
+    macd=paper_macd_veto(analysis,as_of=at)
+    quote=quote_gate(token,signal["quote_at"],
+        confirmed_continuation=bool(temporal.get("ready") and temporal.get("lane")=="confirmed_continuation"),
+        require_continuity=False)
+    market_block=(not temporal.get("ready") or not age_ok or not activity_ok
+        or not price_flow_ok or late or macd.get("blocked") or not quote.get("ready"))
+    until=stamp(state["cooldowns"].get(token)); cooldown=bool(until and until>at)
+    try: daily=float(real_state.get("daily_realized_pnl_sda") or 0)
+    except (ValueError,TypeError): daily=float("-inf")
+    risk_block=not math.isfinite(daily) or daily<=-float(cfg.MAX_DAILY_LOSS_SDA)
+    signal_id=hashlib.sha256(f"{token}|{signal['quote_at']}|{strategy.VERSION}|REAL".encode()).hexdigest() if signal["quote_at"] else None
+    duplicate=bool(signal_id and signal_id in state["consumed_signal_ids"])
+    exists=token in real_state.get("positions",{}) or token in real_state.get("pending_buys",{})
+    cap_ok,cap_reason,capacity=_capacity(real_state)
+    reasons=[]
+    if market_block: reasons.append("MARKET:"+str(temporal.get("reason")) if not temporal.get("ready") else "MARKET_FILTER")
+    if cooldown: reasons.append("REAL_COOLDOWN")
+    if risk_block: reasons.append("REAL_LOSS_CIRCUIT")
+    if duplicate: reasons.append("REAL_DUPLICATE_SIGNAL")
+    if exists: reasons.append("REAL_POSITION_OR_PENDING_BUY")
+    if not cap_ok: reasons.append(cap_reason)
+    ready=not(market_block or cooldown or risk_block or duplicate or exists or not cap_ok)
+    result={"ready":ready,"reason":"READY" if ready else ";".join(reasons),"token":token,
+        "signal_id":signal_id,"signal":signal,"temporal":temporal,"cooldown_active":cooldown,
+        "risk_circuit":{"blocked":risk_block,"daily_realized_pnl_sda":daily,
+                        "daily_loss_limit_sda":cfg.MAX_DAILY_LOSS_SDA},
+        "capacity":capacity,"capacity_reason":cap_reason,"at":at.isoformat()}
+    state["buy_ready"][token]={"ready":ready,"reason":result["reason"],"signal_id":signal_id,
+        "at":result["at"],"capacity":capacity,"temporal":temporal}
+    state["risk_circuit"]={"blocked":risk_block,"daily_realized_pnl_sda":daily,
+        "limit_sda":cfg.MAX_DAILY_LOSS_SDA,"updated_at":at.isoformat()}
+    return result
+
+def run_scan(market_path="market_analysis.json",execute=True,state_path=STATE):
+    if os.getenv("REAL_TRADING_ENABLED","false").lower()!="true":
+        return {"status":"disabled","buy_ready":0,"actions":[]}
+    state,error=load_state(state_path)
+    if error: return {"status":"state_error","error":error,"buy_ready":0,"actions":[]}
+    try:
+        market=json.loads(Path(market_path).read_text(encoding="utf-8"))
+        tokens=market.get("tokens")
+        if not isinstance(tokens,dict): raise ValueError("tokens missing")
+        real=real_trader.load_state()
+    except Exception as exc:
+        return {"status":"input_error","error":type(exc).__name__,"buy_ready":0,"actions":[]}
+    actions=[]; ready=0; executed=0
+    for token,row in tokens.items():
+        if not isinstance(row,dict): continue
+        result=evaluate_candidate(token,row,state,real)
+        if not result["ready"]: continue
+        ready+=1
+        if not execute or executed>=1:
+            actions.append({"token":token,"status":"BUY_READY_ONLY","signal_id":result["signal_id"]}); continue
+        try:
+            real_trader.safety_check(cfg.position_sda(),real)
+            response=real_trader.execute_buy(token,str(row.get("symbol") or row.get("ticker") or token[:8]),cfg.position_sda())
+            status=response.get("status","UNKNOWN")
+            if status=="DRY_RUN": status="WOULD EXECUTE"
+            actions.append({"token":token,"status":status,"signal_id":result["signal_id"]})
+            executed+=1
+            if status in ("CONFIRMED","PENDING_CONFIRMATION"):
+                state["consumed_signal_ids"].append(result["signal_id"])
+                state["consumed_signal_ids"]=state["consumed_signal_ids"][-20000:]
+                state["cooldowns"][token]=(at:=now()).__class__.fromtimestamp(at.timestamp()+COOLDOWN_HOURS*3600,tz=timezone.utc).isoformat()
+        except Exception as exc:
+            actions.append({"token":token,"status":"SAFETY_OR_EXECUTION_BLOCKED","error":type(exc).__name__+":"+str(exc)[:180]})
+    state["updated_at"]=now().isoformat(); save_state(state,state_path)
+    return {"status":"ok","buy_ready":ready,"actions":actions,"paper_state_used":False}
+
+def main():
+    print("REAL BUY PIPELINE:",json.dumps(run_scan(),ensure_ascii=False,sort_keys=True))
+
+if __name__=="__main__": main()
