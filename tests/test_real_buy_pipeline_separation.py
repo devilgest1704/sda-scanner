@@ -89,6 +89,10 @@ class RealPaperIsolation(unittest.TestCase):
   self.state["temporal_history"][self.token]={"score":70}
   p.save_state(self.state,self.path); loaded,error=p.load_state(self.path)
   self.assertIsNone(error); self.assertEqual(loaded["temporal_history"],self.state["temporal_history"])
+ def test_missing_real_signal_state_fails_closed(self):
+  loaded,error=p.load_state(self.path)
+  self.assertIsNone(loaded)
+  self.assertEqual(error,"REAL_SIGNAL_STATE_MISSING")
  def test_corrupt_state_fails_closed(self):
   self.path.write_text("{",encoding="utf-8")
   loaded,error=p.load_state(self.path); self.assertIsNone(loaded); self.assertEqual(error,"REAL_SIGNAL_STATE_UNREADABLE")
@@ -139,8 +143,3 @@ class RealPaperIsolation(unittest.TestCase):
    safety.assert_called_once(); self.assertEqual(out["status"],"DRY_RUN")
 
 if __name__=="__main__": unittest.main()
- def test_missing_real_signal_state_fails_closed(self):
-  loaded,error=p.load_state(self.path)
-  self.assertIsNone(loaded)
-  self.assertEqual(error,"REAL_SIGNAL_STATE_MISSING")
-
