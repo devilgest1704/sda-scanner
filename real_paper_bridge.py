@@ -1,10 +1,4 @@
-"""Opt-in reconciliation from the canonical PAPER ledger to the real executor.
-
-The bridge is inert unless REAL_TRADING_ENABLED=true AND
-REAL_TRADING_DRY_RUN=false. First run establishes a baseline and never
-backfills existing PAPER positions. It only reacts to subsequent PAPER
-position transitions. PAPER remains the sole signal/exit authority.
-"""
+"""REAL wallet reconciliation and SELL V2 bridge. REAL BUY signals are independent."""
 import json
 import os
 import sys
@@ -13,10 +7,6 @@ from pathlib import Path
 
 STATE_FILE = Path("real_paper_bridge_state.json")
 EVENTS_FILE = Path("real_paper_bridge_events.json")
-PAPER_FILE = Path("positions.json")
-
-MAX_PAPER_BUY_AGE_SECONDS = 15 * 60
-PAPER_CLOCK_SKEW_SECONDS = 60
 REAL_LIMIT_ERRORS = (
     "Maximum real open positions reached",
     "Real trading capital cap",
@@ -231,38 +221,6 @@ def _reconcile_real_wallets(real_trader, swing_executor):
     return actions
 
 
-def _paper_positions():
-    """Return (positions, None) for a valid PAPER ledger, else (None, reason)."""
-    try:
-        ledger = json.loads(PAPER_FILE.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None, "PAPER_FILE_MISSING"
-    except (OSError, UnicodeDecodeError) as exc:
-        return None, f"PAPER_FILE_UNREADABLE: {type(exc).__name__}"
-    except ValueError as exc:
-        return None, f"PAPER_JSON_MALFORMED: {str(exc)[:120]}"
-    if not isinstance(ledger, dict):
-        return None, "PAPER_LEDGER_NOT_A_DICT"
-    if "positions" not in ledger:
-        return None, "PAPER_POSITIONS_MISSING"
-    positions = ledger["positions"]
-    if not isinstance(positions, dict):
-        return None, "PAPER_POSITIONS_WRONG_TYPE"
-    return {str(k).lower(): v for k, v in positions.items()
-            if isinstance(v, dict) and str(k).startswith("0x")}, None
-
-
-def _paper_age_seconds(position, now):
-    """Age of a PAPER entry; None when opened_at is missing, invalid or in the future."""
-    try:
-        opened = datetime.fromisoformat(str(position.get("opened_at")).replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return None
-    if opened.tzinfo is None:
-        return None
-    age = (now - opened).total_seconds()
-    return age if age >= -PAPER_CLOCK_SKEW_SECONDS else None
-
 
 def reconcile():
     # Do not even import the executor while disabled.
@@ -330,120 +288,16 @@ def reconcile():
     pre_paper_action_count = len(actions)
     _persist_events(actions)
 
-    # REAL must follow the exact active PAPER entry/exit profile. Fail closed
-    # rather than trading a different strategy after a workflow config drift.
-    paper_buy_mode = os.getenv("SDA_PAPER_BUY_MODE", "temporal_recovery").strip()
-    paper_tp4 = os.getenv("SDA_PAPER_TP4", "0").strip() == "1"
-    if paper_buy_mode != "temporal_recovery" or not paper_tp4:
-        raise RuntimeError(
-            "REAL bridge requires the active PAPER profile: "
-            "SDA_PAPER_BUY_MODE=temporal_recovery and SDA_PAPER_TP4=1"
-        )
-
-    current, paper_error = _paper_positions()
+    # REAL BUY discovery is handled by tools.real_buy_pipeline. This bridge
+    # owns only REAL wallet reconciliation and SELL V2; it must not inspect
+    # PAPER positions, signals, capacity, cooldowns or risk state.
     if STATE_FILE.exists():
         state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
         if not isinstance(state, dict):
-            raise RuntimeError("Invalid bridge state; refusing to overwrite it")
+            raise RuntimeError("Invalid REAL bridge state; refusing to overwrite it")
     else:
         state = {}
-    if not state.get("initialized"):
-        if paper_error:
-            # Never create a baseline from an unknown PAPER state.
-            actions.append({"action": "PAPER_STATE_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
-                            "reason": paper_error, "at": _now()})
-            # Keep the bridge baseline absent until a valid PAPER snapshot exists.
-            _persist_events(actions[pre_paper_action_count:])
-            return {"status": "paper_state_unavailable", "paper_state_error": paper_error,
-                    "actions": actions}
-        state = {"initialized": True, "paper_positions": sorted(current),
-                 "initialized_at": _now(), "last_run": _now(),
-                 "wallet_sync": _wallet_sync_summary(wallet_sync, real_trader)}
-        _save(STATE_FILE, state)
-        _persist_events(actions[pre_paper_action_count:])
-        return {"status": "baseline_initialized", "actions": actions}
-
-    previous = set(state.get("paper_positions", []))
-    paper_valid = paper_error is None
-    buy_data_available = (os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE", "true").strip().lower() == "true"
-                          and bool(wallet_sync.get("ok")))
-    now_keys = set(current) if paper_valid else set(previous)
-    legacy_bridge = state.setdefault("legacy_pending_sell", [])
-    for token in list(state.get("pending_sell", [])):
-        legacy_bridge.append({"token": token, "archived_at": _now(),
-                              "reason": "pre_swing_v2_bridge_sell_never_replayed"})
-    state["pending_sell"] = []
-
-    real_snapshot = real_trader.load_state()
-    pending_buy = set(state.get("pending_buy", [])) | set(real_snapshot.get("pending_buys", {}))
-    newly_seen = now_keys - previous
-    opened = sorted(newly_seen | pending_buy) if paper_valid and buy_data_available else []
-    next_pending_buy = (set() if paper_valid else set(state.get("pending_buy", [])))
-    if not buy_data_available:
-        next_pending_buy = pending_buy
-        actions.append({"action": "BUY_DATA_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
-                        "reason": "required market or whale data unavailable", "at": _now()})
-    detected_at = datetime.now(timezone.utc)
-    if not paper_valid:
-        # BUY discovery is skipped; REAL SELL V2 below still uses REAL state only.
-        failures = int((state.get("paper_state") or {}).get("consecutive_failures") or 0) + 1
-        state["paper_state"] = {"status": "UNAVAILABLE", "reason": paper_error,
-                                "consecutive_failures": failures, "at": _now()}
-        actions.append({"action": "PAPER_STATE_UNAVAILABLE", "status": "BUY_DISCOVERY_SKIPPED",
-                        "reason": paper_error, "preserved_baseline_size": len(previous),
-                        "at": _now()})
-        print(f"::warning::PAPER_STATE_UNAVAILABLE ({paper_error}); REAL BUY discovery skipped, "
-              "previous PAPER baseline preserved", file=sys.stderr, flush=True)
-    elif buy_data_available:
-        state["paper_state"] = {"status": "VALID", "consecutive_failures": 0, "at": _now()}
-
-    # Recover only post-migration Swing V2 intents. The executor checks their
-    # persisted hashes/receipts and never blindly resubmits an UNKNOWN tx.
-    try:
-        for recovered in swing_executor.startup_recovery():
-            label = "ACCOUNTING_REPAIR" if recovered.get("action") == "ACCOUNTING_REPAIR" else "SELL_RECOVERY"
-            actions.append({**recovered, "action": label,
-                            "result_action": recovered.get("action"), "at": _now()})
-    except Exception as exc:
-        actions.append({"action": "SELL_RECOVERY", "status": "ERROR",
-                        "error": str(exc)[:500], "at": _now()})
-
-    # New PAPER positions continue to create REAL BUYs exactly as before.
-    for token in opened:
-        pos = current.get(token, {})
-        existing_pending = real_trader.load_state().get("pending_buys", {}).get(token, {})
-        symbol = str(pos.get("symbol") or pos.get("ticker")
-                      or existing_pending.get("symbol") or token[:8])
-        if token in newly_seen and token not in pending_buy:
-            age = _paper_age_seconds(pos, detected_at)
-            if age is None or age > MAX_PAPER_BUY_AGE_SECONDS:
-                # Delayed discovery: never enter at a different market condition later.
-                actions.append({"action": "BUY", "token": token, "symbol": symbol,
-                                "status": "STALE_PAPER_BUY_SKIPPED",
-                                "paper_opened_at": pos.get("opened_at"),
-                                "detected_at": detected_at.isoformat(),
-                                "age_seconds": age, "max_age_seconds": MAX_PAPER_BUY_AGE_SECONDS,
-                                "at": _now()})
-                continue
-        # REAL BUY size is the configured production size, not the PAPER research size.
-        amount = cfg.position_sda()
-        try:
-            result = real_trader.execute_buy(token, symbol, amount)
-            status = result.get("status", "UNKNOWN")
-            actions.append({"action": "BUY", "token": token, "symbol": symbol,
-                           "status": status, "tx": result.get("tx"), "at": _now()})
-            if status not in ("CONFIRMED", "ALREADY_OPEN"):
-                next_pending_buy.add(token)
-        except Exception as exc:
-            message = str(exc)
-            limited = any(marker in message for marker in REAL_LIMIT_ERRORS)
-            # REAL-limit skips are final: the PAPER signal is never replayed later.
-            actions.append({"action": "BUY", "token": token, "symbol": symbol,
-                           "status": "PAPER_BUY_SKIPPED_REAL_LIMIT" if limited else "ERROR",
-                           "error": message[:500], "at": _now()})
-            pending_state = real_trader.load_state().get("pending_buys", {})
-            if token in pending_state:
-                next_pending_buy.add(token)
+    pre_paper_action_count = len(actions)
 
     # REAL positions now exit only through fresh market-price observations and
     # the authoritative Swing SELL V2 policy. A PAPER close is NOT a SELL signal.
@@ -559,8 +413,6 @@ def reconcile():
             actions.append({"action": "SELL_DECISION", "status": "ERROR",
                             "error": str(exc)[:500], "at": _now()})
 
-    state["paper_positions"] = sorted(now_keys)
-    state["pending_buy"] = sorted(next_pending_buy)
     state["pending_sell"] = []
     state["last_run"] = _now()
     state["last_actions"] = actions
@@ -580,16 +432,7 @@ def reconcile():
     elif health["health"] == "SELL_QUARANTINED":
         print(f"::warning::REAL SELL HEALTH SELL_QUARANTINED {json.dumps(health['status_counts'])}",
               file=sys.stderr, flush=True)
-    if health["health"] == "SELL_ERROR":
-        status = "reconciled_with_sell_error"
-    elif not paper_valid:
-        status = "paper_state_unavailable"
-    else:
-        status = "reconciled"
-    return {"status": status,
-            "sell_health": health["health"], "sell_health_detail": health,
-            "paper_state": "VALID" if paper_valid else "UNAVAILABLE",
-            "paper_state_error": paper_error,
-            "actions": actions,
-            "paper_open": len(now_keys), "opened": len(opened),
-            "closed": len(previous - now_keys), "sell_strategy": "swing_v2"}
+    status = "reconciled_with_sell_error" if health["health"] == "SELL_ERROR" else "reconciled"
+    return {"status": status, "sell_health": health["health"],
+            "sell_health_detail": health, "paper_state": "NOT_USED",
+            "actions": actions, "sell_strategy": "swing_v2"}

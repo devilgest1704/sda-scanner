@@ -31,7 +31,7 @@ if ! [[ "$OPTIMIZER_INTERVAL" =~ ^[0-9]+$ ]] || [ "$OPTIMIZER_INTERVAL" -lt 900 
   exit 1
 fi
 
-STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json v30_no_buy_diagnostic.json strategy_lab/candidate_outcomes.json strategy_lab/missed_pump_learning.json strategy_lab/forward_shadow_state.json strategy_lab/execution_quote_audit.json strategy_lab/evolution_state.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json real_worker_status.json real_paper_bridge_state.json real_paper_bridge_events.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json strategy_lab/temporal_paper_trial.json strategy_lab/temporal_paper_trial_report.json strategy_lab/lane_research_state.json strategy_lab/paper_paths"
+STATE_FILES="state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json v30_pump_state.json v30_execution_state.json v30_no_buy_diagnostic.json strategy_lab/candidate_outcomes.json strategy_lab/missed_pump_learning.json strategy_lab/forward_shadow_state.json strategy_lab/execution_quote_audit.json strategy_lab/evolution_state.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json real_buy_signal_state.json real_worker_status.json real_paper_bridge_state.json real_paper_bridge_events.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json strategy_lab/temporal_paper_trial.json strategy_lab/temporal_paper_trial_report.json strategy_lab/lane_research_state.json strategy_lab/paper_paths"
 STATE_FILES="$STATE_FILES market_source_state.json"
 
 ensure_json_state() {
@@ -39,7 +39,7 @@ ensure_json_state() {
 import json
 from pathlib import Path
 
-files = '''state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json real_paper_bridge_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json'''.split()
+files = '''state.json whale_state.json whale_data.json whale_history.json portfolio_data.json market_data.json market_analysis.json token_metadata.json liquidity_data.json paper_stats.json sidra_swap_discovery.json pending_signals.json positions.json v30_optimizer_trades.json wallet_data.json decision_state_v15.json paper_auto_state.json telegram_menu_state.json paper_buy_guard_state.json real_trade_state.json real_buy_signal_state.json real_paper_bridge_state.json v25_candidate_state.json v25_learner_state.json v25_shadow_learning_v2.json v25_shadow_learning_summary.json v25_shadow_learning_false_negative_report.json v25_shadow_learning_event_report.json v30_pump_state.json'''.split()
 files.append("market_source_state.json")
 
 # Never reset trading ledgers or transaction journals automatically.
@@ -280,6 +280,12 @@ run_one_scan() {
     buy_data_available=false
   fi
 
+  # Independent REAL BUY admission; this stage runs from market data and
+  # REAL-owned state before/independently of the PAPER engine.
+  if ! run_timed_stage real_buy_pipeline env TELEGRAM_TOKEN="" python -m tools.real_buy_pipeline; then
+    echo "::warning::REAL BUY pipeline failed closed; REAL SELL/reconciliation continues." >&2
+  fi
+
   if ! run_timed_stage paper_engine env TELEGRAM_TOKEN="" python paper_engine_v19.py; then
     echo "::warning::PAPER evaluation failed; REAL BUY discovery is fail-closed, REAL SELL and wallet reconciliation continue." >&2
     buy_data_available=false
@@ -362,7 +368,7 @@ PY
 python -m tools.paper_state_guard
 
 # Compile once per worker, not once per minute.
-python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py v30_pump_hunter.py tools/temporal_paper_trial.py
+python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py v30_pump_hunter.py tools/temporal_paper_trial.py tools/real_buy_pipeline.py
 find . -type d -name __pycache__ -prune -exec rm -rf {} +
 
 # Executable code is fixed for the life of this worker (pinned by the workflow
