@@ -367,7 +367,7 @@ PY
 python -m tools.paper_state_guard
 
 # Compile once per worker, not once per minute.
-python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py v30_pump_hunter.py tools/temporal_paper_trial.py tools/real_buy_pipeline.py tools/real_buy_pipeline.py
+python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py v30_pump_hunter.py tools/temporal_paper_trial.py tools/real_buy_pipeline.py
 find . -type d -name __pycache__ -prune -exec rm -rf {} +
 
 # Executable code is fixed for the life of this worker (pinned by the workflow
