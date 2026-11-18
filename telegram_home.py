@@ -33,7 +33,7 @@ def _n(value, default=0.0):
 
 
 def _status(decision):
-    if not decision.get("paper_buy_blocked"):
+    if decision.get("real_buy_ready") is True:
         return "BUY"
     return "WATCH" if str(decision.get("pump_phase") or "NO") == "WATCH" else "NO"
 
@@ -232,7 +232,7 @@ def _scanner_inputs(dashboard):
         row["real_buy_ready"] = bool(isinstance(real_signal, dict) and real_signal.get("ready") is True)
         row["real_buy_reason"] = (real_signal.get("reason") if isinstance(real_signal, dict)
                                   else "REAL signal not evaluated")
-        row["status"] = "BUY" if row["real_buy_ready"] else "WATCH"
+        row["status"] = "BUY" if row["real_buy_ready"] else ("WATCH" if str(row["decision"].get("pump_phase") or "NO") == "WATCH" else "NO")
         row["decision"]["real_buy_ready"] = row["real_buy_ready"]
         row["decision"]["real_buy_reason"] = row["real_buy_reason"]
     try:
