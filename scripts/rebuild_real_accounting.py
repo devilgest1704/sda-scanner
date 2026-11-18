@@ -108,6 +108,13 @@ def allocate_open_lot_value(total_value, lot_quantity, wallet_quantity):
         return None
     return total*quantity/wallet
 
+
+def wsda_sell_proceeds(flows, wallet, router, zero):
+    """Count the final WSDA receipt once, preferring wallet over router intermediate."""
+    wallet_received=sum((q for f,t,q in flows if t==wallet and f not in {zero,wallet}),Decimal(0))
+    router_received=sum((q for f,t,q in flows if t==router and f not in {zero,wallet}),Decimal(0))
+    return wallet_received if wallet_received>0 else router_received
+
 def word(v): return f"{int(v):064x}"
 def aword(a): return str(a).lower().replace("0x","").rjust(64,"0")
 def calldata(token_in,token_out,fee,amount,deadline):
@@ -229,11 +236,7 @@ def main():
         nonws_in=[x for x in incoming if x["contract"]!=WSDA]
         nonws_out=[x for x in outgoing if x["contract"]!=WSDA]
         ws=wsda_flows(h)
-        wallet_proceeds=sum((q for f,t,q in ws if t==WALLET and f not in {ZERO,WALLET}),Decimal(0))
-        router_proceeds=sum((q for f,t,q in ws if t==ROUTER and f not in {ZERO,WALLET}),Decimal(0))
-        # Prefer the final wallet receipt. If the router retained the output,
-        # use its receipt instead; never add both legs of one transfer chain.
-        proceeds=wallet_proceeds if wallet_proceeds>0 else router_proceeds
+        proceeds=wsda_sell_proceeds(ws,WALLET,ROUTER,ZERO)
         burn=sum((q for f,t,q in ws if f in {ROUTER,WALLET} and t==ZERO),Decimal(0))
         kind="OTHER"
         if not success: kind="FAILED"
