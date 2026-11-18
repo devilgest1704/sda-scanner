@@ -304,6 +304,17 @@ def reconcile():
                               "reason": "legacy bridge sell is never replayed"})
     state["pending_sell"] = []
 
+    # Recover only persisted REAL Swing V2 intents. This is SELL/ledger
+    # recovery and is deliberately independent of PAPER state.
+    try:
+        for recovered in swing_executor.startup_recovery():
+            label = "ACCOUNTING_REPAIR" if recovered.get("action") == "ACCOUNTING_REPAIR" else "SELL_RECOVERY"
+            actions.append({**recovered, "action": label,
+                            "result_action": recovered.get("action"), "at": _now()})
+    except Exception as exc:  # noqa: BLE001 - keep SELL recovery visible and fail-safe
+        actions.append({"action": "SELL_RECOVERY", "status": "ERROR",
+                        "error": str(exc)[:500], "at": _now()})
+
     # REAL positions now exit only through fresh market-price observations and
     # the authoritative Swing SELL V2 policy. A PAPER close is NOT a SELL signal.
     if not migrated:

@@ -163,6 +163,8 @@ class BridgeHarness:
         self.chain = chain
         self.test = test
         root = Path(chain.tmp.name)
+        self.paper = root / "positions.json"  # fixture only; the REAL bridge never reads it
+        self.paper.write_text(json.dumps({"positions": {}}), encoding="utf-8")
         (root / "bridge_state.json").write_text(json.dumps({
             "initialized": True, "paper_positions": [], "pending_buy": [], "pending_sell": [],
         }), encoding="utf-8")
