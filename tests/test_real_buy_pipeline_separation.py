@@ -137,6 +137,21 @@ class RealPaperIsolation(unittest.TestCase):
   self.assertEqual(order,["SAFETY_PASS","EXECUTE"])
   self.assertEqual(result["actions"][0]["status"],"WOULD EXECUTE")
   self.assertEqual(banned_reads,[])
+
+ def test_safety_failure_removes_buy_ready_diagnostic(self):
+  market_path=Path(self.tmp.name)/"market.json"
+  market_path.write_text(__import__("json").dumps({"tokens":{self.token:self.analysis}}),encoding="utf-8")
+  p.save_state(self.state,self.path)
+  with patch.dict("os.environ",{"REAL_TRADING_ENABLED":"true","REAL_TRADING_DRY_RUN":"true"}),\
+       patch.object(p,"load_state",return_value=(self.state,None)),\
+       patch.object(p,"evaluate_candidate",return_value={"ready":True,"signal_id":"sid"}),\
+       patch.object(p.real_trader,"load_state",return_value=self.real),\
+       patch.object(p.real_trader,"safety_check",side_effect=RuntimeError("daily loss limit")),\
+       patch.object(p.real_trader,"execute_buy") as execute:
+   result=p.run_scan(market_path=str(market_path),execute=True,state_path=self.path)
+  execute.assert_not_called()
+  self.assertEqual(result["buy_ready"],0)
+  self.assertFalse(self.state["buy_ready"][self.token]["ready"])
  def test_executor_dry_run_contract(self):
   with patch.object(p.real_trader,"safety_check") as safety,patch.object(p.real_trader,"execute_buy",return_value={"status":"DRY_RUN"}):
    p.real_trader.safety_check(30,self.real); out=p.real_trader.execute_buy(self.token,"T",30)
