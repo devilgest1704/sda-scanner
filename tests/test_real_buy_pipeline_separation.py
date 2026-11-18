@@ -17,11 +17,11 @@ class RealPaperIsolation(unittest.TestCase):
            "15m":{"net_flow":200}}}
   self.token="0x"+"a"*40
  def tearDown(self): self.tmp.cleanup()
- def ready(self):
+ def ready(self, capacity=(True,"REAL_CAPACITY_AVAILABLE",{"positions":7})):
   temporal={"ready":True,"reason":"TEST","lane":"confirmed_continuation","sparse_activity_verified":True}
   score=({"last_transaction":self.at.isoformat(),"data_age_sec":10,"price":1,"m1":3,"m15":2,"m4":1,
    "flow":800,"flow15":200,"vol":1000,"trades":12,"buy_ratio":9,"trade_ratio":2,"accel":1},80,70,10,"CONFIRMATION")
-  with patch.object(p.strategy,"score",return_value=score),patch.object(p,"evaluate_tp4",return_value=temporal),       patch.object(p,"_capacity",return_value=(True,"REAL_CAPACITY_AVAILABLE",{"positions":7})),       patch.object(p,"_market_gates",return_value={"blocked":False,"reasons":[]}):
+  with patch.object(p.strategy,"score",return_value=score),patch.object(p,"evaluate_tp4",return_value=temporal),       patch.object(p,"_capacity",return_value=capacity),       patch.object(p,"_market_gates",return_value={"blocked":False,"reasons":[]}):
    return p.evaluate_candidate(self.token,self.analysis,self.state,self.real,self.at)
  def test_paper_full_and_cooldown_are_irrelevant(self):
   self.assertTrue(self.ready()["ready"])
@@ -32,11 +32,9 @@ class RealPaperIsolation(unittest.TestCase):
   self.assertFalse(self.ready()["ready"])
  def test_real_ten_positions_blocks(self):
   self.state["cooldowns"].clear()
-  with patch.object(p,"_capacity",return_value=(False,"REAL_POSITION_LIMIT",None)):
-   self.assertFalse(self.ready()["ready"])
+  self.assertFalse(self.ready((False,"REAL_POSITION_LIMIT",None))["ready"])
  def test_real_capital_blocks(self):
-  with patch.object(p,"_capacity",return_value=(False,"REAL_CAPITAL_LIMIT",None)):
-   self.assertFalse(self.ready()["ready"])
+  self.assertFalse(self.ready((False,"REAL_CAPITAL_LIMIT",None))["ready"])
 
  def test_real_held_token_blocks(self):
   self.real["positions"][self.token]={"cost_sda":30}
