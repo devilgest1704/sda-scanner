@@ -74,6 +74,17 @@ class RealPaperIsolation(unittest.TestCase):
    f"{self.token}|{quote}|{p.strategy.VERSION}|REAL".encode()).hexdigest()
   self.state["consumed_signal_ids"]=[signal_id]
   self.assertFalse(self.ready()["ready"])
+
+ def test_first_real_observation_passes_empty_history_not_shadow_fallback(self):
+  score=({"last_transaction":self.at.isoformat(),"data_age_sec":10,"price":1,"m1":3,"m15":2,"m4":1,
+   "flow":800,"flow15":200,"vol":1000,"trades":12,"buy_ratio":9},80,70,10,"CONFIRMATION")
+  seen=[]
+  with patch.object(p.strategy,"score",return_value=score),\
+       patch.object(p,"evaluate_tp4",side_effect=lambda *a,**kw:(seen.append(kw.get("previous")),{"ready":False,"reason":"no_prior"})[1]),\
+       patch.object(p,"_market_gates",return_value={"blocked":True,"reasons":["no temporal"]}),\
+       patch.object(p,"_capacity",return_value=(True,"REAL_CAPACITY_AVAILABLE",{"positions":7})):
+   p.evaluate_candidate(self.token,self.analysis,self.state,self.real,self.at)
+  self.assertEqual(seen,[{}])
  def test_restart_preserves_temporal_history(self):
   self.state["temporal_history"][self.token]={"score":70}
   p.save_state(self.state,self.path); loaded,error=p.load_state(self.path)

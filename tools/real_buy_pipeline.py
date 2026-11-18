@@ -130,7 +130,7 @@ def evaluate_candidate(token,analysis,state,real_state,at=None):
         "price_sda":c.get("price"),"m1h":c.get("m1"),"m15":c.get("m15"),
         "flow_15m":c.get("flow15"),"flow_1h":c.get("flow"),"volume_1h":c.get("vol"),
         "trades_1h":c.get("trades"),"buy_ratio":c.get("buy_ratio"),"decision_at":at.isoformat()}
-    prior=state["temporal_history"].get(token)
+    prior=state["temporal_history"].get(token) or {}
     temporal=evaluate_tp4(token,signal,at=at,previous=prior)
     # Advance REAL's own temporal evidence; never consult Shadow/PAPER journals.
     state["temporal_history"][token]=signal
