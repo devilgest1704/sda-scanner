@@ -227,6 +227,8 @@ def main():
         obj=logs.get(h,{})
         return obj.get("items",[]) if isinstance(obj,dict) else (obj if isinstance(obj,list) else [])
     def wsda_flows(h):
+        wallet_flows=[(addr(tr.get("from")),addr(tr.get("to")),human(tr))
+                      for tr in byhash.get(h,[]) if tokenof(tr)[0]==WSDA]
         if h in logs:
             out=[]
             for lg in logs_for(h):
@@ -234,12 +236,13 @@ def main():
                 ps={p.get("name"):p.get("value") for p in (lg.get("decoded") or {}).get("parameters",[])}
                 if ps.get("value") is None: continue
                 out.append((str(ps.get("from") or "").lower(),str(ps.get("to") or "").lower(),dec(ps["value"],18)))
+            # Keep complete router/pool hops from logs, but merge any wallet-
+            # involving WSDA transfer omitted by the log endpoint without
+            # double-counting a transfer already present in the event list.
+            for flow in wallet_flows:
+                if flow not in out: out.append(flow)
             if out: return out
-        # Non-router WSDA movements involving the wallet are already present in
-        # the complete address-level token-transfer history. It also serves as
-        # a safe fallback when a router log response contains no WSDA events.
-        return [(addr(tr.get("from")),addr(tr.get("to")),human(tr))
-                for tr in byhash.get(h,[]) if tokenof(tr)[0]==WSDA]
+        return wallet_flows
     records=[]; classifications=[]
     for h in hashes:
         tx=txmap.get(h,{}); d=details.get(h,{})
