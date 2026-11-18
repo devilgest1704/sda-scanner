@@ -464,7 +464,6 @@ class SellHealthVisibility(unittest.TestCase):
         self.assertNotEqual(result["status"], "reconciled")
         self.assertIn("forced SELL failure", json.dumps(result["sell_health_detail"]))
         harness.buy.assert_not_called()
-        harness.buy.assert_called_once_with(NEW_TOKEN, "NEW", cfg.position_sda())
         saved = json.loads((Path(chain.tmp.name) / "bridge_state.json").read_text(encoding="utf-8"))
         self.assertEqual(saved["sell_health"]["health"], "SELL_ERROR")
 
