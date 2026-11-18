@@ -26,7 +26,7 @@ def now():
 
 def initial_state():
     return {"schema_version":VERSION,"updated_at":now().isoformat(),"history":{},
-            "temporal_history":{},"cooldowns":{},"risk_circuit":{},
+            "temporal_history":{},"signal_history":{},"cooldowns":{},"risk_circuit":{},
             "buy_ready":{},"consumed_signal_ids":[],"market_data_status":"UNKNOWN"}
 
 def _json_clean(value):
