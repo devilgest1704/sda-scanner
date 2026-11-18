@@ -79,6 +79,12 @@ def dump(name,obj):
     p=OUT/name; p.write_text(json.dumps(obj,indent=2,sort_keys=True,default=str)+"\n",encoding="utf-8")
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
+def native_cash_expected(opening_balance, native_in, native_out, router_buy_spend,
+                         sell_proceeds, residual_wsda, wallet_fees):
+    """Expected native balance from the opening block plus all wallet cash flows."""
+    return (opening_balance + native_in - native_out - router_buy_spend
+            + sell_proceeds - residual_wsda - wallet_fees)
+
 def word(v): return f"{int(v):064x}"
 def aword(a): return str(a).lower().replace("0x","").rjust(64,"0")
 def calldata(token_in,token_out,fee,amount,deadline):
@@ -224,7 +230,16 @@ def main():
         elif fr==WALLET and to!=ROUTER and value>0: kind="NATIVE TRANSFER OUT"
         elif to==WALLET and fr!=WALLET and value>0: kind="NATIVE TRANSFER IN"
         elif nonws_in: kind="TOKEN TRANSFER IN"
-        elif nonws_out: kind="TOKEN TRANSFER OUT"
+        elif nonws_out:
+            kind="TOKEN TRANSFER OUT"
+            # Non-router token outflows are wallet disposals/transfers, not SELLs.
+            # Consume their quantity from FIFO lots so accounting reflects the
+            # actual on-chain balance without inventing sale proceeds or PnL.
+            for x in nonws_out:
+                records.append({"hash":h,"timestamp":d.get("timestamp") or tx.get("timestamp"),
+                    "action":"TRANSFER_OUT","contract":x["contract"],"symbol":x["symbol"],
+                    "quantity":Decimal(x["quantity"]),"cost":Decimal(0),
+                    "proceeds":Decimal(0),"gas":Decimal(0)})
         elif value>0: kind="NATIVE TRANSFER"
         classifications.append({"hash":h,"timestamp":d.get("timestamp") or tx.get("timestamp"),
             "block":d.get("block_number") or tx.get("block_number"),"from":fr,"to":to,
@@ -246,7 +261,7 @@ def main():
     for v in approvals.values(): v.sort(key=lambda x:x["timestamp"])
     unwraps.sort(key=lambda x:x["timestamp"])
     records.sort(key=lambda x:x["timestamp"] or "")
-    lots=defaultdict(deque); closed=[]; unmatched=[]
+    lots=defaultdict(deque); closed=[]; unmatched=[]; unmatched_transfer_outs=[]; transfer_outs=[]
     for r in records:
         c=r["contract"]
         if r["action"]=="BUY":
@@ -260,6 +275,18 @@ def main():
             matches.append({"lot":lot,"qty":take,"cost":lot["cost"]*ratio,"gas":lot["buy_gas"]*ratio})
             lot["remaining"]-=take; remaining-=take
             if lot["remaining"]<=Decimal("1e-18"): lots[c].popleft()
+        if r["action"]=="TRANSFER_OUT":
+            transferred=sum((m["qty"] for m in matches),Decimal(0))
+            basis=sum((m["cost"]+m["gas"] for m in matches),Decimal(0))
+            transfer_outs.append({"tx":r["hash"],"at":r["timestamp"],"contract":c,
+                "symbol":r["symbol"],"quantity":str(transferred),
+                "cost_basis_sda":str(basis),"buy_tx":[m["lot"]["buy_hash"] for m in matches],
+                "unmatched_quantity":str(remaining)})
+            if remaining>Decimal("1e-12"):
+                unmatched_transfer_outs.append({"tx":r["hash"],"contract":c,"symbol":r["symbol"],
+                    "unmatched_quantity":str(remaining),
+                    "reason":"Token transfer out exceeds confirmed open BUY lots"})
+            continue
         if remaining>Decimal("1e-12"):
             unmatched.append({"sell_tx":r["hash"],"token":r["symbol"],"contract":c,
                 "unmatched_quantity":str(remaining),"proceeds_sda":str(r["proceeds"]),
@@ -335,25 +362,33 @@ def main():
         priced=list(pool.map(price_one,holding_rows))
     holdmap={h["contract"]:h for h in priced}
     open_positions=[]; residual_dust=[]; open_value=Decimal(0); open_cost=Decimal(0); open_complete=True
+    open_quantity_by_contract=defaultdict(Decimal)
+    for lot in open_lots:
+        if Decimal(lot["quantity"])>DUST_TOKEN_QUANTITY:
+            open_quantity_by_contract[lot["contract"]]+=Decimal(lot["quantity"])
     for lot in open_lots:
         c=lot["contract"]; h=holdmap.get(c)
         qty=Decimal(lot["quantity"]); cost=Decimal(lot["total_cost_basis_sda"])
         if qty<=DUST_TOKEN_QUANTITY:
             residual_dust.append(lot)
             continue
-        if not h or Decimal(h["quantity"]) < qty-Decimal("0.00000001"):
-            open_complete=False; current=None; err="wallet balance does not cover FIFO open lot"
+        wallet_qty=Decimal(h["quantity"]) if h else Decimal(0)
+        total_open_qty=open_quantity_by_contract[c]
+        if not h or wallet_qty < total_open_qty-Decimal("0.00000001"):
+            open_complete=False; current=None; err="wallet balance does not cover aggregate FIFO open lots"
         else:
-            current=h.get("exit_quote_sda")
-            if current is None: current=h.get("spot_value_sda")
+            full_value=h.get("exit_quote_sda")
+            if full_value is None: full_value=h.get("spot_value_sda")
             err=h.get("exit_quote_error") if h.get("exit_quote_sda") is None else None
+            current=(Decimal(str(full_value))*qty/wallet_qty) if full_value is not None and wallet_qty>0 else None
             if current is None: open_complete=False
-        pnl=Decimal(str(current))-cost if current is not None else None
-        if current is not None: open_value+=Decimal(str(current))
+        pnl=current-cost if current is not None else None
+        if current is not None: open_value+=current
         open_cost+=cost
         open_positions.append({**lot,"decimals":int(token_meta.get(c,{}).get("decimals") or 0),
-            "current_value_sda":current,"open_pnl_sda":str(pnl) if pnl is not None else None,
-            "value_method":"full-balance PinetSwap sell eth_call" if h and h.get("exit_quote_sda") is not None else "1 SDA buy mark",
+            "current_value_sda":str(current) if current is not None else None,
+            "open_pnl_sda":str(pnl) if pnl is not None else None,
+            "value_method":"pro-rata full-balance PinetSwap sell eth_call" if h and h.get("exit_quote_sda") is not None else "pro-rata 1 SDA buy mark",
             "valuation_error":err})
     realized_gross=sum((Decimal(x["gross_pnl_sda"]) for x in closed),Decimal(0))
     realized_net=sum((Decimal(x["net_pnl_sda"]) for x in closed),Decimal(0))
@@ -367,12 +402,28 @@ def main():
     wallet_value_partial=native_sda+wsda_qty+token_spot
     wallet_value_complete=not unpriced
 
-    # Native cash-flow reconciliation: external SDA in/out, router buy spends,
-    # swap proceeds, residual WSDA, and gas paid by this wallet.
+    # Native cash-flow reconciliation includes the wallet's opening balance at
+    # the block immediately before the first indexed wallet activity. The old
+    # zero-origin equation silently treated a pre-existing balance as a delta.
+    # Internal native transfers are also included (notably WSDA unwrap payouts).
+    history_blocks=[]
+    for item in txs+transfers+internal:
+        try:
+            if item.get("block_number") is not None:
+                history_blocks.append(int(item.get("block_number")))
+        except (TypeError,ValueError):
+            continue
+    if not history_blocks:
+        raise RuntimeError("Cannot establish opening native balance: no indexed wallet block")
+    first_wallet_block=min(history_blocks)
+    opening_native_raw=int(rpc("eth_getBalance",[WALLET,hex(max(0,first_wallet_block-1))]),16)
+    opening_native=Decimal(opening_native_raw)/Decimal(10**18)
+
     wallet_fees=Decimal(0); native_in=Decimal(0); native_out=Decimal(0); router_buy_spend=Decimal(0)
+    buy_hashes={r["hash"] for r in records if r["action"]=="BUY"}
+    top_level_value_by_hash={h:dec((details.get(h) or txmap.get(h,{ })).get("value","0"),18) for h in hashes}
     # Transaction-detail endpoints can return JSON null for valid hashes.
-    # Use the already-fetched address transaction as the authoritative fallback
-    # so native cash flows and gas are not silently omitted from reconciliation.
+    # Use the already-fetched address transaction as the authoritative fallback.
     for h in hashes:
         d=details.get(h)
         if not isinstance(d,dict) or not d:
@@ -380,12 +431,31 @@ def main():
         fee=dec((d.get("fee") or {}).get("value","0"),18)
         if addr(d.get("from"))==WALLET: wallet_fees+=fee
         val=dec(d.get("value","0"),18); fr,to=addr(d.get("from")),addr(d.get("to"))
-        if val>0 and to==WALLET and fr!=WALLET: native_in+=val
-        elif val>0 and fr==WALLET and to==ROUTER: router_buy_spend+=val
-        elif val>0 and fr==WALLET and to!=ROUTER: native_out+=val
+        if val>0 and to==WALLET and fr!=WALLET:
+            native_in+=val
+        elif val>0 and fr==WALLET and to!=WALLET:
+            if h in buy_hashes and to==ROUTER:
+                router_buy_spend+=val
+            else:
+                native_out+=val
+    # Internal value transfers are separate from top-level transaction values.
+    # Skip traces for transactions whose wallet-paid top-level value was already
+    # counted, avoiding double counting the same native transfer.
+    for item in internal:
+        if not isinstance(item,dict): continue
+        if str(item.get("success",True)).lower() in {"false","0","no"}: continue
+        if str(item.get("is_error",False)).lower() in {"true","1","yes"}: continue
+        tx_hash=str(item.get("transaction_hash") or item.get("hash") or "").lower()
+        if top_level_value_by_hash.get(tx_hash,Decimal(0))>0: continue
+        fr,to=addr(item.get("from")),addr(item.get("to"))
+        value=dec(rawval(item.get("value")),18)
+        if value<=0: continue
+        if to==WALLET and fr!=WALLET: native_in+=value
+        elif fr==WALLET and to!=WALLET: native_out+=value
     all_proceeds=sum((r["proceeds"] for r in records if r["action"]=="SELL"),Decimal(0))
     residual_wsda=wsda_qty
-    expected=native_in-native_out-router_buy_spend+all_proceeds-residual_wsda-wallet_fees
+    expected=native_cash_expected(opening_native,native_in,native_out,router_buy_spend,
+                                  all_proceeds,residual_wsda,wallet_fees)
     cash_delta=native_sda-expected
 
     # Compare, never substitute, the bot ledger with blockchain facts.
@@ -521,7 +591,8 @@ def main():
         "open_market_value_sda":str(open_value) if open_complete else None,
         "open_pnl_sda":str(open_pnl) if open_pnl is not None else None,
         "total_pnl_sda":str(total_pnl) if total_pnl is not None else None,"statistics":stats,
-        "external_flows":{"native_deposits_sda":str(native_in),"native_withdrawals_and_other_out_sda":str(native_out),
+        "external_flows":{"opening_native_balance_sda":str(opening_native),
+            "native_deposits_sda":str(native_in),"native_withdrawals_and_other_out_sda":str(native_out),
             "router_buy_spend_sda":str(router_buy_spend),"all_swap_proceeds_sda":str(all_proceeds),
             "wallet_paid_gas_sda":str(wallet_fees),"cash_reconciliation_expected_sda":str(expected),
             "native_balance_sda":str(native_sda),"cash_reconciliation_delta_sda":str(cash_delta)},
@@ -587,6 +658,8 @@ def main():
     if errors: bot_blockers.extend(sorted(errors))
     if abs(cash_delta)>Decimal("0.00000001"): bot_blockers.append("NATIVE_CASH_RECONCILIATION_DELTA")
     bot_blockers.extend(x["sell_tx"] for x in bot_unmatched)
+    bot_unmatched_transfer_outs=[x for x in unmatched_transfer_outs if x["contract"] in bot_buy_contracts]
+    bot_blockers.extend(x["tx"] for x in bot_unmatched_transfer_outs)
     if not bot_open_complete:
         bot_blockers.extend(x["buy_tx"] for x in bot_open_positions if x["value_sda"] is None)
     bot_blockers=sorted(set(bot_blockers))
@@ -611,6 +684,8 @@ def main():
         "bot_unresolved_transactions":bot_blockers,
         "realized_pnl_sda":str(bot_realized),"open_pnl_sda":str(bot_open_pnl),"total_pnl_sda":str(bot_total),
         "open_positions":bot_open_positions,"buy_transactions":bot_buy_records,
+        "external_transfer_outs":[x for x in transfer_outs if x["contract"] in bot_buy_contracts],
+        "unmatched_transfer_outs":bot_unmatched_transfer_outs,
         "sell_transactions":[{"tx":x.get("sell_tx"),"at":x.get("timestamp"),"symbol":x.get("token"),
             "contract":x.get("contract"),"quantity":x.get("quantity_sold"),"proceeds_sda":x.get("sell_proceeds_sda"),
             "cost_basis_sda":x.get("buy_cost_sda"),"gross_pnl_sda":x.get("gross_pnl_sda"),
