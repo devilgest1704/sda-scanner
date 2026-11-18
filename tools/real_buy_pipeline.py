@@ -46,7 +46,7 @@ def save_state(state,path=STATE):
 def load_state(path=STATE):
     path=Path(path)
     if not path.exists():
-        state=initial_state(); save_state(state,path); return state,None
+        return None,"REAL_SIGNAL_STATE_MISSING"
     try:
         state=json.loads(path.read_text(encoding="utf-8"))
         if (not isinstance(state,dict) or state.get("schema_version")!=VERSION

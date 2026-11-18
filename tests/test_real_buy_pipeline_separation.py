@@ -98,6 +98,7 @@ class RealPaperIsolation(unittest.TestCase):
   market={"tokens":{self.token:self.analysis}}
   market_path=Path(self.tmp.name)/"market.json"
   market_path.write_text(__import__("json").dumps(market),encoding="utf-8")
+  p.save_state(self.state,self.path)
   temporal={"ready":True,"reason":"TEST_VALID","lane":"confirmed_continuation","sparse_activity_verified":True}
   score=({"last_transaction":self.at.isoformat(),"data_age_sec":10,"price":1,"m1":3,"m15":2,"m4":1,
    "flow":800,"flow15":200,"vol":1000,"trades":12,"buy_ratio":9,"trade_ratio":2,"accel":1},80,70,10,"CONFIRMATION")
@@ -138,3 +139,8 @@ class RealPaperIsolation(unittest.TestCase):
    safety.assert_called_once(); self.assertEqual(out["status"],"DRY_RUN")
 
 if __name__=="__main__": unittest.main()
+ def test_missing_real_signal_state_fails_closed(self):
+  loaded,error=p.load_state(self.path)
+  self.assertIsNone(loaded)
+  self.assertEqual(error,"REAL_SIGNAL_STATE_MISSING")
+
