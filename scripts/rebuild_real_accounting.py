@@ -451,6 +451,10 @@ def main():
     top_level_by_hash={h:(details.get(h) or txmap.get(h,{ })) for h in hashes}
     top_level_value_by_hash={h:dec(top_level_by_hash[h].get("value","0"),18) for h in hashes}
     top_level_to_by_hash={h:addr(top_level_by_hash[h].get("to")) for h in hashes}
+    top_level_success_by_hash={h:(
+        str(top_level_by_hash[h].get("status") or "").lower()=="ok"
+        and str(top_level_by_hash[h].get("result") or "").lower()=="success"
+    ) for h in hashes}
     # Transaction-detail endpoints can return JSON null for valid hashes.
     # Use the already-fetched address transaction as the authoritative fallback.
     for h in hashes:
@@ -459,7 +463,8 @@ def main():
             d=txmap.get(h,{})
         fee=dec((d.get("fee") or {}).get("value","0"),18)
         if addr(d.get("from"))==WALLET: wallet_fees+=fee
-        val=dec(d.get("value","0"),18); fr,to=addr(d.get("from")),addr(d.get("to"))
+        val=dec(d.get("value","0"),18) if top_level_success_by_hash.get(h,False) else Decimal(0)
+        fr,to=addr(d.get("from")),addr(d.get("to"))
         if val>0 and to==WALLET and fr not in {WALLET,WSDA}:
             native_in+=val
         elif val>0 and fr==WALLET and to not in {WALLET,WSDA}:
@@ -475,6 +480,7 @@ def main():
         if str(item.get("success",True)).lower() in {"false","0","no"}: continue
         if str(item.get("is_error",False)).lower() in {"true","1","yes"}: continue
         tx_hash=str(item.get("transaction_hash") or item.get("hash") or "").lower()
+        if tx_hash in top_level_success_by_hash and not top_level_success_by_hash[tx_hash]: continue
         fr,to=addr(item.get("from")),addr(item.get("to"))
         value=dec(rawval(item.get("value")),18)
         if value<=0: continue
