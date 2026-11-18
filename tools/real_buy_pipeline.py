@@ -26,10 +26,19 @@ def initial_state():
             "temporal_history":{},"cooldowns":{},"risk_circuit":{},
             "buy_ready":{},"consumed_signal_ids":[]}
 
+def _json_clean(value):
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _json_clean(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_clean(item) for item in value]
+    return value
+
 def save_state(state,path=STATE):
     path=Path(path); path.parent.mkdir(parents=True,exist_ok=True)
     tmp=path.with_suffix(path.suffix+".tmp")
-    tmp.write_text(json.dumps(state,indent=2,ensure_ascii=False,allow_nan=False),encoding="utf-8")
+    tmp.write_text(json.dumps(_json_clean(state),indent=2,ensure_ascii=False,allow_nan=False),encoding="utf-8")
     os.replace(tmp,path)
 
 def load_state(path=STATE):
