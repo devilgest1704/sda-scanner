@@ -6,8 +6,10 @@ receipt and current token balance before adding a missing position.
 """
 from __future__ import annotations
 
+import base64
 import fcntl
 import json
+import os
 import time
 from datetime import UTC, datetime
 from decimal import ROUND_DOWN, Decimal
@@ -16,7 +18,7 @@ from pathlib import Path
 import requests
 
 ACCOUNTING_FILE = Path("real_accounting_state.json")
-ACCOUNTING_URL = "https://raw.githubusercontent.com/devilgest1704/sda-scanner/main/real_accounting_state.json"
+ACCOUNTING_URL = "https://api.github.com/repos/devilgest1704/sda-scanner/contents/real_accounting_state.json"
 LOCK_FILE = Path("/tmp/sda-real-wallet-reconciliation.lock")
 MAX_SNAPSHOT_AGE_SECONDS = 20 * 60
 CHAIN_ID = 97453
@@ -128,14 +130,29 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=None,
                     snapshot = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
                     snapshot_source = str(snapshot_path)
                 else:
+                    headers = {
+                        "Accept": "application/vnd.github.raw",
+                        "Cache-Control": "no-cache",
+                        "Pragma": "no-cache",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                        "User-Agent": "sda-real-wallet-reconciliation/1.0",
+                    }
+                    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+                    if token:
+                        headers["Authorization"] = f"Bearer {token}"
                     response = requests.get(
                         ACCOUNTING_URL,
-                        params={"_": str(int(time.time() * 1000))},
-                        headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+                        params={"ref": "main", "_": str(int(time.time() * 1000))},
+                        headers=headers,
                         timeout=15,
                     )
                     response.raise_for_status()
                     snapshot = response.json()
+                    # GitHub may return the contents envelope if the media type
+                    # is negotiated differently; decode that form defensively.
+                    if isinstance(snapshot, dict) and snapshot.get("encoding") == "base64":
+                        raw = base64.b64decode(snapshot.get("content") or "")
+                        snapshot = json.loads(raw.decode("utf-8"))
                     snapshot_source = ACCOUNTING_URL
             except Exception as exc:  # noqa: BLE001 - surface provider/network failures to the health state
                 return {"ok": False, "syncStatus": "FAILED",
