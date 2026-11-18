@@ -365,7 +365,7 @@ def buy_scanner_text(dashboard, detail=False):
         lines += ["⚪ Data stale", ""]
     else:
         ready, watch = _counts(rows)
-        lines += ["SHARED SIGNAL", f"BUY-ready: {ready}", f"WATCH: {watch}", ""]
+        lines += ["REAL SIGNAL", f"BUY-ready: {ready}", f"WATCH: {watch}", ""]
     state, reason, _best = real_buy_status(rows, real, stale)
     lines += ["REAL"] + _real_lines(real, labelled=False)
     lines.append(f"Status: {state}" + (f" — {reason}" if reason and state == "BLOCKED" else ""))
