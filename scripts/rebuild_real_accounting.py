@@ -114,11 +114,9 @@ def allocate_open_lot_value(total_value, lot_quantity, wallet_quantity):
     return total*quantity/wallet
 
 
-def wsda_sell_proceeds(flows, wallet, router, zero):
-    """Count the final WSDA receipt once, preferring wallet over router intermediate."""
-    wallet_received=sum((q for f,t,q in flows if t==wallet and f not in {zero,wallet}),Decimal(0))
-    router_received=sum((q for f,t,q in flows if t==router and f not in {zero,wallet}),Decimal(0))
-    return wallet_received if wallet_received>0 else router_received
+def wsda_sell_proceeds(flows, wallet, zero):
+    """Count only WSDA actually received by the wallet, never a router intermediate."""
+    return sum((q for f,t,q in flows if t==wallet and f not in {zero,wallet}),Decimal(0))
 
 def word(v): return f"{int(v):064x}"
 def aword(a): return str(a).lower().replace("0x","").rjust(64,"0")
@@ -164,35 +162,38 @@ def main():
     internal,ip=paged(f"/addresses/{WALLET}/internal-transactions")
     holdings,hp=paged(f"/addresses/{WALLET}/tokens",{"type":"ERC-20"})
     hashes=sorted({str(x.get("hash") or "").lower() for x in txs if x.get("hash")} | {str(x.get("transaction_hash") or "").lower() for x in transfers if x.get("transaction_hash")} | {str(x.get("transaction_hash") or "").lower() for x in internal if x.get("transaction_hash")})
+    txmap={str(t.get("hash") or "").lower():t for t in txs}
     details={}; errors={}; logs={}; log_errors={}
-    # Address-level token transfers and internal transactions above are already
-    # fully paginated. Re-fetching them for every hash was redundant and made
-    # the scheduled freshness job unnecessarily slow. Only details and logs
-    # are fetched per hash, concurrently, with one HTTP session per worker.
-    def fetch_transaction_bundle(h):
-        detail={}; detail_error=None
+    # Address-level token transfers and internal transactions are already fully
+    # paginated. Fetch transaction details concurrently, then fetch event logs
+    # only for router transactions, where WSDA mint/proceeds events are needed.
+    def fetch_transaction_detail(h):
         try:
             payload=get(f"/transactions/{h}")
-            # Some explorer detail endpoints legitimately return JSON null.
-            detail=payload if isinstance(payload,dict) else {}
+            return h,payload if isinstance(payload,dict) else {},None
         except Exception as exc:
-            detail_error=str(exc)
-        try:
-            event_logs=get(f"/transactions/{h}/logs")
-        except Exception as exc:
-            event_logs={"fetch_error":str(exc)}
-        return h,detail,detail_error,event_logs
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        futures=[pool.submit(fetch_transaction_bundle,h) for h in hashes]
+            return h,{},str(exc)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures=[pool.submit(fetch_transaction_detail,h) for h in hashes]
         for i,future in enumerate(as_completed(futures),1):
-            h,detail,detail_error,event_logs=future.result()
-            details[h]=detail; logs[h]=event_logs
+            h,detail,detail_error=future.result()
+            details[h]=detail
             if detail_error: errors[h]=detail_error
-            if isinstance(event_logs,dict) and event_logs.get("fetch_error"):
-                log_errors[h]=event_logs["fetch_error"]
-            if i%25==0: print(f"Transaction evidence {i}/{len(hashes)}",flush=True)
-    # Keep the evidence schema keys while relying on the complete address-level
-    # paginated collections instead of duplicating identical per-hash calls.
+            if i%50==0: print(f"Transaction details {i}/{len(hashes)}",flush=True)
+    router_hashes=[h for h in hashes
+        if addr((details.get(h) or txmap.get(h,{ })).get("to"))==ROUTER]
+    def fetch_router_logs(h):
+        try: return h,get(f"/transactions/{h}/logs"),None
+        except Exception as exc: return h,{"fetch_error":str(exc)},str(exc)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures=[pool.submit(fetch_router_logs,h) for h in router_hashes]
+        for i,future in enumerate(as_completed(futures),1):
+            h,event_logs,log_error=future.result()
+            logs[h]=event_logs
+            if log_error: log_errors[h]=log_error
+            if i%25==0: print(f"Router event logs {i}/{len(router_hashes)}",flush=True)
+    # Keep the raw-evidence schema keys; their complete sources are the
+    # paginated address-level token-transfer and internal-transaction lists.
     txtrans={}; txinternal={}
     native=int(rpc("eth_getBalance",[WALLET,"latest"]),16)
     token_meta={}
@@ -206,7 +207,8 @@ def main():
             "internal_transaction_pages":ip,"token_holdings_pages":hp},
         "counts":{"transactions":len(txs),"token_transfers":len(transfers),
             "internal_transactions":len(internal),"transaction_details":len(details),
-            "transaction_detail_errors":len(errors),"token_holdings":len(holdings)},
+            "transaction_detail_errors":len(errors),"router_transactions_with_logs":len(logs),
+            "log_fetch_errors":len(log_errors),"token_holdings":len(holdings)},
         "native_balance_wei":str(native),"native_balance_sda":str(Decimal(native)/Decimal(10**18))},
         "address":address,"transactions":txs,"token_transfers":transfers,
         "internal_transactions":internal,"token_holdings":{"items":holdings,"next_page_params":None},
@@ -225,14 +227,18 @@ def main():
         obj=logs.get(h,{})
         return obj.get("items",[]) if isinstance(obj,dict) else (obj if isinstance(obj,list) else [])
     def wsda_flows(h):
-        out=[]
-        for lg in logs_for(h):
-            if addr(lg.get("address"))!=WSDA: continue
-            ps={p.get("name"):p.get("value") for p in (lg.get("decoded") or {}).get("parameters",[])}
-            if ps.get("value") is None: continue
-            out.append((str(ps.get("from") or "").lower(),str(ps.get("to") or "").lower(),dec(ps["value"],18)))
-        return out
-    txmap={str(t.get("hash") or "").lower():t for t in txs}
+        if h in logs:
+            out=[]
+            for lg in logs_for(h):
+                if addr(lg.get("address"))!=WSDA: continue
+                ps={p.get("name"):p.get("value") for p in (lg.get("decoded") or {}).get("parameters",[])}
+                if ps.get("value") is None: continue
+                out.append((str(ps.get("from") or "").lower(),str(ps.get("to") or "").lower(),dec(ps["value"],18)))
+            return out
+        # Non-router WSDA movements involving the wallet are already present in
+        # the complete address-level token-transfer history.
+        return [(addr(tr.get("from")),addr(tr.get("to")),human(tr))
+                for tr in byhash.get(h,[]) if tokenof(tr)[0]==WSDA]
     records=[]; classifications=[]
     for h in hashes:
         tx=txmap.get(h,{}); d=details.get(h,{})
@@ -254,7 +260,7 @@ def main():
         nonws_in=[x for x in incoming if x["contract"]!=WSDA]
         nonws_out=[x for x in outgoing if x["contract"]!=WSDA]
         ws=wsda_flows(h)
-        proceeds=wsda_sell_proceeds(ws,WALLET,ROUTER,ZERO)
+        proceeds=wsda_sell_proceeds(ws,WALLET,ZERO)
         burn=sum((q for f,t,q in ws if f in {ROUTER,WALLET} and t==ZERO),Decimal(0))
         kind="OTHER"
         if not success: kind="FAILED"
