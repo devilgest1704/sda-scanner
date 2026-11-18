@@ -434,7 +434,8 @@ def main():
     for item in txs+transfers+internal:
         try:
             if item.get("block_number") is not None:
-                history_blocks.append(int(item.get("block_number")))
+                block_value=item.get("block_number")
+                history_blocks.append(int(block_value,0) if isinstance(block_value,str) else int(block_value))
         except (TypeError,ValueError):
             continue
     if not history_blocks:
