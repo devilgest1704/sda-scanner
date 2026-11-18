@@ -101,3 +101,36 @@ def test_non_sell_external_wsda_inflow_remains_in_cash_reconciliation():
     assert wsda_external_in_for_transaction(
         flows, "0xwallet", "0xrouter", confirmed_sell=False
     ) == Decimal("5.25")
+
+
+def test_production_wallet_cash_reconciles_both_sell_settlement_paths():
+    router_only = [("0xpool", "0xrouter", Decimal("388.034190138358737247"))]
+    wallet_receipt = [("0xpool", "0xwallet", Decimal("112.089205424448730824"))]
+    proceeds = (
+        wsda_sell_proceeds(router_only, "0xwallet", "0xrouter", "0xzero")
+        + wsda_sell_proceeds(wallet_receipt, "0xwallet", "0xrouter", "0xzero")
+    )
+    external_in = (
+        wsda_external_in_for_transaction(
+            router_only, "0xwallet", "0xrouter", confirmed_sell=True
+        )
+        + wsda_external_in_for_transaction(
+            wallet_receipt, "0xwallet", "0xrouter", confirmed_sell=True
+        )
+    )
+    expected_native = native_cash_expected(
+        opening_balance=Decimal("0"),
+        opening_wsda=Decimal("0"),
+        native_in=Decimal("502.2"),
+        native_out=Decimal("201.336831839026230645"),
+        router_buy_spend=Decimal("526.5906"),
+        wsda_external_in=external_in,
+        wsda_external_out=Decimal("0"),
+        wsda_router_spend=Decimal("0"),
+        sell_proceeds=proceeds,
+        residual_wsda=Decimal("0.842286993814061367"),
+        wallet_fees=Decimal("0.938526920505734916"),
+    )
+    assert proceeds == Decimal("500.123395562807468071")
+    assert external_in == Decimal("0")
+    assert expected_native == Decimal("272.615149809461441143")
