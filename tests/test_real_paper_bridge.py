@@ -24,7 +24,6 @@ class BridgeTests(unittest.TestCase):
         self.events = root / "bridge_events.json"
         self.paper.write_text(json.dumps({"positions": {}}), encoding="utf-8")
         for name, value in (
-            ("PAPER_FILE", self.paper),
             ("STATE_FILE", self.state),
             ("EVENTS_FILE", self.events),
         ):
@@ -35,8 +34,6 @@ class BridgeTests(unittest.TestCase):
         self.env = patch.dict(os.environ, {
             "REAL_TRADING_ENABLED": "true",
             "REAL_TRADING_DRY_RUN": "false",
-            "SDA_PAPER_BUY_MODE": "temporal_recovery",
-            "SDA_PAPER_TP4": "1",
         })
         self.env.start()
         self.addCleanup(self.env.stop)
@@ -164,75 +161,21 @@ class BridgeTests(unittest.TestCase):
         self.trader.execute_buy.assert_not_called()
         self.trader.execute_sell.assert_not_called()
 
-    def test_real_bridge_refuses_strategy_drift(self):
-        with patch.dict(os.environ, {"SDA_PAPER_TP4": "0"}):
-            with self.assertRaisesRegex(RuntimeError, "requires the active PAPER profile"):
-                bridge.reconcile()
-
-    def test_real_buy_uses_configured_real_size_not_paper_size(self):
-        self.cfg.position_sda = lambda value=None: 30.0 if value is None else float(value)
-        bridge.reconcile()
-        self.write_paper({TOKEN: {"symbol": "TEST", "investment_sda": 18.0, "opened_at": bridge._now()}})
-        bridge.reconcile()
-        self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 30.0)
-
-    def test_first_run_only_sets_baseline(self):
-        self.write_paper({TOKEN: {"symbol": "TEST"}})
+    def test_bridge_never_reads_paper_or_executes_buys(self):
+        self.paper.unlink()
         result = bridge.reconcile()
-        self.assertEqual(result["status"], "baseline_initialized")
         self.trader.execute_buy.assert_not_called()
+        self.assertEqual(result["paper_state"], "NOT_USED")
 
-    def test_new_paper_position_triggers_one_buy(self):
-        bridge.reconcile()  # baseline empty
-        self.write_paper({TOKEN: {"symbol": "TEST", "opened_at": bridge._now()}})
-        result = bridge.reconcile()
-        self.assertEqual(result["opened"], 1)
-        self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 20.0)
-        self.assertEqual(result["actions"][0]["status"], "CONFIRMED")
-
-    def test_pending_buy_is_recovered_from_real_ledger_after_bridge_checkpoint_loss(self):
-        self.state.write_text(json.dumps({
-            "initialized": True,
-            "paper_positions": [TOKEN],
-            "pending_buy": [],
-            "pending_sell": [],
-        }), encoding="utf-8")
-        self.write_paper({})
+    def test_real_pending_buy_is_not_replayed_by_sell_bridge(self):
         self.trader.load_state.return_value = {
             "positions": {TOKEN: {"symbol": "TEST", "token_amount_raw": 123}},
             "pending_buys": {TOKEN: {"symbol": "TEST"}},
             "pending_sells": {},
         }
         result = bridge.reconcile()
-        self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 20.0)
-        self.trader.execute_sell.assert_not_called()
-        self.assertEqual([a["action"] for a in result["actions"]], ["BUY"])
-
-    def test_pending_buy_is_reconciled_and_closed_if_paper_exits_first(self):
-        self.state.write_text(json.dumps({
-            "initialized": True,
-            "paper_positions": [TOKEN],
-            "pending_buy": [TOKEN],
-            "pending_sell": [],
-        }), encoding="utf-8")
-        self.write_paper({})
-        self.trader.load_state.return_value = {
-            "positions": {TOKEN: {"symbol": "TEST", "token_amount_raw": 123}},
-            "pending_buys": {TOKEN: {"symbol": "TEST"}},
-        }
-        result = bridge.reconcile()
-        self.trader.execute_buy.assert_called_once_with(TOKEN, "TEST", 20.0)
-        self.trader.execute_sell.assert_not_called()
-        self.assertEqual([a["action"] for a in result["actions"]], ["BUY"])
-
-    def test_paper_close_does_not_trigger_real_sell(self):
-        self.write_paper({TOKEN: {"symbol": "TEST"}})
-        bridge.reconcile()  # baseline includes token
-        self.write_paper({})
-        result = bridge.reconcile()
-        self.trader.execute_sell.assert_not_called()
-        self.assertEqual(result["closed"], 1)
-        self.assertEqual(result["actions"], [])
+        self.trader.execute_buy.assert_not_called()
+        self.assertEqual(result["paper_state"], "NOT_USED")
 
     def test_legacy_bridge_pending_sell_is_archived_not_executed(self):
         self.state.write_text(json.dumps({

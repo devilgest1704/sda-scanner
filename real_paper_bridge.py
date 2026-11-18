@@ -298,6 +298,11 @@ def reconcile():
     else:
         state = {}
     pre_paper_action_count = len(actions)
+    legacy_bridge = state.setdefault("legacy_pending_sell", [])
+    for token in list(state.get("pending_sell", [])):
+        legacy_bridge.append({"token": token, "archived_at": _now(),
+                              "reason": "legacy bridge sell is never replayed"})
+    state["pending_sell"] = []
 
     # REAL positions now exit only through fresh market-price observations and
     # the authoritative Swing SELL V2 policy. A PAPER close is NOT a SELL signal.

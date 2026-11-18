@@ -2,7 +2,7 @@ import tempfile, unittest
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
-import real_buy_pipeline as p
+from tools import real_buy_pipeline as p
 import real_trading_config as cfg
 
 class RealPaperIsolation(unittest.TestCase):
@@ -47,6 +47,23 @@ class RealPaperIsolation(unittest.TestCase):
  def test_corrupt_state_fails_closed(self):
   self.path.write_text("{",encoding="utf-8")
   loaded,error=p.load_state(self.path); self.assertIsNone(loaded); self.assertEqual(error,"REAL_SIGNAL_STATE_UNREADABLE")
+
+ def test_full_dry_run_path_returns_would_execute(self):
+  order=[]
+  market={"tokens":{self.token:self.analysis}}
+  market_path=Path(self.tmp.name)/"market.json"
+  market_path.write_text(__import__("json").dumps(market),encoding="utf-8")
+  with patch.dict("os.environ",{"REAL_TRADING_ENABLED":"true","REAL_TRADING_DRY_RUN":"true"}),\
+       patch.object(p,"load_state",return_value=(self.state,None)),\
+       patch.object(p.real_trader,"load_state",return_value=self.real),\
+       patch.object(p,"evaluate_candidate",return_value={"ready":True,"signal_id":"sid"}),\
+       patch.object(p.real_trader,"safety_check",side_effect=lambda *a:order.append("SAFETY_PASS")),\
+       patch.object(p.real_trader,"execute_buy",side_effect=lambda *a: (order.append("EXECUTE"),{"status":"DRY_RUN"})[1]),\
+       patch.object(p,"save_state"):
+   result=p.run_scan(market_path=str(market_path),execute=True,state_path=self.path)
+  self.assertEqual(order,["SAFETY_PASS","EXECUTE"])
+  self.assertEqual(result["actions"][0]["status"],"WOULD EXECUTE")
+
  def test_executor_dry_run_contract(self):
   with patch.object(p.real_trader,"safety_check") as safety,patch.object(p.real_trader,"execute_buy",return_value={"status":"DRY_RUN"}):
    p.real_trader.safety_check(30,self.real); out=p.real_trader.execute_buy(self.token,"T",30)
