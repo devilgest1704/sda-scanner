@@ -114,9 +114,14 @@ def allocate_open_lot_value(total_value, lot_quantity, wallet_quantity):
     return total*quantity/wallet
 
 
-def wsda_sell_proceeds(flows, wallet, zero):
-    """Count only WSDA actually received by the wallet, never a router intermediate."""
-    return sum((q for f,t,q in flows if t==wallet and f not in {zero,wallet}),Decimal(0))
+def wsda_sell_proceeds(flows, wallet, router, zero):
+    """Count final wallet receipt, or router receipt when no wallet hop exists."""
+    wallet_received=sum((q for f,t,q in flows if t==wallet and f not in {zero,wallet}),Decimal(0))
+    router_received=sum((q for f,t,q in flows if t==router and f not in {zero,wallet}),Decimal(0))
+    # A transaction may log both pool->router and router->wallet. Count the
+    # final wallet leg in that case; otherwise retain the router-only proceeds
+    # used by routes that unwrap/settle through the router.
+    return wallet_received if wallet_received>0 else router_received
 
 
 def wsda_external_in_for_transaction(flows, wallet, router, confirmed_sell):
@@ -271,7 +276,7 @@ def main():
         nonws_in=[x for x in incoming if x["contract"]!=WSDA]
         nonws_out=[x for x in outgoing if x["contract"]!=WSDA]
         ws=wsda_flows(h)
-        proceeds=wsda_sell_proceeds(ws,WALLET,ZERO)
+        proceeds=wsda_sell_proceeds(ws,WALLET,ROUTER,ZERO)
         burn=sum((q for f,t,q in ws if f in {ROUTER,WALLET} and t==ZERO),Decimal(0))
         kind="OTHER"
         if not success: kind="FAILED"
