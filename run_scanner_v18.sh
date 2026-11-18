@@ -280,6 +280,12 @@ run_one_scan() {
     buy_data_available=false
   fi
 
+  # Reconcile the REAL wallet and run the unchanged SELL V2 engine before
+  # evaluating a fresh independent REAL BUY signal.
+  if ! python -c 'from real_paper_bridge import reconcile; print("REAL wallet/SELL reconciliation:", reconcile())'; then
+    echo "::warning::REAL wallet/SELL reconciliation failed; REAL BUY pipeline remains fail-closed." >&2
+  fi
+
   # Independent REAL BUY admission; this stage runs from market data and
   # REAL-owned state before/independently of the PAPER engine.
   if ! run_timed_stage real_buy_pipeline env TELEGRAM_TOKEN="" python -m tools.real_buy_pipeline; then
@@ -289,13 +295,6 @@ run_one_scan() {
   if ! run_timed_stage paper_engine env TELEGRAM_TOKEN="" python paper_engine_v19.py; then
     echo "::warning::PAPER evaluation failed; REAL BUY discovery is fail-closed, REAL SELL and wallet reconciliation continue." >&2
     buy_data_available=false
-  fi
-  # Mirror only committed PAPER position transitions. The bridge is strictly
-  # opt-in and returns disabled under the production defaults. It also owns
-  # independent REAL SELL V2 and manual wallet reconciliation, so always run
-  # it after a BUY-data or PAPER evaluation failure.
-  if ! SDA_SCANNER_BUY_DATA_AVAILABLE="$buy_data_available" python -c 'from real_paper_bridge import reconcile; print("PAPER->REAL bridge:", reconcile())'; then
-    echo "::warning::PAPER->REAL bridge failed; PAPER ledger and exits remain authoritative." >&2
   fi
   if ! run_timed_stage paper_stats env TELEGRAM_TOKEN="" python paper_stats.py; then
     echo "::warning::PAPER statistics failed; scanner continues." >&2
@@ -368,7 +367,7 @@ PY
 python -m tools.paper_state_guard
 
 # Compile once per worker, not once per minute.
-python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py v30_pump_hunter.py tools/temporal_paper_trial.py tools/real_buy_pipeline.py
+python -m py_compile market_scanner.py liquidity_scanner.py main.py engine.py technical_analysis.py telegram_dashboard.py paper_engine_v19.py market_analysis_export.py v26_pump_hunter.py v30_pump_hunter.py tools/temporal_paper_trial.py tools/real_buy_pipeline.py tools/real_buy_pipeline.py
 find . -type d -name __pycache__ -prune -exec rm -rf {} +
 
 # Executable code is fixed for the life of this worker (pinned by the workflow
