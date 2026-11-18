@@ -234,9 +234,10 @@ def main():
                 ps={p.get("name"):p.get("value") for p in (lg.get("decoded") or {}).get("parameters",[])}
                 if ps.get("value") is None: continue
                 out.append((str(ps.get("from") or "").lower(),str(ps.get("to") or "").lower(),dec(ps["value"],18)))
-            return out
+            if out: return out
         # Non-router WSDA movements involving the wallet are already present in
-        # the complete address-level token-transfer history.
+        # the complete address-level token-transfer history. It also serves as
+        # a safe fallback when a router log response contains no WSDA events.
         return [(addr(tr.get("from")),addr(tr.get("to")),human(tr))
                 for tr in byhash.get(h,[]) if tokenof(tr)[0]==WSDA]
     records=[]; classifications=[]
