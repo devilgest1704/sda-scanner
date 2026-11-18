@@ -1,11 +1,13 @@
 """Independent REAL BUY pipeline; shares V30 market scoring and TP4 temporal rules."""
 from __future__ import annotations
+
 import hashlib
 import json
 import math
 import os
 from datetime import UTC, datetime
 from pathlib import Path
+
 import real_trader
 import real_trading_config as cfg
 import real_wallet_reconciliation as wallet_reconciliation
