@@ -4,22 +4,22 @@ import hashlib
 import json
 import math
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
-import real_trading_config as cfg
 import real_trader
+import real_trading_config as cfg
 import real_wallet_reconciliation as wallet_reconciliation
 import v30_pump_hunter as strategy
+from tools.paper_quote_quality import entry_gate as quote_gate
 from tools.temporal_recovery_buy import evaluate_tp4
 from tools.v32_hourly_macd import paper_macd_veto
-from tools.paper_quote_quality import entry_gate as quote_gate
 
 STATE=Path("real_buy_signal_state.json")
 VERSION=1
 COOLDOWN_HOURS=6
 
 def now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 def initial_state():
     return {"schema_version":VERSION,"updated_at":now().isoformat(),"history":{},
@@ -58,8 +58,8 @@ def load_state(path=STATE):
 def stamp(value):
     if not isinstance(value,str): return None
     try:
-        d=datetime.fromisoformat(value.replace("Z","+00:00"))
-        return d.astimezone(timezone.utc) if d.tzinfo else None
+        d=datetime.fromisoformat(value)
+        return d.astimezone(UTC) if d.tzinfo else None
     except ValueError: return None
 
 def _capacity(real):
@@ -81,7 +81,7 @@ def _capacity(real):
     try:
         wallet=real_trader.wallet_address()
         balance=real_trader.native_balance(wallet)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - RPC failure must fail closed
         return False,"REAL_BALANCE_UNAVAILABLE:"+type(exc).__name__,None
     if balance<int(amount*10**18): return False,"REAL_NATIVE_BALANCE_INSUFFICIENT",None
     return True,"REAL_CAPACITY_AVAILABLE",{"positions":count,"max_positions":cfg.MAX_OPEN_POSITIONS,
@@ -172,9 +172,9 @@ def run_scan(market_path="market_analysis.json",execute=True,state_path=STATE):
     try:
         market=json.loads(Path(market_path).read_text(encoding="utf-8"))
         tokens=market.get("tokens")
-        if not isinstance(tokens,dict): raise ValueError("tokens missing")
+        if not isinstance(tokens,dict): raise TypeError("tokens missing")
         real=real_trader.load_state()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - malformed input or REAL ledger failure must fail closed
         return {"status":"input_error","error":type(exc).__name__,"buy_ready":0,"actions":[]}
     actions=[]; ready=0; executed=0
     for token,row in tokens.items():
@@ -194,8 +194,8 @@ def run_scan(market_path="market_analysis.json",execute=True,state_path=STATE):
             if status in ("CONFIRMED","PENDING_CONFIRMATION"):
                 state["consumed_signal_ids"].append(result["signal_id"])
                 state["consumed_signal_ids"]=state["consumed_signal_ids"][-20000:]
-                state["cooldowns"][token]=(at:=now()).__class__.fromtimestamp(at.timestamp()+COOLDOWN_HOURS*3600,tz=timezone.utc).isoformat()
-        except Exception as exc:
+                state["cooldowns"][token]=(at:=now()).__class__.fromtimestamp(at.timestamp()+COOLDOWN_HOURS*3600,tz=UTC).isoformat()
+        except Exception as exc:  # noqa: BLE001 - never let one candidate bypass REAL safety
             actions.append({"token":token,"status":"SAFETY_OR_EXECUTION_BLOCKED","error":type(exc).__name__+":"+str(exc)[:180]})
     state["updated_at"]=now().isoformat(); save_state(state,state_path)
     return {"status":"ok","buy_ready":ready,"actions":actions,"paper_state_used":False}
