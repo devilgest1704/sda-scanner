@@ -24,6 +24,15 @@ class RealPaperIsolation(unittest.TestCase):
    "flow":800,"flow15":200,"vol":1000,"trades":12,"buy_ratio":9,"trade_ratio":2,"accel":1},80,70,10,"CONFIRMATION")
   with patch.object(p.strategy,"score",return_value=score),patch.object(p,"evaluate_tp4",return_value=temporal),       patch.object(p,"_capacity",return_value=capacity),       patch.object(p,"_market_gates",return_value={"blocked":False,"reasons":[]}):
    return p.evaluate_candidate(self.token,self.analysis,self.state,self.real,self.at)
+
+ def test_confirmation_uses_snapshot_impulse_but_ignition_requires_delta(self):
+  c={"data_age_sec":60,"last_transaction":self.at.isoformat(),"price":1,
+     "m1":5,"m15":3,"flow15":100,"flow":500,"vol":1000,"trades":10,"buy_ratio":2}
+  confirmation=p._current_signal({},(c,70,65,0,"CONFIRMATION"),self.at)
+  ignition=p._current_signal({},(c,70,65,0,"IGNITION"),self.at)
+  self.assertGreater(confirmation["impulse"],0)
+  self.assertEqual(confirmation["impulse"],confirmation["snapshot_impulse"])
+  self.assertEqual(ignition["impulse"],0)
  def test_paper_full_and_cooldown_are_irrelevant(self):
   self.assertTrue(self.ready()["ready"])
  def test_paper_position_and_loss_circuit_are_irrelevant(self):
