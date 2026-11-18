@@ -213,14 +213,35 @@ def test_default_snapshot_fetch_reads_latest_github_state(monkeypatch):
         seen["url"] = url
         seen["kwargs"] = kwargs
         return Response()
+    monkeypatch.setenv("GH_TOKEN", "test-github-token")
     monkeypatch.setattr(reconciliation.requests, "get", get)
     monkeypatch.setattr(reconciliation, "LOCK_FILE", __import__("pathlib").Path("/tmp/test-real-wallet-reconciliation-remote.lock"))
     trader = FakeTrader()
     result = reconciliation.reconcile_manual_buys(trader)
     assert result["ok"] is True
     assert seen["url"] == reconciliation.ACCOUNTING_URL
+    assert seen["url"].startswith("https://api.github.com/repos/")
+    assert seen["kwargs"]["params"]["ref"] == "main"
+    assert seen["kwargs"]["headers"]["Accept"] == "application/vnd.github.raw"
+    assert seen["kwargs"]["headers"]["Authorization"] == "Bearer test-github-token"
     assert seen["kwargs"]["headers"]["Cache-Control"] == "no-cache"
     assert len(trader.state["positions"]) == 1
+
+
+def test_github_contents_envelope_is_decoded(monkeypatch):
+    import base64
+
+    source = snapshot()
+    payload = base64.b64encode(json.dumps(source).encode("utf-8")).decode("ascii")
+    class Response:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"encoding": "base64", "content": payload}
+    monkeypatch.setattr(reconciliation.requests, "get", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr(reconciliation, "LOCK_FILE", __import__("pathlib").Path("/tmp/test-real-wallet-reconciliation-base64.lock"))
+    result = reconciliation.reconcile_manual_buys(FakeTrader())
+    assert result["ok"] is True
 
 
 
