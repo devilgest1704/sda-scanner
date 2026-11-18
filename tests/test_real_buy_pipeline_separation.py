@@ -121,17 +121,34 @@ class RealPaperIsolation(unittest.TestCase):
   # PAPER is deliberately full and has an active cooldown/loss circuit. REAL's
   # own 7/10 capacity and empty cooldown are the only admission state consulted.
   paper_file=Path(self.tmp.name)/"positions.json"
-  paper_file.write_text(__import__("json").dumps({"positions":{**{f"0x{i+100:040x}":{} for i in range(9)},self.token:{}}}),encoding="utf-8")
+  paper_file.write_text(__import__("json").dumps({
+   "positions":{**{f"0x{i+100:040x}":{} for i in range(9)},self.token:{}},
+   "closed_trades":[{"status":"CLOSED","closed_at":self.at.isoformat(),"closed_profit_sda":-3}
+                    for _ in range(8)]}),encoding="utf-8")
+  paper_state_file=Path(self.tmp.name)/"v30_pump_state.json"
+  paper_state_file.write_text(__import__("json").dumps({
+   "cooldowns":{self.token:"2099-01-01T00:00:00+00:00"}}),encoding="utf-8")
   shadow_file=Path(self.tmp.name)/"strategy_lab"/"forward_shadow_state.json"
   shadow_file.parent.mkdir(parents=True,exist_ok=True)
-  shadow_file.write_text(__import__("json").dumps({"cooldowns":{self.token:"2099-01-01T00:00:00+00:00"},"loss_circuit":{"blocked":True}}),encoding="utf-8")
+  shadow_file.write_text(__import__("json").dumps({"cooldowns":{self.token:"2099-01-01T00:00:00+00:00"},
+   "loss_circuit":{"blocked":True}}),encoding="utf-8")
+  (Path(self.tmp.name)/"v30_agent_config.json").write_text("{invalid",encoding="utf-8")
+  (Path(self.tmp.name)/"paper_champion_config.json").write_text("{invalid",encoding="utf-8")
+  banned={"positions.json","forward_shadow_state.json","v30_pump_state.json",
+          "v30_agent_config.json","paper_champion_config.json","v30_execution_state.json"}
   banned_reads=[]
   original_read=Path.read_text
+  original_open=open
   def guarded_read(path,*args,**kwargs):
-   if path.name in ("positions.json","forward_shadow_state.json"):
+   if path.name in banned:
     banned_reads.append(path.name)
     raise AssertionError("REAL pipeline attempted to read PAPER state")
    return original_read(path,*args,**kwargs)
+  def guarded_open(path,*args,**kwargs):
+   if Path(path).name in banned:
+    banned_reads.append(Path(path).name)
+    raise AssertionError("REAL pipeline attempted to open PAPER state")
+   return original_open(path,*args,**kwargs)
   actual_safety=p.real_trader.safety_check
   def safety(*args):
    actual_safety(*args)
@@ -144,7 +161,7 @@ class RealPaperIsolation(unittest.TestCase):
        patch.object(p.real_trader,"load_state",return_value=self.real),\
        patch.object(p.real_trader,"safety_check",side_effect=safety),\
        patch.object(p.real_trader,"execute_buy",side_effect=lambda *a:(order.append("EXECUTE"),{"status":"DRY_RUN"})[1]),\
-       patch.object(Path,"read_text",guarded_read):
+       patch.object(Path,"read_text",guarded_read),patch("builtins.open",guarded_open):
    result=p.run_scan(market_path=str(market_path),execute=True,state_path=self.path)
   self.assertEqual(order,["SAFETY_PASS","EXECUTE"])
   self.assertEqual(result["actions"][0]["status"],"WOULD EXECUTE")
