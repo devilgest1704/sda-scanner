@@ -223,9 +223,10 @@ def _scanner_inputs(dashboard):
             signal_stamp = None
     except (TypeError, ValueError):
         signal_stamp = None
+    signal_age = (datetime.now(timezone.utc) - signal_stamp).total_seconds() if signal_stamp else None
     signal_stale = (not isinstance(signal_state, dict) or signal_state.get("schema_version") != 1
-                    or signal_stamp is None
-                    or (datetime.now(timezone.utc) - signal_stamp).total_seconds() > 5 * 60)
+                    or signal_age is None or not 0 <= signal_age <= 5 * 60
+                    or signal_state.get("market_data_status") != "OK")
     ready_map = signal_state.get("buy_ready", {}) if isinstance(signal_state, dict) else {}
     for row in rows:
         real_signal = ready_map.get(str(row["address"]).lower()) if isinstance(ready_map, dict) else None
