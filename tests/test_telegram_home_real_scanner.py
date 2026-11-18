@@ -143,7 +143,7 @@ def test_home_shows_real_buy_scanner_and_no_paper_summary(env, monkeypatch):
     assert "🟢 BUY-ready   0" in text and "🟡 WATCH       1" in text
     assert "💰 Available   140 SDA" in text
     assert "💵 Next BUY    30 SDA" in text
-    assert "⚪ REAL BUY: NO SIGNAL" in text
+    assert "🟡 REAL BUY: NO SIGNAL" in text
     assert "🧪 PAPER" not in text and "🎯" not in text and "IDM" not in text
     assert "PAPER" in [b["callback_data"] for row in telegram_home.home_keyboard()["inline_keyboard"] for b in row]
 
