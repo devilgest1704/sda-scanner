@@ -67,6 +67,13 @@ class RealPaperIsolation(unittest.TestCase):
  def test_real_loss_circuit_blocks(self):
   self.real["daily_realized_pnl_sda"]=-cfg.MAX_DAILY_LOSS_SDA
   self.assertFalse(self.ready()["ready"])
+
+ def test_consumed_real_signal_is_not_replayed_after_restart(self):
+  quote=self.at.isoformat()
+  signal_id=__import__("hashlib").sha256(
+   f"{self.token}|{quote}|{p.strategy.VERSION}|REAL".encode()).hexdigest()
+  self.state["consumed_signal_ids"]=[signal_id]
+  self.assertFalse(self.ready()["ready"])
  def test_restart_preserves_temporal_history(self):
   self.state["temporal_history"][self.token]={"score":70}
   p.save_state(self.state,self.path); loaded,error=p.load_state(self.path)
