@@ -77,13 +77,17 @@ class RealPaperIsolation(unittest.TestCase):
     banned_reads.append(path.name)
     raise AssertionError("REAL pipeline attempted to read PAPER state")
    return original_read(path,*args,**kwargs)
-  with patch.dict("os.environ",{"REAL_TRADING_ENABLED":"true","REAL_TRADING_DRY_RUN":"true"}),\
+  actual_safety=p.real_trader.safety_check
+  def safety(*args):
+   actual_safety(*args)
+   order.append("SAFETY_PASS")
+  with contextlib.chdir(self.tmp.name),patch.dict("os.environ",{"REAL_TRADING_ENABLED":"true","REAL_TRADING_DRY_RUN":"true"}),\
        patch.object(p.strategy,"score",return_value=score),\
        patch.object(p,"evaluate_tp4",return_value=temporal),\
        patch.object(p,"_market_gates",return_value={"blocked":False,"reasons":[]}),\
        patch.object(p,"_capacity",return_value=(True,"REAL_CAPACITY_AVAILABLE",{"positions":7})),\
        patch.object(p.real_trader,"load_state",return_value=self.real),\
-       patch.object(p.real_trader,"safety_check",side_effect=lambda *a:order.append("SAFETY_PASS")),\
+       patch.object(p.real_trader,"safety_check",side_effect=safety),\
        patch.object(p.real_trader,"execute_buy",side_effect=lambda *a:(order.append("EXECUTE"),{"status":"DRY_RUN"})[1]),\
        patch.object(Path,"read_text",guarded_read):
    result=p.run_scan(market_path=str(market_path),execute=True,state_path=self.path)
