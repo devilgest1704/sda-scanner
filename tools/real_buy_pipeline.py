@@ -52,10 +52,11 @@ def load_state(path=STATE):
         state=json.loads(path.read_text(encoding="utf-8"))
         if (not isinstance(state,dict) or state.get("schema_version")!=VERSION
             or stamp(state.get("updated_at")) is None
-            or any(not isinstance(state.get(k),dict) for k in ("history","temporal_history","cooldowns","risk_circuit","buy_ready"))
+            or any(not isinstance(state.get(k),dict) for k in ("history","temporal_history","signal_history","cooldowns","risk_circuit","buy_ready"))
             or not isinstance(state.get("consumed_signal_ids"),list)
             or any(not isinstance(v,dict) for v in state["history"].values())
             or any(not isinstance(v,dict) for v in state["temporal_history"].values())
+            or any(not isinstance(v,list) or any(not isinstance(item,dict) for item in v) for v in state["signal_history"].values())
             or any(not isinstance(v,dict) for v in state["buy_ready"].values())
             or any(not isinstance(k,str) or stamp(v) is None for k,v in state["cooldowns"].items())
             or any(not isinstance(v,str) or not v for v in state["consumed_signal_ids"])
@@ -159,6 +160,11 @@ def evaluate_candidate(token,analysis,state,real_state,at=None):
     temporal=evaluate_tp4(token,signal,at=at,previous=prior)
     # Advance REAL's own temporal evidence; never consult Shadow/PAPER journals.
     state["temporal_history"][token]=signal
+    signal_rows=state["signal_history"].setdefault(token,[])
+    signal_rows.append({"signal":signal,"temporal_ready":bool(temporal.get("ready")),
+        "temporal_reason":temporal.get("reason"),"lane":temporal.get("lane"),
+        "observed_at":at.isoformat()})
+    state["signal_history"][token]=signal_rows[-50:]
     state["temporal_history"]=dict(list(state["temporal_history"].items())[-5000:])
     market=_market_gates(token,analysis,signal,temporal,at)
     market_block=market["blocked"]
