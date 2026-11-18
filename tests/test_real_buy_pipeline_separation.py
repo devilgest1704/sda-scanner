@@ -53,17 +53,33 @@ class RealPaperIsolation(unittest.TestCase):
   market={"tokens":{self.token:self.analysis}}
   market_path=Path(self.tmp.name)/"market.json"
   market_path.write_text(__import__("json").dumps(market),encoding="utf-8")
+  temporal={"ready":True,"reason":"TEST_VALID","lane":"confirmed_continuation","sparse_activity_verified":True}
+  score=({"last_transaction":self.at.isoformat(),"data_age_sec":10,"price":1,"m1":3,"m15":2,"m4":1,
+   "flow":800,"flow15":200,"vol":1000,"trades":12,"buy_ratio":9,"trade_ratio":2,"accel":1},80,70,10,"CONFIRMATION")
+  # PAPER is deliberately full and has an active cooldown/loss circuit. REAL's
+  # own 7/10 capacity and empty cooldown are the only admission state consulted.
+  paper_full={"positions":{f"0x{i+100:040x}":{} for i in range(10)}}
+  shadow={"cooldowns":{self.token:"2099-01-01T00:00:00+00:00"},"loss_circuit":{"blocked":True}}
+  banned_reads=[]
+  original_read=Path.read_text
+  def guarded_read(path,*args,**kwargs):
+   if path.name in ("positions.json","forward_shadow_state.json"):
+    banned_reads.append(path.name)
+    raise AssertionError("REAL pipeline attempted to read PAPER state")
+   return original_read(path,*args,**kwargs)
   with patch.dict("os.environ",{"REAL_TRADING_ENABLED":"true","REAL_TRADING_DRY_RUN":"true"}),\
-       patch.object(p,"load_state",return_value=(self.state,None)),\
+       patch.object(p.strategy,"score",return_value=score),\
+       patch.object(p,"evaluate_tp4",return_value=temporal),\
+       patch.object(p,"_market_gates",return_value={"blocked":False,"reasons":[]}),\
+       patch.object(p,"_capacity",return_value=(True,"REAL_CAPACITY_AVAILABLE",{"positions":7})),\
        patch.object(p.real_trader,"load_state",return_value=self.real),\
-       patch.object(p,"evaluate_candidate",return_value={"ready":True,"signal_id":"sid"}),\
        patch.object(p.real_trader,"safety_check",side_effect=lambda *a:order.append("SAFETY_PASS")),\
-       patch.object(p.real_trader,"execute_buy",side_effect=lambda *a: (order.append("EXECUTE"),{"status":"DRY_RUN"})[1]),\
-       patch.object(p,"save_state"):
+       patch.object(p.real_trader,"execute_buy",side_effect=lambda *a:(order.append("EXECUTE"),{"status":"DRY_RUN"})[1]),\
+       patch.object(Path,"read_text",guarded_read):
    result=p.run_scan(market_path=str(market_path),execute=True,state_path=self.path)
   self.assertEqual(order,["SAFETY_PASS","EXECUTE"])
   self.assertEqual(result["actions"][0]["status"],"WOULD EXECUTE")
-
+  self.assertEqual(banned_reads,[])
  def test_executor_dry_run_contract(self):
   with patch.object(p.real_trader,"safety_check") as safety,patch.object(p.real_trader,"execute_buy",return_value={"status":"DRY_RUN"}):
    p.real_trader.safety_check(30,self.real); out=p.real_trader.execute_buy(self.token,"T",30)
