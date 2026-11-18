@@ -184,7 +184,7 @@ def run_scan(market_path="market_analysis.json",execute=True,state_path=STATE):
         result=evaluate_candidate(token,row,state,real)
         if not result["ready"]: continue
         ready+=1
-        if not execute or executed>=1:
+        if not execute or executed>=MAX_BUYS_PER_SCAN:
             actions.append({"token":token,"status":"BUY_READY_ONLY","signal_id":result["signal_id"]}); continue
         try:
             real_trader.safety_check(cfg.position_sda(),real)
@@ -192,12 +192,24 @@ def run_scan(market_path="market_analysis.json",execute=True,state_path=STATE):
             status=response.get("status","UNKNOWN")
             if status=="DRY_RUN": status="WOULD EXECUTE"
             actions.append({"token":token,"status":status,"signal_id":result["signal_id"]})
-            executed+=1
             if status in ("CONFIRMED","PENDING_CONFIRMATION"):
                 state["consumed_signal_ids"].append(result["signal_id"])
                 state["consumed_signal_ids"]=state["consumed_signal_ids"][-20000:]
                 state["cooldowns"][token]=(now()+timedelta(hours=COOLDOWN_HOURS)).isoformat()
+                state["buy_ready"][token]={"ready":False,"reason":"REAL_BUY_SUBMITTED" if status=="CONFIRMED" else "REAL_BUY_PENDING",
+                    "signal_id":result["signal_id"],"at":now().isoformat()}
+                ready-=1
+                executed+=1
+            elif status=="WOULD EXECUTE":
+                executed+=1
+            else:
+                state["buy_ready"][token]={"ready":False,"reason":"REAL_EXECUTOR_NOT_READY:"+str(status),
+                    "signal_id":result["signal_id"],"at":now().isoformat()}
+                ready-=1
         except Exception as exc:  # noqa: BLE001 - never let one candidate bypass REAL safety
+            state["buy_ready"][token]={"ready":False,"reason":"REAL_SAFETY_OR_EXECUTION_BLOCKED:"+type(exc).__name__,
+                "signal_id":result["signal_id"],"at":now().isoformat()}
+            ready-=1
             actions.append({"token":token,"status":"SAFETY_OR_EXECUTION_BLOCKED","error":type(exc).__name__+":"+str(exc)[:180]})
     state["updated_at"]=now().isoformat(); save_state(state,state_path)
     return {"status":"ok","buy_ready":ready,"actions":actions,"paper_state_used":False}
