@@ -288,7 +288,7 @@ run_one_scan() {
 
   # Independent REAL BUY admission; this stage runs from market data and
   # REAL-owned state before/independently of the PAPER engine.
-  if ! run_timed_stage real_buy_pipeline env TELEGRAM_TOKEN="" python -m tools.real_buy_pipeline; then
+  if ! run_timed_stage real_buy_pipeline env TELEGRAM_TOKEN="" SDA_SCANNER_BUY_DATA_AVAILABLE="$buy_data_available" python -m tools.real_buy_pipeline; then
     echo "::warning::REAL BUY pipeline failed closed; REAL SELL/reconciliation continues." >&2
   fi
 

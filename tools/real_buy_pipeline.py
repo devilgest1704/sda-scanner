@@ -147,6 +147,8 @@ def evaluate_candidate(token,analysis,state,real_state,at=None):
 def run_scan(market_path="market_analysis.json",execute=True,state_path=STATE):
     if os.getenv("REAL_TRADING_ENABLED","false").lower()!="true":
         return {"status":"disabled","buy_ready":0,"actions":[]}
+    if os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE","true").strip().lower()!="true":
+        return {"status":"market_data_degraded","buy_ready":0,"actions":[]}
     state,error=load_state(state_path)
     if error: return {"status":"state_error","error":error,"buy_ready":0,"actions":[]}
     try:

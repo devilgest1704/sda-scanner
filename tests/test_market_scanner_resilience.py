@@ -110,6 +110,9 @@ def test_market_failure_disables_buy_and_publishes_source_health():
     market_branch = runner[start:end]
     assert "buy_data_available=false" in market_branch
     assert "market_source_state.json" in runner
+    bridge = runner.index('from real_paper_bridge import reconcile')
+    real_buy = runner.index("if ! run_timed_stage real_buy_pipeline")
     paper = runner.index("if ! run_timed_stage paper_engine")
-    bridge = runner.index('SDA_SCANNER_BUY_DATA_AVAILABLE="$buy_data_available"', paper)
-    assert bridge > paper
+    assert bridge < real_buy < paper
+    assert 'SDA_SCANNER_BUY_DATA_AVAILABLE="$buy_data_available"' in runner
+    assert "python -m tools.real_buy_pipeline" in runner
