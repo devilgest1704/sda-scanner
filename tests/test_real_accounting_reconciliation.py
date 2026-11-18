@@ -80,17 +80,17 @@ def test_wsda_sell_proceeds_counts_router_hop_only_once():
         ("0xpool", "0xrouter", Decimal("20")),
         ("0xrouter", "0xwallet", Decimal("20")),
     ]
-    assert wsda_sell_proceeds(flows, "0xwallet", "0xzero") == Decimal("20")
+    assert wsda_sell_proceeds(flows, "0xwallet", "0xrouter", "0xzero") == Decimal("20")
 
 
 def test_wsda_sell_proceeds_does_not_count_router_intermediate_without_wallet_receipt():
     flows = [("0xpool", "0xrouter", Decimal("7.5"))]
-    assert wsda_sell_proceeds(flows, "0xwallet", "0xzero") == Decimal("0")
+    assert wsda_sell_proceeds(flows, "0xwallet", "0xrouter", "0xzero") == Decimal("7.5")
 
 
 def test_confirmed_sell_wsda_receipt_is_not_counted_again_as_external_inflow():
     flows = [("0xpool", "0xwallet", Decimal("112.089205424448730824"))]
-    assert wsda_sell_proceeds(flows, "0xwallet", "0xzero") == Decimal("112.089205424448730824")
+    assert wsda_sell_proceeds(flows, "0xwallet", "0xrouter", "0xzero") == Decimal("112.089205424448730824")
     assert wsda_external_in_for_transaction(
         flows, "0xwallet", "0xrouter", confirmed_sell=True
     ) == Decimal("0")
