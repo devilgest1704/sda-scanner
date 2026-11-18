@@ -471,6 +471,10 @@ def main():
         if (fr==WALLET and to==top_level_to_by_hash.get(tx_hash)
                 and value==top_level_value_by_hash.get(tx_hash,Decimal(0))):
             continue
+        # WSDA wrapping/unwrapping is already represented by the final WSDA
+        # balance and confirmed swap proceeds; counting its native trace again
+        # would double count the same value.
+        if fr==WSDA or to==WSDA: continue
         if to==WALLET and fr!=WALLET: native_in+=value
         elif fr==WALLET and to!=WALLET: native_out+=value
     all_proceeds=sum((r["proceeds"] for r in records if r["action"]=="SELL"),Decimal(0))
@@ -607,6 +611,7 @@ def main():
             "approvals":sum(x["classification"]=="APPROVAL" for x in classifications),
             "unwraps":sum(x["classification"]=="UNWRAP" for x in classifications)},
         "classifications":classifications,"closed_trades":closed,"unmatched_sells":unmatched,
+        "external_transfer_outs":transfer_outs,"unmatched_transfer_outs":unmatched_transfer_outs,
         "realized_pnl_gross_sda":str(realized_gross),"realized_pnl_net_sda":str(realized_net),
         "open_positions":open_positions,"residual_dust":residual_dust,"open_cost_basis_sda":str(open_cost),
         "open_market_value_sda":str(open_value) if open_complete else None,
@@ -630,6 +635,7 @@ def main():
             "gas":"wallet-paid transaction fees; entry gas prorated across FIFO quantities; sell gas, associated approval and linked unwrap gas allocated",
             "market_value":"read-only PinetSwap eth_call; 1 SDA buy mark for wallet value, full-balance sell quote for open positions",
             "external_assets":"not assigned invented acquisition basis; disclosed separately",
+            "token_transfer_outs":"FIFO reduce open bot lots; no sale proceeds or realized PnL inferred",
             "trading_side_effects":"none; eth_call and explorer GET only"},
         "validation":{"all_pagination_exhausted":True,"detail_fetch_errors":errors,
             "cash_reconciliation_zero":abs(cash_delta)<=Decimal("0.00000001"),
