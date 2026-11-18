@@ -115,9 +115,6 @@ class RealPaperIsolation(unittest.TestCase):
   market_path=Path(self.tmp.name)/"market.json"
   market_path.write_text(__import__("json").dumps(market),encoding="utf-8")
   p.save_state(self.state,self.path)
-  temporal={"ready":True,"reason":"TEST_VALID","lane":"confirmed_continuation","sparse_activity_verified":True}
-  score=({"last_transaction":self.at.isoformat(),"data_age_sec":10,"price":1,"m1":3,"m15":2,"m4":1,
-   "flow":800,"flow15":200,"vol":1000,"trades":12,"buy_ratio":9,"trade_ratio":2,"accel":1},80,70,10,"CONFIRMATION")
   # PAPER is deliberately full and has an active cooldown/loss circuit. REAL's
   # own 7/10 capacity and empty cooldown are the only admission state consulted.
   paper_file=Path(self.tmp.name)/"positions.json"
@@ -153,11 +150,15 @@ class RealPaperIsolation(unittest.TestCase):
   def safety(*args):
    actual_safety(*args)
    order.append("SAFETY_PASS")
+  forbidden=unittest.mock.Mock(side_effect=AssertionError("PAPER access or live transaction attempted"))
   with contextlib.chdir(self.tmp.name),patch.dict("os.environ",{"REAL_TRADING_ENABLED":"true","REAL_TRADING_DRY_RUN":"true"}),\
-       patch.object(p.strategy,"score",return_value=score),\
-       patch.object(p,"evaluate_tp4",return_value=temporal),\
-       patch.object(p,"_market_gates",return_value={"blocked":False,"reasons":[]}),\
-       patch.object(p,"_capacity",return_value=(True,"REAL_CAPACITY_AVAILABLE",{"positions":7})),\
+      patch.object(p.strategy,"load_state",forbidden),\
+      patch("tools.temporal_recovery_buy.previous_signals",forbidden),\
+      patch.object(p.real_trader,"wallet_address",return_value="0x"+"c"*40),\
+      patch.object(p.real_trader,"native_balance",return_value=1000*10**18),\
+      patch.object(p.real_trader,"rpc",forbidden),\
+      patch.object(p.real_trader,"private_account",forbidden),\
+      patch.object(p.real_trader,"send_transaction",forbidden),\
        patch.object(p.real_trader,"load_state",return_value=self.real),\
        patch.object(p.real_trader,"safety_check",side_effect=safety),\
        patch.object(p.real_trader,"execute_buy",side_effect=lambda *a:(order.append("EXECUTE"),{"status":"DRY_RUN"})[1]),\
@@ -165,6 +166,19 @@ class RealPaperIsolation(unittest.TestCase):
    result=p.run_scan(market_path=str(market_path),execute=True,state_path=self.path)
   self.assertEqual(order,["SAFETY_PASS","EXECUTE"])
   self.assertEqual(result["actions"][0]["status"],"WOULD EXECUTE")
+  self.assertEqual(result["buy_ready"],1)
+  saved,error=p.load_state(self.path)
+  self.assertIsNone(error)
+  self.assertTrue(saved["buy_ready"][self.token]["ready"])
+  self.assertEqual(saved["buy_ready"][self.token]["capacity"]["positions"],7)
+  self.assertEqual(saved["buy_ready"][self.token]["capacity"]["deployed_sda"],210)
+  self.assertIn(self.token,saved["history"])
+  self.assertIn(self.token,saved["temporal_history"])
+  self.assertFalse(saved["risk_circuit"]["blocked"])
+  self.assertEqual(cfg.position_sda(),30)
+  self.assertEqual(cfg.MAX_OPEN_POSITIONS,10)
+  self.assertEqual(cfg.TRADING_WALLET_CAPITAL_SDA,300)
+  forbidden.assert_not_called()
   self.assertEqual(banned_reads,[])
 
  def test_safety_failure_removes_buy_ready_diagnostic(self):
