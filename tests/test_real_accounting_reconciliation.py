@@ -83,7 +83,7 @@ def test_wsda_sell_proceeds_counts_router_hop_only_once():
     assert wsda_sell_proceeds(flows, "0xwallet", "0xrouter", "0xzero") == Decimal("20")
 
 
-def test_wsda_sell_proceeds_does_not_count_router_intermediate_without_wallet_receipt():
+def test_wsda_sell_proceeds_uses_router_fallback_without_wallet_receipt():
     flows = [("0xpool", "0xrouter", Decimal("7.5"))]
     assert wsda_sell_proceeds(flows, "0xwallet", "0xrouter", "0xzero") == Decimal("7.5")
 
