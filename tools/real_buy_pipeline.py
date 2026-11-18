@@ -216,6 +216,7 @@ def run_scan(market_path="market_analysis.json",execute=True,state_path=STATE):
         _mark_unavailable(state_path,"INPUT_ERROR")
         return {"status":"input_error","error":type(exc).__name__,"buy_ready":0,"actions":[]}
     state["market_data_status"]="OK"
+    state["buy_ready"]={}
     actions=[]; ready=0; executed=0
     for token,row in tokens.items():
         if not isinstance(row,dict): continue
