@@ -9,6 +9,7 @@ STAGNATION_WINDOW_SECONDS = 24 * 3600
 MIN_IMPROVEMENT_PP = 1.0
 MIN_HISTORY_COVERAGE = 0.75
 MAX_PRICE_AGE_SECONDS = 300
+MAX_TREND_SNAPSHOT_AGE_SECONDS = 20 * 60
 MAX_HISTORY_GAP_SECONDS = 6 * 3600
 HISTORY_RETENTION_SECONDS = 26 * 3600
 HISTORY_SAMPLE_INTERVAL_SECONDS = 240
@@ -105,7 +106,7 @@ def assess_trend(context, now=None):
     now = now or datetime.now(UTC)
     context = context if isinstance(context, dict) else {}
     snapshot = _time(context.get("_snapshot_updated_at"))
-    if snapshot is None or (now - snapshot).total_seconds() < 0 or (now - snapshot).total_seconds() > 300:
+    if snapshot is None or (now - snapshot).total_seconds() < 0 or (now - snapshot).total_seconds() > MAX_TREND_SNAPSHOT_AGE_SECONDS:
         return {"state": "UNKNOWN", "fresh": False, "bullish": False,
                 "blocker": "STALE_TREND", "momentum_1h": None, "momentum_4h": None,
                 "macd_state": "UNKNOWN", "flow_1h": None, "flow_4h": None}

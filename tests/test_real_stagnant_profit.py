@@ -90,6 +90,19 @@ class MaxHoldStagnantProfitTests(unittest.TestCase):
         self.assertFalse(trend["fresh"])
         self.assertEqual(evaluate(trend=trend)["blocker"], "STALE_TREND")
 
+    def test_trend_snapshot_uses_existing_20_minute_freshness_limit(self):
+        context = {
+            "_snapshot_updated_at": (NOW-timedelta(minutes=10)).isoformat(),
+            "momentum": {"1h_pct": 0.0, "4h_pct": 0.0},
+            "flow": {"1h": {"net_flow": 0, "transactions": 0},
+                     "4h": {"net_flow": 0, "transactions": 0}},
+            "technical": {
+                "1h": {"available": True, "last_timestamp": (NOW-timedelta(hours=1)).isoformat()},
+                "4h": {"available": True, "last_timestamp": (NOW-timedelta(hours=4)).isoformat()},
+            },
+        }
+        self.assertTrue(policy.assess_trend(context, now=NOW)["fresh"])
+
     def test_i_stale_price_holds(self):
         self.assertEqual(evaluate(timestamp=(NOW-timedelta(seconds=301)).isoformat())["blocker"],
                          "STALE_PRICE")
