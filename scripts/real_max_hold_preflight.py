@@ -5,11 +5,13 @@ It never saves state, creates SELL intents, signs, or broadcasts transactions.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from decimal import Decimal
 import json
-from pathlib import Path
 import sys
+from datetime import UTC, datetime
+from decimal import Decimal
+from pathlib import Path
+
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -24,7 +26,7 @@ def _load(path):
     try:
         value = json.loads(Path(path).read_text(encoding="utf-8"))
         return value if isinstance(value, dict) else {}
-    except Exception:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return {}
 
 
@@ -41,7 +43,7 @@ def _reference_quote(token, metadata, wallet):
         return None
     return {
         "price_sda": (10 ** decimals) / int(amount_out),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "source": "PinetSwap read-only 1 SDA BUY reference",
         "quote_amount_sda": 1,
         "quote_side": "BUY_REFERENCE",
@@ -50,7 +52,7 @@ def _reference_quote(token, metadata, wallet):
 
 
 def main():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     state = _load(cfg.STATE_FILE)
     analysis = _load("market_analysis.json")
     metadata = _load("token_metadata.json")
@@ -114,7 +116,7 @@ def main():
                         net_exit_pnl_sda=net_exit,
                         pending_sell=bool((state.get("pending_sells") or {}).get(token)),
                     )
-                except Exception as exc:
+                except (requests.RequestException, RuntimeError, ValueError, TypeError, OSError, ArithmeticError) as exc:
                     if first.get("eligible_without_net"):
                         result = {**first, "blocker": f"EXECUTABLE_QUOTE_UNAVAILABLE:{type(exc).__name__}"}
             row = {
@@ -130,7 +132,7 @@ def main():
                 "decision": result.get("decision", "HOLD"),
                 "blocker": result.get("blocker"),
             }
-        except Exception as exc:
+        except (requests.RequestException, RuntimeError, ValueError, TypeError, KeyError, OSError, ArithmeticError) as exc:
             row = {
                 "token": symbol, "address": token, "source": source,
                 "age_hours": None, "current_pnl_pct": None, "gross_pnl_sda": None,

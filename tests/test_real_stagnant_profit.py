@@ -1,10 +1,10 @@
 import json
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import real_stagnant_profit as policy
 
-NOW = datetime(2026, 11, 19, 10, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 19, 10, 0, tzinfo=UTC)
 PRICE_TIME = NOW.isoformat()
 TREND = {"fresh": True, "bullish": False, "state": "FLAT"}
 HISTORY = [

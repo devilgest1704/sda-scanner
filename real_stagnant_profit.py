@@ -1,7 +1,7 @@
 """Fail-closed MAX_HOLD_STAGNANT_PROFIT policy and bounded REAL-only history."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 MIN_HOLD_SECONDS = 72 * 3600
@@ -20,10 +20,10 @@ def _time(value):
     if not value:
         return None
     try:
-        result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        result = datetime.fromisoformat(str(value))
     except (TypeError, ValueError, OverflowError):
         return None
-    return result.astimezone(timezone.utc) if result.tzinfo else None
+    return result.astimezone(UTC) if result.tzinfo else None
 
 
 def _number(value):
@@ -36,18 +36,18 @@ def _number(value):
 
 def record_observation(state, token, position, price, pnl_pct, timestamp, now=None):
     """Persist fresh observations per REAL position; bounded and restart-safe."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     stamp = _time(timestamp)
     px, pnl = _number(price), _number(pnl_pct)
     if stamp is None or px is None or px <= 0 or pnl is None:
         return []
-    age = (now.astimezone(timezone.utc) - stamp).total_seconds()
+    age = (now.astimezone(UTC) - stamp).total_seconds()
     if age < 0 or age > MAX_PRICE_AGE_SECONDS:
         return []
     identity = str(position.get("position_id") or position.get("buy_tx") or token)
     key = f"{str(token).lower()}:{identity}"
     root = state.setdefault("real_stagnation_history", {})
-    cutoff = now.astimezone(timezone.utc) - timedelta(seconds=HISTORY_RETENTION_SECONDS)
+    cutoff = now.astimezone(UTC) - timedelta(seconds=HISTORY_RETENTION_SECONDS)
     live_positions = state.get("positions") or {}
     for old_key, old_record in list(root.items()):
         if not isinstance(old_record, dict):
@@ -90,7 +90,7 @@ def record_observation(state, token, position, price, pnl_pct, timestamp, now=No
         newest = sorted(
             root.items(),
             key=lambda pair: _time((pair[1].get("observations") or [{}])[-1].get("timestamp"))
-                or datetime.min.replace(tzinfo=timezone.utc),
+                or datetime.min.replace(tzinfo=UTC),
             reverse=True,
         )
         keep = {item[0] for item in newest[:MAX_HISTORY_POSITIONS]}
@@ -102,7 +102,7 @@ def record_observation(state, token, position, price, pnl_pct, timestamp, now=No
 
 def assess_trend(context, now=None):
     """Validate production market-analysis freshness and detect any bullish recovery."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     context = context if isinstance(context, dict) else {}
     snapshot = _time(context.get("_snapshot_updated_at"))
     if snapshot is None or (now - snapshot).total_seconds() < 0 or (now - snapshot).total_seconds() > 300:
