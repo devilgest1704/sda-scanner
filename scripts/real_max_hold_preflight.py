@@ -75,6 +75,9 @@ def main():
             )
             if market is None:
                 raise RuntimeError("STALE_PRICE")
+            # A live BUY-reference quote may be stamped a few seconds after
+            # resolver startup; evaluate against a clock captured after acquisition.
+            evaluation_now = datetime.now(UTC)
             decimals = int(metadata[str(token).lower()]["decimals"])
             quantity_raw = int(position.get("remaining_quantity", position.get("token_amount_raw", 0)) or 0)
             quantity = Decimal(quantity_raw) / Decimal(10 ** decimals)
@@ -88,13 +91,13 @@ def main():
             gross_pnl_sda = price * quantity - basis
             market_context = dict((analysis.get("tokens") or {}).get(str(token).lower()) or {})
             market_context["_snapshot_updated_at"] = analysis.get("updated_at")
-            trend = stagnant.assess_trend(market_context, now=now)
+            trend = stagnant.assess_trend(market_context, now=evaluation_now)
             identity = str(position.get("position_id") or position.get("buy_tx") or token)
             hist_key = f"{str(token).lower()}:{identity}"
             history_record = (state.get("real_stagnation_history") or {}).get(hist_key) or {}
             history = history_record.get("observations") or []
             first = stagnant.evaluate(
-                position, now=now, price=price, price_timestamp=market.get("timestamp"),
+                position, now=evaluation_now, price=price, price_timestamp=market.get("timestamp"),
                 history=history, trend=trend, current_pnl_pct=pnl_pct,
                 net_exit_pnl_sda=None,
                 pending_sell=bool((state.get("pending_sells") or {}).get(token)),
@@ -103,7 +106,7 @@ def main():
             net_exit = None
             result = first
             opened = stagnant._time(position.get("opened_at") or position.get("at") or position.get("buy_timestamp"))
-            age_hours = (now - opened).total_seconds() / 3600 if opened else None
+            age_hours = (evaluation_now - opened).total_seconds() / 3600 if opened else None
             # Preflight quote is read-only and is also collected for positive aged
             # positions blocked by stale trend/history, so the report can show NET EXIT.
             if pnl_pct > 0 and age_hours is not None and age_hours >= 72:
@@ -111,7 +114,7 @@ def main():
                     quote = sell._max_hold_executable_quote(token, position, quantity_raw, owner=wallet)
                     net_exit = Decimal(quote["expected_net_pnl_sda"])
                     result = stagnant.evaluate(
-                        position, now=now, price=price, price_timestamp=market.get("timestamp"),
+                        position, now=evaluation_now, price=price, price_timestamp=market.get("timestamp"),
                         history=history, trend=trend, current_pnl_pct=pnl_pct,
                         net_exit_pnl_sda=net_exit,
                         pending_sell=bool((state.get("pending_sells") or {}).get(token)),
