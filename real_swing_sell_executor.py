@@ -913,9 +913,10 @@ def _submit_swap(token, intent):
     })
     if intent.get("sell_reason") == "MAX_HOLD_STAGNANT_PROFIT":
         try:
-            gas_units = int(trader.estimate_gas(owner, cfg.ROUTER_ADDRESS, calldata, 0))
-            gas_price_wei = int(trader.gas_price())
-            network_cost = Decimal(gas_units) * Decimal(gas_price_wei) / Decimal(10 ** 18)
+            network = _estimate_max_hold_network_cost(
+                token, owner, actual, calldata, int(quoted)
+            )
+            network_cost = Decimal(network["network_cost_sda"])
             proceeds = Decimal(int(quoted)) / Decimal(10 ** 18)
             remaining_cost = Decimal(str(position.get("remaining_cost_basis") or 0))
             net_pnl = proceeds - remaining_cost - network_cost
@@ -966,6 +967,49 @@ def _submit_swap(token, intent):
 
 
 
+def _estimate_max_hold_network_cost(token, owner, quantity_raw, swap_calldata, proceeds_raw):
+    """Estimate swap + unwrap + any still-required approval network cost in native SDA."""
+    gas_price_wei = int(trader.gas_price())
+    if gas_price_wei <= 0:
+        raise RuntimeError("NETWORK_GAS_PRICE_UNAVAILABLE")
+    try:
+        swap_gas = int(trader.estimate_gas(owner, cfg.ROUTER_ADDRESS, swap_calldata, 0))
+        swap_source = "eth_estimateGas"
+    except Exception:
+        # The live allowance may not yet exist; use the executor's hard gas ceiling,
+        # not a zero-cost assumption, for the pre-approval quote check.
+        swap_gas = int(cfg.GAS_LIMIT)
+        swap_source = "configured_gas_limit_fallback"
+    if swap_gas <= 0:
+        raise RuntimeError("SWAP_GAS_ESTIMATE_INVALID")
+    unwrap_data = cfg.UNWRAP_SELECTOR + trader.word(int(proceeds_raw))
+    try:
+        unwrap_gas = int(trader.estimate_gas(owner, cfg.WSDA_ADDRESS, unwrap_data, 0))
+    except Exception:
+        unwrap_gas = 100000  # same upper limit used by the existing unwrap executor
+    if unwrap_gas <= 0:
+        raise RuntimeError("UNWRAP_GAS_ESTIMATE_INVALID")
+    allowance = int(trader.allowance(token, owner, cfg.ROUTER_ADDRESS))
+    approval_gas = 0
+    if allowance < int(quantity_raw):
+        approval_data = (cfg.APPROVE_SELECTOR + trader.address_word(cfg.ROUTER_ADDRESS)
+                         + trader.word((1 << 256) - 1))
+        try:
+            approval_gas = int(trader.estimate_gas(owner, token, approval_data, 0))
+        except Exception:
+            approval_gas = 100000  # same upper limit used by the existing approval executor
+        if approval_gas <= 0:
+            raise RuntimeError("APPROVAL_GAS_ESTIMATE_INVALID")
+    total_gas = swap_gas + unwrap_gas + approval_gas
+    network_cost = Decimal(total_gas) * Decimal(gas_price_wei) / Decimal(10 ** 18)
+    return {
+        "swap_gas_units": swap_gas, "swap_gas_source": swap_source,
+        "unwrap_gas_units": unwrap_gas, "approval_gas_units": approval_gas,
+        "total_gas_units": total_gas, "gas_price_wei": gas_price_wei,
+        "network_cost_sda": str(network_cost),
+    }
+
+
 def _max_hold_executable_quote(token, position, quantity_raw, owner=None):
     """Read-only full-quantity SELL quote and conservative native-network cost estimate."""
     owner = owner or trader.wallet_address()
@@ -981,12 +1025,9 @@ def _max_hold_executable_quote(token, position, quantity_raw, owner=None):
     calldata = trader.build_exact_input_single(
         token, cfg.WSDA_ADDRESS, fee, owner, deadline, int(quantity_raw), minimum
     )
-    gas_units = int(trader.estimate_gas(owner, cfg.ROUTER_ADDRESS, calldata, 0))
-    gas_price_wei = int(trader.gas_price())
-    if gas_units <= 0 or gas_price_wei <= 0:
-        raise RuntimeError("NETWORK_COST_ESTIMATE_INVALID")
+    network = _estimate_max_hold_network_cost(token, owner, quantity_raw, calldata, quoted)
     proceeds_sda = Decimal(quoted) / Decimal(10 ** 18)
-    network_cost_sda = Decimal(gas_units) * Decimal(gas_price_wei) / Decimal(10 ** 18)
+    network_cost_sda = Decimal(network["network_cost_sda"])
     remaining_cost = Decimal(str(position.get(
         "remaining_cost_basis", position.get("amount_sda", position.get("cost_sda", 0))
     ) or 0))
@@ -995,7 +1036,12 @@ def _max_hold_executable_quote(token, position, quantity_raw, owner=None):
     return {
         "fee_tier": int(fee), "quoted_wsda_raw": quoted,
         "minimum_wsda_raw": minimum, "expected_proceeds_sda": str(proceeds_sda),
-        "estimated_gas_units": gas_units, "gas_price_wei": gas_price_wei,
+        "estimated_gas_units": network["total_gas_units"],
+        "swap_gas_units": network["swap_gas_units"],
+        "unwrap_gas_units": network["unwrap_gas_units"],
+        "approval_gas_units": network["approval_gas_units"],
+        "swap_gas_source": network["swap_gas_source"],
+        "gas_price_wei": network["gas_price_wei"],
         "estimated_network_cost_sda": str(network_cost_sda),
         "remaining_cost_basis_sda": str(remaining_cost),
         "expected_net_pnl_sda": str(net_pnl_sda),
