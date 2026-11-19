@@ -43,11 +43,11 @@ jobs:
         run: python -m pip install -r requirements.txt pytest httpx ruff mypy
       - name: Static Python syntax validation
         run: bash -n run_scanner_v18.sh
-          python -m compileall -q real_trader.py real_paper_bridge.py real_wallet_reconciliation.py real_swing_sell_executor.py real_swing_sell_report.py real_market_price.py real_bot_menu.py real_bot_views.py real_pnl_stats.py telegram_home.py tools/real_buy_pipeline.py v30_pump_hunter.py tools/worker_code_pin.py scripts/rebuild_real_accounting.py swing_sell_v2.py
-      - name: Lint new wallet reconciliation module
-        run: python -m ruff check real_wallet_reconciliation.py tools/real_buy_pipeline.py
-      - name: Typecheck wallet reconciliation module
-        run: python -m mypy --ignore-missing-imports real_wallet_reconciliation.py tools/real_buy_pipeline.py
+          python -m compileall -q real_trader.py real_paper_bridge.py real_wallet_reconciliation.py real_swing_sell_executor.py real_stagnant_profit.py real_swing_sell_report.py real_market_price.py real_bot_menu.py real_bot_views.py real_pnl_stats.py telegram_home.py tools/real_buy_pipeline.py v30_pump_hunter.py tools/worker_code_pin.py scripts/rebuild_real_accounting.py scripts/real_max_hold_preflight.py swing_sell_v2.py
+      - name: Lint REAL support modules and preflight
+        run: python -m ruff check real_wallet_reconciliation.py tools/real_buy_pipeline.py real_stagnant_profit.py scripts/real_max_hold_preflight.py tests/test_real_stagnant_profit.py
+      - name: Typecheck REAL reconciliation and MAX HOLD modules
+        run: python -m mypy --ignore-missing-imports real_wallet_reconciliation.py tools/real_buy_pipeline.py real_stagnant_profit.py scripts/real_max_hold_preflight.py
       - name: Run worker code pinning and state-only checkpoint gate tests
         run: python -m pytest -q tests/test_worker_code_pin.py tests/test_state_checkpoint.py tests/test_ci_production_gate.py
       - name: Run full repository test suite (blocking, one process per module)
@@ -186,6 +186,10 @@ jobs:
               }, ensure_ascii=False, sort_keys=True))
           print("REAL TRANSACTIONS SENT: 0 (eth_call only)")
           PY
+      - name: Run MAX HOLD stagnant-profit policy tests
+        run: python -m pytest -q tests/test_real_stagnant_profit.py
+      - name: Run read-only MAX HOLD preflight across all current REAL positions
+        run: python scripts/real_max_hold_preflight.py
       - name: Run Swing SELL V2 live-executor mock integration tests
         run: python -m pytest -q tests/test_real_swing_sell_executor.py
       - name: Run PAPER-to-REAL bridge regression tests

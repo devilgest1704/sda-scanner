@@ -359,3 +359,35 @@ def test_expired_cache_only_portfolio_does_not_show_stale_manual_sell(monkeypatc
     assert "DBN" not in text
     assert "not loaded yet" in text
 
+
+
+def test_sell_v2_telegram_view_displays_max_hold_diagnostics(monkeypatch):
+    token = "0x" + "a" * 40
+    state = {
+        "positions": {token: {"symbol": "TEST"}},
+        "real_max_hold_shadow": [{
+            "token": token, "age_hours": 120, "gross_pnl_pct": 4.2,
+            "improvement_24h_pp": 0.4, "trend": "FLAT",
+            "expected_net_pnl_sda": "0.61",
+            "execution_decision": "MAX_HOLD_STAGNANT_PROFIT",
+            "blocker": None,
+        }],
+    }
+    files = {"real_trade_state.json": state, "market_analysis.json": {}, "token_metadata.json": {}}
+    monkeypatch.setattr(rb, "_remote_json", lambda _dashboard, path: files.get(path, {}))
+    monkeypatch.setattr(rb, "_wallet_address", lambda: "0x" + "b" * 40)
+    import real_swing_sell_report as report
+    monkeypatch.setattr(report, "build_decision_rows", lambda *args, **kwargs: [{
+        "token": "TEST", "token_address": token, "entry_price": 1.0,
+        "decision_price": 1.04, "pnl_pct": 4.0, "market_value_sda": 10.4,
+        "price_source": "quote", "price_age_seconds": 0, "action": "HOLD",
+        "profit_partial_done": False, "trailing_armed": False,
+        "swing_state": "HOLD", "current_peak": None, "trailing_price": None,
+    }])
+    text = views._sell_v2_text(SimpleNamespace())
+    assert "MAX HOLD" in text
+    assert "120h" in text
+    assert "+0.40 pp" in text
+    assert "+0.61 SDA" in text
+    assert "MAX_HOLD_STAGNANT_PROFIT" in text
+

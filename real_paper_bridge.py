@@ -408,9 +408,12 @@ def reconcile():
                                         "symbol": symbol, "status": "PRICE_UNAVAILABLE",
                                         "at": _now()})
                         continue
+                    token_market = (market_snapshot.get("tokens") or {}).get(str(token).lower(), {})
+                    trend_context = dict(token_market) if isinstance(token_market, dict) else {}
+                    trend_context["_snapshot_updated_at"] = market_snapshot.get("updated_at")
                     result = swing_executor.evaluate_position(
                         token, symbol, market["price_sda"], market.get("timestamp"),
-                        wallet_reconciled=True
+                        wallet_reconciled=True, market_context=trend_context
                     )
                     actions.append({"action": "SELL_DECISION", "token": token,
                                     "symbol": symbol,
