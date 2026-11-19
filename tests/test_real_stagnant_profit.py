@@ -164,6 +164,22 @@ class MaxHoldStagnantProfitTests(unittest.TestCase):
         self.assertEqual(len(rows), 5)
         self.assertEqual(evaluate(history=rows)["decision"], "MAX_HOLD_STAGNANT_PROFIT")
 
+    def test_max_pnl_is_preserved_within_sampling_bucket(self):
+        pos = position(position_id="p1")
+        state = {"positions": {"token": pos}}
+        first = policy.record_observation(
+            state, "token", pos, "1.01", 2.0,
+            (NOW-timedelta(minutes=1)).isoformat(), now=NOW,
+        )
+        second = policy.record_observation(
+            state, "token", pos, "1.02", 2.5,
+            NOW.isoformat(), now=NOW,
+        )
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(second), 1)
+        self.assertEqual(second[-1]["pnl_pct"], 2.5)
+        self.assertEqual(second[-1]["price"], "1.02")
+
     def test_stale_observation_is_ignored(self):
         state = {"positions": {"token": position(position_id="p1")}}
         rows = policy.record_observation(

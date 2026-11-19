@@ -73,8 +73,17 @@ def record_observation(state, token, position, price, pnl_pct, timestamp, now=No
                                    "position_id": identity, "observations": []})
     observations = record.setdefault("observations", [])
     if observations:
-        last = _time(observations[-1].get("timestamp"))
-        if last and (stamp - last).total_seconds() < HISTORY_SAMPLE_INTERVAL_SECONDS:
+        last_observation = observations[-1]
+        last = _time(last_observation.get("timestamp"))
+        if last and 0 <= (stamp - last).total_seconds() < HISTORY_SAMPLE_INTERVAL_SECONDS:
+            # Keep the maximum PnL seen inside the sampling bucket, not merely
+            # the last mark; this preserves short-lived peaks without dense writes.
+            last_pnl = _number(last_observation.get("pnl_pct"))
+            if last_pnl is None or pnl > last_pnl:
+                observations[-1] = {"timestamp": stamp.isoformat(), "price": str(px),
+                                     "pnl_pct": float(pnl)}
+            return observations
+        if last and stamp < last:
             return observations
     observations.append({"timestamp": stamp.isoformat(), "price": str(px),
                          "pnl_pct": float(pnl)})
