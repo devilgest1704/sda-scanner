@@ -31,6 +31,20 @@ def evaluate(pos=None, *, pnl=5.0, history=None, trend=TREND,
 
 
 class MaxHoldStagnantProfitTests(unittest.TestCase):
+    def test_window_start_includes_overlapping_sample_bucket_maximum(self):
+        history = [
+            {"timestamp": (NOW-timedelta(hours=24, minutes=2)).isoformat(),
+             "latest_timestamp": (NOW-timedelta(hours=23, minutes=58)).isoformat(),
+             "start_pnl_pct": 4.0, "pnl_pct": 4.2, "max_pnl_pct": 5.5},
+            {"timestamp": (NOW-timedelta(hours=18)).isoformat(), "price": "1", "pnl_pct": 4.2},
+            {"timestamp": (NOW-timedelta(hours=12)).isoformat(), "price": "1", "pnl_pct": 4.2},
+            {"timestamp": (NOW-timedelta(hours=6)).isoformat(), "price": "1", "pnl_pct": 4.2},
+            {"timestamp": NOW.isoformat(), "price": "1", "pnl_pct": 4.2},
+        ]
+        result = evaluate(history=history)
+        self.assertEqual(result["blocker"], "PROFIT_IMPROVED")
+        self.assertEqual(result["improvement_pp"], 1.5)
+
     def test_a_positive_stagnant_candidate(self):
         history = [{"timestamp": (NOW-timedelta(hours=h)).isoformat(),
                     "price": "1", "pnl_pct": p} for h,p in

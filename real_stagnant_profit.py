@@ -216,15 +216,17 @@ def evaluate(position, *, now, price, price_timestamp, history, trend,
     points = []
     for item in history or []:
         stamp = _time(item.get("timestamp"))
+        latest_stamp = _time(item.get("latest_timestamp") or item.get("timestamp"))
         value = _number(item.get("start_pnl_pct"))
         if value is None:
             value = _number(item.get("pnl_pct"))
         bucket_max = _number(item.get("max_pnl_pct"))
         if bucket_max is None:
             bucket_max = value
-        if stamp is None or value is None or bucket_max is None or stamp > now or stamp < window_start:
+        if (stamp is None or latest_stamp is None or value is None or bucket_max is None
+                or stamp > now or latest_stamp < window_start or latest_stamp > now):
             continue
-        points.append((stamp, value, bucket_max))
+        points.append((max(stamp, window_start), value, bucket_max))
     points.sort(key=lambda row: row[0])
     if len(points) < 4:
         result["blocker"] = "INSUFFICIENT_HISTORY"
