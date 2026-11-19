@@ -22,9 +22,12 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_CEILING, ROUND_DOWN
 from pathlib import Path
+from time import time
 
+import real_market_price as market_prices
+import real_max_hold as max_hold
 import real_trader as trader
 import real_trading_config as cfg
 import swing_sell_v2 as policy
@@ -69,6 +72,7 @@ REASON_MAP = {
     "LOSS_LIMIT": "STOP_LOSS",
     "HARD_TP": "HARD_TP",
     "TRAILING_STOP": "TRAILING_STOP",
+    max_hold.REASON: max_hold.REASON,
 }
 
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
@@ -865,6 +869,123 @@ def _resolve_existing(token, intent):
     return {"action": "SELL", "status": intent.get("status", "UNKNOWN"), "token": token}
 
 
+def _max_hold_quote(token, position, owner):
+    quantity = int(position["remaining_quantity"])
+    basis = Decimal(position["remaining_cost_basis"])
+    if not owner or quantity <= 0 or basis <= 0 or trader.chain_id() != cfg.CHAIN_ID:
+        return {}, "INVALID_EXECUTION_CONTEXT"
+    if trader.token_balance(token, owner) < quantity:
+        return {}, "WALLET_QUANTITY_MISMATCH"
+    if trader.allowance(token, owner, cfg.ROUTER_ADDRESS) < quantity:
+        return {}, "EXECUTABLE_QUOTE_REQUIRES_ALLOWANCE"
+    fee, quoted, _, deadline = trader.quote_best_live_fee(
+        token, cfg.WSDA_ADDRESS, token, owner, quantity, value_wei=0,
+    )
+    gas_price = trader.gas_price()
+    if quoted <= 0 or gas_price <= 0 or deadline <= time():
+        return {}, "INVALID_EXECUTABLE_QUOTE"
+    scale = Decimal(10**18)
+    unwrap_gas = MAX_UNWRAP_FAILURES * 100000
+    gas_cost = Decimal((cfg.GAS_LIMIT + unwrap_gas) * gas_price) / scale
+    proceeds = Decimal(quoted) / scale
+    net = proceeds - basis - gas_cost
+    break_even = int((basis * scale).to_integral_value(rounding=ROUND_CEILING))
+    minimum = max(trader.min_out(quoted), break_even + (cfg.GAS_LIMIT + unwrap_gas) * gas_price + 1)
+    fields = {"executable_sell_quote": {"quantity_raw": quantity, "fee_tier": fee,
+               "quoted_wsda_raw": quoted, "minimum_wsda_raw": minimum, "deadline": deadline},
+              "expected_proceeds_sda": str(proceeds), "expected_net_pnl_sda": str(net),
+              "network_cost_budget_sda": str(gas_cost)}
+    if net <= 0 or minimum > quoted:
+        return fields, "NET_EXIT_NOT_PROFITABLE"
+    if trader.native_balance(owner) < (cfg.GAS_LIMIT + unwrap_gas) * gas_price:
+        return fields, "INSUFFICIENT_NETWORK_BALANCE"
+    calldata = trader.build_exact_input_single(token, cfg.WSDA_ADDRESS, fee, owner, deadline,
+                                               quantity, minimum)
+    gas_estimate = trader.estimate_gas(owner, cfg.ROUTER_ADDRESS, calldata)
+    if not 0 < gas_estimate <= cfg.GAS_LIMIT or deadline <= time():
+        return fields, "INVALID_EXECUTABLE_QUOTE"
+    return fields, None
+
+
+def _max_hold_pending(state, token, position):
+    identity = str(position.get("position_id") or position.get("buy_tx") or token)
+    if position.get("sell_intent_id") and position.get("sell_intent_status") not in {
+        "CONFIRMED", "FAILED_FINAL", "CANCELLED",
+    }:
+        return True
+    return token in state.get("pending_sells", {}) or any(
+        intent.get("token") == token and intent.get("position_id") == identity
+        and _stage(intent) in ACTIVE_STAGES
+        for intent in state.get("sell_intents", {}).values() if isinstance(intent, dict)
+    )
+
+
+def max_hold_preview(token, symbol, position, state, market_price, price_timestamp,
+                     market_snapshot, *, decimals=None, now=None, diagnostic_quote=False,
+                     priority_decision=None):
+    """Evaluate with read-only RPC; the caller owns persistence and dispatch."""
+    now = now or _now_dt()
+    clock = now.timestamp()
+    observed = max_hold.timestamp(price_timestamp)
+    opened = max_hold.timestamp(position.get("opened_at"))
+    price = max_hold.number(market_price)
+    row = {"token": token, "symbol": symbol, "timestamp": now.isoformat(),
+           "source": position.get("source") or ("AUTO" if position.get("buy_tx") else "UNKNOWN"),
+           "age_hours": (clock - opened) / 3600 if opened is not None else None,
+           "entry_price": None, "reference_price": str(price) if price is not None else None,
+           "gross_pnl_pct": None, "gross_pnl_sda": None, "executable_sell_quote": None,
+           "expected_proceeds_sda": None, "expected_net_pnl_sda": None, "quote_blocker": None}
+    trend_fields, trend_blocker = max_hold.trend(market_snapshot, token, clock)
+    row.update(trend_fields)
+    points = max_hold.observations(position, clock, None, Decimal(0), Decimal(0))
+    blocker = "INVALID_POSITION_BASIS"
+    try:
+        position = _position_defaults(position)
+        decimals = trader.token_decimals(token) if decimals is None else int(decimals)
+        quantity = Decimal(position["remaining_quantity"]) / (Decimal(10) ** decimals)
+        cost = Decimal(position["remaining_cost_basis"])
+        if 0 <= decimals <= 36 and quantity > 0 and cost.is_finite() and cost > 0:
+            entry = cost / quantity
+            row["entry_price"] = str(entry)
+            if price is not None and price > 0:
+                gross = price * quantity - cost
+                pnl_pct = gross / cost * 100
+                row.update(gross_pnl_pct=str(pnl_pct), gross_pnl_sda=str(gross))
+                points = max_hold.observations(position, clock, observed, price, pnl_pct)
+                blocker = max_hold.eligibility(position, clock, observed, pnl_pct, points,
+                                               max_hold.history_summary(points))
+                previous = priority_decision or policy.decide(position, pnl_pct / 100, price)
+                if previous["action"] != "HOLD":
+                    blocker = "HIGHER_PRIORITY_SELL"
+            else:
+                blocker = "PRICE_UNAVAILABLE"
+    except (ArithmeticError, KeyError, TypeError, ValueError, RuntimeError):
+        pass
+    if _max_hold_pending(state, token, position):
+        blocker = "SELL_INTENT_PENDING"
+    row.update(max_hold.history_summary(points))
+    row["trend_blocker"] = trend_blocker
+    blocker = blocker or trend_blocker
+    if blocker is None or (diagnostic_quote and row["entry_price"] is not None):
+        try:
+            quote_fields, quote_blocker = _max_hold_quote(token, position, trader.wallet_address())
+            row.update(quote_fields)
+            row["quote_blocker"] = quote_blocker
+            blocker = blocker or quote_blocker
+            after_quote = _now_dt().timestamp()
+            if blocker is None and not max_hold.fresh(observed, after_quote):
+                blocker = "STALE_PRICE"
+            if blocker is None:
+                blocker = max_hold.trend(market_snapshot, token, after_quote)[1]
+        except Exception:
+            row["quote_blocker"] = "EXECUTABLE_QUOTE_UNAVAILABLE"
+            blocker = blocker or "EXECUTABLE_QUOTE_UNAVAILABLE"
+    row.update(blocker=blocker, decision="SHADOW_MAX_HOLD_HOLD" if blocker else
+               "SHADOW_MAX_HOLD_STAGNANT_PROFIT",
+               max_hold_decision="HOLD" if blocker else max_hold.REASON)
+    return row, points
+
+
 def _submit_swap(token, intent):
     account = trader.private_account()
     owner = account.address
@@ -890,12 +1011,26 @@ def _submit_swap(token, intent):
     intent["token_balance_before"] = wallet_qty
     intent["wsda_balance_before"] = int(trader.token_balance(cfg.WSDA_ADDRESS, owner))
     _update_intent(token, intent)
-    # Fresh executable quote is intentionally obtained only AFTER approval.
+    stagnant = intent.get("sell_reason") == max_hold.REASON
+    quote_fields = {}
     try:
-        fee, quoted, _, deadline = trader.quote_best_live_fee(
-            token, cfg.WSDA_ADDRESS, token, owner, actual, value_wei=0
-        )
-        minimum = trader.min_out(quoted)
+        if stagnant:
+            snapshot = market_prices.load_market_snapshot()
+            shadow, _ = max_hold_preview(token, intent["symbol"], position, {},
+                                         intent["reference_price"], intent["price_timestamp"], snapshot)
+            quote_fields = shadow
+            if shadow["blocker"] or actual != tracked_qty or actual != intent["requested_quantity_raw"]:
+                blocker = shadow["blocker"] or "POSITION_QUANTITY_CHANGED"
+                _cancel_intent(token, intent, blocker)
+                return {"action": "HOLD", "status": blocker, "token": token}
+            quote = shadow["executable_sell_quote"]
+            fee, quoted, minimum, deadline = (quote["fee_tier"], quote["quoted_wsda_raw"],
+                                              quote["minimum_wsda_raw"], quote["deadline"])
+        else:
+            fee, quoted, _, deadline = trader.quote_best_live_fee(
+                token, cfg.WSDA_ADDRESS, token, owner, actual, value_wei=0
+            )
+            minimum = trader.min_out(quoted)
         if int(quoted) <= 0 or int(minimum) <= 0:
             raise RuntimeError("SELL quote/minOut is zero (no valid route)")
         calldata = trader.build_exact_input_single(
@@ -912,6 +1047,15 @@ def _submit_swap(token, intent):
     _update_intent(token, intent)
 
     def persist_swap(signed):
+        if stagnant:
+            clock = _now_dt().timestamp()
+            cost = Decimal(str(position["remaining_cost_basis"])) * 10**18
+            gas = (int(signed["gas"]) + MAX_UNWRAP_FAILURES * 100000) * int(signed["gas_price"])
+            if (not max_hold.fresh(max_hold.timestamp(intent["price_timestamp"]), clock)
+                    or max_hold.trend(market_prices.load_market_snapshot(), token, clock)[1]
+                    or deadline <= time() or minimum <= cost + gas):
+                raise RuntimeError("MAX HOLD execution protection changed before broadcast")
+            intent["max_hold_shadow"] = quote_fields
         intent.update({"stage": "SWAP_SUBMITTED", "status": "SUBMITTED",
                        "tx_hash": signed["tx_hash"], "swap_tx": signed["tx_hash"],
                        "nonce": signed["nonce"], "gas": signed["gas"],
@@ -1003,8 +1147,8 @@ def evaluate_position(token, symbol, market_price, price_timestamp=None, wallet_
             return {"action": "HOLD", "status": "SELL_MANAGEMENT_DISABLED", "token": token}
         if migrated:
             return {"action": "HOLD", "status": "MIGRATION_BASELINE", "token": token}
-        price = Decimal(str(market_price))
-        if price <= 0:
+        price = max_hold.number(market_price)
+        if price is None or price <= 0:
             return {"action": "HOLD", "status": "PRICE_UNAVAILABLE", "token": token}
         migration_stamp = state.get("sell_migration_observation_started_at")
         if migration_stamp:
@@ -1036,10 +1180,19 @@ def evaluate_position(token, symbol, market_price, price_timestamp=None, wallet_
             return {"action": "HOLD", "status": "NO_POSITION", "token": token}
         current.update(position)
         state["positions"][token] = current
+        shadow = None
+        if max_hold.management_enabled(current):
+            shadow, points = max_hold_preview(token, symbol, current, state, price, price_timestamp,
+                                              market_prices.load_market_snapshot(), decimals=decimals,
+                                              priority_decision=decision)
+            if shadow["blocker"] is None and decision["action"] == "HOLD":
+                decision = {"action": "FULL_SELL", "reason": max_hold.REASON}
+            current[max_hold.HISTORY_KEY] = points
+            current[max_hold.SHADOW_KEY] = [*current.get(max_hold.SHADOW_KEY, [])[-63:], shadow]
         trader.save_state(state)
         if decision["action"] == "HOLD":
             return {"action": "HOLD", "status": decision["reason"], "token": token,
-                    "pnl_pct": float(pnl_fraction * 100)}
+                "pnl_pct": float(pnl_fraction * 100)}
         gate = _retry_gate(state, current.get("position_id") or token, REASON_MAP[decision["reason"]])
         if gate:
             return {"action": "HOLD", "token": token, "pnl_pct": float(pnl_fraction * 100),
@@ -1059,7 +1212,8 @@ def evaluate_position(token, symbol, market_price, price_timestamp=None, wallet_
         if trader.chain_id() != cfg.CHAIN_ID:
             raise RuntimeError("Wrong Sidra Chain ID")
         wallet_qty = int(trader.token_balance(token, account.address))
-        actual_qty = min(int(intent["requested_quantity_raw"]), wallet_qty)
+        requested_qty = int(intent["requested_quantity_raw"])
+        actual_qty = min(requested_qty, wallet_qty)
         if actual_qty <= 0:
             _cancel_intent(token, intent, "CANCELLED_NO_WALLET_BALANCE")
             return {"action": "SELL", "status": "NO_WALLET_BALANCE", "token": token}
@@ -1068,6 +1222,10 @@ def evaluate_position(token, symbol, market_price, price_timestamp=None, wallet_
         intent["wsda_balance_before"] = int(trader.token_balance(cfg.WSDA_ADDRESS, account.address))
         _update_intent(token, intent)
         current_allowance = int(trader.allowance(token, account.address, cfg.ROUTER_ADDRESS))
+        if decision["reason"] == max_hold.REASON and (
+            actual_qty != requested_qty or current_allowance < actual_qty):
+            _cancel_intent(token, intent, "MAX_HOLD_EXECUTION_CONTEXT_CHANGED")
+            return {"action": "HOLD", "status": "MAX_HOLD_EXECUTION_CONTEXT_CHANGED", "token": token}
         if current_allowance < actual_qty:
             intent["stage"] = "APPROVAL_PENDING"
             intent["status"] = "APPROVAL_PENDING"
