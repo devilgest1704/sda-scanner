@@ -46,8 +46,9 @@ class MaxHoldStagnantProfitTests(unittest.TestCase):
     def test_c_net_exit_nonpositive_holds(self):
         self.assertEqual(evaluate(net=0)["blocker"], "NET_EXIT_NOT_PROFITABLE")
 
-    def test_d_loss_never_uses_max_hold(self):
-        self.assertEqual(evaluate(pnl=-1)["blocker"], "NON_POSITIVE_PNL")
+    def test_d_loss_never_uses_max_hold_even_at_300h(self):
+        old_loss = position(opened_at=(NOW-timedelta(hours=300)).isoformat())
+        self.assertEqual(evaluate(old_loss, pnl=-1)["blocker"], "NON_POSITIVE_PNL")
 
     def test_e_age_under_72h_holds(self):
         self.assertEqual(evaluate(position(opened_at=(NOW-timedelta(hours=48)).isoformat()))["blocker"],
@@ -59,13 +60,35 @@ class MaxHoldStagnantProfitTests(unittest.TestCase):
                    ((24,4),(18,5),(12,6),(6,6),(0,6))]
         self.assertEqual(evaluate(history=history)["blocker"], "PROFIT_IMPROVED")
 
-    def test_g_bullish_four_hour_holds(self):
-        self.assertEqual(evaluate(trend={"fresh":True,"bullish":True})["blocker"],
-                         "POSITIVE_MOMENTUM")
+    def test_g_bullish_four_hour_momentum_holds(self):
+        context = {
+            "_snapshot_updated_at": NOW.isoformat(),
+            "momentum": {"1h_pct": 0.0, "4h_pct": 1.2},
+            "flow": {"1h": {"net_flow": 0, "transactions": 0},
+                     "4h": {"net_flow": 0, "transactions": 0}},
+            "technical": {
+                "1h": {"available": True, "last_timestamp": (NOW-timedelta(hours=1)).isoformat()},
+                "4h": {"available": True, "last_timestamp": (NOW-timedelta(hours=4)).isoformat()},
+            },
+        }
+        trend = policy.assess_trend(context, now=NOW)
+        self.assertTrue(trend["bullish"])
+        self.assertEqual(evaluate(trend=trend)["blocker"], "POSITIVE_MOMENTUM")
 
-    def test_h_stale_trend_holds(self):
-        self.assertEqual(evaluate(trend={"fresh":False,"bullish":False})["blocker"],
-                         "STALE_TREND")
+    def test_h_stale_trend_candles_hold(self):
+        context = {
+            "_snapshot_updated_at": NOW.isoformat(),
+            "momentum": {"1h_pct": 0.0, "4h_pct": 0.0},
+            "flow": {"1h": {"net_flow": 0, "transactions": 0},
+                     "4h": {"net_flow": 0, "transactions": 0}},
+            "technical": {
+                "1h": {"available": True, "last_timestamp": (NOW-timedelta(hours=3)).isoformat()},
+                "4h": {"available": True, "last_timestamp": (NOW-timedelta(hours=4)).isoformat()},
+            },
+        }
+        trend = policy.assess_trend(context, now=NOW)
+        self.assertFalse(trend["fresh"])
+        self.assertEqual(evaluate(trend=trend)["blocker"], "STALE_TREND")
 
     def test_i_stale_price_holds(self):
         self.assertEqual(evaluate(timestamp=(NOW-timedelta(seconds=301)).isoformat())["blocker"],
