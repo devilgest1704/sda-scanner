@@ -13,6 +13,7 @@ MAX_HISTORY_GAP_SECONDS = 6 * 3600
 HISTORY_RETENTION_SECONDS = 26 * 3600
 HISTORY_SAMPLE_INTERVAL_SECONDS = 240
 MAX_HISTORY_POINTS = 400
+MAX_HISTORY_POSITIONS = 50
 
 
 def _time(value):
@@ -46,6 +47,27 @@ def record_observation(state, token, position, price, pnl_pct, timestamp, now=No
     identity = str(position.get("position_id") or position.get("buy_tx") or token)
     key = f"{str(token).lower()}:{identity}"
     root = state.setdefault("real_stagnation_history", {})
+    cutoff = now.astimezone(timezone.utc) - timedelta(seconds=HISTORY_RETENTION_SECONDS)
+    live_positions = state.get("positions") or {}
+    for old_key, old_record in list(root.items()):
+        if not isinstance(old_record, dict):
+            root.pop(old_key, None)
+            continue
+        old_token = str(old_record.get("token") or "").lower()
+        old_identity = str(old_record.get("position_id") or "")
+        live = live_positions.get(old_token)
+        live_identity = (str(live.get("position_id") or live.get("buy_tx") or old_token)
+                         if isinstance(live, dict) else "")
+        if not live_identity or live_identity != old_identity:
+            root.pop(old_key, None)
+            continue
+        old_observations = old_record.get("observations") or []
+        old_record["observations"] = [
+            item for item in old_observations
+            if _time(item.get("timestamp")) and _time(item.get("timestamp")) >= cutoff
+        ]
+        if not old_record["observations"]:
+            root.pop(old_key, None)
     record = root.setdefault(key, {"token": str(token).lower(),
                                    "position_id": identity, "observations": []})
     observations = record.setdefault("observations", [])
@@ -55,7 +77,6 @@ def record_observation(state, token, position, price, pnl_pct, timestamp, now=No
             return observations
     observations.append({"timestamp": stamp.isoformat(), "price": str(px),
                          "pnl_pct": float(pnl)})
-    cutoff = now.astimezone(timezone.utc) - timedelta(seconds=HISTORY_RETENTION_SECONDS)
     observations[:] = [item for item in observations
                        if _time(item.get("timestamp")) and _time(item.get("timestamp")) >= cutoff]
     if len(observations) > MAX_HISTORY_POINTS:
@@ -65,6 +86,17 @@ def record_observation(state, token, position, price, pnl_pct, timestamp, now=No
         if thinned[-1] != observations[-1]:
             thinned.append(observations[-1])
         observations[:] = thinned[-MAX_HISTORY_POINTS:]
+    if len(root) > MAX_HISTORY_POSITIONS:
+        newest = sorted(
+            root.items(),
+            key=lambda pair: _time((pair[1].get("observations") or [{}])[-1].get("timestamp"))
+                or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        keep = {item[0] for item in newest[:MAX_HISTORY_POSITIONS]}
+        for old_key in list(root):
+            if old_key not in keep:
+                root.pop(old_key, None)
     return observations
 
 

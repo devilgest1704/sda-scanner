@@ -91,6 +91,32 @@ class MaxHoldStagnantProfitTests(unittest.TestCase):
         self.assertEqual(len(rows), 5)
         self.assertEqual(evaluate(history=rows)["decision"], "MAX_HOLD_STAGNANT_PROFIT")
 
+    def test_stale_observation_is_ignored(self):
+        state = {"positions": {"token": position(position_id="p1")}}
+        rows = policy.record_observation(
+            state, "token", position(position_id="p1"), "1", 4.0,
+            (NOW-timedelta(seconds=301)).isoformat(), now=NOW,
+        )
+        self.assertEqual(rows, [])
+        self.assertNotIn("real_stagnation_history", state)
+
+    def test_history_registry_is_globally_bounded(self):
+        state = {"positions": {}}
+        for index in range(55):
+            token = f"token-{index}"
+            pos = position(position_id=f"p{index}")
+            state["positions"][token] = pos
+            state.setdefault("real_stagnation_history", {})[f"{token}:p{index}"] = {
+                "token": token, "position_id": f"p{index}",
+                "observations": [{"timestamp": (NOW-timedelta(minutes=5)).isoformat(),
+                                  "price": "1", "pnl_pct": 1.0}],
+            }
+        policy.record_observation(
+            state, "token-0", state["positions"]["token-0"], "1", 1.0,
+            NOW.isoformat(), now=NOW,
+        )
+        self.assertLessEqual(len(state["real_stagnation_history"]), policy.MAX_HISTORY_POSITIONS)
+
     def test_m_manual_and_n_auto_use_same_policy(self):
         for source in ("MANUAL", "AUTO"):
             self.assertEqual(evaluate(position(source=source))["decision"],
