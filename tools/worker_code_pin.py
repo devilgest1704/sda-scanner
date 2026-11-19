@@ -274,7 +274,6 @@ def write_status(cwd=None, output=STATUS_FILE):
     market_source = _read_json(root, "market_source_state.json")
     market = _read_json(root, "market_analysis.json")
     paper = _read_json(root, "paper_stats.json")
-    bridge_health = bridge.get("sell_health") if isinstance(bridge.get("sell_health"), dict) else {}
     lane = _read_json(root, "strategy_lab/lane_research_state.json")
 
     whale_stamp = whale.get("last_successful_whale_at") or whale.get("updated_at")
@@ -290,13 +289,7 @@ def write_status(cwd=None, output=STATUS_FILE):
     else:
         market_health = ("HEALTHY" if _freshness(market_data_stamp) and _freshness(market_analysis_stamp)
                          else "STALE")
-    sell_stamp = bridge.get("last_real_sell_evaluation_at") or bridge_health.get("at")
-    sell_total = len(ledger.get("positions", {})) if isinstance(ledger.get("positions"), dict) else 0
-    sell_evaluated = int(bridge.get("real_positions_evaluated", bridge_health.get("evaluated", 0)) or 0)
-    sell_recent = _freshness(sell_stamp)
-    sell_failed = bridge_health.get("health") == "SELL_ERROR"
-    sell_protection = ("ACTIVE" if sell_recent and not sell_failed and sell_evaluated >= sell_total
-                       else "FAILING" if sell_recent and sell_failed else "UNKNOWN")
+    sell_protection, sell_stamp, sell_evaluated, sell_total = sell_health_snapshot(ledger, bridge)
     reconciliation_stamp = (wallet_sync.get("lastSuccessfulReconciliation")
                              or ledger.get("lastSuccessfulReconciliation")
                              or bridge.get("last_real_reconciliation_at"))
@@ -361,6 +354,33 @@ def write_status(cwd=None, output=STATUS_FILE):
     tmp.write_text(json.dumps(status, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     os.replace(tmp, path)
     return status
+
+
+def sell_health_snapshot(ledger, bridge):
+    health = bridge.get("sell_health")
+    health = health if isinstance(health, dict) else {}
+    stamp = bridge.get("last_real_sell_evaluation_at") or health.get("at")
+    positions = ledger.get("positions")
+    total = len(positions) if isinstance(positions, dict) else 0
+    try:
+        evaluated = int(bridge.get("real_positions_evaluated", health.get("evaluated", 0)) or 0)
+    except (ValueError, TypeError, OverflowError):
+        evaluated = 0
+    recent = _freshness(stamp)
+    if recent and health.get("health") == "SELL_ERROR":
+        status = "FAILING"
+    elif recent and isinstance(positions, dict) and evaluated >= total:
+        status = "ACTIVE"
+    else:
+        status = "UNKNOWN"
+    return status, stamp, evaluated, total
+
+
+def sell_protection_text(root=None):
+    root = Path(root or ".")
+    status, _, _, _ = sell_health_snapshot(_read_json(root, "real_trade_state.json"),
+                                           _read_json(root, "real_paper_bridge_state.json"))
+    return f"REAL SELL protection: {status}"
 
 
 def watchdog_decision(run_id, run_sha, run_age, cwd=None, repo=None, token=None, fetch=None):

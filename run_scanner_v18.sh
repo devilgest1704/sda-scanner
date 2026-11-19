@@ -266,10 +266,12 @@ run_one_scan() {
     buy_data_available=false
   fi
   if ! run_timed_stage technical_analysis python technical_analysis.py; then
-    echo "::warning::Technical-analysis stage failed; scanner continues." >&2
+    echo "::warning::Technical-analysis stage failed; REAL BUY discovery is fail-closed." >&2
+    buy_data_available=false
   fi
   if ! run_timed_stage market_analysis_export python market_analysis_export.py; then
-    echo "::warning::Market-analysis export failed; dashboard remains stale until recovery." >&2
+    echo "::warning::Market-analysis export failed; REAL BUY discovery is fail-closed." >&2
+    buy_data_available=false
   fi
   if ! run_timed_stage token_metadata python token_metadata.py; then
     echo "::warning::Token metadata failed; REAL BUY discovery is fail-closed, protections continue." >&2

@@ -1,8 +1,10 @@
 # SDA whale scanner — direct PinetSwap Supabase source
 # Read-only. Uses the exact token_transactions endpoint observed from PinetSwap Whale Alerts.
-import os, json, traceback, time
+import os, json
 from datetime import datetime, timezone, timedelta
 import requests
+from tools.market_source_http import SupabaseSourceError, fetch_rows
+from tools.worker_code_pin import sell_protection_text
 
 TOKEN=os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID=os.environ.get('CHAT_ID')
@@ -23,19 +25,6 @@ SOURCE='pinet-supabase-token_transactions-v2'
 SUPABASE_RETRIES=int(os.environ.get('WHALE_SUPABASE_RETRIES','3'))
 SUPABASE_RETRY_BASE_SECONDS=float(os.environ.get('WHALE_SUPABASE_RETRY_BASE_SECONDS','5'))
 WHALE_ALERT_INTERVAL_SECONDS=3600
-TRANSIENT_SUPABASE_STATUS={429,500,502,503,504,520,521,522,523,524,530}
-
-
-class SupabaseSourceError(RuntimeError):
-    def __init__(self, message, status_code=None, attempts=1, transient=False):
-        super().__init__(message)
-        self.status_code=status_code
-        self.attempts=attempts
-        self.transient=transient
-
-
-class TransientSupabaseError(SupabaseSourceError):
-    pass
 
 
 def load(path, default):
@@ -75,46 +64,10 @@ def fetch_supabase():
         'limit':str(FETCH_LIMIT),
     }
 
-    last_error=None
-    last_status=None
-    for attempt in range(1, SUPABASE_RETRIES + 1):
-        try:
-            r=requests.get(SUPABASE_URL,params=params,headers=SUPABASE_HEADERS,timeout=30)
-            if r.status_code in TRANSIENT_SUPABASE_STATUS:
-                raise requests.exceptions.HTTPError(
-                    f'Supabase transient HTTP {r.status_code}', response=r
-                )
-            r.raise_for_status()
-            obj=r.json()
-            return obj if isinstance(obj,list) else []
-        except requests.exceptions.RequestException as exc:
-            last_error=exc
-            status=getattr(getattr(exc,'response',None),'status_code',None)
-            last_status=status
-            transient = isinstance(exc, requests.exceptions.Timeout) or isinstance(
-                exc, (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError)
-            ) or status in TRANSIENT_SUPABASE_STATUS
-            if not transient:
-                raise SupabaseSourceError(
-                    f'Supabase request rejected (HTTP {status or "invalid response"}): {exc}',
-                    status_code=status, attempts=attempt
-                ) from exc
-            if attempt >= SUPABASE_RETRIES:
-                raise TransientSupabaseError(
-                    f'Supabase temporarily unavailable after {attempt} attempts: {exc}',
-                    status_code=status, attempts=attempt, transient=True
-                ) from exc
-            delay=SUPABASE_RETRY_BASE_SECONDS * (2 ** (attempt - 1))
-            print(
-                f'⚠️ SUPABASE TRANSIENT ERROR (attempt {attempt}/{SUPABASE_RETRIES}, '
-                f'HTTP {status or "network"}); retrying in {delay:g}s: {exc}'
-            )
-            time.sleep(delay)
-
-    raise TransientSupabaseError(
-        f'Supabase fetch failed: {last_error}', status_code=last_status,
-        attempts=SUPABASE_RETRIES, transient=True
-    )
+    state=load(STATE_FILE,{})
+    previous=state.get('last_error_diagnostic') if isinstance(state,dict) else None
+    return fetch_rows(SUPABASE_URL,SUPABASE_HEADERS,params,retries=SUPABASE_RETRIES,
+                      base_delay=SUPABASE_RETRY_BASE_SECONDS,previous=previous)
 
 
 def _send_whale_alert(text):
@@ -126,7 +79,7 @@ def _send_whale_alert(text):
             json={'chat_id':CHAT_ID,'text':text}, timeout=10
         )
     except Exception as exc:
-        print(f'WHALE TELEGRAM ALERT FAILED: {type(exc).__name__}: {exc}')
+        print(f'WHALE TELEGRAM ALERT FAILED: {type(exc).__name__}')
 
 
 def _record_source_unavailable(error, now=None):
@@ -141,6 +94,7 @@ def _record_source_unavailable(error, now=None):
     state['whale_source_health']='SOURCE_UNAVAILABLE'
     state['data_source_health']={**source_health,'whale':'SOURCE_UNAVAILABLE'}
     state['last_error_http_status']=error.status_code
+    state['last_error_diagnostic']=error.diagnostic
     state['last_error']=str(error)[:300]
     try:
         failures=int(state.get('consecutive_failures') or 0)+1
@@ -170,6 +124,7 @@ def _record_source_recovered(now=None):
         'whale_source_health':'HEALTHY',
         'data_source_health':{**source_health,'whale':'HEALTHY'},
         'last_error_http_status':None,
+        'last_error_diagnostic':None,
         'last_error':None,
         'consecutive_failures':0,
     })
@@ -297,7 +252,7 @@ def main():
     })
     save(STATE_FILE,state)
     if recovered:
-        _send_whale_alert('✅ BUY data recovered\nWhale source healthy')
+        _send_whale_alert('✅ Whale source recovered')
 
     print('WHALE SCANNER — PINETSWAP SUPABASE')
     print(f'Source: {SOURCE}')
@@ -318,7 +273,6 @@ def run():
     try:
         main()
     except SupabaseSourceError as exc:
-        traceback.print_exc()
         _state, should_alert = _record_source_unavailable(exc)
         print(f'⚠️ WHALE SOURCE UNAVAILABLE (HTTP {exc.status_code or "network"}, '
               f'attempts={exc.attempts}, transient={exc.transient}): {exc}')
@@ -326,22 +280,21 @@ def run():
             _send_whale_alert(
                 f'⚠️ BUY data degraded\nWhale source unavailable '
                 f'(HTTP {exc.status_code or "network"})\n'
-                'REAL SELL protection: ACTIVE'
+                f'{sell_protection_text()}'
             )
         # Exit 75 tells the continuous runner to continue without whale data.
-        raise SystemExit(75)
+        raise SystemExit(75) from None
     except Exception as exc:
-        traceback.print_exc()
         source_error=SupabaseSourceError(
-            f'Whale scanner failed: {type(exc).__name__}: {str(exc)[:200]}')
+            f'Whale scanner failed: {type(exc).__name__}')
         _state, should_alert = _record_source_unavailable(source_error)
-        print(f'❌ WHALE SCANNER ERROR: {type(exc).__name__}: {str(exc)[:300]}')
+        print(f'❌ WHALE SCANNER ERROR: {type(exc).__name__}')
         if should_alert:
             _send_whale_alert(
                 '⚠️ BUY data degraded\nWhale scanner unavailable (internal error)\n'
-                'REAL SELL protection: ACTIVE'
+                f'{sell_protection_text()}'
             )
-        raise SystemExit(75)
+        raise SystemExit(75) from None
 
 
 if __name__=='__main__':
