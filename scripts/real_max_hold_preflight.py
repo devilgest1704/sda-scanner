@@ -69,6 +69,13 @@ def main():
         source = "MANUAL" if (str(position.get("source") or "").upper() == "MANUAL" or position.get("manual_imported")) else "AUTO"
         position = dict(position)
         position.setdefault("sellManagementEnabled", True)
+        manual_position = (str(position.get("source") or "").upper() == "MANUAL"
+                           or bool(position.get("manual_imported")))
+        if manual_position and not position.get("buy_tx") and (
+                not position.get("position_id") or position.get("position_id") == token):
+            opened_identity = position.get("opened_at") or position.get("at") or position.get("buy_timestamp")
+            if opened_identity:
+                position.setdefault("history_position_id", f"MANUAL:{opened_identity}")
         try:
             market = market_prices.resolve_market_price(
                 token, analysis, now=now,
@@ -94,7 +101,8 @@ def main():
             market_context = dict((analysis.get("tokens") or {}).get(str(token).lower()) or {})
             market_context["_snapshot_updated_at"] = analysis.get("updated_at")
             trend = stagnant.assess_trend(market_context, now=evaluation_now)
-            identity = str(position.get("position_id") or position.get("buy_tx") or token)
+            identity = str(position.get("history_position_id") or position.get("position_id")
+                           or position.get("buy_tx") or token)
             hist_key = f"{str(token).lower()}:{identity}"
             history_record = (state.get("real_stagnation_history") or {}).get(hist_key) or {}
             history = history_record.get("observations") or []

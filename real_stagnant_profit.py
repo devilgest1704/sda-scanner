@@ -45,7 +45,8 @@ def record_observation(state, token, position, price, pnl_pct, timestamp, now=No
     age = (now.astimezone(UTC) - stamp).total_seconds()
     if age < 0 or age > MAX_PRICE_AGE_SECONDS:
         return []
-    identity = str(position.get("position_id") or position.get("buy_tx") or token)
+    identity = str(position.get("history_position_id") or position.get("position_id")
+                   or position.get("buy_tx") or token)
     key = f"{str(token).lower()}:{identity}"
     root = state.setdefault("real_stagnation_history", {})
     cutoff = now.astimezone(UTC) - timedelta(seconds=HISTORY_RETENTION_SECONDS)
@@ -57,7 +58,8 @@ def record_observation(state, token, position, price, pnl_pct, timestamp, now=No
         old_token = str(old_record.get("token") or "").lower()
         old_identity = str(old_record.get("position_id") or "")
         live = live_positions.get(old_token)
-        live_identity = (str(live.get("position_id") or live.get("buy_tx") or old_token)
+        live_identity = (str(live.get("history_position_id") or live.get("position_id")
+                              or live.get("buy_tx") or old_token)
                          if isinstance(live, dict) else "")
         if not live_identity or live_identity != old_identity:
             root.pop(old_key, None)

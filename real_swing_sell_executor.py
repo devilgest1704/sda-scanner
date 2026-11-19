@@ -300,6 +300,13 @@ def _position_defaults(position):
     qty = int(pos.get("remaining_quantity", pos.get("token_amount_raw", 0)) or 0)
     cost = Decimal(str(pos.get("remaining_cost_basis",
                                pos.get("amount_sda", pos.get("cost_sda", 0))) or 0))
+    manual_position = (str(pos.get("source") or "").upper() == "MANUAL"
+                       or bool(pos.get("manual_imported")))
+    if manual_position and not pos.get("buy_tx") and (
+            not pos.get("position_id") or pos.get("position_id") == pos.get("token")):
+        opened_identity = pos.get("opened_at") or pos.get("at") or pos.get("buy_timestamp")
+        if opened_identity:
+            pos.setdefault("history_position_id", f"MANUAL:{opened_identity}")
     pos.setdefault("position_id", pos.get("buy_tx") or pos.get("token"))
     pos.setdefault("initial_quantity", pos.get("token_amount_raw", qty))
     pos.setdefault("remaining_quantity", qty)

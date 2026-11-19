@@ -207,6 +207,22 @@ class MaxHoldStagnantProfitTests(unittest.TestCase):
         )
         self.assertLessEqual(len(state["real_stagnation_history"]), policy.MAX_HISTORY_POSITIONS)
 
+    def test_manual_history_is_separated_by_original_open_time(self):
+        first = {"source": "MANUAL", "position_id": "token", "opened_at": (NOW-timedelta(hours=100)).isoformat()}
+        second = {"source": "MANUAL", "position_id": "token", "opened_at": (NOW-timedelta(hours=20)).isoformat()}
+        first["history_position_id"] = f"MANUAL:{first['opened_at']}"
+        second["history_position_id"] = f"MANUAL:{second['opened_at']}"
+        state = {"positions": {"token": first}}
+        policy.record_observation(state, "token", first, "1", 2.0, PRICE_TIME, now=NOW)
+        state["positions"]["token"] = second
+        policy.record_observation(
+            state, "token", second, "1", 2.0,
+            (NOW+timedelta(seconds=1)).isoformat(), now=NOW+timedelta(seconds=1),
+        )
+        records = state["real_stagnation_history"]
+        self.assertEqual(len(records), 1)
+        self.assertIn(second["history_position_id"], next(iter(records)))
+
     def test_m_manual_and_n_auto_use_same_policy(self):
         for source in ("MANUAL", "AUTO"):
             self.assertEqual(evaluate(position(source=source))["decision"],
