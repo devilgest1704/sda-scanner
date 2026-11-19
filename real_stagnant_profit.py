@@ -165,7 +165,7 @@ def evaluate(position, *, now, price, price_timestamp, history, trend,
     if pending_sell:
         result["blocker"] = "PENDING_SELL_INTENT"
         return result
-    if position.get("sellManagementEnabled") is False:
+    if position.get("sellManagementEnabled") is not True:
         result["blocker"] = "SELL_MANAGEMENT_DISABLED"
         return result
     if position.get("profit_partial_done"):

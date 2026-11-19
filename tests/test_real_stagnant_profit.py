@@ -140,6 +140,10 @@ class MaxHoldStagnantProfitTests(unittest.TestCase):
         self.assertEqual(evaluate(timestamp=(NOW-timedelta(seconds=301)).isoformat())["blocker"],
                          "STALE_PRICE")
 
+    def test_sell_management_disabled_blocks_rule(self):
+        self.assertEqual(evaluate(position(sellManagementEnabled=False))["blocker"],
+                         "SELL_MANAGEMENT_DISABLED")
+
     def test_j_partial_disables_rule(self):
         self.assertEqual(evaluate(position(profit_partial_done=True))["blocker"],
                          "PARTIAL_ALREADY_DONE")

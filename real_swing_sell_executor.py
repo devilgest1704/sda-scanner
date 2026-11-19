@@ -311,6 +311,8 @@ def _position_defaults(position):
     pos.setdefault("realized_pnl", "0")
     pos.setdefault("profit_partial_done", False)
     pos.setdefault("trailing_armed", False)
+    # Existing REAL SELL V2 treats an absent flag as enabled; persist that default explicitly.
+    pos.setdefault("sellManagementEnabled", True)
     return pos
 
 
