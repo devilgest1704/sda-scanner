@@ -1083,7 +1083,7 @@ def _max_hold_shadow_row(token, position, price, pnl_fraction, age_hours,
     return {
         "token": token, "timestamp": trader.now(),
         "age_hours": age_hours,
-        "source": "MANUAL" if (position.get("source") == "MANUAL" or position.get("manual_imported")) else "AUTO",
+        "source": "MANUAL" if (str(position.get("source") or "").upper() == "MANUAL" or position.get("manual_imported")) else "AUTO",
         "entry_price": str(history_result.get("entry_price") or ""),
         "current_reference_price": str(price),
         "gross_pnl_pct": float(pnl_fraction * 100),

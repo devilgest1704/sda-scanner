@@ -66,7 +66,7 @@ def main():
         if not isinstance(position, dict):
             continue
         symbol = str(metadata.get(str(token).lower(), {}).get("symbol") or position.get("symbol") or token[:10])
-        source = "MANUAL" if (position.get("source") == "MANUAL" or position.get("manual_imported")) else "AUTO"
+        source = "MANUAL" if (str(position.get("source") or "").upper() == "MANUAL" or position.get("manual_imported")) else "AUTO"
         try:
             market = market_prices.resolve_market_price(
                 token, analysis, now=now,
