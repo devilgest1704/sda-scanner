@@ -531,6 +531,10 @@ def _sell_v2_text(dashboard):
             "quote_amount_sda":1,"fee_tier":quote["fee_tier"]}
     rows=report.build_decision_rows(state, analysis, metadata,
         supabase_lookup=rb._newest_supabase_price,reference_quote_lookup=reference_quote)
+    max_hold_by_token={}
+    for item in state.get("real_max_hold_shadow",[]) if isinstance(state.get("real_max_hold_shadow"),list) else []:
+        if isinstance(item,dict) and item.get("token"):
+            max_hold_by_token[str(item["token"]).lower()]=item
     lines=["🎯 SELL V2 • READ ONLY",""]
     if not rows:
         lines.append("⚪ No open REAL positions")
@@ -551,6 +555,18 @@ def _sell_v2_text(dashboard):
             age=int(row.get("price_age_seconds") or 0)
             lines.append(f'  Price {row["price_source"]} • age {age}s')
         lines.append(f'P:{ "Y" if row["profit_partial_done"] else "N"}  T:{ "Y" if row["trailing_armed"] else "N"}  State: {row["swing_state"]}')
+        max_hold=max_hold_by_token.get(str(row.get("token_address") or "").lower())
+        if max_hold:
+            age="N/A" if max_hold.get("age_hours") is None else f'{float(max_hold["age_hours"]):.0f}h'
+            max_pnl="N/A" if max_hold.get("gross_pnl_pct") is None else f'{float(max_hold["gross_pnl_pct"]):+.2f}%'
+            improvement="N/A" if max_hold.get("improvement_24h_pp") is None else f'{float(max_hold["improvement_24h_pp"]):+.2f} pp'
+            net="N/A" if max_hold.get("expected_net_pnl_sda") is None else f'{float(max_hold["expected_net_pnl_sda"]):+.2f} SDA'
+            decision=max_hold.get("execution_decision") or "HOLD"
+            trend=max_hold.get("trend") or "UNKNOWN"
+            lines.append(f'  MAX HOLD • Age: {age} • PnL: {max_pnl} • 24h improvement: {improvement}')
+            lines.append(f'  Trend: {trend} • Net exit: {net} • Decision: {decision}')
+            if max_hold.get("blocker"):
+                lines.append(f'  Blocker: {max_hold["blocker"]}')
         if row["trailing_armed"]:
             peak="N/A" if row["current_peak"] is None else f'{row["current_peak"]:.6g}'
             exit_price="N/A" if row["trailing_price"] is None else f'{row["trailing_price"]:.6g}'
