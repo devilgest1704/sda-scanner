@@ -104,6 +104,7 @@ def main():
             )
             quote = None
             net_exit = None
+            quote_blocker = None
             result = first
             opened = stagnant._time(position.get("opened_at") or position.get("at") or position.get("buy_timestamp"))
             age_hours = (evaluation_now - opened).total_seconds() / 3600 if opened else None
@@ -120,8 +121,9 @@ def main():
                         pending_sell=bool((state.get("pending_sells") or {}).get(token)),
                     )
                 except (requests.RequestException, RuntimeError, ValueError, TypeError, OSError, ArithmeticError) as exc:
+                    quote_blocker = f"{type(exc).__name__}:{str(exc)[:140]}"
                     if first.get("eligible_without_net"):
-                        result = {**first, "blocker": f"EXECUTABLE_QUOTE_UNAVAILABLE:{type(exc).__name__}"}
+                        result = {**first, "blocker": "EXECUTABLE_QUOTE_UNAVAILABLE"}
             row = {
                 "token": symbol, "address": token, "source": source,
                 "age_hours": round(age_hours, 2) if age_hours is not None else None,
@@ -136,7 +138,7 @@ def main():
                 "flow_4h": trend.get("flow_4h"),
                 "history_coverage_pct": result.get("history_coverage_pct"),
                 "decision": result.get("decision", "HOLD"),
-                "blocker": result.get("blocker"),
+                "blocker": result.get("blocker"), "quote_blocker": quote_blocker,
             }
         except (requests.RequestException, RuntimeError, ValueError, TypeError, KeyError, OSError, ArithmeticError) as exc:
             row = {
@@ -146,7 +148,7 @@ def main():
                 "momentum_1h": None, "momentum_4h": None, "macd": None,
                 "technical_trend_1h": None, "technical_trend_4h": None,
                 "flow_1h": None, "flow_4h": None, "history_coverage_pct": 0,
-                "decision": "HOLD", "blocker": str(exc)[:160],
+                "decision": "HOLD", "blocker": str(exc)[:160], "quote_blocker": None,
             }
         rows.append(row)
         print(json.dumps(row, ensure_ascii=False, sort_keys=True))
