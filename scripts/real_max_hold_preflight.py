@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import json
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import real_market_price as market_prices
 import real_stagnant_profit as stagnant
@@ -60,7 +63,7 @@ def main():
     for token, position in positions.items():
         if not isinstance(position, dict):
             continue
-        symbol = str(position.get("symbol") or metadata.get(str(token).lower(), {}).get("symbol") or token[:10])
+        symbol = str(metadata.get(str(token).lower(), {}).get("symbol") or position.get("symbol") or token[:10])
         source = "MANUAL" if (position.get("source") == "MANUAL" or position.get("manual_imported")) else "AUTO"
         try:
             market = market_prices.resolve_market_price(
@@ -97,7 +100,11 @@ def main():
             quote = None
             net_exit = None
             result = first
-            if first.get("eligible_without_net"):
+            opened = stagnant._time(position.get("opened_at") or position.get("at") or position.get("buy_timestamp"))
+            age_hours = (now - opened).total_seconds() / 3600 if opened else None
+            # Preflight quote is read-only and is also collected for positive aged
+            # positions blocked by stale trend/history, so the report can show NET EXIT.
+            if pnl_pct > 0 and age_hours is not None and age_hours >= 72:
                 try:
                     quote = sell._max_hold_executable_quote(token, position, quantity_raw, owner=wallet)
                     net_exit = Decimal(quote["expected_net_pnl_sda"])
@@ -108,11 +115,11 @@ def main():
                         pending_sell=bool((state.get("pending_sells") or {}).get(token)),
                     )
                 except Exception as exc:
-                    result = {**first, "blocker": f"EXECUTABLE_QUOTE_UNAVAILABLE:{type(exc).__name__}"}
+                    if first.get("eligible_without_net"):
+                        result = {**first, "blocker": f"EXECUTABLE_QUOTE_UNAVAILABLE:{type(exc).__name__}"}
             row = {
                 "token": symbol, "address": token, "source": source,
-                "age_hours": round((now - stagnant._time(position.get("opened_at") or position.get("at") or position.get("buy_timestamp"))).total_seconds()/3600, 2)
-                    if stagnant._time(position.get("opened_at") or position.get("at") or position.get("buy_timestamp")) else None,
+                "age_hours": round(age_hours, 2) if age_hours is not None else None,
                 "current_pnl_pct": round(pnl_pct, 3), "gross_pnl_sda": str(gross_pnl_sda),
                 "net_exit_pnl_sda": str(net_exit) if net_exit is not None else None,
                 "improvement_pp": result.get("improvement_pp"),
