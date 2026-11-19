@@ -802,6 +802,10 @@ def _resolve_existing(token, intent):
         if stage == "APPROVAL_SUBMITTED":
             if not ok:
                 return _fail(token, intent, "APPROVAL_REVERTED", tx_hash, deterministic=True)
+            if intent.get("sell_reason") == "MAX_HOLD_STAGNANT_PROFIT":
+                actual_approval_cost = _receipt_native_fee_sda(receipt, intent)
+                if actual_approval_cost is not None:
+                    intent["max_hold_approval_cost_sda"] = str(actual_approval_cost)
             intent.pop("tx_hash", None)
             intent["approval_tx"] = tx_hash
             intent["stage"] = "APPROVAL_CONFIRMED"
@@ -917,9 +921,10 @@ def _submit_swap(token, intent):
                 token, owner, actual, calldata, int(quoted)
             )
             network_cost = Decimal(network["network_cost_sda"])
+            approval_cost = Decimal(str(intent.get("max_hold_approval_cost_sda") or 0))
             proceeds = Decimal(int(quoted)) / Decimal(10 ** 18)
             remaining_cost = Decimal(str(position.get("remaining_cost_basis") or 0))
-            net_pnl = proceeds - remaining_cost - network_cost
+            net_pnl = proceeds - remaining_cost - network_cost - approval_cost
         except Exception as exc:
             _cancel_intent(token, intent, "CANCELLED_MAX_HOLD_NET_RECHECK_FAILED")
             return {"action": "HOLD", "status": "NET_EXIT_RECHECK_FAILED",
@@ -1010,6 +1015,20 @@ def _estimate_max_hold_network_cost(token, owner, quantity_raw, swap_calldata, p
     }
 
 
+
+def _receipt_native_fee_sda(receipt, intent):
+    """Return actual native-SDA fee from a confirmed receipt, with signed-tx fallback."""
+    def as_int(value):
+        if value is None:
+            return 0
+        return int(value, 16) if isinstance(value, str) and value.startswith("0x") else int(value)
+    gas_used = as_int(receipt.get("gasUsed")) or as_int(intent.get("gas"))
+    gas_price = as_int(receipt.get("effectiveGasPrice")) or as_int(intent.get("gas_price"))
+    if gas_used <= 0 or gas_price <= 0:
+        return None
+    return Decimal(gas_used) * Decimal(gas_price) / Decimal(10 ** 18)
+
+
 def _max_hold_executable_quote(token, position, quantity_raw, owner=None):
     """Read-only full-quantity SELL quote and conservative native-network cost estimate."""
     owner = owner or trader.wallet_address()
@@ -1043,6 +1062,9 @@ def _max_hold_executable_quote(token, position, quantity_raw, owner=None):
         "swap_gas_source": network["swap_gas_source"],
         "gas_price_wei": network["gas_price_wei"],
         "estimated_network_cost_sda": str(network_cost_sda),
+        "estimated_approval_cost_sda": str(
+            Decimal(network["approval_gas_units"]) * Decimal(network["gas_price_wei"]) / Decimal(10 ** 18)
+        ),
         "remaining_cost_basis_sda": str(remaining_cost),
         "expected_net_pnl_sda": str(net_pnl_sda),
         "deadline": int(deadline), "calldata": calldata,
@@ -1079,6 +1101,8 @@ def _max_hold_shadow_row(token, position, price, pnl_fraction, age_hours,
         "executable_sell_quote": (quote or {}).get("quoted_wsda_raw"),
         "expected_proceeds_sda": (quote or {}).get("expected_proceeds_sda"),
         "expected_net_pnl_sda": (quote or {}).get("expected_net_pnl_sda"),
+        "estimated_network_cost_sda": (quote or {}).get("estimated_network_cost_sda"),
+        "estimated_approval_cost_sda": (quote or {}).get("estimated_approval_cost_sda"),
         "decision": ("SHADOW_MAX_HOLD_STAGNANT_PROFIT"
                      if decision == "MAX_HOLD_STAGNANT_PROFIT"
                      else "SHADOW_MAX_HOLD_HOLD"),
@@ -1245,6 +1269,11 @@ def evaluate_position(token, symbol, market_price, price_timestamp=None, wallet_
         )
         if intent is None:
             return {"action": "SELL", "status": "INTENT_ALREADY_EXISTS", "token": token}
+        if decision.get("reason") == "MAX_HOLD_STAGNANT_PROFIT" and max_hold_diagnostics:
+            intent["max_hold_approval_cost_sda"] = (
+                max_hold_diagnostics.get("estimated_approval_cost_sda") or "0"
+            )
+            intent["max_hold_preflight_net_pnl_sda"] = max_hold_diagnostics.get("expected_net_pnl_sda")
         _persist_intent(intent)
         if not cfg.REAL_TRADING_ENABLED or cfg.REAL_TRADING_DRY_RUN:
             return {"action": "SELL", "status": "DRY_RUN", "token": token,
@@ -1298,6 +1327,10 @@ def evaluate_position(token, symbol, market_price, price_timestamp=None, wallet_
                 return {"action": "SELL", "status": "PENDING_CONFIRMATION", "token": token, "tx": tx}
             if int(receipt.get("status", "0x0"), 16) != 1:
                 return _fail(token, intent, "APPROVAL_REVERTED", tx, deterministic=True)
+            if intent.get("sell_reason") == "MAX_HOLD_STAGNANT_PROFIT":
+                actual_approval_cost = _receipt_native_fee_sda(receipt, intent)
+                if actual_approval_cost is not None:
+                    intent["max_hold_approval_cost_sda"] = str(actual_approval_cost)
             intent.pop("tx_hash", None)
             intent["stage"] = "APPROVAL_CONFIRMED"
             intent["status"] = "APPROVAL_CONFIRMED"
