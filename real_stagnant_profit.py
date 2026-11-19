@@ -78,19 +78,20 @@ def record_observation(state, token, position, price, pnl_pct, timestamp, now=No
         last_observation = observations[-1]
         last = _time(last_observation.get("timestamp"))
         if last and 0 <= (stamp - last).total_seconds() < HISTORY_SAMPLE_INTERVAL_SECONDS:
-            # Keep both the latest mark (for the baseline) and bucket maximum
-            # (for stagnation detection) without writing a dense time series.
+            # Keep the bucket start for coverage, the latest mark for current PnL,
+            # and the bucket maximum for improvement without dense state writes.
             old_max = _number(last_observation.get("max_pnl_pct"))
             old_latest = _number(last_observation.get("pnl_pct"))
             bucket_max = max(value for value in (old_max, old_latest, pnl) if value is not None)
             last_observation.update({
-                "timestamp": stamp.isoformat(), "price": str(px),
+                "latest_timestamp": stamp.isoformat(), "price": str(px),
                 "pnl_pct": float(pnl), "max_pnl_pct": float(bucket_max),
             })
             return observations
         if last and stamp < last:
             return observations
-    observations.append({"timestamp": stamp.isoformat(), "price": str(px),
+    observations.append({"timestamp": stamp.isoformat(), "latest_timestamp": stamp.isoformat(),
+                         "price": str(px), "start_pnl_pct": float(pnl),
                          "pnl_pct": float(pnl), "max_pnl_pct": float(pnl)})
     observations[:] = [item for item in observations
                        if _time(item.get("timestamp")) and _time(item.get("timestamp")) >= cutoff]
@@ -212,8 +213,12 @@ def evaluate(position, *, now, price, price_timestamp, history, trend,
     points = []
     for item in history or []:
         stamp = _time(item.get("timestamp"))
-        value = _number(item.get("pnl_pct"))
-        bucket_max = _number(item.get("max_pnl_pct")) or value
+        value = _number(item.get("start_pnl_pct"))
+        if value is None:
+            value = _number(item.get("pnl_pct"))
+        bucket_max = _number(item.get("max_pnl_pct"))
+        if bucket_max is None:
+            bucket_max = value
         if stamp is None or value is None or bucket_max is None or stamp > now or stamp < window_start:
             continue
         points.append((stamp, value, bucket_max))
