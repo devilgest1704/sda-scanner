@@ -34,3 +34,32 @@ Each JSON line reports one REAL position's source, age, gross and estimated
 NET exit PnL, history coverage, trend and decision blockers. A null value means
 the corresponding data could not be established. This command never writes
 state, signs or broadcasts transactions, or contacts Telegram.
+
+## REAL BUY market-source outages
+
+Both collectors use the PinetSwap Supabase `public.token_transactions` feed.
+Transient failures use bounded retries with jitter. A long `Retry-After` is
+honored across scans without blocking the scan loop. Failure diagnostics store
+the response status, server, Ray ID and safe proxy/error codes, not raw bodies
+or credentials. An HTTP success is not sufficient: the market collector must
+see a valid recent trade before publishing healthy data. Each scan resets its
+BUY availability flag; existing wallet, signal and capacity gates still apply.
+
+### Independent fallback proposal (disabled)
+
+Run a separate read-only indexer using confirmed PinetSwap pool `Swap` logs
+from an independently operated Sidra RPC, with `https://node.sidrachain.com`
+as an initial validation endpoint. Reuse the ABI decoding in the liquidity
+scanner, discover and verify the covered pools and token decimals, and use
+receipts and block timestamps to reconstruct `token_transactions` rows:
+hash, token, direction, participants, SDA price, SDA volume and timestamp.
+Do not treat router-level sender/recipient as user wallet addresses without
+verifying receipt semantics. Preserve unique log identity, reconcile reorgs,
+and handle duplicate, multi-pool, multi-hop and non-WSDA routes explicitly.
+
+Before enabling BUY fallback, compare both feeds in shadow mode over an
+overlapping production period. Verify coverage and lag against the confirmed
+chain tip; compare per-swap values and both 1h/4h flow and whale aggregates;
+check that admission decisions match. Test provider limits, gaps and outage
+recovery. Unverified coverage, excessive lag, ambiguous mappings or mismatch
+must keep REAL BUY closed. A SELL reference quote is not a transaction feed.

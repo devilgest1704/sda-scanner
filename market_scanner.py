@@ -1,13 +1,14 @@
 import json
 import os
-import traceback
-import time
+import math
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import requests
 
 from tools.market_history_integrity import append_transaction, compact_history
+from tools.market_source_http import SupabaseSourceError, fetch_rows
+from tools.worker_code_pin import sell_protection_text
 
 
 # ============================================================
@@ -36,20 +37,12 @@ MIN_RECENT_TRADES = 2
 SUPABASE_RETRIES = int(os.environ.get("MARKET_SUPABASE_RETRIES", "3"))
 SUPABASE_RETRY_BASE_SECONDS = float(os.environ.get("MARKET_SUPABASE_RETRY_BASE_SECONDS", "5"))
 SOURCE_ALERT_INTERVAL_SECONDS = 3600
-TRANSIENT_SUPABASE_STATUS = {429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 530}
+MAX_SOURCE_TRADE_AGE_SECONDS = 900
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
     "accept-profile": "public",
 }
-
-
-class SupabaseSourceError(RuntimeError):
-    def __init__(self, message, status_code=None, attempts=1, transient=False):
-        super().__init__(message)
-        self.status_code = status_code
-        self.attempts = attempts
-        self.transient = transient
 
 
 def _read_source_state():
@@ -82,8 +75,9 @@ def _record_source_unavailable(error, now=None):
         "source_health": "SOURCE_UNAVAILABLE",
         "last_attempt_at": stamp,
         "failure_count": int(state.get("failure_count", 0) or 0) + 1,
-        "last_error": str(error)[:500],
+        "last_error": str(error) if isinstance(error, SupabaseSourceError) else type(error).__name__,
         "last_error_http_status": getattr(error, "status_code", None),
+        "last_error_diagnostic": getattr(error, "diagnostic", None),
     })
     if should_alert:
         state["last_alert_at"] = stamp
@@ -102,6 +96,7 @@ def _record_source_recovered(now=None):
         "failure_count": 0,
         "last_error": None,
         "last_error_http_status": None,
+        "last_error_diagnostic": None,
     })
     _write_source_state(state)
     return recovered
@@ -119,7 +114,7 @@ def _send_market_alert(text):
             timeout=(2, 8),
         )
     except Exception as exc:
-        print(f"Market source alert failed: {type(exc).__name__}: {exc}")
+        print(f"Market source alert failed: {type(exc).__name__}")
 
 
 # ============================================================
@@ -245,49 +240,9 @@ def fetch_transactions():
         "limit": FETCH_LIMIT,
     }
 
-    last_error = None
-    for attempt in range(1, SUPABASE_RETRIES + 1):
-        try:
-            response = requests.get(
-                SUPABASE_URL,
-                headers=HEADERS,
-                params=params,
-                timeout=30,
-            )
-            if response.status_code in TRANSIENT_SUPABASE_STATUS:
-                raise requests.HTTPError(
-                    f"Supabase transient HTTP {response.status_code}", response=response)
-            response.raise_for_status()
-            data = response.json()
-            if not isinstance(data, list):
-                raise SupabaseSourceError("Supabase returned unexpected data format", attempts=attempt)
-            return data
-        except requests.exceptions.RequestException as exc:
-            last_error = exc
-            status = getattr(getattr(exc, "response", None), "status_code", None)
-            transient = isinstance(exc, (
-                requests.exceptions.Timeout,
-                requests.exceptions.ConnectionError,
-                requests.exceptions.ChunkedEncodingError,
-            )) or status in TRANSIENT_SUPABASE_STATUS
-            if not transient:
-                raise SupabaseSourceError(
-                    f"Supabase request rejected (HTTP {status or 'invalid response'}): {exc}",
-                    status_code=status, attempts=attempt) from exc
-            if attempt >= SUPABASE_RETRIES:
-                raise SupabaseSourceError(
-                    f"Supabase temporarily unavailable after {attempt} attempts: {exc}",
-                    status_code=status, attempts=attempt, transient=True) from exc
-            delay = SUPABASE_RETRY_BASE_SECONDS * (2 ** (attempt - 1))
-            print(
-                f"MARKET SUPABASE TRANSIENT ERROR (attempt {attempt}/{SUPABASE_RETRIES}, "
-                f"HTTP {status or 'network'}); retrying in {delay:g}s: {exc}")
-            time.sleep(delay)
-        except SupabaseSourceError:
-            raise
-
-    raise SupabaseSourceError(
-        f"Supabase fetch failed: {last_error}", attempts=SUPABASE_RETRIES, transient=True)
+    return fetch_rows(SUPABASE_URL, HEADERS, params, retries=SUPABASE_RETRIES,
+                      base_delay=SUPABASE_RETRY_BASE_SECONDS,
+                      previous=_read_source_state().get("last_error_diagnostic"))
 
 
 # ============================================================
@@ -305,7 +260,7 @@ def normalize_transaction(tx):
         timestamp = parse_timestamp(tx.get("tx_timestamp"))
         tx_type = str(tx.get("tx_type") or "").lower()
 
-        if price <= 0 or volume < 0 or timestamp is None:
+        if not math.isfinite(price) or not math.isfinite(volume) or price <= 0 or volume < 0 or timestamp is None:
             return None
 
         if tx_type not in ("buy", "sell"):
@@ -527,6 +482,11 @@ try:
     print("📈 MARKET SCANNER START")
 
     transactions = fetch_transactions()
+    observed_at = now_utc()
+    normalized = [(raw.get("token_address"), normalize_transaction(raw)) for raw in transactions]
+    if not any(tx and tx["hash"] and 0 <= (observed_at - parse_timestamp(tx["timestamp"])).total_seconds()
+               <= MAX_SOURCE_TRADE_AGE_SECONDS for _, tx in normalized):
+        raise SupabaseSourceError("Supabase feed has no fresh valid transactions")
     print(f"Loaded transactions: {len(transactions)}")
 
     metadata = load_metadata()
@@ -549,13 +509,9 @@ try:
 
     new_transactions = 0
 
-    for raw_tx in transactions:
-        tx = normalize_transaction(raw_tx)
-
+    for token_address, tx in normalized:
         if tx is None:
             continue
-
-        token_address = raw_tx.get("token_address")
         if not token_address:
             continue
 
@@ -592,7 +548,7 @@ try:
 
     save_market_data(market_data)
     if _record_source_recovered():
-        _send_market_alert("✅ BUY data recovered\nMarket source healthy")
+        _send_market_alert("✅ Market source recovered")
 
     active_tokens = sum(
         1
@@ -669,13 +625,13 @@ try:
         send_telegram(message[:4000])
 
 except Exception as exc:
-    error_text = traceback.format_exc()
-    print(error_text)
+    print(f"MARKET SOURCE FAILED: {exc if isinstance(exc, SupabaseSourceError) else type(exc).__name__}")
     _, should_alert = _record_source_unavailable(exc)
     if should_alert:
         status = getattr(exc, "status_code", None)
         suffix = f" (HTTP {status})" if status else ""
         _send_market_alert(
             f"⚠️ BUY data degraded\nMarket source unavailable{suffix}\n"
-            "REAL SELL protection: ACTIVE")
-    raise SystemExit(75) from exc
+            f"{sell_protection_text()}"
+        )
+    raise SystemExit(75) from None

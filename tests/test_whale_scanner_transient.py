@@ -1,5 +1,3 @@
-import contextlib
-import io
 import json
 import tempfile
 import unittest
@@ -12,7 +10,7 @@ import whale_scanner
 
 
 def _response(status, payload=None):
-    response = Mock(status_code=status, text=f"HTTP {status}")
+    response = Mock(status_code=status, text=f"HTTP {status}", headers={})
     response.json.return_value = payload
     if status >= 400:
         response.raise_for_status.side_effect = requests.HTTPError(
@@ -21,7 +19,12 @@ def _response(status, payload=None):
 
 
 class WhaleScannerTransientTests(unittest.TestCase):
-    @patch("whale_scanner.time.sleep")
+    def setUp(self):
+        jitter = patch("tools.market_source_http.uniform", return_value=0)
+        jitter.start()
+        self.addCleanup(jitter.stop)
+
+    @patch("tools.market_source_http.time.sleep")
     @patch("whale_scanner.requests.get")
     def test_http_521_retries_and_recovers_on_third_attempt(self, get, sleep):
         get.side_effect = [
@@ -31,30 +34,31 @@ class WhaleScannerTransientTests(unittest.TestCase):
         self.assertEqual(get.call_count, 3)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 10])
 
-    @patch("whale_scanner.time.sleep")
+    @patch("tools.market_source_http.time.sleep")
     @patch("whale_scanner.requests.get")
     def test_http_520_521_and_530_are_transient(self, get, sleep):
-        for status in (520, 521, 530):
+        for status in (520, 521, 530, 540):
             with self.subTest(status=status):
                 get.reset_mock()
                 sleep.reset_mock()
                 get.return_value = _response(status)
-                with self.assertRaises(whale_scanner.TransientSupabaseError) as raised:
+                with self.assertRaises(whale_scanner.SupabaseSourceError) as raised:
                     whale_scanner.fetch_supabase()
                 self.assertEqual(raised.exception.status_code, status)
+                self.assertTrue(raised.exception.transient)
                 self.assertEqual(get.call_count, 3)
                 self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 10])
 
-    @patch("whale_scanner.time.sleep")
+    @patch("tools.market_source_http.time.sleep")
     @patch("whale_scanner.requests.get")
     def test_http_429_uses_bounded_backoff(self, get, sleep):
         get.return_value = _response(429)
-        with self.assertRaises(whale_scanner.TransientSupabaseError):
+        with self.assertRaises(whale_scanner.SupabaseSourceError):
             whale_scanner.fetch_supabase()
         self.assertEqual(get.call_count, 3)
         self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 10])
 
-    @patch("whale_scanner.time.sleep")
+    @patch("tools.market_source_http.time.sleep")
     @patch("whale_scanner.requests.get")
     def test_timeout_retries_and_recovers(self, get, sleep):
         get.side_effect = [requests.Timeout("slow"), _response(200, [])]
@@ -62,7 +66,7 @@ class WhaleScannerTransientTests(unittest.TestCase):
         self.assertEqual(get.call_count, 2)
         sleep.assert_called_once_with(5)
 
-    @patch("whale_scanner.time.sleep")
+    @patch("tools.market_source_http.time.sleep")
     @patch("whale_scanner.requests.get")
     def test_http_400_is_not_retried(self, get, sleep):
         get.return_value = _response(400)
@@ -84,7 +88,7 @@ class WhaleScannerTransientTests(unittest.TestCase):
                 "whale_source_health": "HEALTHY",
             }), encoding="utf-8")
             data_path.write_text('{"token": {"whale_buy_volume": 42}}', encoding="utf-8")
-            error = whale_scanner.TransientSupabaseError(
+            error = whale_scanner.SupabaseSourceError(
                 "temporary 521", status_code=521, attempts=3, transient=True)
             now = datetime.now(timezone.utc)
             with patch.object(whale_scanner, "STATE_FILE", str(state_path)):
@@ -100,7 +104,7 @@ class WhaleScannerTransientTests(unittest.TestCase):
                 self.assertEqual(data_path.read_text(encoding="utf-8"),
                                  '{"token": {"whale_buy_volume": 42}}')
 
-    def test_transient_error_logs_traceback_but_sends_concise_alert_once(self):
+    def test_transient_error_alert_uses_last_runtime_sell_health(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = Path(directory, "whale_state.json")
             data_path = Path(directory, "whale_data.json")
@@ -109,7 +113,7 @@ class WhaleScannerTransientTests(unittest.TestCase):
             prior = datetime.now(timezone.utc).isoformat()
             state_path.write_text(json.dumps({"updated_at": prior}), encoding="utf-8")
             data_path.write_text('{"prior":"snapshot"}', encoding="utf-8")
-            error = whale_scanner.TransientSupabaseError(
+            error = whale_scanner.SupabaseSourceError(
                 "temporary 521", status_code=521, attempts=3, transient=True)
             with patch.object(whale_scanner, "STATE_FILE", str(state_path)), \
                  patch.object(whale_scanner, "DATA_FILE", str(data_path)), \
@@ -118,17 +122,15 @@ class WhaleScannerTransientTests(unittest.TestCase):
                  patch.object(whale_scanner, "TOKEN", "test-token"), \
                  patch.object(whale_scanner, "CHAT_ID", "test-chat"), \
                  patch.object(whale_scanner, "fetch_supabase", side_effect=error), \
+                 patch.object(whale_scanner, "sell_protection_text", return_value="REAL SELL protection: FAILING"), \
                  patch.object(whale_scanner, "_send_whale_alert") as alert:
-                stderr = io.StringIO()
-                with contextlib.redirect_stderr(stderr):
-                    with self.assertRaises(SystemExit) as raised:
-                        whale_scanner.run()
+                with self.assertRaises(SystemExit) as raised:
+                    whale_scanner.run()
                 self.assertEqual(raised.exception.code, 75)
-                self.assertIn("Traceback (most recent call last)", stderr.getvalue())
                 alert.assert_called_once()
                 self.assertIn("BUY data degraded", alert.call_args.args[0])
                 self.assertNotIn("Traceback", alert.call_args.args[0])
-                self.assertIn("REAL SELL protection: ACTIVE", alert.call_args.args[0])
+                self.assertIn("REAL SELL protection: FAILING", alert.call_args.args[0])
                 self.assertEqual(data_path.read_text(encoding="utf-8"), '{"prior":"snapshot"}')
 
     def test_successful_request_marks_source_fresh_and_sends_recovery_once(self):
@@ -154,7 +156,7 @@ class WhaleScannerTransientTests(unittest.TestCase):
                 self.assertEqual(state["data_source_health"]["whale"], "HEALTHY")
                 self.assertEqual(state["updated_at"], state["last_successful_whale_at"])
                 self.assertTrue(whale_scanner.ts(state["updated_at"]))
-                alert.assert_called_once_with("✅ BUY data recovered\nWhale source healthy")
+                alert.assert_called_once_with("✅ Whale source recovered")
                 whale_scanner.main()
                 alert.assert_called_once()
 
