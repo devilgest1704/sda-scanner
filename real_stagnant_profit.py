@@ -129,17 +129,21 @@ def assess_trend(context, now=None):
                 "macd_state": "UNKNOWN", "flow_1h": float(n1) if n1 is not None else None,
                 "flow_4h": float(n4) if n4 is not None else None}
     macd1, macd4 = (t1.get("macd") or {}), (t4.get("macd") or {})
-    macd_bullish = any(bool(m.get("bullish")) and bool(m.get("histogram_rising"))
-                       for m in (macd1, macd4) if isinstance(m, dict))
-    macd_state = "BULLISH_RISING" if macd_bullish else (
-        "BULLISH" if any(bool(m.get("bullish")) for m in (macd1, macd4)
-                         if isinstance(m, dict)) else "NON_BULLISH")
+    macd_rows = [m for m in (macd1, macd4) if isinstance(m, dict)]
+    macd_positive = any(
+        bool(m.get("bullish")) or (
+            (_number(m.get("histogram")) or Decimal(0)) > 0 and bool(m.get("histogram_rising"))
+        ) for m in macd_rows
+    )
+    macd_rising = any(bool(m.get("histogram_rising")) for m in macd_rows)
+    macd_state = "BULLISH_RISING" if macd_positive and macd_rising else (
+        "BULLISH" if macd_positive else "NON_BULLISH")
     positive_flow = ((n1 > 0 and (tx1 or 0) > 0) or (n4 > 0 and (tx4 or 0) > 0))
     breakout = context.get("breakout_volume_trend") or {}
     bullish_impulse = bool(breakout.get("eligible")) and (
         (_number(breakout.get("breakout_pct")) or Decimal(0)) > 0)
     bullish = bool(m1 >= Decimal("0.5") or m4 >= Decimal("1.0") or
-                   macd_bullish or positive_flow or bullish_impulse)
+                   macd_positive or positive_flow or bullish_impulse)
     return {
         "state": "POSITIVE" if bullish else "FLAT",
         "fresh": True, "bullish": bullish, "blocker": "POSITIVE_MOMENTUM" if bullish else None,

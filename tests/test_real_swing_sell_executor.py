@@ -239,6 +239,7 @@ class SwingSellExecutionTests(unittest.TestCase):
                     {"timestamp": "2026-11-08T18:00:00+00:00", "price": "0.0204", "pnl_pct": 2.0},
                     {"timestamp": "2026-11-08T21:00:00+00:00", "price": "0.02042", "pnl_pct": 2.1},
                     {"timestamp": "2026-11-09T00:00:00+00:00", "price": "0.02044", "pnl_pct": 2.2},
+                    {"timestamp": "2026-11-09T06:00:00+00:00", "price": "0.02045", "pnl_pct": 2.25},
                     {"timestamp": "2026-11-09T12:00:00+00:00", "price": "0.02046", "pnl_pct": 2.3},
                 ],
             }
