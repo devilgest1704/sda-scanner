@@ -168,17 +168,18 @@ class MaxHoldStagnantProfitTests(unittest.TestCase):
         pos = position(position_id="p1")
         state = {"positions": {"token": pos}}
         first = policy.record_observation(
-            state, "token", pos, "1.01", 2.0,
+            state, "token", pos, "1.02", 2.5,
             (NOW-timedelta(minutes=1)).isoformat(), now=NOW,
         )
         second = policy.record_observation(
-            state, "token", pos, "1.02", 2.5,
+            state, "token", pos, "1.01", 2.0,
             NOW.isoformat(), now=NOW,
         )
         self.assertEqual(len(first), 1)
         self.assertEqual(len(second), 1)
-        self.assertEqual(second[-1]["pnl_pct"], 2.5)
-        self.assertEqual(second[-1]["price"], "1.02")
+        self.assertEqual(second[-1]["pnl_pct"], 2.0)
+        self.assertEqual(second[-1]["max_pnl_pct"], 2.5)
+        self.assertEqual(second[-1]["price"], "1.01")
 
     def test_stale_observation_is_ignored(self):
         state = {"positions": {"token": position(position_id="p1")}}

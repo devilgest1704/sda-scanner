@@ -76,17 +76,20 @@ def record_observation(state, token, position, price, pnl_pct, timestamp, now=No
         last_observation = observations[-1]
         last = _time(last_observation.get("timestamp"))
         if last and 0 <= (stamp - last).total_seconds() < HISTORY_SAMPLE_INTERVAL_SECONDS:
-            # Keep the maximum PnL seen inside the sampling bucket, not merely
-            # the last mark; this preserves short-lived peaks without dense writes.
-            last_pnl = _number(last_observation.get("pnl_pct"))
-            if last_pnl is None or pnl > last_pnl:
-                observations[-1] = {"timestamp": stamp.isoformat(), "price": str(px),
-                                     "pnl_pct": float(pnl)}
+            # Keep both the latest mark (for the baseline) and bucket maximum
+            # (for stagnation detection) without writing a dense time series.
+            old_max = _number(last_observation.get("max_pnl_pct"))
+            old_latest = _number(last_observation.get("pnl_pct"))
+            bucket_max = max(value for value in (old_max, old_latest, pnl) if value is not None)
+            last_observation.update({
+                "timestamp": stamp.isoformat(), "price": str(px),
+                "pnl_pct": float(pnl), "max_pnl_pct": float(bucket_max),
+            })
             return observations
         if last and stamp < last:
             return observations
     observations.append({"timestamp": stamp.isoformat(), "price": str(px),
-                         "pnl_pct": float(pnl)})
+                         "pnl_pct": float(pnl), "max_pnl_pct": float(pnl)})
     observations[:] = [item for item in observations
                        if _time(item.get("timestamp")) and _time(item.get("timestamp")) >= cutoff]
     if len(observations) > MAX_HISTORY_POINTS:
@@ -208,9 +211,10 @@ def evaluate(position, *, now, price, price_timestamp, history, trend,
     for item in history or []:
         stamp = _time(item.get("timestamp"))
         value = _number(item.get("pnl_pct"))
-        if stamp is None or value is None or stamp > now or stamp < window_start:
+        bucket_max = _number(item.get("max_pnl_pct")) or value
+        if stamp is None or value is None or bucket_max is None or stamp > now or stamp < window_start:
             continue
-        points.append((stamp, value))
+        points.append((stamp, value, bucket_max))
     points.sort(key=lambda row: row[0])
     if len(points) < 4:
         result["blocker"] = "INSUFFICIENT_HISTORY"
@@ -222,11 +226,12 @@ def evaluate(position, *, now, price, price_timestamp, history, trend,
         result["blocker"] = "INSUFFICIENT_HISTORY"
         result["history_coverage_pct"] = round(max(0.0, coverage) * 100, 2)
         return result
-    improvement = max(value for _, value in points) - points[0][1]
+    maximum_pnl = max(point[2] for point in points)
+    improvement = maximum_pnl - points[0][1]
     result.update({
         "history_coverage_pct": round(min(1.0, coverage) * 100, 2),
         "pnl_24h_start_pct": float(points[0][1]),
-        "pnl_24h_max_pct": float(max(value for _, value in points)),
+        "pnl_24h_max_pct": float(maximum_pnl),
         "improvement_pp": float(improvement),
     })
     if improvement >= Decimal(str(MIN_IMPROVEMENT_PP)):
