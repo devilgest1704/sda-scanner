@@ -132,9 +132,8 @@ def assess_trend(context, now=None):
     macd1, macd4 = (t1.get("macd") or {}), (t4.get("macd") or {})
     macd_rows = [m for m in (macd1, macd4) if isinstance(m, dict)]
     macd_positive = any(
-        bool(m.get("bullish")) or (
-            (_number(m.get("histogram")) or Decimal(0)) > 0 and bool(m.get("histogram_rising"))
-        ) for m in macd_rows
+        bool(m.get("bullish")) or bool(m.get("histogram_rising"))
+        for m in macd_rows
     )
     macd_rising = any(bool(m.get("histogram_rising")) for m in macd_rows)
     macd_state = "BULLISH_RISING" if macd_positive and macd_rising else (
