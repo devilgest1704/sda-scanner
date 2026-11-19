@@ -77,6 +77,9 @@ def record_observation(state, token, position, price, pnl_pct, timestamp, now=No
     if observations:
         last_observation = observations[-1]
         last = _time(last_observation.get("timestamp"))
+        latest = _time(last_observation.get("latest_timestamp") or last_observation.get("timestamp"))
+        if latest and stamp < latest:
+            return observations
         if last and 0 <= (stamp - last).total_seconds() < HISTORY_SAMPLE_INTERVAL_SECONDS:
             # Keep the bucket start for coverage, the latest mark for current PnL,
             # and the bucket maximum for improvement without dense state writes.
