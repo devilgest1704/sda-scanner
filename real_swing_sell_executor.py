@@ -28,6 +28,7 @@ from pathlib import Path
 import real_trader as trader
 import real_trading_config as cfg
 import swing_sell_v2 as policy
+import real_stagnant_profit as stagnant_profit
 
 PRE_SWAP_STAGES = {
     "CREATED", "APPROVAL_PENDING", "APPROVAL_SUBMITTED", "APPROVAL_CONFIRMED", "READY_TO_SWAP",
@@ -69,6 +70,7 @@ REASON_MAP = {
     "LOSS_LIMIT": "STOP_LOSS",
     "HARD_TP": "HARD_TP",
     "TRAILING_STOP": "TRAILING_STOP",
+    "MAX_HOLD_STAGNANT_PROFIT": "MAX_HOLD_STAGNANT_PROFIT",
 }
 
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
@@ -909,6 +911,24 @@ def _submit_swap(token, intent):
         "quoted_wsda_raw": int(quoted), "minimum_wsda_raw": int(minimum),
         "deadline": int(deadline), "stage": "READY_TO_SWAP", "status": "READY_TO_SWAP",
     })
+    if intent.get("sell_reason") == "MAX_HOLD_STAGNANT_PROFIT":
+        try:
+            gas_units = int(trader.estimate_gas(owner, cfg.ROUTER_ADDRESS, calldata, 0))
+            gas_price_wei = int(trader.gas_price())
+            network_cost = Decimal(gas_units) * Decimal(gas_price_wei) / Decimal(10 ** 18)
+            proceeds = Decimal(int(quoted)) / Decimal(10 ** 18)
+            remaining_cost = Decimal(str(position.get("remaining_cost_basis") or 0))
+            net_pnl = proceeds - remaining_cost - network_cost
+        except Exception as exc:
+            _cancel_intent(token, intent, "CANCELLED_MAX_HOLD_NET_RECHECK_FAILED")
+            return {"action": "HOLD", "status": "NET_EXIT_RECHECK_FAILED",
+                    "blocker": f"{type(exc).__name__}: {str(exc)[:160]}", "token": token}
+        if net_pnl <= 0:
+            _cancel_intent(token, intent, "CANCELLED_MAX_HOLD_NET_NOT_PROFITABLE")
+            return {"action": "HOLD", "status": "NET_EXIT_NOT_PROFITABLE",
+                    "expected_net_pnl_sda": str(net_pnl), "token": token}
+        intent["max_hold_net_recheck_sda"] = str(net_pnl)
+        _update_intent(token, intent)
     _update_intent(token, intent)
 
     def persist_swap(signed):
@@ -943,6 +963,82 @@ def _submit_swap(token, intent):
     if not _mark_swap_mined(token, intent, tx, receipt, owner):
         return {"action": "SELL", "status": "ACCOUNTING_UNVERIFIED", "token": token}
     return _resolve_existing(token, intent)
+
+
+
+def _max_hold_executable_quote(token, position, quantity_raw, owner=None):
+    """Read-only full-quantity SELL quote and conservative native-network cost estimate."""
+    owner = owner or trader.wallet_address()
+    if not owner:
+        raise RuntimeError("WALLET_ADDRESS_UNAVAILABLE")
+    fee, quoted, _quote_calldata, deadline = trader.quote_best_live_fee(
+        token, cfg.WSDA_ADDRESS, token, owner, int(quantity_raw), value_wei=0
+    )
+    quoted = int(quoted)
+    minimum = int(trader.min_out(quoted))
+    if quoted <= 0 or minimum <= 0:
+        raise RuntimeError("EXECUTABLE_SELL_QUOTE_INVALID")
+    calldata = trader.build_exact_input_single(
+        token, cfg.WSDA_ADDRESS, fee, owner, deadline, int(quantity_raw), minimum
+    )
+    gas_units = int(trader.estimate_gas(owner, cfg.ROUTER_ADDRESS, calldata, 0))
+    gas_price_wei = int(trader.gas_price())
+    if gas_units <= 0 or gas_price_wei <= 0:
+        raise RuntimeError("NETWORK_COST_ESTIMATE_INVALID")
+    proceeds_sda = Decimal(quoted) / Decimal(10 ** 18)
+    network_cost_sda = Decimal(gas_units) * Decimal(gas_price_wei) / Decimal(10 ** 18)
+    remaining_cost = Decimal(str(position.get(
+        "remaining_cost_basis", position.get("amount_sda", position.get("cost_sda", 0))
+    ) or 0))
+    # The router quote already includes the selected pool fee. Do not subtract it twice.
+    net_pnl_sda = proceeds_sda - remaining_cost - network_cost_sda
+    return {
+        "fee_tier": int(fee), "quoted_wsda_raw": quoted,
+        "minimum_wsda_raw": minimum, "expected_proceeds_sda": str(proceeds_sda),
+        "estimated_gas_units": gas_units, "gas_price_wei": gas_price_wei,
+        "estimated_network_cost_sda": str(network_cost_sda),
+        "remaining_cost_basis_sda": str(remaining_cost),
+        "expected_net_pnl_sda": str(net_pnl_sda),
+        "deadline": int(deadline), "calldata": calldata,
+    }
+
+
+def _persist_max_hold_telemetry(state, row):
+    rows = state.setdefault("real_max_hold_shadow", [])
+    rows.append(dict(row))
+    # Keep the most recent evaluations only; this is diagnostic state, not a ledger.
+    del rows[:-1000]
+
+
+def _max_hold_shadow_row(token, position, price, pnl_fraction, age_hours,
+                          history_result, trend, quote, decision, blocker):
+    return {
+        "token": token, "timestamp": trader.now(),
+        "age_hours": age_hours,
+        "source": "MANUAL" if (position.get("source") == "MANUAL" or position.get("manual_imported")) else "AUTO",
+        "entry_price": str(history_result.get("entry_price") or ""),
+        "current_reference_price": str(price),
+        "gross_pnl_pct": float(pnl_fraction * 100),
+        "gross_pnl_sda": history_result.get("gross_pnl_sda"),
+        "pnl_24h_start_pct": history_result.get("pnl_24h_start_pct"),
+        "pnl_24h_max_pct": history_result.get("pnl_24h_max_pct"),
+        "improvement_24h_pp": history_result.get("improvement_pp"),
+        "history_coverage_pct": history_result.get("history_coverage_pct"),
+        "momentum_1h": (trend or {}).get("momentum_1h"),
+        "momentum_4h": (trend or {}).get("momentum_4h"),
+        "macd_state": (trend or {}).get("macd_state"),
+        "flow_1h": (trend or {}).get("flow_1h"),
+        "flow_4h": (trend or {}).get("flow_4h"),
+        "trend": (trend or {}).get("state", "UNKNOWN"),
+        "executable_sell_quote": (quote or {}).get("quoted_wsda_raw"),
+        "expected_proceeds_sda": (quote or {}).get("expected_proceeds_sda"),
+        "expected_net_pnl_sda": (quote or {}).get("expected_net_pnl_sda"),
+        "decision": ("SHADOW_MAX_HOLD_STAGNANT_PROFIT"
+                     if decision == "MAX_HOLD_STAGNANT_PROFIT"
+                     else "SHADOW_MAX_HOLD_HOLD"),
+        "execution_decision": decision or "HOLD",
+        "blocker": blocker,
+    }
 
 
 def _new_intent(token, symbol, position, decision, market_price, price_timestamp):
@@ -980,7 +1076,7 @@ def _new_intent(token, symbol, position, decision, market_price, price_timestamp
     return intent, None
 
 
-def evaluate_position(token, symbol, market_price, price_timestamp=None, wallet_reconciled=False):
+def evaluate_position(token, symbol, market_price, price_timestamp=None, wallet_reconciled=False, market_context=None):
     token = trader.addr(token)
     with _token_lock(token):
         migrated = migrate_if_needed()
@@ -1036,10 +1132,64 @@ def evaluate_position(token, symbol, market_price, price_timestamp=None, wallet_
             return {"action": "HOLD", "status": "NO_POSITION", "token": token}
         current.update(position)
         state["positions"][token] = current
+
+        max_hold_diagnostics = None
+        if decision["action"] == "HOLD":
+            now_dt = _now_dt()
+            opened_at = current.get("opened_at") or current.get("at") or current.get("buy_timestamp")
+            opened_dt = _parse_time(opened_at)
+            age_hours = ((now_dt - opened_dt).total_seconds() / 3600
+                         if opened_dt is not None else None)
+            quantity = int(current.get("remaining_quantity", current.get("token_amount_raw", 0)) or 0)
+            gross_pnl_sda = (price * quantity_human) - cost
+            history = stagnant_profit.record_observation(
+                state, token, current, price, float(pnl_fraction * 100),
+                price_timestamp, now=now_dt,
+            )
+            trend = stagnant_profit.assess_trend(market_context or {}, now=now_dt)
+            base = stagnant_profit.evaluate(
+                current, now=now_dt, price=price, price_timestamp=price_timestamp,
+                history=history, trend=trend, current_pnl_pct=float(pnl_fraction * 100),
+                net_exit_pnl_sda=None, pending_sell=bool(state.get("pending_sells", {}).get(token)),
+            )
+            base.update({
+                "entry_price": str(entry_price),
+                "gross_pnl_sda": str(gross_pnl_sda),
+                "age_hours": age_hours,
+            })
+            quote = None
+            execution_decision = None
+            blocker = base.get("blocker")
+            if base.get("eligible_without_net"):
+                try:
+                    quote = _max_hold_executable_quote(token, current, quantity)
+                    net_value = Decimal(quote["expected_net_pnl_sda"])
+                    final = stagnant_profit.evaluate(
+                        current, now=now_dt, price=price, price_timestamp=price_timestamp,
+                        history=history, trend=trend, current_pnl_pct=float(pnl_fraction * 100),
+                        net_exit_pnl_sda=net_value,
+                        pending_sell=bool(state.get("pending_sells", {}).get(token)),
+                    )
+                    base.update(final)
+                    blocker = base.get("blocker")
+                    if base.get("decision") == "MAX_HOLD_STAGNANT_PROFIT":
+                        execution_decision = "MAX_HOLD_STAGNANT_PROFIT"
+                        decision = {"action": "FULL_SELL", "reason": "MAX_HOLD_STAGNANT_PROFIT"}
+                except Exception as exc:
+                    blocker = f"EXECUTABLE_QUOTE_UNAVAILABLE:{type(exc).__name__}"
+                    base["blocker"] = blocker
+            max_hold_diagnostics = _max_hold_shadow_row(
+                token, current, price, pnl_fraction, age_hours, base, trend,
+                quote, execution_decision, blocker,
+            )
+            _persist_max_hold_telemetry(state, max_hold_diagnostics)
         trader.save_state(state)
         if decision["action"] == "HOLD":
-            return {"action": "HOLD", "status": decision["reason"], "token": token,
-                    "pnl_pct": float(pnl_fraction * 100)}
+            result = {"action": "HOLD", "status": decision["reason"], "token": token,
+                      "pnl_pct": float(pnl_fraction * 100)}
+            if max_hold_diagnostics is not None:
+                result["max_hold"] = max_hold_diagnostics
+            return result
         gate = _retry_gate(state, current.get("position_id") or token, REASON_MAP[decision["reason"]])
         if gate:
             return {"action": "HOLD", "token": token, "pnl_pct": float(pnl_fraction * 100),

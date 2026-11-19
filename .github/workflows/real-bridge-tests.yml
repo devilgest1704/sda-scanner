@@ -186,6 +186,8 @@ jobs:
               }, ensure_ascii=False, sort_keys=True))
           print("REAL TRANSACTIONS SENT: 0 (eth_call only)")
           PY
+      - name: Run MAX HOLD stagnant-profit policy tests
+        run: python -m pytest -q tests/test_real_stagnant_profit.py
       - name: Run Swing SELL V2 live-executor mock integration tests
         run: python -m pytest -q tests/test_real_swing_sell_executor.py
       - name: Run PAPER-to-REAL bridge regression tests

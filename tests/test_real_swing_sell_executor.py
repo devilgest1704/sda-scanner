@@ -229,6 +229,55 @@ class SwingSellExecutionTests(unittest.TestCase):
         self.assertEqual(result["status"], "CONFIRMED")
         self.assertEqual(self.events[:4], ["approval", "quote", "swap", "unwrap"])
 
+    def test_max_hold_stagnant_profit_full_sell_releases_real_slot(self):
+        now = "2026-11-09T18:00:00+00:00"
+        self.state["positions"][TOKEN]["position_id"] = "buy-1"
+        self.state["real_stagnation_history"] = {
+            f"{TOKEN}:buy-1": {
+                "token": TOKEN, "position_id": "buy-1",
+                "observations": [
+                    {"timestamp": "2026-11-08T18:00:00+00:00", "price": "0.0204", "pnl_pct": 2.0},
+                    {"timestamp": "2026-11-08T21:00:00+00:00", "price": "0.02042", "pnl_pct": 2.1},
+                    {"timestamp": "2026-11-09T00:00:00+00:00", "price": "0.02044", "pnl_pct": 2.2},
+                    {"timestamp": "2026-11-09T12:00:00+00:00", "price": "0.02046", "pnl_pct": 2.3},
+                ],
+            }
+        }
+        self.receipt.return_value = {
+            "status": "0x1", "logs": self.transfer_logs(1000, 21 * 10**18)
+        }
+        self.token_balances = [1000, 1000, 0, 0]
+        self.wsda_balances = [0, 0, 21 * 10**18]
+        context = {
+            "_snapshot_updated_at": now,
+            "momentum": {"1h_pct": 0.0, "4h_pct": 0.0},
+            "flow": {
+                "1h": {"net_flow": 0.0, "transactions": 0},
+                "4h": {"net_flow": 0.0, "transactions": 0},
+            },
+            "technical": {
+                "1h": {"available": True, "last_timestamp": "2026-11-09T17:00:00+00:00",
+                       "macd": {"bullish": False, "histogram_rising": False}},
+                "4h": {"available": True, "last_timestamp": "2026-11-09T14:00:00+00:00",
+                       "macd": {"bullish": False, "histogram_rising": False}},
+            },
+        }
+        with patch.object(sell.trader, "now", lambda: now), \
+             patch.object(sell.trader, "quote_best_live_fee",
+                          lambda *a, **k: (3000, 21 * 10**18, "0x", 9999999999)), \
+             patch.object(sell.trader, "estimate_gas", lambda *a, **k: 100000), \
+             patch.object(sell.trader, "gas_price", lambda: 1):
+            result = sell.evaluate_position(
+                TOKEN, "TEST", "0.0205", now, wallet_reconciled=True,
+                market_context=context,
+            )
+        self.assertEqual(result["status"], "CONFIRMED")
+        self.assertNotIn(TOKEN, self.state["positions"])
+        self.assertEqual(self.state["trades"][-1]["sell_reason"], "MAX_HOLD_STAGNANT_PROFIT")
+        self.assertEqual(self.state["trades"][-1]["sold_quantity_raw"], 1000)
+        self.assertEqual(self.state["real_max_hold_shadow"][-1]["decision"],
+                         "SHADOW_MAX_HOLD_STAGNANT_PROFIT")
+
     def test_legacy_full_position_executor_is_disabled(self):
         with self.assertRaisesRegex(RuntimeError, "Legacy full-position SELL executor is disabled"):
             sell.trader.execute_sell(TOKEN, "TEST", 1000)
