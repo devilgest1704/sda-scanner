@@ -1,17 +1,17 @@
 {
   "mode": "READ_ONLY_PAPER_NO_BUY_DIAGNOSTIC",
-  "checked_at": "2026-11-19T09:50:20.879264+00:00",
+  "checked_at": "2026-11-19T09:56:30.051669+00:00",
   "market": {
     "status": "OK",
-    "market_at": "2026-11-19T09:49:36.256826+00:00",
+    "market_at": "2026-11-19T09:55:35.645971+00:00",
     "tokens": 164,
-    "quotes_last_5m": 0,
-    "quotes_last_15m": 2,
-    "quotes_last_60m": 23,
-    "fresh_with_8_trades_1h": 0,
-    "fresh_with_12_trades_1h": 0,
-    "fresh_m15_ge_1_5pct": 0,
-    "fresh_m15_ge_1_5pct_and_8_trades": 0,
+    "quotes_last_5m": 3,
+    "quotes_last_15m": 4,
+    "quotes_last_60m": 22,
+    "fresh_with_8_trades_1h": 2,
+    "fresh_with_12_trades_1h": 2,
+    "fresh_m15_ge_1_5pct": 1,
+    "fresh_m15_ge_1_5pct_and_8_trades": 1,
     "fresh_m15_ge_1_5pct_8_trades_and_net_flow_200": 0
   },
   "paper_loss_circuit": {
@@ -32,39 +32,38 @@
   "last_paper_close_at": "2026-11-17T14:55:27.952220+00:00",
   "funnel": {
     "status": "CURRENT",
-    "at": "2026-11-19T09:50:15.525045+00:00",
+    "at": "2026-11-19T09:56:24.699799+00:00",
     "age_minutes": 0.1,
     "aligned_to_market": true,
     "tokens_scored": 164,
-    "fresh_tokens": 2,
+    "fresh_tokens": 4,
     "champion_ready": 0,
-    "shadow_ready": 1,
+    "shadow_ready": 0,
     "sampled_rows": 40,
     "sampled_phases": {
-      "CONFIRMATION": 1,
-      "WATCH": 1,
-      "NO": 38
+      "NO": 40
     },
     "sampled_rejections": {
-      "v31_age": 40,
-      "quote_continuity": 40,
       "temporal_recovery": 40,
+      "v31_age": 37,
       "v31_activity": 37,
-      "price_flow": 1,
-      "late_spike": 1
+      "quote_continuity": 37,
+      "late_spike": 1,
+      "price_flow": 1
     },
     "fresh_rejections": {
-      "quote_continuity": 2,
-      "temporal_recovery": 2,
-      "v31_age": 2,
-      "v31_activity": 1
+      "temporal_recovery": 4,
+      "v31_activity": 2,
+      "quote_continuity": 1,
+      "v31_age": 1
     },
     "temporal_lane_rejections": {
       "temporal_recovery": {
-        "stale_or_invalid_current_quote": 2
+        "single_quote_swing_filters_insufficient": 3,
+        "stale_or_invalid_current_quote": 1
       },
       "confirmed_continuation": {
-        "missing_reason": 2
+        "missing_reason": 4
       }
     },
     "temporal_lane_ready": {
@@ -75,28 +74,53 @@
     "would_buy_if_only_loss_circuit_cleared": false,
     "top_near_ready": [
       {
-        "address": "0xc716d2d396298d061f4cbd78dc00590a2638e825",
-        "symbol": "DGPT",
-        "score": 80.2,
-        "quality": 78.1,
-        "impulse": 19.8,
-        "phase": "CONFIRMATION",
-        "data_age_sec": 394.3,
-        "gates": [
-          "temporal_recovery",
-          "v31_age",
-          "quote_continuity"
-        ],
-        "reason": "quote_continuity: stale_or_invalid_current_quote"
-      },
-      {
-        "address": "0xc0eff0278bef0931a03bc020ba3a51057c96b61c",
-        "symbol": "HLMR",
-        "score": 24.2,
-        "quality": 24.2,
+        "address": "0x71bf57a174156ebbc9c935a8490c1c4c1dbe6f00",
+        "symbol": "EZY",
+        "score": 18.6,
+        "quality": 18.6,
         "impulse": 0.0,
         "phase": "NO",
-        "data_age_sec": 646.3,
+        "data_age_sec": 269.5,
+        "gates": [
+          "temporal_recovery"
+        ],
+        "reason": "NO / temporal_recovery: single_quote_swing_filters_insufficient / "
+      },
+      {
+        "address": "0xc716d2d396298d061f4cbd78dc00590a2638e825",
+        "symbol": "DGPT",
+        "score": 17.9,
+        "quality": 17.9,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 121.5,
+        "gates": [
+          "temporal_recovery"
+        ],
+        "reason": "NO / temporal_recovery: single_quote_swing_filters_insufficient / "
+      },
+      {
+        "address": "0x4197589f68f83c8283901bf8d4980db8d6bae2d8",
+        "symbol": "FARMT",
+        "score": 11.2,
+        "quality": 11.2,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 257.5,
+        "gates": [
+          "temporal_recovery",
+          "v31_activity"
+        ],
+        "reason": "NO / temporal_recovery; v31_activity: single_quote_swing_filters_insufficient / "
+      },
+      {
+        "address": "0xaaadd5d2bb88fbdaa426ffdb95b917b861fe94bb",
+        "symbol": "AITT",
+        "score": 25.9,
+        "quality": 25.9,
+        "impulse": 0.0,
+        "phase": "NO",
+        "data_age_sec": 440.5,
         "gates": [
           "temporal_recovery",
           "v31_age",
@@ -107,7 +131,7 @@
       }
     ]
   },
-  "assessment": "NO_FRESH_MARKET_QUOTE",
+  "assessment": "NO_ELIGIBLE_BUY_SIGNALS_OBSERVED",
   "paper_buy_rules_modified": false,
   "real_trading": false
 }
