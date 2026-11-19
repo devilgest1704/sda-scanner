@@ -75,6 +75,23 @@ class MaxHoldStagnantProfitTests(unittest.TestCase):
         self.assertTrue(trend["bullish"])
         self.assertEqual(evaluate(trend=trend)["blocker"], "POSITIVE_MOMENTUM")
 
+    def test_bullish_technical_trend_label_blocks_exit(self):
+        context = {
+            "_snapshot_updated_at": NOW.isoformat(),
+            "momentum": {"1h_pct": 0.0, "4h_pct": 0.0},
+            "flow": {"1h": {"net_flow": 0, "transactions": 0},
+                     "4h": {"net_flow": 0, "transactions": 0}},
+            "technical": {
+                "1h": {"available": True, "last_timestamp": (NOW-timedelta(hours=1)).isoformat(),
+                       "trend": "BULLISH"},
+                "4h": {"available": True, "last_timestamp": (NOW-timedelta(hours=4)).isoformat(),
+                       "trend": "BEARISH"},
+            },
+        }
+        trend = policy.assess_trend(context, now=NOW)
+        self.assertTrue(trend["bullish"])
+        self.assertEqual(trend["technical_trend_1h"], "BULLISH")
+
     def test_bullish_macd_histogram_recovery_blocks_exit(self):
         context = {
             "_snapshot_updated_at": NOW.isoformat(),

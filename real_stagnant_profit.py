@@ -138,17 +138,21 @@ def assess_trend(context, now=None):
     macd_rising = any(bool(m.get("histogram_rising")) for m in macd_rows)
     macd_state = "BULLISH_RISING" if macd_positive and macd_rising else (
         "BULLISH" if macd_positive else "NON_BULLISH")
+    trend_1h = str(t1.get("trend") or "UNKNOWN").upper()
+    trend_4h = str(t4.get("trend") or "UNKNOWN").upper()
+    bullish_trend_label = any(label.startswith("BULLISH") for label in (trend_1h, trend_4h))
     positive_flow = ((n1 > 0 and (tx1 or 0) > 0) or (n4 > 0 and (tx4 or 0) > 0))
     breakout = context.get("breakout_volume_trend") or {}
     bullish_impulse = bool(breakout.get("eligible")) and (
         (_number(breakout.get("breakout_pct")) or Decimal(0)) > 0)
     bullish = bool(m1 >= Decimal("0.5") or m4 >= Decimal("1.0") or
-                   macd_positive or positive_flow or bullish_impulse)
+                   macd_positive or bullish_trend_label or positive_flow or bullish_impulse)
     return {
         "state": "POSITIVE" if bullish else "FLAT",
         "fresh": True, "bullish": bullish, "blocker": "POSITIVE_MOMENTUM" if bullish else None,
         "momentum_1h": float(m1), "momentum_4h": float(m4),
-        "macd_state": macd_state, "flow_1h": float(n1), "flow_4h": float(n4),
+        "macd_state": macd_state, "technical_trend_1h": trend_1h,
+        "technical_trend_4h": trend_4h, "flow_1h": float(n1), "flow_4h": float(n4),
     }
 
 
