@@ -110,6 +110,7 @@ def normalize(observations):
         if not address:
             continue
         valid.append({"at":t,"address":address,"features":values,
+                      "rejection_reasons":{lane:row.get(field) for lane,field in (("temporal_recovery","temporal_recovery_reason"),("confirmed_continuation","continuation_reason")) if isinstance(row.get(field),str) and row.get(field)},
                       "frozen_snapshot":frozen_snapshot,
                       "pnl":net_sda(entry,end_price),
                       "gates":tuple(row["gates"]),
@@ -500,6 +501,15 @@ def learn(observations):
                 label=str(gate)
                 counts[label]=counts.get(label,0)+1
         return dict(sorted(counts.items(),key=lambda x:(-x[1],x[0]))[:12])
+    # Diagnostics only: compare frozen rejection reasons against later
+    # 60m observed-quote outcomes. Counts overlap across the two lanes.
+    reason_cohorts={}
+    for item in all_rows:
+        for lane,reason in item.get("rejection_reasons",{}).items():
+            key=f"{lane}:{reason}"
+            reason_cohorts.setdefault(key,[]).append(item)
+    reason_outcomes={key:summary(rows) for key,rows in
+                     sorted(reason_cohorts.items())}
     positives=[r for r in all_rows if r["pnl"]>=3]
     negatives=[r for r in all_rows if r["pnl"]<0]
     base={
@@ -515,6 +525,7 @@ def learn(observations):
             sum(r["pnl"] for r in positives),4),
         "negative_theoretical_60m_sda_model_not_fills":round(
             sum(r["pnl"] for r in negatives),4),
+        "rejection_reason_60m_observed_cohorts":reason_outcomes,
         "gates_on_profitable_rejected_candidates":rejection_counts(positives),
         "gates_on_loss_making_rejected_candidates":rejection_counts(negatives),
         "potential_240m_peak_examples":sum(
