@@ -1,0 +1,16 @@
+name: SHADOW Report Integrity (read-only)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'strategy_lab/check_report_integrity.py'
+      - '.github/workflows/shadow-report-integrity.yml'
+permissions:
+  contents: read
+jobs:
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify SHADOW report consistency
+        run: python3 strategy_lab/check_report_integrity.py
