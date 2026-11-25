@@ -97,7 +97,7 @@ jobs:
             if [ "$run_age" -ge 300 ]; then
               # A running job is not proof of a completed scan. Use the
               # scanner-owned market checkpoint, never the agent report time.
-              stale_checkpoint="$(python -m tools.scanner_checkpoint_health)"
+              checkpoint_health="$(python -m tools.scanner_checkpoint_health)"
               if ! code_decision="$(timeout 120s python -m tools.worker_code_pin watchdog \
                     --run-id "$run_id" --run-sha "$run_sha" --run-age "$run_age")"; then
                 # Unverifiable approval never rolls code; a stale worker is still replaced.
@@ -105,8 +105,8 @@ jobs:
                 code_decision="keep"
               fi
               echo "Approved-code decision for worker $run_id: $code_decision"
-              if [ "$stale_checkpoint" = "true" ] || [ "$code_decision" = "replace" ]; then
-                  echo "Worker $run_id requires replacement (stale_checkpoint=$stale_checkpoint); requesting controlled replacement."
+              if [ "$checkpoint_health" != "HEALTHY" ] || [ "$code_decision" = "replace" ]; then
+                  echo "Worker $run_id requires replacement (checkpoint_health=$checkpoint_health); requesting controlled replacement."
                   timeout 30s gh run cancel "$run_id" --repo "${{ github.repository }}"
                   # Wait for GitHub to confirm that the prior paper writer
                   # has stopped before dispatching. Leaving immediately here
