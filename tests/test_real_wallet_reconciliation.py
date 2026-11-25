@@ -340,3 +340,22 @@ def test_wallet_transfer_without_router_open_lot_is_not_imported_as_buy(tmp_path
     assert result["imported"] == []
     assert trader.state["positions"] == {}
     assert trader.state["trades"] == []
+
+
+def test_older_snapshot_cannot_overwrite_newer_ledger_snapshot(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    trader = FakeTrader()
+    newer = datetime.now(timezone.utc) - timedelta(minutes=2)
+    older = newer - timedelta(minutes=3)
+    trader.state["lastBlockchainSnapshotGeneratedAt"] = newer.isoformat()
+    trader.state["lastSuccessfulWalletSync"] = newer.isoformat()
+    path = tmp_path / "real_accounting_state.json"
+    path.write_text(json.dumps(snapshot(older)))
+    result = reconciliation.reconcile_manual_buys(trader, snapshot_path=path)
+    assert result["ok"] is False
+    assert result["syncStatus"] == "STALE"
+    assert "older than the current REAL ledger snapshot" in result["syncError"]
+    assert trader.state["positions"] == {}
+    assert trader.state["lastBlockchainSnapshotGeneratedAt"] == newer.isoformat()
+    assert trader.state["lastSuccessfulWalletSync"] == newer.isoformat()
+    assert trader.saved == 0
