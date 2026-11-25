@@ -183,6 +183,17 @@ def reconcile_manual_buys(real_trader, *, snapshot_path=None,
                     buys[(tx, token)] = row
 
             state = real_trader.load_state()
+            incoming_snapshot_at = _stamp(snapshot.get("generated_at"))
+            current_snapshot_at = _stamp(state.get("lastBlockchainSnapshotGeneratedAt"))
+            if (current_snapshot_at is not None and incoming_snapshot_at is not None
+                    and incoming_snapshot_at < current_snapshot_at):
+                # A still-young but older GitHub snapshot must never roll the
+                # REAL ledger backwards after a newer reconciliation succeeded.
+                return {"ok": False, "syncStatus": "STALE",
+                        "syncError": "blockchain snapshot is older than the current REAL ledger snapshot",
+                        "lastSyncAttemptAt": attempted, "imported": [],
+                        "lastSuccessfulWalletSync": state.get("lastSuccessfulWalletSync"),
+                        "lastBlockchainSnapshotGeneratedAt": state.get("lastBlockchainSnapshotGeneratedAt")}
             positions = state.setdefault("positions", {})
             trades = state.setdefault("trades", [])
             imports = state.setdefault("manual_imports", [])
