@@ -165,8 +165,21 @@ jobs:
                   exit 0
                 fi
               done
-              echo '::error::Scanner dispatch accepted but no worker appeared within 60 seconds.'
-              exit 1
+              # The dispatch API can acknowledge a run before Actions exposes
+              # it in the run list. Recheck queued/in-progress state before retrying
+              # so we never create a second writer while the first is being queued.
+              post_dispatch_active="$(timeout 30s gh run list \
+                --workflow scanner_v18.yml --repo "${{ github.repository }}" \
+                --branch main --limit 20 --json status \
+                --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending" or .status == "waiting" or .status == "requested")] | length')" || {
+                  echo "::warning::Unable to verify dispatch visibility; leaving retry to the next watchdog tick."
+                  exit 1
+                }
+              if [ "${post_dispatch_active}" -gt 0 ]; then
+                echo "Scanner dispatch is queued/pending; not creating a duplicate run."
+                exit 0
+              fi
+              echo "::warning::Scanner dispatch accepted but no worker appeared; retrying."
             fi
 
             if [ "$attempt" -lt 3 ]; then
