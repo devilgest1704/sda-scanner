@@ -150,8 +150,17 @@ def _reconcile_claims(state,real):
             else:
                 try:
                     receipt=real_trader.rpc("eth_getTransactionReceipt",[claim["tx_hash"]])
-                    claim["reconciliation"]=("CONFIRMED_AWAITING_ACCOUNTING" if receipt and int(receipt.get("status","0x0"),16)==1
-                        else "REVERTED_REQUIRES_RECONCILIATION" if receipt else "PENDING_RECEIPT")
+                    if not receipt:
+                        claim["reconciliation"]="PENDING_RECEIPT"
+                    elif int(receipt.get("status","0x0"),16)==1:
+                        claim["reconciliation"]="CONFIRMED_AWAITING_ACCOUNTING"
+                    else:
+                        # A mined revert is terminal for this intent. Release the
+                        # token claim for a later, distinct market observation while
+                        # retaining the failed hash for audit and dedup history.
+                        claim.update(status="FAILED_RETRYABLE",
+                                     reconciliation="REVERTED_REQUIRES_RECONCILIATION",
+                                     resolved_at=now().isoformat())
                 except (OSError,ValueError,TypeError,RuntimeError,AttributeError) as exc:
                     claim["reconciliation"]="RECEIPT_UNAVAILABLE:"+type(exc).__name__
 
