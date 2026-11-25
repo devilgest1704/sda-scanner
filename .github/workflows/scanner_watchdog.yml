@@ -44,7 +44,10 @@ jobs:
 
       - name: Dispatch scanner only when no worker is active
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use the automatically issued workflow token. GITHUB_TOKEN is not a
+          # user-configured Actions secret; reading secrets.GITHUB_TOKEN leaves
+          # GH_TOKEN empty and makes every watchdog dispatch attempt fail.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
