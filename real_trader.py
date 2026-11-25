@@ -430,6 +430,58 @@ def _finalize_confirmed_buy(token, symbol, plan, tx_hash, gas, gp, token_balance
             "tx": tx_hash, "token_amount_raw": received_raw, "gas": gas, "gas_price": gp}
 
 
+def _recover_pending_buy(token, symbol, pending):
+    """Resolve one persisted BUY intent without ever creating or broadcasting a transaction."""
+    tx_hash = pending.get("tx_hash")
+    if not tx_hash:
+        return {"action": "BUY", "token": token,
+                "status": "MANUAL_RECONCILIATION_REQUIRED"}
+    receipt = rpc("eth_getTransactionReceipt", [tx_hash])
+    if not receipt:
+        return {"action": "BUY", "token": token,
+                "status": "PENDING_CONFIRMATION", "tx": tx_hash}
+    if int(receipt.get("status", "0x0"), 16) != 1:
+        state = load_state()
+        current = state.get("pending_buys", {}).get(token)
+        if isinstance(current, dict) and current.get("tx_hash") == tx_hash:
+            state["pending_buys"].pop(token, None)
+            save_state(state)
+        raise RuntimeError(f"BUY failed: {tx_hash}")
+    account = private_account()
+    if chain_id() != cfg.CHAIN_ID or account.address.lower() != str(pending.get("wallet") or "").lower():
+        raise RuntimeError("Pending BUY wallet or chain mismatch")
+    return _finalize_confirmed_buy(token, pending.get("symbol") or symbol,
+        pending["plan"], tx_hash, pending.get("gas"), pending.get("gas_price"),
+        pending.get("token_balance_before"))
+
+
+def recover_pending_buys():
+    """Recover every persisted BUY intent at worker startup; this path never broadcasts."""
+    state = load_state()
+    results = []
+    pending_buys = state.get("pending_buys")
+    if not isinstance(pending_buys, dict):
+        raise RuntimeError("Invalid pending BUY state; refusing to overwrite it")
+    for token, pending in list(pending_buys.items()):
+        if not isinstance(pending, dict):
+            results.append({"action": "BUY_RECOVERY", "token": token,
+                            "status": "MANUAL_RECONCILIATION_REQUIRED"})
+            continue
+        try:
+            # Re-read before resolving so a changed/removed intent is never acted on.
+            current = load_state().get("pending_buys", {}).get(token)
+            if not isinstance(current, dict) or current.get("tx_hash") != pending.get("tx_hash"):
+                results.append({"action": "BUY_RECOVERY", "token": token,
+                                "status": "INTENT_CHANGED"})
+                continue
+            result = _recover_pending_buy(token, pending.get("symbol") or token[:8], current)
+            results.append({"action": "BUY_RECOVERY", **result})
+        except Exception as exc:  # noqa: BLE001 - retain intent and fail closed per token
+            results.append({"action": "BUY_RECOVERY", "token": token,
+                            "status": "UNKNOWN", "error": type(exc).__name__})
+    return results
+
+
 def execute_buy(token, symbol, position_sda=None):
     token = addr(token)
     state = load_state()
@@ -442,22 +494,7 @@ def execute_buy(token, symbol, position_sda=None):
     # response must never cause a second BUY on the next scanner cycle.
     pending = state.setdefault("pending_buys", {}).get(token)
     if isinstance(pending, dict):
-        tx_hash = pending.get("tx_hash")
-        if not tx_hash:
-            return {"action": "BUY", "token": token, "status": "MANUAL_RECONCILIATION_REQUIRED"}
-        receipt = rpc("eth_getTransactionReceipt", [tx_hash])
-        if not receipt:
-            return {"action": "BUY", "token": token, "status": "PENDING_CONFIRMATION", "tx": tx_hash}
-        if int(receipt.get("status", "0x0"), 16) != 1:
-            state["pending_buys"].pop(token, None)
-            save_state(state)
-            raise RuntimeError(f"BUY failed: {tx_hash}")
-        account = private_account()
-        if chain_id() != cfg.CHAIN_ID or account.address.lower() != pending["wallet"].lower():
-            raise RuntimeError("Pending BUY wallet or chain mismatch")
-        return _finalize_confirmed_buy(token, pending.get("symbol") or symbol,
-            pending["plan"], tx_hash, pending.get("gas"), pending.get("gas_price"),
-            pending.get("token_balance_before"))
+        return _recover_pending_buy(token, symbol, pending)
 
     try:
         plan = prepare_buy(token, symbol, position_sda)
