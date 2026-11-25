@@ -423,12 +423,21 @@ def run_scan(market_path="market_analysis.json",execute=True,state_path=STATE):
         except (OSError,ValueError,TypeError,RuntimeError) as exc:
             return {"status":"disabled","state_error":type(exc).__name__,"buy_ready":0,"actions":[]}
         return {"status":"disabled","buy_ready":0,"actions":[]}
+    # Resolve all persisted BUY intents before market-data gates. A restart must
+    # reconcile confirmed/pending transactions even when the current scan cannot
+    # produce a fresh signal. recover_pending_buys is read-only on-chain and never
+    # creates or broadcasts a new transaction.
+    try:
+        recovery_actions = real_trader.recover_pending_buys()
+    except (OSError,ValueError,TypeError,RuntimeError) as exc:
+        return {"status":"pending_buy_recovery_error","error":type(exc).__name__,
+                "buy_ready":0,"actions":[]}
     if os.getenv("SDA_SCANNER_BUY_DATA_AVAILABLE","true").strip().lower()!="true":
         try:
             _mark_unavailable(state_path,"MARKET_DATA_DEGRADED")
         except (OSError,ValueError,TypeError,RuntimeError) as exc:
-            return {"status":"market_data_degraded","state_error":type(exc).__name__,"buy_ready":0,"actions":[]}
-        return {"status":"market_data_degraded","buy_ready":0,"actions":[]}
+            return {"status":"market_data_degraded","state_error":type(exc).__name__,"buy_ready":0,"actions":recovery_actions}
+        return {"status":"market_data_degraded","buy_ready":0,"actions":recovery_actions}
     try:
         market=json.loads(Path(market_path).read_text(encoding="utf-8"))
         tokens=market.get("tokens")
@@ -437,12 +446,13 @@ def run_scan(market_path="market_analysis.json",execute=True,state_path=STATE):
         try:
             _mark_unavailable(state_path,"INPUT_ERROR")
         except (OSError,ValueError,TypeError,RuntimeError) as state_error:
-            return {"status":"input_error","error":type(exc).__name__,"state_error":type(state_error).__name__,"buy_ready":0,"actions":[]}
-        return {"status":"input_error","error":type(exc).__name__,"buy_ready":0,"actions":[]}
+            return {"status":"input_error","error":type(exc).__name__,"state_error":type(state_error).__name__,"buy_ready":0,"actions":recovery_actions}
+        return {"status":"input_error","error":type(exc).__name__,"buy_ready":0,"actions":recovery_actions}
     try:
         ready,actions,reservations=_prepare_scan(tokens,execute,state_path)
     except (OSError,ValueError,TypeError,RuntimeError,KeyError) as exc:
-        return {"status":"state_error","error":str(exc)[:180],"buy_ready":0,"actions":[]}
+        return {"status":"state_error","error":str(exc)[:180],"buy_ready":0,"actions":recovery_actions}
+    actions.extend(recovery_actions)
     for reservation in reservations:
         try:
             action=_execute_reserved(reservation,state_path)
