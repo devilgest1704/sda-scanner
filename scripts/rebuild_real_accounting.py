@@ -130,6 +130,52 @@ def wsda_external_in_for_transaction(flows, wallet, router, confirmed_sell):
         return Decimal(0)
     return sum((q for f,t,q in flows if t==wallet and f not in {wallet,router}),Decimal(0))
 
+def bot_buy_records_from_classifications(classifications, ledger_buy_rows, wsda):
+    """Build BOT BUY records; PINE requires exact REAL ledger hash and token match."""
+    ledger_buy_contracts={
+        str(row.get("tx") or "").lower():str(row.get("token") or "").lower()
+        for row in ledger_buy_rows if isinstance(row,dict)
+        and str(row.get("action") or "").upper()=="BUY" and row.get("tx") and row.get("token")
+    }
+    records=[]
+    for tx in classifications:
+        if tx.get("classification")!="BUY" or not tx.get("success"): continue
+        received=next((d for d in tx.get("token_deltas",[]) if d.get("direction")=="IN"
+                       and str(d.get("contract") or "").lower()!=str(wsda).lower()),None)
+        if not received: continue
+        tx_hash=str(tx.get("hash") or "").lower()
+        symbol=str(received.get("symbol") or "UNKNOWN")
+        contract=str(received.get("contract") or "").lower()
+        # PINE has also appeared as an external/airdrop asset. Include it only
+        # when this exact successful on-chain BUY hash and token contract match
+        # an automatic BUY recorded by the REAL transaction ledger.
+        if symbol.upper()=="PINE" and (not tx_hash or ledger_buy_contracts.get(tx_hash)!=contract):
+            continue
+        records.append({"tx":tx_hash,"at":tx.get("timestamp"),
+            "symbol":symbol,"contract":contract,
+            "quantity":str(received.get("quantity") or "0"),"invested_sda":str(tx.get("native_value_sda") or "0")})
+    return records
+
+
+def bot_sell_contracts_from_ledger(ledger_sell_rows):
+    """Map confirmed automatic SELL hashes to their REAL ledger token contracts."""
+    return {
+        str(row.get("tx") or "").lower():str(row.get("token") or "").lower()
+        for row in ledger_sell_rows if isinstance(row,dict)
+        and str(row.get("action") or "").upper()=="SELL" and row.get("tx") and row.get("token")
+    }
+
+
+def bot_closed_trade_records(closed, bot_buy_contracts, ledger_sell_rows):
+    """PINE SELLs count only when exact REAL ledger hash and token both match."""
+    ledger_sell_contracts=bot_sell_contracts_from_ledger(ledger_sell_rows)
+    return [row for row in closed
+            if str(row.get("contract") or "").lower() in bot_buy_contracts
+            and (str(row.get("token") or "").upper()!="PINE"
+                 or ledger_sell_contracts.get(str(row.get("sell_tx") or "").lower())
+                    ==str(row.get("contract") or "").lower())]
+
+
 def word(v): return f"{int(v):064x}"
 def aword(a): return str(a).lower().replace("0x","").rjust(64,"0")
 def calldata(token_in,token_out,fee,amount,deadline):
@@ -721,24 +767,17 @@ def main():
             "unmatched_sell_count":len(unmatched),"ledger_loaded":ledger is not None}}
     # BOT accounting is narrower than wallet accounting: only successful,
     # wallet-funded router BUYs and FIFO-matched SELLs have verified bot basis.
-    bot_buy_records=[]
-    for tx in classifications:
-        if tx.get("classification")!="BUY" or not tx.get("success"): continue
-        received=next((d for d in tx.get("token_deltas",[]) if d.get("direction")=="IN"
-                       and str(d.get("symbol") or "").upper()!="PINE"
-                       and str(d.get("contract") or "").lower()!=WSDA),None)
-        if not received: continue
-        bot_buy_records.append({"tx":tx["hash"],"at":tx.get("timestamp"),
-            "symbol":received.get("symbol") or "UNKNOWN","contract":str(received.get("contract") or "").lower(),
-            "quantity":str(received.get("quantity") or "0"),"invested_sda":str(tx.get("native_value_sda") or "0")})
+    # Only verified on-chain router BUYs enter BOT accounting. PINE additionally
+    # requires exact ownership evidence from the existing REAL transaction ledger.
+    bot_buy_records=bot_buy_records_from_classifications(classifications,ledger_trades,WSDA)
     bot_buy_contracts={x["contract"] for x in bot_buy_records}
-    bot_closed_trades=[x for x in closed if str(x.get("contract") or "").lower() in bot_buy_contracts
-                       and str(x.get("token") or "").upper()!="PINE"]
+    verified_bot_sell_contracts=bot_sell_contracts_from_ledger(ledger_trades)
+    bot_closed_trades=bot_closed_trade_records(closed,bot_buy_contracts,ledger_trades)
     bot_open_positions=[]
     for p in open_positions:
         contract=str(p.get("contract") or "").lower()
         quantity=Decimal(str(p.get("quantity") or "0"))
-        if contract not in bot_buy_contracts or str(p.get("token") or "").upper()=="PINE" or quantity<=DUST_TOKEN_QUANTITY:
+        if contract not in bot_buy_contracts or quantity<=DUST_TOKEN_QUANTITY:
             continue
         pnl=Decimal(str(p.get("open_pnl_sda") or "0"))
         value=Decimal(str(p.get("current_value_sda"))) if p.get("current_value_sda") is not None else None
@@ -758,7 +797,8 @@ def main():
     bot_total=bot_realized+bot_open_pnl
     bot_open_complete=all(x["value_sda"] is not None for x in bot_open_positions)
     bot_unmatched=[x for x in unmatched if str(x.get("contract") or "").lower() in bot_buy_contracts
-                   and str(x.get("token") or "").upper()!="PINE"]
+                   and (str(x.get("token") or "").upper()!="PINE"
+                        or verified_bot_sell_contracts.get(str(x.get("sell_tx") or "").lower()) == str(x.get("contract") or "").lower())]
     bot_blockers=[]
     if errors: bot_blockers.extend(sorted(errors))
     if log_errors: bot_blockers.extend(sorted(log_errors))
@@ -813,7 +853,7 @@ def main():
             "unmatched_sell_count":len(bot_unmatched)},
         "excluded_external_activity":{"unmatched_sells":excluded_external_sells,
             "unknown_basis_assets":[{"symbol":x.get("symbol"),"contract":x.get("contract")} for x in external_assets]},
-        "method":{"lot_matching":"FIFO","bot_buy_rule":"successful wallet-funded router BUY with received token delta",
+        "method":{"lot_matching":"FIFO","bot_buy_rule":"successful wallet-funded router BUY; PINE additionally requires exact REAL ledger BUY hash",
             "bot_sell_rule":"successful SELL fully matched to confirmed bot BUY FIFO basis",
             "dust_threshold_token_quantity":str(DUST_TOKEN_QUANTITY),
             "external_receipts":"excluded from BOT performance without verified router BUY cost basis",

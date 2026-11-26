@@ -4,7 +4,8 @@ import real_bot_menu
 def test_worker_status_is_worker_derived():
     from datetime import datetime, timezone
     status = {"enabled": True, "dry_run": False, "syncStatus": "FRESH",
-              "updated_at": datetime.now(timezone.utc).isoformat()}
+              "updated_at": datetime.now(timezone.utc).isoformat(),
+              "last_successful_scan_at": datetime.now(timezone.utc).isoformat()}
     assert real_bot_menu._status(status) == "🟢 LIVE"
 
 

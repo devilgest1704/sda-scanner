@@ -44,9 +44,21 @@ jobs:
 
       - name: Dispatch scanner only when no worker is active
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
+          # PR test completions must never restart the production REAL worker.
+          # Only workflow_run events from main (scanner runs / main CI gates) are
+          # allowed to participate in the production watchdog.
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            event_branch="${{ github.event.workflow_run.head_branch }}"
+            event_type="${{ github.event.workflow_run.event }}"
+            if [ "$event_branch" != "main" ] || [ "$event_type" = "pull_request" ]; then
+              echo "Ignoring non-production workflow completion: branch=$event_branch event=$event_type."
+              exit 0
+            fi
+          fi
 
           # Discard queued scanner dispatches pinned to an older commit. Otherwise
           # an old scheduled run can take the concurrency slot immediately after
@@ -94,16 +106,17 @@ jobs:
             if [ "$run_age" -ge 300 ]; then
               # A running job is not proof of a completed scan. Use the
               # scanner-owned market checkpoint, never the agent report time.
-              stale_checkpoint="$(python -m tools.scanner_checkpoint_health)"
+              checkpoint_health="$(python -m tools.scanner_checkpoint_health)"
               if ! code_decision="$(timeout 120s python -m tools.worker_code_pin watchdog \
                     --run-id "$run_id" --run-sha "$run_sha" --run-age "$run_age")"; then
                 # Unverifiable approval never rolls code; a stale worker is still replaced.
                 echo "::warning::Could not verify CI-approved code for the worker; no code rollout this run."
                 code_decision="keep"
               fi
+              echo "Worker checkpoint health for $run_id: $checkpoint_health"
               echo "Approved-code decision for worker $run_id: $code_decision"
-              if [ "$stale_checkpoint" = "true" ] || [ "$code_decision" = "replace" ]; then
-                  echo "Worker $run_id requires replacement (stale_checkpoint=$stale_checkpoint); requesting controlled replacement."
+              if [ "$checkpoint_health" = "STALE" ] || [ "$checkpoint_health" = "UNKNOWN" ] || [ "$code_decision" = "replace" ]; then
+                  echo "Worker $run_id requires replacement (checkpoint_health=$checkpoint_health); requesting controlled replacement."
                   timeout 30s gh run cancel "$run_id" --repo "${{ github.repository }}"
                   # Wait for GitHub to confirm that the prior paper writer
                   # has stopped before dispatching. Leaving immediately here
@@ -162,8 +175,20 @@ jobs:
                   exit 0
                 fi
               done
-              echo '::error::Scanner dispatch accepted but no worker appeared within 60 seconds.'
-              exit 1
+              # A dispatch acknowledgement is not proof that a run was queued.
+              # Recheck visibility before retrying to avoid duplicate writers.
+              post_dispatch_active="$(timeout 30s gh run list \
+                --workflow scanner_v18.yml --repo "${{ github.repository }}" \
+                --branch main --limit 20 --json status \
+                --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending" or .status == "waiting" or .status == "requested")] | length')" || {
+                  echo "::warning::Unable to verify dispatch visibility; leaving retry to the next watchdog tick."
+                  exit 1
+                }
+              if [ "${post_dispatch_active}" -gt 0 ]; then
+                echo "Scanner dispatch is queued/pending; not creating a duplicate run."
+                exit 0
+              fi
+              echo "::warning::Scanner dispatch accepted but no worker appeared; retrying."
             fi
 
             if [ "$attempt" -lt 3 ]; then

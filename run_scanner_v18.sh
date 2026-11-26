@@ -16,6 +16,12 @@ INTERVAL="${SCANNER_INTERVAL_SECONDS:-60}"
 CHECKPOINT="${SCANNER_STATE_CHECKPOINT_SECONDS:-300}"
 CONTINUOUS="${SCANNER_CONTINUOUS:-true}"
 OPTIMIZER_INTERVAL="${SCANNER_OPTIMIZER_INTERVAL_SECONDS:-3600}"
+# Rotate after a completed scan at 240 minutes, safely before Actions' 350m cap.
+MAX_RUNTIME="${SCANNER_MAX_RUNTIME_SECONDS:-14400}"
+if ! [[ "$MAX_RUNTIME" =~ ^[0-9]+$ ]] || [ "$MAX_RUNTIME" -lt 3600 ] || [ "$MAX_RUNTIME" -ge 21000 ]; then
+  echo "Invalid SCANNER_MAX_RUNTIME_SECONDS=$MAX_RUNTIME (must be 3600..20999)" >&2
+  exit 1
+fi
 
 if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]] || [ "$INTERVAL" -lt 1 ]; then
   echo "Invalid SCANNER_INTERVAL_SECONDS=$INTERVAL" >&2
@@ -95,7 +101,8 @@ checkpoint_state() {
   # (or a watchdog-restarted worker) synchronizes.
   # shellcheck disable=SC2086
   if ! python -m tools.state_checkpoint --message 'Update SDA scanner state' $STATE_FILES; then
-    echo "STATE CHECKPOINT: not published this cycle; worker code unchanged." >&2
+    echo "::warning::STATE CHECKPOINT failed; refusing to declare the cycle durable." >&2
+    return 1
   fi
   return 0
 }
@@ -394,7 +401,8 @@ echo "Target interval: ${INTERVAL}s"
 echo "State checkpoint: ${CHECKPOINT}s"
 
 last_checkpoint="$(date +%s)"
-next_start="$(date +%s)"
+worker_started="$(date +%s)"
+next_start="$worker_started"
 
 while true; do
   now="$(date +%s)"
@@ -405,6 +413,24 @@ while true; do
   run_started="$(date +%s)"
   run_one_scan
   run_finished="$(date +%s)"
+
+  # Exit cleanly after a completed scan so workflow_run can start a replacement.
+  rotation_status=0
+  python -m tools.worker_lifecycle "$worker_started" "$run_finished" "$MAX_RUNTIME" >/dev/null || rotation_status=$?
+  if [ "$rotation_status" -eq 0 ]; then
+    worker_age=$((run_finished - worker_started))
+    echo "WORKER LIFECYCLE: rotating after ${worker_age}s (limit ${MAX_RUNTIME}s)."
+    # Do not terminate cleanly until the completed cycle and REAL ledger
+    # are durably published. Retry without starting another scan.
+    until checkpoint_state; do
+      echo "::warning::Worker rotation deferred: durable checkpoint unavailable; retrying in 30s."
+      sleep 30
+    done
+    exit 0
+  elif [ "$rotation_status" -ne 1 ]; then
+    echo "::error::Worker lifecycle health is unknown; refusing an unsafe continuation."
+    exit 1
+  fi
 
   if [ "$CONTINUOUS" != "true" ]; then
     checkpoint_state
@@ -421,8 +447,11 @@ while true; do
 
   now="$(date +%s)"
   if [ $((now - last_checkpoint)) -ge "$CHECKPOINT" ]; then
-    checkpoint_state
-    last_checkpoint="$now"
+    until checkpoint_state; do
+      echo "::warning::Scanner paused before next cycle until state checkpoint succeeds."
+      sleep 30
+    done
+    last_checkpoint="$(date +%s)"
     if [ $((now - last_optimizer_probe)) -ge 900 ]; then
       last_optimizer_probe="$now"
       # Network API calls run in the background: never delay the next paper

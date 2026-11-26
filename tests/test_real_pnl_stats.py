@@ -129,7 +129,7 @@ def test_open_pnl_not_assigned_to_history_and_total_is_realized_plus_open():
 
 
 @pytest.mark.parametrize("row", [
-    sell("0xpine", "2026-11-10T08:00:00Z", 67.9, symbol="PINE"),
+    sell("0xpine", "2026-11-10T08:00:00Z", 67.9, symbol="PINE", buy_tx=("0xexternal-pine",)),
     sell("0xairdrop", "2026-11-10T08:00:00Z", 3, contract="0x" + "9" * 40),
     sell("0xdeposit", "2026-11-10T08:00:00Z", 3, buy_tx=("0xexternal-deposit",)),
     sell("0xwithdrawal", "2026-11-10T08:00:00Z", 3),
@@ -142,6 +142,20 @@ def test_non_bot_activity_is_excluded(row):
                                        excluded_external_activity=external), {}, None, True, now=NOW)
     assert [e["tx"] for e in m["events"]] == ["0xbot"]
     assert m["realized"] == Decimal("1")
+
+
+def test_verified_bot_owned_pine_sell_is_counted_but_external_pine_is_excluded():
+    verified = sell("0xpine-bot-sell", "2026-11-10T08:00:00Z", "2.5",
+                    symbol="PINE", contract=BOT_BUYS[1]["contract"], buy_tx=("0xbuy1",))
+    external = sell("0xpine-airdrop-sell", "2026-11-10T09:00:00Z", "80",
+                    symbol="PINE", contract="0x" + "8" * 40, buy_tx=("0xairdrop-buy",))
+    wrong_contract = sell("0xpine-wrong-contract", "2026-11-10T10:00:00Z", "12",
+                          symbol="PINE", contract="0x" + "9" * 40, buy_tx=("0xbuy1",))
+    m = model([verified, external, wrong_contract])
+    assert [event["tx"] for event in m["events"]] == ["0xpine-bot-sell"]
+    assert m["realized"] == Decimal("2.5")
+    assert {row["tx"] for row in m["excluded"]} == {"0xpine-airdrop-sell", "0xpine-wrong-contract"}
+    assert all(row["reason"] == "EXTERNAL_ASSET" for row in m["excluded"])
 
 
 def test_unresolved_bot_trade_marks_only_its_period_partial():

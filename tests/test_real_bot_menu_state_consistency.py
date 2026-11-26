@@ -46,7 +46,7 @@ def test_ledger_staleness_is_independent_of_worker_heartbeat():
 
 def test_worker_status_is_live_dry_run_disabled_or_unknown():
     now = datetime.now(timezone.utc).isoformat()
-    assert real_bot_menu._status({"enabled": True, "dry_run": False, "syncStatus": "FRESH", "updated_at": now}) == "🟢 LIVE"
+    assert real_bot_menu._status({"enabled": True, "dry_run": False, "syncStatus": "FRESH", "updated_at": now, "last_successful_scan_at": now}) == "🟢 LIVE"
     assert real_bot_menu._status({"enabled": True, "dry_run": True, "updated_at": now}) == "🟡 DRY RUN"
     assert real_bot_menu._status({"enabled": False, "dry_run": False, "updated_at": now}) == "🔴 REAL TRADING DISABLED"
     assert real_bot_menu._status(None) == "⚪ STATUS UNKNOWN — worker status unavailable"
@@ -56,11 +56,24 @@ def test_worker_status_is_live_dry_run_disabled_or_unknown():
 def test_worker_status_distinguishes_live_buy_data_degradation():
     now = datetime.now(timezone.utc).isoformat()
     status = {"enabled": True, "dry_run": False, "updated_at": now,
-              "syncStatus": "FRESH", "worker_health": "BUY_DATA_DEGRADED",
+              "last_successful_scan_at": now, "syncStatus": "FRESH", "worker_health": "BUY_DATA_DEGRADED",
               "whale_source_health": "SOURCE_UNAVAILABLE"}
     assert real_bot_menu._status(status) == (
-        "🟠 LIVE — BUY DATA DEGRADED — WHALE SOURCE UNAVAILABLE")
+        "🟠 WORKER ACTIVE — BUY DATA DEGRADED — WHALE SOURCE UNAVAILABLE")
 
+
+
+def test_degraded_wallet_sync_is_never_labelled_live():
+    now = datetime.now(timezone.utc).isoformat()
+    status = {
+        "enabled": True, "dry_run": False, "updated_at": now,
+        "lastWorkerHeartbeat": now, "last_successful_scan_at": now,
+        "syncStatus": "FAILED", "lastSyncError": "RPC timeout",
+        "worker_health": "BUY_DATA_DEGRADED",
+    }
+    label = real_bot_menu._status(status)
+    assert label.startswith("🟠 WORKER ACTIVE — BUY DATA DEGRADED")
+    assert "LIVE" not in label
 
 
 def test_wallet_sync_failure_overrides_fresh_worker_heartbeat():
