@@ -12,17 +12,38 @@ class HealthTests(unittest.TestCase):
     def setUp(self):
         self.now = datetime(2026, 11, 25, 12, 0, tzinfo=timezone.utc)
 
-    def test_fresh_stale_and_boundary(self):
-        for age, expected in ((0, "HEALTHY"), (1200, "HEALTHY"), (1201, "STALE")):
-            data = {"last_successful_scan_at": (self.now - timedelta(seconds=age)).isoformat()}
-            self.assertEqual(checkpoint_health(data, self.now), expected)
-            self.assertEqual(stale(data, self.now), expected != "HEALTHY")
+    def _status(self, scan_age=0, heartbeat_age=0):
+        return {
+            "last_successful_scan_at": (self.now - timedelta(seconds=scan_age)).isoformat(),
+            "lastWorkerHeartbeat": (self.now - timedelta(seconds=heartbeat_age)).isoformat(),
+        }
 
-    def test_missing_invalid_naive_and_future_evidence_are_unknown(self):
-        values = ({}, None, {"last_successful_scan_at": None},
-                  {"last_successful_scan_at": "bad"},
-                  {"last_successful_scan_at": "2026-11-25T11:55:00"},
-                  {"last_successful_scan_at": (self.now + timedelta(minutes=1)).isoformat()})
+    def test_completed_scan_and_heartbeat_freshness_boundaries(self):
+        self.assertEqual(checkpoint_health(self._status(), self.now), "HEALTHY")
+        self.assertEqual(checkpoint_health(self._status(scan_age=1200), self.now), "HEALTHY")
+        self.assertEqual(checkpoint_health(self._status(scan_age=1201), self.now), "IN_PROGRESS")
+        self.assertFalse(stale(self._status(scan_age=1201), self.now))
+        self.assertEqual(checkpoint_health(self._status(scan_age=0, heartbeat_age=901), self.now), "STALE")
+        self.assertTrue(stale(self._status(scan_age=0, heartbeat_age=901), self.now))
+
+    def test_fresh_heartbeat_allows_startup_or_scan_in_progress_without_live_label(self):
+        data = {"lastWorkerHeartbeat": self.now.isoformat()}
+        self.assertEqual(checkpoint_health(data, self.now), "IN_PROGRESS")
+        self.assertFalse(stale(data, self.now))
+
+    def test_missing_invalid_naive_and_future_evidence_fail_closed(self):
+        values = (
+            {}, None,
+            {"last_successful_scan_at": self.now.isoformat()},
+            {"lastWorkerHeartbeat": "bad", "last_successful_scan_at": self.now.isoformat()},
+            {"lastWorkerHeartbeat": "2026-11-25T11:55:00", "last_successful_scan_at": self.now.isoformat()},
+            {"lastWorkerHeartbeat": (self.now + timedelta(minutes=1)).isoformat(),
+             "last_successful_scan_at": self.now.isoformat()},
+            {"lastWorkerHeartbeat": self.now.isoformat(), "last_successful_scan_at": "bad"},
+            {"lastWorkerHeartbeat": self.now.isoformat(), "last_successful_scan_at": "2026-11-25T11:55:00"},
+            {"lastWorkerHeartbeat": self.now.isoformat(),
+             "last_successful_scan_at": (self.now + timedelta(minutes=1)).isoformat()},
+        )
         for data in values:
             with self.subTest(data=data):
                 self.assertEqual(checkpoint_health(data, self.now), "UNKNOWN")
