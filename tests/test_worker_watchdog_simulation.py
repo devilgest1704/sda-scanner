@@ -31,7 +31,7 @@ def _run_watchdog(tmp_path, *, active="0", head_branch="main", event_type="push"
 
     commands = {
         "git": '#!/bin/sh\necho mainsha\n',
-        "timeout": '#!/bin/sh\nshift 2\nexec "$@"\n',
+        "timeout": '#!/bin/sh\nshift 1\nexec "$@"\n',
         "sleep": '#!/bin/sh\nexit 0\n',
         "gh": '''#!/bin/sh
 case "$1 $2" in
