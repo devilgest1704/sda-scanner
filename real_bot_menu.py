@@ -45,6 +45,7 @@ def _wallet_address():
 
 
 REAL_LEDGER_FRESHNESS_SECONDS = 900
+REAL_SCAN_FRESHNESS_SECONDS = 1200
 REAL_WORKER_STATUS_FILE = "real_worker_status.json"
 
 
@@ -113,6 +114,14 @@ def _status(worker_state=None):
         return f"⚪ STATUS UNKNOWN — worker heartbeat stale ({int(heartbeat_age)}s)"
     if not enabled:
         return "🔴 REAL TRADING DISABLED"
+    scan_stamp = _parse_timestamp(worker_state.get("last_successful_scan_at"))
+    if scan_stamp is None:
+        return "⚪ STATUS UNKNOWN — completed scan checkpoint missing or invalid"
+    scan_age = (datetime.now(timezone.utc) - scan_stamp).total_seconds()
+    if scan_age < 0:
+        return "⚪ STATUS UNKNOWN — completed scan checkpoint is in the future"
+    if scan_age > REAL_SCAN_FRESHNESS_SECONDS:
+        return f"⚪ STATUS UNKNOWN — completed scan stale ({int(scan_age)}s)"
     if worker_state.get("worker_health") == "CRITICAL_FAILURE":
         return "🔴 CRITICAL FAILURE"
     if enabled and not dry_run and worker_state.get("syncStatus") != "FRESH":
