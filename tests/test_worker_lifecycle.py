@@ -28,6 +28,15 @@ class WorkerLifecycleTests(unittest.TestCase):
         self.assertIn('SCANNER_MAX_RUNTIME_SECONDS: "14400"', workflow)
         self.assertIn('MAX_RUNTIME="${SCANNER_MAX_RUNTIME_SECONDS:-14400}"', runner)
 
+    def test_watchdog_authentication_health_and_single_writer_checks(self):
+        watchdog = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "scanner_watchdog.yml").read_text(encoding="utf-8")
+        self.assertIn("GH_TOKEN: ${{ github.token }}", watchdog)
+        self.assertNotIn("secrets.GITHUB_TOKEN", watchdog)
+        self.assertIn('if [ "$checkpoint_health" != "HEALTHY" ]', watchdog)
+        self.assertIn('if [ "$old_status" != "completed" ]', watchdog)
+        self.assertIn("post_dispatch_active=", watchdog)
+        self.assertIn("Scanner dispatch is queued/pending; not creating a duplicate run.", watchdog)
+
     def test_cli_exit_codes_match_continue_and_rotate(self):
         module = "tools.worker_lifecycle"
         before = subprocess.run([sys.executable, "-m", module, "100", "399", "300"],
