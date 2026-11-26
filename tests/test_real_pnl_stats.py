@@ -149,10 +149,13 @@ def test_verified_bot_owned_pine_sell_is_counted_but_external_pine_is_excluded()
                     symbol="PINE", contract=BOT_BUYS[1]["contract"], buy_tx=("0xbuy1",))
     external = sell("0xpine-airdrop-sell", "2026-11-10T09:00:00Z", "80",
                     symbol="PINE", contract="0x" + "8" * 40, buy_tx=("0xairdrop-buy",))
-    m = model([verified, external])
+    wrong_contract = sell("0xpine-wrong-contract", "2026-11-10T10:00:00Z", "12",
+                          symbol="PINE", contract="0x" + "9" * 40, buy_tx=("0xbuy1",))
+    m = model([verified, external, wrong_contract])
     assert [event["tx"] for event in m["events"]] == ["0xpine-bot-sell"]
     assert m["realized"] == Decimal("2.5")
-    assert m["excluded"] == [{"tx": "0xpine-airdrop-sell", "symbol": "PINE", "reason": "EXTERNAL_ASSET"}]
+    assert {row["tx"] for row in m["excluded"]} == {"0xpine-airdrop-sell", "0xpine-wrong-contract"}
+    assert all(row["reason"] == "EXTERNAL_ASSET" for row in m["excluded"])
 
 
 def test_unresolved_bot_trade_marks_only_its_period_partial():
