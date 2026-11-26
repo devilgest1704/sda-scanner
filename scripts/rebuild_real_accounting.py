@@ -130,9 +130,13 @@ def wsda_external_in_for_transaction(flows, wallet, router, confirmed_sell):
         return Decimal(0)
     return sum((q for f,t,q in flows if t==wallet and f not in {wallet,router}),Decimal(0))
 
-def bot_buy_records_from_classifications(classifications, ledger_buy_hashes, wsda):
-    """Build BOT BUY records; PINE requires an exact REAL ledger transaction match."""
-    ledger_buy_hashes={str(tx).lower() for tx in ledger_buy_hashes if tx}
+def bot_buy_records_from_classifications(classifications, ledger_buy_rows, wsda):
+    """Build BOT BUY records; PINE requires exact REAL ledger hash and token match."""
+    ledger_buy_contracts={
+        str(row.get("tx") or "").lower():str(row.get("token") or "").lower()
+        for row in ledger_buy_rows if isinstance(row,dict)
+        and str(row.get("action") or "").upper()=="BUY" and row.get("tx") and row.get("token")
+    }
     records=[]
     for tx in classifications:
         if tx.get("classification")!="BUY" or not tx.get("success"): continue
@@ -141,12 +145,14 @@ def bot_buy_records_from_classifications(classifications, ledger_buy_hashes, wsd
         if not received: continue
         tx_hash=str(tx.get("hash") or "").lower()
         symbol=str(received.get("symbol") or "UNKNOWN")
+        contract=str(received.get("contract") or "").lower()
         # PINE has also appeared as an external/airdrop asset. Include it only
-        # when this exact successful on-chain BUY hash exists in the REAL ledger.
-        if symbol.upper()=="PINE" and (not tx_hash or tx_hash not in ledger_buy_hashes):
+        # when this exact successful on-chain BUY hash and token contract match
+        # an automatic BUY recorded by the REAL transaction ledger.
+        if symbol.upper()=="PINE" and (not tx_hash or ledger_buy_contracts.get(tx_hash)!=contract):
             continue
         records.append({"tx":tx_hash,"at":tx.get("timestamp"),
-            "symbol":symbol,"contract":str(received.get("contract") or "").lower(),
+            "symbol":symbol,"contract":contract,
             "quantity":str(received.get("quantity") or "0"),"invested_sda":str(tx.get("native_value_sda") or "0")})
     return records
 
@@ -753,9 +759,9 @@ def main():
     # wallet-funded router BUYs and FIFO-matched SELLs have verified bot basis.
     # Only verified on-chain router BUYs enter BOT accounting. PINE additionally
     # requires exact ownership evidence from the existing REAL transaction ledger.
-    bot_buy_records=bot_buy_records_from_classifications(classifications,ledger_buys,WSDA)
+    bot_buy_records=bot_buy_records_from_classifications(classifications,ledger_trades,WSDA)
     bot_buy_contracts={x["contract"] for x in bot_buy_records}
-    verified_bot_sell_hashes=ledger_sells | matched_manual_hashes
+    verified_bot_sell_hashes=ledger_sells
     bot_closed_trades=bot_closed_trade_records(closed,bot_buy_contracts,verified_bot_sell_hashes)
     bot_open_positions=[]
     for p in open_positions:
