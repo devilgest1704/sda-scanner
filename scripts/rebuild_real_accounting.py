@@ -157,13 +157,23 @@ def bot_buy_records_from_classifications(classifications, ledger_buy_rows, wsda)
     return records
 
 
-def bot_closed_trade_records(closed, bot_buy_contracts, ledger_sell_hashes):
-    """PINE SELLs count only when their exact hash is in the REAL SELL ledger."""
-    ledger_sell_hashes={str(tx).lower() for tx in ledger_sell_hashes if tx}
+def bot_sell_contracts_from_ledger(ledger_sell_rows):
+    """Map confirmed automatic SELL hashes to their REAL ledger token contracts."""
+    return {
+        str(row.get("tx") or "").lower():str(row.get("token") or "").lower()
+        for row in ledger_sell_rows if isinstance(row,dict)
+        and str(row.get("action") or "").upper()=="SELL" and row.get("tx") and row.get("token")
+    }
+
+
+def bot_closed_trade_records(closed, bot_buy_contracts, ledger_sell_rows):
+    """PINE SELLs count only when exact REAL ledger hash and token both match."""
+    ledger_sell_contracts=bot_sell_contracts_from_ledger(ledger_sell_rows)
     return [row for row in closed
             if str(row.get("contract") or "").lower() in bot_buy_contracts
             and (str(row.get("token") or "").upper()!="PINE"
-                 or str(row.get("sell_tx") or "").lower() in ledger_sell_hashes)]
+                 or ledger_sell_contracts.get(str(row.get("sell_tx") or "").lower())
+                    ==str(row.get("contract") or "").lower())]
 
 
 def word(v): return f"{int(v):064x}"
@@ -761,8 +771,8 @@ def main():
     # requires exact ownership evidence from the existing REAL transaction ledger.
     bot_buy_records=bot_buy_records_from_classifications(classifications,ledger_trades,WSDA)
     bot_buy_contracts={x["contract"] for x in bot_buy_records}
-    verified_bot_sell_hashes=ledger_sells
-    bot_closed_trades=bot_closed_trade_records(closed,bot_buy_contracts,verified_bot_sell_hashes)
+    verified_bot_sell_contracts=bot_sell_contracts_from_ledger(ledger_trades)
+    bot_closed_trades=bot_closed_trade_records(closed,bot_buy_contracts,ledger_trades)
     bot_open_positions=[]
     for p in open_positions:
         contract=str(p.get("contract") or "").lower()
@@ -788,7 +798,7 @@ def main():
     bot_open_complete=all(x["value_sda"] is not None for x in bot_open_positions)
     bot_unmatched=[x for x in unmatched if str(x.get("contract") or "").lower() in bot_buy_contracts
                    and (str(x.get("token") or "").upper()!="PINE"
-                        or str(x.get("sell_tx") or "").lower() in verified_bot_sell_hashes)]
+                        or verified_bot_sell_contracts.get(str(x.get("sell_tx") or "").lower()) == str(x.get("contract") or "").lower())]
     bot_blockers=[]
     if errors: bot_blockers.extend(sorted(errors))
     if log_errors: bot_blockers.extend(sorted(log_errors))
