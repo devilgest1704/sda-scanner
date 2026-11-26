@@ -1,7 +1,7 @@
 """Small, deterministic worker-lifecycle policy shared by runner and tests."""
 import sys
 
-DEFAULT_MAX_RUNTIME_SECONDS = 5 * 60 * 60
+DEFAULT_MAX_RUNTIME_SECONDS = 4 * 60 * 60
 
 
 def should_rotate(started_at, now, max_runtime=DEFAULT_MAX_RUNTIME_SECONDS):
