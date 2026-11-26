@@ -113,8 +113,9 @@ jobs:
                 echo "::warning::Could not verify CI-approved code for the worker; no code rollout this run."
                 code_decision="keep"
               fi
+              echo "Worker checkpoint health for $run_id: $checkpoint_health"
               echo "Approved-code decision for worker $run_id: $code_decision"
-              if [ "$checkpoint_health" != "HEALTHY" ] || [ "$code_decision" = "replace" ]; then
+              if [ "$checkpoint_health" = "STALE" ] || [ "$checkpoint_health" = "UNKNOWN" ] || [ "$code_decision" = "replace" ]; then
                   echo "Worker $run_id requires replacement (checkpoint_health=$checkpoint_health); requesting controlled replacement."
                   timeout 30s gh run cancel "$run_id" --repo "${{ github.repository }}"
                   # Wait for GitHub to confirm that the prior paper writer
