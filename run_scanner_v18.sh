@@ -417,7 +417,7 @@ while true; do
   # Exit cleanly after a completed scan, leaving ample time before the
   # workflow's 350-minute hard timeout for GitHub to dispatch its replacement.
   rotation_status=0
-  python -m tools.worker_lifecycle "$worker_started" "$run_finished" "$MAX_RUNTIME" || rotation_status=$?
+  python -m tools.worker_lifecycle "$worker_started" "$run_finished" "$MAX_RUNTIME" >/dev/null || rotation_status=$?
   if [ "$rotation_status" -eq 0 ]; then
     worker_age=$((run_finished - worker_started))
     echo "WORKER LIFECYCLE: rotating after ${worker_age}s (limit ${MAX_RUNTIME}s)."
