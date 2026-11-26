@@ -48,6 +48,18 @@ jobs:
         run: |
           set -euo pipefail
 
+          # PR test completions must never restart the production REAL worker.
+          # Only workflow_run events from main (scanner runs / main CI gates) are
+          # allowed to participate in the production watchdog.
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            event_branch="${{ github.event.workflow_run.head_branch }}"
+            event_type="${{ github.event.workflow_run.event }}"
+            if [ "$event_branch" != "main" ] || [ "$event_type" = "pull_request" ]; then
+              echo "Ignoring non-production workflow completion: branch=$event_branch event=$event_type."
+              exit 0
+            fi
+          fi
+
           # Discard queued scanner dispatches pinned to an older commit. Otherwise
           # an old scheduled run can take the concurrency slot immediately after
           # the stale worker is stopped, delaying the production fix again.
