@@ -59,7 +59,13 @@ def _excluded_sell(sell, excluded_contracts, excluded_txs, bot_buys):
     contract = str(sell.get("contract") or "").lower()
     source = str(sell.get("source") or "").upper()
     if symbol in EXCLUDED_SYMBOLS:
-        return "EXTERNAL_ASSET"
+        buy_txs = sell.get("buy_tx")
+        if isinstance(buy_txs, str):
+            buy_txs = [buy_txs]
+        # Symbols can be held as bot-funded lots or external airdrops. PINE is
+        # included only when every FIFO source BUY hash is verified in accounting.
+        if not buy_txs or not bot_buys or any(str(tx).lower() not in bot_buys for tx in buy_txs):
+            return "EXTERNAL_ASSET"
     if contract and contract in excluded_contracts:
         return "EXTERNAL_ASSET"
     if str(sell.get("tx") or "").lower() in excluded_txs:
