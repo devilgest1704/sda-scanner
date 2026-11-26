@@ -27,6 +27,8 @@ class WorkerLifecycleTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn('SCANNER_MAX_RUNTIME_SECONDS: "14400"', workflow)
         self.assertIn('MAX_RUNTIME="${SCANNER_MAX_RUNTIME_SECONDS:-14400}"', runner)
+        self.assertIn("return 1", runner)
+        self.assertIn("until checkpoint_state", runner)
 
     def test_watchdog_authentication_health_and_single_writer_checks(self):
         watchdog = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "scanner_watchdog.yml").read_text(encoding="utf-8")
