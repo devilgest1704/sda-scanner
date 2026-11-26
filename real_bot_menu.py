@@ -129,11 +129,11 @@ def _status(worker_state=None):
     if enabled and not dry_run and worker_state.get("syncStatus") != "FRESH":
         sync_status = worker_state.get("syncStatus") or "UNKNOWN"
         reason = worker_state.get("lastSyncError") or f"wallet sync {sync_status.lower()}"
-        return f"🟠 LIVE — BUY DATA DEGRADED — {reason}"
+        return f"🟠 WORKER ACTIVE — BUY DATA DEGRADED — {reason}"
     if worker_state.get("worker_health") == "BUY_DATA_DEGRADED":
         if worker_state.get("whale_source_health") == "SOURCE_UNAVAILABLE":
-            return "🟠 LIVE — BUY DATA DEGRADED — WHALE SOURCE UNAVAILABLE"
-        return "🟠 LIVE — BUY DATA DEGRADED"
+            return "🟠 WORKER ACTIVE — BUY DATA DEGRADED — WHALE SOURCE UNAVAILABLE"
+        return "🟠 WORKER ACTIVE — BUY DATA DEGRADED"
     return "🟢 LIVE"
 
 
