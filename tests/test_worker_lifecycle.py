@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import unittest
+from pathlib import Path
 from tools.worker_lifecycle import DEFAULT_MAX_RUNTIME_SECONDS, should_rotate
 
 
@@ -18,6 +19,11 @@ class WorkerLifecycleTests(unittest.TestCase):
             with self.subTest(args=args):
                 with self.assertRaises(ValueError):
                     should_rotate(*args)
+
+    def test_scanner_workflow_enforces_single_worker_concurrency(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "scanner_v18.yml").read_text(encoding="utf-8")
+        self.assertIn("group: sda-scanner-paper", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
 
     def test_cli_exit_codes_match_continue_and_rotate(self):
         module = "tools.worker_lifecycle"
