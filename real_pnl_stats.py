@@ -64,7 +64,7 @@ def _excluded_sell(sell, excluded_contracts, excluded_txs, bot_buys):
             buy_txs = [buy_txs]
         # Symbols can be held as bot-funded lots or external airdrops. PINE is
         # included only when every FIFO source BUY hash is verified in accounting.
-        if not buy_txs or not bot_buys or any(str(tx).lower() not in bot_buys for tx in buy_txs):
+        if not buy_txs or not bot_buys or any(bot_buys.get(str(tx).lower()) != contract for tx in buy_txs):
             return "EXTERNAL_ASSET"
     if contract and contract in excluded_contracts:
         return "EXTERNAL_ASSET"
@@ -96,8 +96,9 @@ def build_pnl_model(accounting, runtime_state=None, open_pnl=None, open_complete
                           if isinstance(x, dict) and x.get("contract")}
     excluded_txs = {str(x.get("sell_tx") or "").lower()
                     for x in external.get("unmatched_sells") or [] if isinstance(x, dict)}
-    bot_buys = {str(x.get("tx") or "").lower()
-                for x in accounting.get("buy_transactions") or [] if isinstance(x, dict) and x.get("tx")}
+    bot_buys = {str(x.get("tx") or "").lower():str(x.get("contract") or "").lower()
+                for x in accounting.get("buy_transactions") or []
+                if isinstance(x, dict) and x.get("tx") and x.get("contract")}
 
     events, excluded, seen = [], [], set()
     for sell in accounting.get("sell_transactions") or []:
