@@ -114,6 +114,8 @@ def _status(worker_state=None):
         return f"⚪ STATUS UNKNOWN — worker heartbeat stale ({int(heartbeat_age)}s)"
     if not enabled:
         return "🔴 REAL TRADING DISABLED"
+    if dry_run:
+        return "🟡 DRY RUN"
     scan_stamp = _parse_timestamp(worker_state.get("last_successful_scan_at"))
     if scan_stamp is None:
         return "⚪ STATUS UNKNOWN — completed scan checkpoint missing or invalid"
@@ -132,7 +134,7 @@ def _status(worker_state=None):
         if worker_state.get("whale_source_health") == "SOURCE_UNAVAILABLE":
             return "🟠 LIVE — BUY DATA DEGRADED — WHALE SOURCE UNAVAILABLE"
         return "🟠 LIVE — BUY DATA DEGRADED"
-    return "🟡 DRY RUN" if dry_run else "🟢 LIVE"
+    return "🟢 LIVE"
 
 
 def _parse_timestamp(value):
