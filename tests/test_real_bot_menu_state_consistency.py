@@ -59,7 +59,7 @@ def test_worker_status_distinguishes_live_buy_data_degradation():
               "last_successful_scan_at": now, "syncStatus": "FRESH", "worker_health": "BUY_DATA_DEGRADED",
               "whale_source_health": "SOURCE_UNAVAILABLE"}
     assert real_bot_menu._status(status) == (
-        "🟠 LIVE — BUY DATA DEGRADED — WHALE SOURCE UNAVAILABLE")
+        "🟠 WORKER ACTIVE — BUY DATA DEGRADED — WHALE SOURCE UNAVAILABLE")
 
 
 
