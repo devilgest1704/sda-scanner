@@ -1,4 +1,6 @@
-"""Small, deterministic worker-lifecycle policy shared by runner tests."""
+"""Small, deterministic worker-lifecycle policy shared by runner and tests."""
+import sys
+
 DEFAULT_MAX_RUNTIME_SECONDS = 5 * 60 * 60
 
 
@@ -14,3 +16,22 @@ def should_rotate(started_at, now, max_runtime=DEFAULT_MAX_RUNTIME_SECONDS):
     if age < 0:
         raise ValueError("worker start timestamp is in the future")
     return age >= max_runtime
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) != 3:
+        print("usage: python -m tools.worker_lifecycle STARTED_AT NOW MAX_RUNTIME", file=sys.stderr)
+        return 2
+    try:
+        started_at, now, max_runtime = (int(value) for value in argv)
+        rotate = should_rotate(started_at, now, max_runtime)
+    except (TypeError, ValueError):
+        print("invalid worker lifecycle timestamps", file=sys.stderr)
+        return 2
+    print("ROTATE" if rotate else "CONTINUE")
+    return 0 if rotate else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
