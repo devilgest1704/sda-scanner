@@ -26,6 +26,11 @@ def test_pine_sell_requires_exact_real_ledger_sell_hash():
         {"sell_tx": "0xbot-sell", "contract": "0xpine", "token": "PINE"},
         {"sell_tx": "0xairdrop-sell", "contract": "0xpine", "token": "PINE"},
         {"sell_tx": "0xother-sell", "contract": "0xother", "token": "OTHER"},
+        {"sell_tx": "0xbot-sell", "contract": "0xother", "token": "PINE"},
     ]
-    result = bot_closed_trade_records(closed, {"0xpine", "0xother"}, {"0xbot-sell"})
+    ledger_sells = [
+        {"action": "SELL", "tx": "0xbot-sell", "token": "0xpine"},
+        {"action": "SELL", "tx": "0xother-sell", "token": "0xother"},
+    ]
+    result = bot_closed_trade_records(closed, {"0xpine", "0xother"}, ledger_sells)
     assert [row["sell_tx"] for row in result] == ["0xbot-sell", "0xother-sell"]
