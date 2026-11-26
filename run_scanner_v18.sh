@@ -416,11 +416,16 @@ while true; do
 
   # Exit cleanly after a completed scan, leaving ample time before the
   # workflow's 350-minute hard timeout for GitHub to dispatch its replacement.
-  worker_age=$((run_finished - worker_started))
-  if [ "$worker_age" -ge "$MAX_RUNTIME" ]; then
+  rotation_status=0
+  python -m tools.worker_lifecycle "$worker_started" "$run_finished" "$MAX_RUNTIME" || rotation_status=$?
+  if [ "$rotation_status" -eq 0 ]; then
+    worker_age=$((run_finished - worker_started))
     echo "WORKER LIFECYCLE: rotating after ${worker_age}s (limit ${MAX_RUNTIME}s)."
     checkpoint_state
     exit 0
+  elif [ "$rotation_status" -ne 1 ]; then
+    echo "::error::Worker lifecycle health is unknown; refusing an unsafe continuation."
+    exit 1
   fi
 
   if [ "$CONTINUOUS" != "true" ]; then
