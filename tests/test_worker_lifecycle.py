@@ -5,7 +5,7 @@ from tools.worker_lifecycle import DEFAULT_MAX_RUNTIME_SECONDS, should_rotate
 
 
 class WorkerLifecycleTests(unittest.TestCase):
-    def test_worker_rotates_at_five_hour_boundary(self):
+    def test_worker_rotates_at_four_hour_boundary(self):
         start = 1_000_000
         self.assertFalse(should_rotate(start, start + DEFAULT_MAX_RUNTIME_SECONDS - 1))
         self.assertTrue(should_rotate(start, start + DEFAULT_MAX_RUNTIME_SECONDS))
