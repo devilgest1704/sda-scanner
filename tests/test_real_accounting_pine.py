@@ -16,7 +16,7 @@ def test_pine_buy_requires_exact_confirmed_real_ledger_hash():
          "native_value_sda": "10", "token_deltas": [
              {"direction": "IN", "contract": "0xother", "symbol": "OTHER", "quantity": "5"}]},
     ]
-    buys = bot_buy_records_from_classifications(rows + [dict(rows[0], hash="0xwrong-contract", token_deltas=[{"direction": "IN", "contract": "0xother", "symbol": "PINE", "quantity": "9"}])], [{"action": "BUY", "tx": "0xbotpine", "token": "0xpine"}], "0xwsda")
+    buys = bot_buy_records_from_classifications(rows + [dict(rows[0], token_deltas=[{"direction": "IN", "contract": "0xother", "symbol": "PINE", "quantity": "9"}])], [{"action": "BUY", "tx": "0xbotpine", "token": "0xpine"}], "0xwsda")
     assert [row["tx"] for row in buys] == ["0xbotpine", "0xother"]
     assert buys[0]["symbol"] == "PINE"
 
