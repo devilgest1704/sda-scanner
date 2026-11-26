@@ -16,6 +16,13 @@ INTERVAL="${SCANNER_INTERVAL_SECONDS:-60}"
 CHECKPOINT="${SCANNER_STATE_CHECKPOINT_SECONDS:-300}"
 CONTINUOUS="${SCANNER_CONTINUOUS:-true}"
 OPTIMIZER_INTERVAL="${SCANNER_OPTIMIZER_INTERVAL_SECONDS:-3600}"
+# Gracefully rotate the worker before GitHub's 350-minute hard job timeout.
+# Completion is then a normal workflow_run event, not a forced cancellation.
+MAX_RUNTIME="${SCANNER_MAX_RUNTIME_SECONDS:-18000}"
+if ! [[ "$MAX_RUNTIME" =~ ^[0-9]+$ ]] || [ "$MAX_RUNTIME" -lt 3600 ] || [ "$MAX_RUNTIME" -ge 21000 ]; then
+  echo "Invalid SCANNER_MAX_RUNTIME_SECONDS=$MAX_RUNTIME (must be 3600..20999)" >&2
+  exit 1
+fi
 
 if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]] || [ "$INTERVAL" -lt 1 ]; then
   echo "Invalid SCANNER_INTERVAL_SECONDS=$INTERVAL" >&2
@@ -394,7 +401,8 @@ echo "Target interval: ${INTERVAL}s"
 echo "State checkpoint: ${CHECKPOINT}s"
 
 last_checkpoint="$(date +%s)"
-next_start="$(date +%s)"
+worker_started="$(date +%s)"
+next_start="$worker_started"
 
 while true; do
   now="$(date +%s)"
@@ -405,6 +413,15 @@ while true; do
   run_started="$(date +%s)"
   run_one_scan
   run_finished="$(date +%s)"
+
+  # Exit cleanly after a completed scan, leaving ample time before the
+  # workflow's 350-minute hard timeout for GitHub to dispatch its replacement.
+  worker_age=$((run_finished - worker_started))
+  if [ "$worker_age" -ge "$MAX_RUNTIME" ]; then
+    echo "WORKER LIFECYCLE: rotating after ${worker_age}s (limit ${MAX_RUNTIME}s)."
+    checkpoint_state
+    exit 0
+  fi
 
   if [ "$CONTINUOUS" != "true" ]; then
     checkpoint_state
